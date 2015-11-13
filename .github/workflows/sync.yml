@@ -1,0 +1,37 @@
+name: source sync
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+        description: Push each fully verified release
+      version:
+        type: string
+        required: false
+  schedule:
+    - cron: '17 */6 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: vivaldium-rebuild
+  cancel-in-progress: false
+jobs:
+  rebuild:
+    runs-on: [self-hosted, linux, x64, vivaldium]
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.12.15'
+      - name: Resume reconstruction
+        env:
+          VIVALDI_DATA_DIR: ${{ vars.VIVALDI_DATA_DIR }}
+          VIVALDI_SSH_KEY: ${{ vars.VIVALDI_SSH_KEY_PATH }}
+          GITHUB_TOKEN: ${{ secrets.VIVALDI_BOT_TOKEN }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+        run: uv run --frozen python -u scripts/ci_sync.py
