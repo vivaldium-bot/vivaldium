@@ -19,10 +19,10 @@ index 21a13a6c6e189fcf2183593cffe22f3d125d01a9..9b1405eef5bb94ec0ac4118710738db2
 +*.sh text eol=lf
 diff --git a/.gitmodules b/.gitmodules
 new file mode 100644
-index 0000000000000000000000000000000000000000..d5ece399e85031af73cdfcab216920b3cae9577a
+index 0000000000000000000000000000000000000000..5a9d105446d7cd9705d0f63cd4168276b9cd2c2a
 --- /dev/null
 +++ b/.gitmodules
-@@ -0,0 +1,249 @@
+@@ -0,0 +1,252 @@
 +[submodule "breakpad/src"]
 +	path = breakpad/src
 +	url = ../../breakpad/breakpad/src.git
@@ -239,6 +239,9 @@ index 0000000000000000000000000000000000000000..d5ece399e85031af73cdfcab216920b3
 +[submodule "third_party/wayland/src"]
 +	path = third_party/wayland/src
 +	url = ../../external/anongit.freedesktop.org/git/wayland/wayland.git
++[submodule "third_party/wds/src"]
++	path = third_party/wds/src
++	url = ../../external/github.com/01org/wds.git
 +[submodule "third_party/webdriver/pylib"]
 +	path = third_party/webdriver/pylib
 +	url = ../../external/selenium/py.git
@@ -329,10 +332,10 @@ index eb4b5c6b1c5e7231fe7bd59986da09a0b808b3c0..e44789632e458532d4fc7215966dd6e3
        extensions::ExtensionPrefs::Get(browser_context);
    if (WasUnloadedForReload(extension->id(), reason) &&
 diff --git a/apps/launcher.cc b/apps/launcher.cc
-index 9b01a4d044eaea330ba56519ef490a2479443acd..236a9287b606d6f8e34931da6cf95688723d374b 100644
+index 2ae064873eaf049af69632a2e9d176748ebb181b..9618717db6c081010c826d21a5fa54489fd448d3 100644
 --- a/apps/launcher.cc
 +++ b/apps/launcher.cc
-@@ -18,6 +18,7 @@
+@@ -20,6 +20,7 @@
  #include "chrome/browser/extensions/api/file_handlers/mime_util.h"
  #include "chrome/browser/extensions/api/file_system/file_system_api.h"
  #include "chrome/browser/profiles/profile.h"
@@ -340,8 +343,8 @@ index 9b01a4d044eaea330ba56519ef490a2479443acd..236a9287b606d6f8e34931da6cf95688
  #include "content/public/browser/browser_thread.h"
  #include "content/public/browser/render_process_host.h"
  #include "content/public/browser/web_contents.h"
-@@ -38,6 +39,8 @@
- #include "net/base/net_util.h"
+@@ -40,6 +41,8 @@
+ #include "net/base/filename_util.h"
  #include "url/gurl.h"
  
 +#include "app/vivaldi_apptools.h"
@@ -349,7 +352,7 @@ index 9b01a4d044eaea330ba56519ef490a2479443acd..236a9287b606d6f8e34931da6cf95688
  #if defined(OS_CHROMEOS)
  #include "components/user_manager/user_manager.h"
  #endif
-@@ -343,6 +346,27 @@ void LaunchPlatformAppWithCommandLine(Profile* profile,
+@@ -362,6 +365,27 @@ void LaunchPlatformAppWithCommandLine(Profile* profile,
      }
    }
  
@@ -378,10 +381,10 @@ index 9b01a4d044eaea330ba56519ef490a2479443acd..236a9287b606d6f8e34931da6cf95688
    base::CommandLine::StringType about_blank_url(
        base::ASCIIToUTF16(url::kAboutBlankURL));
 diff --git a/base/base.gyp b/base/base.gyp
-index dc794be506473fb31d7b74d53e91cb6d20694c77..bf293462417936f02bdca7415514438855facabe 100644
+index da57da2bcf6ef62ee49664132b37ae83f9fdacec..1438452231f27f94f49acc145a32ea09961afdbc 100644
 --- a/base/base.gyp
 +++ b/base/base.gyp
-@@ -26,6 +26,7 @@
+@@ -28,6 +28,7 @@
          '../testing/gtest.gyp:gtest_prod',
          '../third_party/modp_b64/modp_b64.gyp:modp_b64',
          'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
@@ -390,7 +393,7 @@ index dc794be506473fb31d7b74d53e91cb6d20694c77..bf293462417936f02bdca74155144388
        # TODO(gregoryd): direct_dependent_settings should be shared with the
        #  64-bit target, but it doesn't work due to a bug in gyp
 diff --git a/base/base.gypi b/base/base.gypi
-index bb028bdf11aec837d4337aa96ad9d5bd8b2dd32d..47d757d627a2c7b5c37d1647bd59df62732bf2ef 100644
+index 1eb914f1e6933499158b9a7e3a01c593121af7b8..bfb7055ff2ba61649d3c4835181b5a5ec2c64778 100644
 --- a/base/base.gypi
 +++ b/base/base.gypi
 @@ -183,6 +183,21 @@
@@ -495,6 +498,19 @@ index 58f925f7e1f69d06529a1f7489faea656ce7285b..51b26d6ef1c92e6ab4a9e18b80a92150
        break;
      }
      case base::DIR_APP_SHORTCUTS: {
+diff --git a/base/build_time.cc b/base/build_time.cc
+index 6f496f2efd2a9c482151911d8ecad02873935ce3..68e0cd091f83933f5ef48b97506c468f62f0d1e7 100644
+--- a/base/build_time.cc
++++ b/base/build_time.cc
+@@ -15,7 +15,7 @@ namespace base {
+ Time GetBuildTime() {
+   Time integral_build_time;
+   // BUILD_DATE is exactly "Mmm DD YYYY".
+-  const char kDateTime[] = BUILD_DATE " 05:00:00";
++  const char kDateTime[] = BUILD_DATE " 00:00:00";
+   bool result = Time::FromUTCString(kDateTime, &integral_build_time);
+   DCHECK(result);
+   return integral_build_time;
 diff --git a/base/command_line.cc b/base/command_line.cc
 index c991959d6911bf545f994b3e6d0833f793cc7cf0..a98105b718a7e65ae17cc96d6333f757584cb70b 100644
 --- a/base/command_line.cc
@@ -1669,7 +1685,7 @@ index 6dd020264e9ce8c786400a2f208d533c55e17d77..4ad0f1353c91ec811972caa4f3c85685
    base::string16 special_build() override;
    base::string16 comments() override;
 diff --git a/base/files/file_util_posix.cc b/base/files/file_util_posix.cc
-index 7e31bfbbb7f177b0ded512c9570e1bbdaab735a6..ceaa2caf3f7e2c3b675e4f257d34f092cc3b40b0 100644
+index 802ed515101a0452d1b4cf397c24495b947a6f2e..bacd50b047be5c19b082bf8e0544b0900f2e17d3 100644
 --- a/base/files/file_util_posix.cc
 +++ b/base/files/file_util_posix.cc
 @@ -135,7 +135,9 @@ std::string TempFileName() {
@@ -1683,6 +1699,21 @@ index 7e31bfbbb7f177b0ded512c9570e1bbdaab735a6..ceaa2caf3f7e2c3b675e4f257d34f092
    return std::string(".com.google.Chrome.XXXXXX");
  #else
    return std::string(".org.chromium.Chromium.XXXXXX");
+diff --git a/base/mac/foundation_util.mm b/base/mac/foundation_util.mm
+index 6ae5df3389977a2268567f062d540d5d11418434..3d36af24a4c9127b4b4e7dbda02bb0b029ad056a 100644
+--- a/base/mac/foundation_util.mm
++++ b/base/mac/foundation_util.mm
+@@ -239,7 +239,9 @@ const char* BaseBundleID() {
+     return base_bundle_id;
+   }
+ 
+-#if defined(GOOGLE_CHROME_BUILD)
++#if defined(VIVALDI_BUILD)
++  return "com.vivaldi.Vivaldi";
++#elif defined(GOOGLE_CHROME_BUILD)
+   return "com.google.Chrome";
+ #else
+   return "org.chromium.Chromium";
 diff --git a/base/memory/shared_memory_posix.cc b/base/memory/shared_memory_posix.cc
 index d55c2df28bd7877ec23b0c42f57c50d8c1aed1e5..208d77c6632ffb67a89f2e007a41ca4dd427597b 100644
 --- a/base/memory/shared_memory_posix.cc
@@ -1726,7 +1757,7 @@ index 3f954d79e4bd8f4a84f80a505eb2fdde93577254..171912d612dbc40d2a6ed20238615dba
        return false;
    }
 diff --git a/base/process/launch_win.cc b/base/process/launch_win.cc
-index 1ffb9799554ea6e1d6ee38af70c4cb1541f58ecc..39bf52ad5facf69f90f4c81c0532c34a1f05f27d 100644
+index 985dccc0a3214b3d5d704127ab10721b5dd301ad..3d5a226eacaa47fe721cc885567d4a1ab21f8232 100644
 --- a/base/process/launch_win.cc
 +++ b/base/process/launch_win.cc
 @@ -146,22 +146,8 @@ void RouteStdioToConsole(bool create_console_if_not_found) {
@@ -1904,7 +1935,7 @@ index dd2ab6fe17765b70a722176c6d1f09bac2a28729..c496a03f76d3309e55ed5d30df8c0a59
    A = 0;
    B = 0;
 diff --git a/base/test/launcher/test_launcher.cc b/base/test/launcher/test_launcher.cc
-index d51d786c8006ebfb8e29335c1ccca627dc917975..369b6bcaf9fbe090dc17aaa5c3c40bc5e08caea9 100644
+index e7ab873a2d247ad4a06b47ee47512551170e3ae5..d7cafce59947935e93dbca2c9cf506dbcf0ae572 100644
 --- a/base/test/launcher/test_launcher.cc
 +++ b/base/test/launcher/test_launcher.cc
 @@ -761,6 +761,7 @@ bool TestLauncher::Init() {
@@ -1990,7 +2021,7 @@ index 82510a20c6b282f9df2ccd804bf1d7a0b4018f38..519f69deba110b215216c718b04ea64f
    CatchMaybeTests();
 diff --git a/breakpad/src/breakpad_googletest_includes.h b/breakpad/src/breakpad_googletest_includes.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..1cc324b2323a771139a4ef19177ffe055f065415
+index 0000000000000000000000000000000000000000..19a3e980777dbdf274c209aa3664700716d8791c
 --- /dev/null
 +++ b/breakpad/src/breakpad_googletest_includes.h
 @@ -0,0 +1,57 @@
@@ -2026,8 +2057,8 @@ index 0000000000000000000000000000000000000000..1cc324b2323a771139a4ef19177ffe05
 +#ifndef BREAKPAD_GOOGLETEST_INCLUDES_H__
 +#define BREAKPAD_GOOGLETEST_INCLUDES_H__
 +
-+#include "testing/gtest/include/gtest/gtest.h"
-+#include "testing/include/gmock/gmock.h"
++#include "gtest/gtest.h"
++#include "gmock/gmock.h"
 +
 +// If AddressSanitizer is used, NULL pointer dereferences generate SIGILL
 +// (illegal instruction) instead of SIGSEGV (segmentation fault).  Also,
@@ -6902,10 +6933,10 @@ index 0000000000000000000000000000000000000000..e2ef45df5d86d3aa722f75841e4b681c
 +#endif  // CLIENT_LINUX_DUMP_WRITER_COMMON_RAW_CONTEXT_CPU_H
 diff --git a/breakpad/src/client/linux/dump_writer_common/thread_info.cc b/breakpad/src/client/linux/dump_writer_common/thread_info.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..9956d4450bb4b494cbb341ae3db6ff2c859d48ce
+index 0000000000000000000000000000000000000000..0a1041d62d3059d29982ba8e380fbe7960c7b1fd
 --- /dev/null
 +++ b/breakpad/src/client/linux/dump_writer_common/thread_info.cc
-@@ -0,0 +1,299 @@
+@@ -0,0 +1,305 @@
 +// Copyright (c) 2014, Google Inc.
 +// All rights reserved.
 +//
@@ -7143,7 +7174,13 @@ index 0000000000000000000000000000000000000000..9956d4450bb4b494cbb341ae3db6ff2c
 +}
 +
 +void ThreadInfo::FillCPUContext(RawContextCPU* out) const {
++#if _MIPS_SIM == _ABI64
++  out->context_flags = MD_CONTEXT_MIPS64_FULL;
++#elif _MIPS_SIM == _ABIO32
 +  out->context_flags = MD_CONTEXT_MIPS_FULL;
++#else
++# error "This mips ABI is currently not supported (n32)"
++#endif
 +
 +  for (int i = 0; i < MD_CONTEXT_MIPS_GPR_COUNT; ++i)
 +    out->iregs[i] = mcontext.gregs[i];
@@ -7304,10 +7341,10 @@ index 0000000000000000000000000000000000000000..99093d2e0b8c37350a6680f5934dcaaf
 +#endif  // CLIENT_LINUX_DUMP_WRITER_COMMON_THREAD_INFO_H_
 diff --git a/breakpad/src/client/linux/dump_writer_common/ucontext_reader.cc b/breakpad/src/client/linux/dump_writer_common/ucontext_reader.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..d37fdeb01f83246f85190b7bfa47316267c1bc23
+index 0000000000000000000000000000000000000000..c80724dd878a8726a73389be27ffdc3877fdf519
 --- /dev/null
 +++ b/breakpad/src/client/linux/dump_writer_common/ucontext_reader.cc
-@@ -0,0 +1,253 @@
+@@ -0,0 +1,259 @@
 +// Copyright (c) 2014, Google Inc.
 +// All rights reserved.
 +//
@@ -7529,7 +7566,13 @@ index 0000000000000000000000000000000000000000..d37fdeb01f83246f85190b7bfa473162
 +}
 +
 +void UContextReader::FillCPUContext(RawContextCPU *out, const ucontext *uc) {
++#if _MIPS_SIM == _ABI64
++  out->context_flags = MD_CONTEXT_MIPS64_FULL;
++#elif _MIPS_SIM == _ABIO32
 +  out->context_flags = MD_CONTEXT_MIPS_FULL;
++#else
++#error "This mips ABI is currently not supported (n32)"
++#endif
 +
 +  for (int i = 0; i < MD_CONTEXT_MIPS_GPR_COUNT; ++i)
 +    out->iregs[i] = uc->uc_mcontext.gregs[i];
@@ -10343,10 +10386,10 @@ index 0000000000000000000000000000000000000000..f94bbd5fb7b3de14b2ed6cd2067af449
 +#endif  // CLIENT_LINUX_LOG_LOG_H_
 diff --git a/breakpad/src/client/linux/microdump_writer/microdump_writer.cc b/breakpad/src/client/linux/microdump_writer/microdump_writer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..aa9f94136761b98a20dd664198431138eb9dd556
+index 0000000000000000000000000000000000000000..91697ed840f930635c494764cac29ca6dd55b09a
 --- /dev/null
 +++ b/breakpad/src/client/linux/microdump_writer/microdump_writer.cc
-@@ -0,0 +1,433 @@
+@@ -0,0 +1,439 @@
 +// Copyright (c) 2014, Google Inc.
 +// All rights reserved.
 +//
@@ -10528,7 +10571,13 @@ index 0000000000000000000000000000000000000000..aa9f94136761b98a20dd664198431138
 +#elif defined(__i386__)
 +    const char kArch[] = "x86";
 +#elif defined(__mips__)
++# if _MIPS_SIM == _ABIO32
 +    const char kArch[] = "mips";
++# elif _MIPS_SIM == _ABI64
++    const char kArch[] = "mips64";
++# else
++#  error "This mips ABI is currently not supported (n32)"
++#endif
 +#else
 +#error "This code has not been ported to your platform yet"
 +#endif
@@ -10693,7 +10742,7 @@ index 0000000000000000000000000000000000000000..aa9f94136761b98a20dd664198431138
 +
 +    char file_name[NAME_MAX];
 +    char file_path[NAME_MAX];
-+    LinuxDumper::GetMappingEffectiveNameAndPath(
++    dumper_->GetMappingEffectiveNameAndPath(
 +        mapping, file_path, sizeof(file_path), file_name, sizeof(file_name));
 +
 +    LogAppend("M ");
@@ -11944,10 +11993,10 @@ index 0000000000000000000000000000000000000000..29686f04aae6ec2efeb14909f728b304
 +}
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_core_dumper.cc b/breakpad/src/client/linux/minidump_writer/linux_core_dumper.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..d732824593bf59bc510cc6e9e0804d0cc32d39c2
+index 0000000000000000000000000000000000000000..622f05069432e6919ec93a2b2a8232102ed76e24
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_core_dumper.cc
-@@ -0,0 +1,257 @@
+@@ -0,0 +1,258 @@
 +// Copyright (c) 2012, Google Inc.
 +// All rights reserved.
 +//
@@ -11999,8 +12048,9 @@ index 0000000000000000000000000000000000000000..d732824593bf59bc510cc6e9e0804d0c
 +
 +LinuxCoreDumper::LinuxCoreDumper(pid_t pid,
 +                                 const char* core_path,
-+                                 const char* procfs_path)
-+    : LinuxDumper(pid),
++                                 const char* procfs_path,
++                                 const char* root_prefix)
++    : LinuxDumper(pid, root_prefix),
 +      core_path_(core_path),
 +      procfs_path_(procfs_path),
 +      thread_infos_(&allocator_, 8) {
@@ -12207,10 +12257,10 @@ index 0000000000000000000000000000000000000000..d732824593bf59bc510cc6e9e0804d0c
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_core_dumper.h b/breakpad/src/client/linux/minidump_writer/linux_core_dumper.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..8537896eecf4c5e4fe017fae9c4262eb734a7e37
+index 0000000000000000000000000000000000000000..8a7c924b61cd121cd01af2a7935ef5927e30d8a0
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_core_dumper.h
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,125 @@
 +// Copyright (c) 2012, Google Inc.
 +// All rights reserved.
 +//
@@ -12260,7 +12310,9 @@ index 0000000000000000000000000000000000000000..8537896eecf4c5e4fe017fae9c4262eb
 +  // its proc files at |procfs_path|. If |procfs_path| is a copy of
 +  // /proc/<pid>, it should contain the following files:
 +  //     auxv, cmdline, environ, exe, maps, status
-+  LinuxCoreDumper(pid_t pid, const char* core_path, const char* procfs_path);
++  // See LinuxDumper for the purpose of |root_prefix|.
++  LinuxCoreDumper(pid_t pid, const char* core_path, const char* procfs_path,
++                  const char* root_prefix = "");
 +
 +  // Implements LinuxDumper::BuildProcPath().
 +  // Builds a proc path for a certain pid for a node (/proc/<pid>/<node>).
@@ -12336,10 +12388,10 @@ index 0000000000000000000000000000000000000000..8537896eecf4c5e4fe017fae9c4262eb
 +#endif  // CLIENT_LINUX_HANDLER_LINUX_CORE_DUMPER_H_
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_core_dumper_unittest.cc b/breakpad/src/client/linux/minidump_writer/linux_core_dumper_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..8f6a423ee04fc4b613d9b6cbcfc32b4c04fef086
+index 0000000000000000000000000000000000000000..ae0c965b34d1d3d5fdbc6175c29624820f65f2bd
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_core_dumper_unittest.cc
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,128 @@
 +// Copyright (c) 2012, Google Inc.
 +// All rights reserved.
 +//
@@ -12380,6 +12432,16 @@ index 0000000000000000000000000000000000000000..8f6a423ee04fc4b613d9b6cbcfc32b4c
 +#include "common/using_std_string.h"
 +
 +using namespace google_breakpad;
++
++TEST(LinuxCoreDumperTest, GetMappingAbsolutePath) {
++  const LinuxCoreDumper dumper(getpid(), "core", "/tmp", "/mnt/root");
++  const MappingInfo mapping = { 0, 0, 0, false, "/usr/lib/libc.so" };
++
++  char path[PATH_MAX];
++  dumper.GetMappingAbsolutePath(mapping, path);
++
++  EXPECT_STREQ("/mnt/root/usr/lib/libc.so", path);
++}
 +
 +TEST(LinuxCoreDumperTest, BuildProcPath) {
 +  const pid_t pid = getpid();
@@ -12460,10 +12522,10 @@ index 0000000000000000000000000000000000000000..8f6a423ee04fc4b613d9b6cbcfc32b4c
 +}
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_dumper.cc b/breakpad/src/client/linux/minidump_writer/linux_dumper.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d24705af5a9e0
+index 0000000000000000000000000000000000000000..060e6c7c0ad5041dd5be011ceb961d887ffc0875
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_dumper.cc
-@@ -0,0 +1,605 @@
+@@ -0,0 +1,606 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -12554,14 +12616,16 @@ index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d2470
 +// All interesting auvx entry types are below AT_SYSINFO_EHDR
 +#define AT_MAX AT_SYSINFO_EHDR
 +
-+LinuxDumper::LinuxDumper(pid_t pid)
++LinuxDumper::LinuxDumper(pid_t pid, const char* root_prefix)
 +    : pid_(pid),
++      root_prefix_(root_prefix),
 +      crash_address_(0),
 +      crash_signal_(0),
 +      crash_thread_(pid),
 +      threads_(&allocator_, 8),
 +      mappings_(&allocator_),
 +      auxv_(&allocator_, AT_MAX + 1) {
++  assert(root_prefix_ && my_strlen(root_prefix_) < PATH_MAX);
 +  // The passed-in size to the constructor (above) is only a hint.
 +  // Must call .resize() to do actual initialization of the elements.
 +  auxv_.resize(AT_MAX + 1);
@@ -12605,14 +12669,9 @@ index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d2470
 +    return FileID::ElfFileIdentifierFromMappedFile(linux_gate, identifier);
 +  }
 +
-+  char filename[NAME_MAX];
-+  size_t filename_len = my_strlen(mapping.name);
-+  if (filename_len >= NAME_MAX) {
-+    assert(false);
++  char filename[PATH_MAX];
++  if (!GetMappingAbsolutePath(mapping, filename))
 +    return false;
-+  }
-+  my_memcpy(filename, mapping.name, filename_len);
-+  filename[filename_len] = '\0';
 +  bool filename_modified = HandleDeletedFileInMapping(filename);
 +
 +  MemoryMappedFile mapped_file(filename, mapping.offset);
@@ -12622,11 +12681,17 @@ index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d2470
 +  bool success =
 +      FileID::ElfFileIdentifierFromMappedFile(mapped_file.data(), identifier);
 +  if (success && member && filename_modified) {
-+    mappings_[mapping_id]->name[filename_len -
++    mappings_[mapping_id]->name[my_strlen(mapping.name) -
 +                                sizeof(kDeletedSuffix) + 1] = '\0';
 +  }
 +
 +  return success;
++}
++
++bool LinuxDumper::GetMappingAbsolutePath(const MappingInfo& mapping,
++                                         char path[PATH_MAX]) const {
++  return my_strlcpy(path, root_prefix_, PATH_MAX) < PATH_MAX &&
++         my_strlcat(path, mapping.name, PATH_MAX) < PATH_MAX;
 +}
 +
 +namespace {
@@ -12678,23 +12743,16 @@ index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d2470
 +// for |mapping|. If the SONAME is found copy it into the passed buffer
 +// |soname| and return true. The size of the buffer is |soname_size|.
 +// The SONAME will be truncated if it is too long to fit in the buffer.
-+bool ElfFileSoName(
++bool ElfFileSoName(const LinuxDumper& dumper,
 +    const MappingInfo& mapping, char* soname, size_t soname_size) {
 +  if (IsMappedFileOpenUnsafe(mapping)) {
 +    // Not safe
 +    return false;
 +  }
 +
-+  char filename[NAME_MAX];
-+  size_t filename_len = my_strlen(mapping.name);
-+  if (filename_len >= NAME_MAX) {
-+    assert(false);
-+    // name too long
++  char filename[PATH_MAX];
++  if (!dumper.GetMappingAbsolutePath(mapping, filename))
 +    return false;
-+  }
-+
-+  my_memcpy(filename, mapping.name, filename_len);
-+  filename[filename_len] = '\0';
 +
 +  MemoryMappedFile mapped_file(filename, mapping.offset);
 +  if (!mapped_file.data() || mapped_file.size() < SELFMAG) {
@@ -12708,7 +12766,6 @@ index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d2470
 +}  // namespace
 +
 +
-+// static
 +void LinuxDumper::GetMappingEffectiveNameAndPath(const MappingInfo& mapping,
 +                                                 char* file_path,
 +                                                 size_t file_path_size,
@@ -12721,8 +12778,10 @@ index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d2470
 +  // apk on Android). We try to find the name of the shared object (SONAME) by
 +  // looking in the file for ELF sections.
 +  bool mapped_from_archive = false;
-+  if (mapping.exec && mapping.offset != 0)
-+    mapped_from_archive = ElfFileSoName(mapping, file_name, file_name_size);
++  if (mapping.exec && mapping.offset != 0) {
++    mapped_from_archive =
++        ElfFileSoName(*this, mapping, file_name, file_name_size);
++  }
 +
 +  if (mapped_from_archive) {
 +    // Some tools (e.g., stackwalk) extract the basename from the pathname. In
@@ -12820,7 +12879,8 @@ index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d2470
 +            MappingInfo* module = mappings_.back();
 +            if ((start_addr == module->start_addr + module->size) &&
 +                (my_strlen(name) == my_strlen(module->name)) &&
-+                (my_strncmp(name, module->name, my_strlen(name)) == 0)) {
++                (my_strncmp(name, module->name, my_strlen(name)) == 0) &&
++                (exec == module->exec)) {
 +              module->size = end_addr - module->start_addr;
 +              line_reader->PopLine(line_len);
 +              continue;
@@ -13046,10 +13106,13 @@ index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d2470
 +
 +  // Check |path| against the /proc/pid/exe 'symlink'.
 +  char exe_link[NAME_MAX];
-+  char new_path[NAME_MAX];
 +  if (!BuildProcPath(exe_link, pid_, "exe"))
 +    return false;
-+  if (!SafeReadLink(exe_link, new_path))
++  MappingInfo new_mapping = {0};
++  if (!SafeReadLink(exe_link, new_mapping.name))
++    return false;
++  char new_path[PATH_MAX];
++  if (!GetMappingAbsolutePath(new_mapping, new_path))
 +    return false;
 +  if (my_strcmp(path, new_path) != 0)
 +    return false;
@@ -13071,10 +13134,10 @@ index 0000000000000000000000000000000000000000..43b74ad9de7e4e536e4622aaa21d2470
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_dumper.h b/breakpad/src/client/linux/minidump_writer/linux_dumper.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..6a3a100f32376e125490a64376c7318a76c4486f
+index 0000000000000000000000000000000000000000..f7fe1dd9dfa39ca6c9b9cd32b994dba9ac574f5c
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_dumper.h
-@@ -0,0 +1,254 @@
+@@ -0,0 +1,264 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -13149,7 +13212,9 @@ index 0000000000000000000000000000000000000000..6a3a100f32376e125490a64376c7318a
 +
 +class LinuxDumper {
 + public:
-+  explicit LinuxDumper(pid_t pid);
++  // The |root_prefix| is prepended to mapping paths before opening them, which
++  // is useful if the crash originates from a chroot.
++  explicit LinuxDumper(pid_t pid, const char* root_prefix = "");
 +
 +  virtual ~LinuxDumper();
 +
@@ -13217,16 +13282,21 @@ index 0000000000000000000000000000000000000000..6a3a100f32376e125490a64376c7318a
 +  pid_t crash_thread() const { return crash_thread_; }
 +  void set_crash_thread(pid_t crash_thread) { crash_thread_ = crash_thread; }
 +
++  // Concatenates the |root_prefix_| and |mapping| path. Writes into |path| and
++  // returns true unless the string is too long.
++  bool GetMappingAbsolutePath(const MappingInfo& mapping,
++                              char path[PATH_MAX]) const;
++
 +  // Extracts the effective path and file name of from |mapping|. In most cases
 +  // the effective name/path are just the mapping's path and basename. In some
 +  // other cases, however, a library can be mapped from an archive (e.g., when
 +  // loading .so libs from an apk on Android) and this method is able to
 +  // reconstruct the original file name.
-+  static void GetMappingEffectiveNameAndPath(const MappingInfo& mapping,
-+                                             char* file_path,
-+                                             size_t file_path_size,
-+                                             char* file_name,
-+                                             size_t file_name_size);
++  void GetMappingEffectiveNameAndPath(const MappingInfo& mapping,
++                                      char* file_path,
++                                      size_t file_path_size,
++                                      char* file_name,
++                                      size_t file_name_size);
 +
 + protected:
 +  bool ReadAuxv();
@@ -13248,6 +13318,9 @@ index 0000000000000000000000000000000000000000..6a3a100f32376e125490a64376c7318a
 +
 +   // ID of the crashed process.
 +  const pid_t pid_;
++
++  // Path of the root directory to which mapping paths are relative.
++  const char* const root_prefix_;
 +
 +  // Virtual address at which the process crashed.
 +  uintptr_t crash_address_;
@@ -14359,10 +14432,10 @@ index 0000000000000000000000000000000000000000..838ea5f6bacd860cb080bf2a63fba1f4
 +}
 diff --git a/breakpad/src/client/linux/minidump_writer/minidump_writer.cc b/breakpad/src/client/linux/minidump_writer/minidump_writer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..0eed74dedabc4bb719d9b2ae8482ec1f0ef02f00
+index 0000000000000000000000000000000000000000..3103761f6033eff1ac7d048499f991b61a92d5d5
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/minidump_writer.cc
-@@ -0,0 +1,1354 @@
+@@ -0,0 +1,1367 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -14533,19 +14606,26 @@ index 0000000000000000000000000000000000000000..0eed74dedabc4bb719d9b2ae8482ec1f
 +    // of stream which we write.
 +    unsigned kNumWriters = 13;
 +
-+    TypedMDRVA<MDRawHeader> header(&minidump_writer_);
 +    TypedMDRVA<MDRawDirectory> dir(&minidump_writer_);
-+    if (!header.Allocate())
-+      return false;
-+    if (!dir.AllocateArray(kNumWriters))
-+      return false;
-+    my_memset(header.get(), 0, sizeof(MDRawHeader));
++    {
++      // Ensure the header gets flushed, as that happens in the destructor.
++      // If a crash occurs somewhere below, at least the header will be
++      // intact.
++      TypedMDRVA<MDRawHeader> header(&minidump_writer_);
++      if (!header.Allocate())
++        return false;
 +
-+    header.get()->signature = MD_HEADER_SIGNATURE;
-+    header.get()->version = MD_HEADER_VERSION;
-+    header.get()->time_date_stamp = time(NULL);
-+    header.get()->stream_count = kNumWriters;
-+    header.get()->stream_directory_rva = dir.position();
++      if (!dir.AllocateArray(kNumWriters))
++        return false;
++
++      my_memset(header.get(), 0, sizeof(MDRawHeader));
++
++      header.get()->signature = MD_HEADER_SIGNATURE;
++      header.get()->version = MD_HEADER_VERSION;
++      header.get()->time_date_stamp = time(NULL);
++      header.get()->stream_count = kNumWriters;
++      header.get()->stream_directory_rva = dir.position();
++    }
 +
 +    unsigned dir_index = 0;
 +    MDRawDirectory dirent;
@@ -14925,7 +15005,7 @@ index 0000000000000000000000000000000000000000..0eed74dedabc4bb719d9b2ae8482ec1f
 +
 +    char file_name[NAME_MAX];
 +    char file_path[NAME_MAX];
-+    LinuxDumper::GetMappingEffectiveNameAndPath(
++    dumper_->GetMappingEffectiveNameAndPath(
 +        mapping, file_path, sizeof(file_path), file_name, sizeof(file_name));
 +
 +    const size_t file_name_len = my_strlen(file_name);
@@ -15182,7 +15262,13 @@ index 0000000000000000000000000000000000000000..0eed74dedabc4bb719d9b2ae8482ec1f
 +    // processor_architecture should always be set, do this first
 +    sys_info->processor_architecture =
 +#if defined(__mips__)
++# if _MIPS_SIM == _ABIO32
 +        MD_CPU_ARCHITECTURE_MIPS;
++# elif _MIPS_SIM == _ABI64
++        MD_CPU_ARCHITECTURE_MIPS64;
++# else
++#  error "This mips ABI is currently not supported (n32)"
++#endif
 +#elif defined(__i386__)
 +        MD_CPU_ARCHITECTURE_X86;
 +#else
@@ -25962,10 +26048,10 @@ index 0000000000000000000000000000000000000000..9e9028b928d835f739ea9f1e3c9ebf60
 +#endif  // CLIENT_MAC_GENERATOR_MACH_VM_COMPAT_H_
 diff --git a/breakpad/src/client/mac/handler/minidump_generator.cc b/breakpad/src/client/mac/handler/minidump_generator.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..0e299180fb00d46d6d3778d0bc0aa09c823218d9
+index 0000000000000000000000000000000000000000..48cd2e99b666a249913efe5c00c6708ac1758337
 --- /dev/null
 +++ b/breakpad/src/client/mac/handler/minidump_generator.cc
-@@ -0,0 +1,1591 @@
+@@ -0,0 +1,1604 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -26110,12 +26196,25 @@ index 0000000000000000000000000000000000000000..0e299180fb00d46d6d3778d0bc0aa09c
 +    CFRelease(read_stream);
 +    return;
 +  }
-+  CFDataRef data = NULL;
-+  CFIndex num_bytes_read = 0;
-+  const UInt8 *data_bytes =
-+    CFReadStreamGetBuffer(read_stream, 0, &num_bytes_read);
-+  if (data_bytes) {
-+    data = CFDataCreate(NULL, data_bytes, num_bytes_read);
++  CFMutableDataRef data = NULL;
++  while (true) {
++    // Actual data file tests: Mac at 480 bytes and iOS at 413 bytes.
++    const CFIndex kMaxBufferLength = 1024;
++    UInt8 data_bytes[kMaxBufferLength];
++    CFIndex num_bytes_read =
++      CFReadStreamRead(read_stream, data_bytes, kMaxBufferLength);
++    if (num_bytes_read < 0) {
++      if (data) {
++        CFRelease(data);
++        data = NULL;
++      }
++      break;
++    } else if (num_bytes_read == 0) {
++      break;
++    } else if (!data) {
++      data = CFDataCreateMutable(NULL, 0);
++    }
++    CFDataAppendBytes(data, data_bytes, num_bytes_read);
 +  }
 +  CFReadStreamClose(read_stream);
 +  CFRelease(read_stream);
@@ -66755,7 +66854,7 @@ index 0000000000000000000000000000000000000000..cd92902151a0fc6b0e0ecb2d540d07f8
 +#endif  // GOOGLE_BREAKPAD_COMMON_ANDROID_INCLUDE_STAB_H
 diff --git a/breakpad/src/common/android/include/sys/procfs.h b/breakpad/src/common/android/include/sys/procfs.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..27223ea34a9a3053fc2b5ae423d284eeb52fdc6b
+index 0000000000000000000000000000000000000000..185124364e6c9d41d7951fa4242288b4f3fb1e8b
 --- /dev/null
 +++ b/breakpad/src/common/android/include/sys/procfs.h
 @@ -0,0 +1,124 @@
@@ -66862,8 +66961,8 @@ index 0000000000000000000000000000000000000000..27223ea34a9a3053fc2b5ae423d284ee
 +  unsigned int   pr_uid;
 +  unsigned int   pr_gid;
 +#elif defined(__mips__)
-+  unsigned long  pr_uid;
-+  unsigned long  pr_gid;
++  __kernel_uid_t pr_uid;
++  __kernel_gid_t pr_gid;
 +#else
 +  unsigned short pr_uid;
 +  unsigned short pr_gid;
@@ -68639,10 +68738,10 @@ index 0000000000000000000000000000000000000000..06bfd89d739d4448e821c2af8d42b2ef
 +//  ByteBuffer buffer(data, sizeof(data));
 diff --git a/breakpad/src/common/common.gyp b/breakpad/src/common/common.gyp
 new file mode 100644
-index 0000000000000000000000000000000000000000..5a666de61f0301f8993103aa69e3fda71c0244f3
+index 0000000000000000000000000000000000000000..177c0938ce68c6dec705f23868036b77f8a9c6db
 --- /dev/null
 +++ b/breakpad/src/common/common.gyp
-@@ -0,0 +1,243 @@
+@@ -0,0 +1,248 @@
 +# Copyright 2014 Google Inc. All rights reserved.
 +#
 +# Redistribution and use in source and binary forms, with or without
@@ -68680,6 +68779,11 @@ index 0000000000000000000000000000000000000000..5a666de61f0301f8993103aa69e3fda7
 +      ['OS=="linux"', {
 +        'defines': ['HAVE_A_OUT_H'],
 +      }],
++      ['OS!="android"', {'sources/': [['exclude', '(^|/)android/']]}],
++      ['OS!="linux"', {'sources/': [['exclude', '(^|/)linux/']]}],
++      ['OS!="mac"', {'sources/': [['exclude', '(^|/)mac/']]}],
++      ['OS!="solaris"', {'sources/': [['exclude', '(^|/)solaris/']]}],
++      ['OS!="win"', {'sources/': [['exclude', '(^|/)windows/']]}],
 +    ],
 +  },
 +  'targets': [
@@ -69618,10 +69722,10 @@ index 0000000000000000000000000000000000000000..644d099506fbf2990a5caa1fc82cbb39
 +#endif  // COMMON_CONVERT_UTF_H_
 diff --git a/breakpad/src/common/dwarf/bytereader-inl.h b/breakpad/src/common/dwarf/bytereader-inl.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..3c167089f7218fac04b7894c6f8c9db79230c916
+index 0000000000000000000000000000000000000000..42c92f943f40e8a6978f359b369b0b3c0e2c6fe6
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/bytereader-inl.h
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,170 @@
 +// Copyright 2006 Google Inc. All Rights Reserved.
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -69656,16 +69760,15 @@ index 0000000000000000000000000000000000000000..3c167089f7218fac04b7894c6f8c9db7
 +#include "common/dwarf/bytereader.h"
 +
 +#include <assert.h>
++#include <stdint.h>
 +
 +namespace dwarf2reader {
 +
-+inline uint8 ByteReader::ReadOneByte(const char* buffer) const {
++inline uint8 ByteReader::ReadOneByte(const uint8_t *buffer) const {
 +  return buffer[0];
 +}
 +
-+inline uint16 ByteReader::ReadTwoBytes(const char* signed_buffer) const {
-+  const unsigned char *buffer
-+    = reinterpret_cast<const unsigned char *>(signed_buffer);
++inline uint16 ByteReader::ReadTwoBytes(const uint8_t *buffer) const {
 +  const uint16 buffer0 = buffer[0];
 +  const uint16 buffer1 = buffer[1];
 +  if (endian_ == ENDIANNESS_LITTLE) {
@@ -69675,9 +69778,7 @@ index 0000000000000000000000000000000000000000..3c167089f7218fac04b7894c6f8c9db7
 +  }
 +}
 +
-+inline uint64 ByteReader::ReadFourBytes(const char* signed_buffer) const {
-+  const unsigned char *buffer
-+    = reinterpret_cast<const unsigned char *>(signed_buffer);
++inline uint64 ByteReader::ReadFourBytes(const uint8_t *buffer) const {
 +  const uint32 buffer0 = buffer[0];
 +  const uint32 buffer1 = buffer[1];
 +  const uint32 buffer2 = buffer[2];
@@ -69689,9 +69790,7 @@ index 0000000000000000000000000000000000000000..3c167089f7218fac04b7894c6f8c9db7
 +  }
 +}
 +
-+inline uint64 ByteReader::ReadEightBytes(const char* signed_buffer) const {
-+  const unsigned char *buffer
-+    = reinterpret_cast<const unsigned char *>(signed_buffer);
++inline uint64 ByteReader::ReadEightBytes(const uint8_t *buffer) const {
 +  const uint64 buffer0 = buffer[0];
 +  const uint64 buffer1 = buffer[1];
 +  const uint64 buffer2 = buffer[2];
@@ -69713,12 +69812,12 @@ index 0000000000000000000000000000000000000000..3c167089f7218fac04b7894c6f8c9db7
 +// information, plus one bit saying whether the number continues or
 +// not.
 +
-+inline uint64 ByteReader::ReadUnsignedLEB128(const char* buffer,
++inline uint64 ByteReader::ReadUnsignedLEB128(const uint8_t *buffer,
 +                                             size_t* len) const {
 +  uint64 result = 0;
 +  size_t num_read = 0;
 +  unsigned int shift = 0;
-+  unsigned char byte;
++  uint8_t byte;
 +
 +  do {
 +    byte = *buffer++;
@@ -69738,12 +69837,12 @@ index 0000000000000000000000000000000000000000..3c167089f7218fac04b7894c6f8c9db7
 +// Read a signed LEB128 number.  These are like regular LEB128
 +// numbers, except the last byte may have a sign bit set.
 +
-+inline int64 ByteReader::ReadSignedLEB128(const char* buffer,
++inline int64 ByteReader::ReadSignedLEB128(const uint8_t *buffer,
 +                                          size_t* len) const {
 +  int64 result = 0;
 +  unsigned int shift = 0;
 +  size_t num_read = 0;
-+  unsigned char byte;
++  uint8_t byte;
 +
 +  do {
 +      byte = *buffer++;
@@ -69758,18 +69857,18 @@ index 0000000000000000000000000000000000000000..3c167089f7218fac04b7894c6f8c9db7
 +  return result;
 +}
 +
-+inline uint64 ByteReader::ReadOffset(const char* buffer) const {
++inline uint64 ByteReader::ReadOffset(const uint8_t *buffer) const {
 +  assert(this->offset_reader_);
 +  return (this->*offset_reader_)(buffer);
 +}
 +
-+inline uint64 ByteReader::ReadAddress(const char* buffer) const {
++inline uint64 ByteReader::ReadAddress(const uint8_t *buffer) const {
 +  assert(this->address_reader_);
 +  return (this->*address_reader_)(buffer);
 +}
 +
 +inline void ByteReader::SetCFIDataBase(uint64 section_base,
-+                                       const char *buffer_base) {
++                                       const uint8_t *buffer_base) {
 +  section_base_ = section_base;
 +  buffer_base_ = buffer_base;
 +  have_section_base_ = true;
@@ -69799,10 +69898,10 @@ index 0000000000000000000000000000000000000000..3c167089f7218fac04b7894c6f8c9db7
 +#endif  // UTIL_DEBUGINFO_BYTEREADER_INL_H__
 diff --git a/breakpad/src/common/dwarf/bytereader.cc b/breakpad/src/common/dwarf/bytereader.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..6802026449bd52af6477ff8d9acc1293cde831c6
+index 0000000000000000000000000000000000000000..3ccbcad69fee3d5b32ce5f839d0070aa31f7f7be
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/bytereader.cc
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,246 @@
 +// Copyright (c) 2010 Google Inc. All Rights Reserved.
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -69832,6 +69931,7 @@ index 0000000000000000000000000000000000000000..6802026449bd52af6477ff8d9acc1293
 +// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 +
 +#include <assert.h>
++#include <stdint.h>
 +#include <stdlib.h>
 +
 +#include "common/dwarf/bytereader-inl.h"
@@ -69867,7 +69967,7 @@ index 0000000000000000000000000000000000000000..6802026449bd52af6477ff8d9acc1293
 +  }
 +}
 +
-+uint64 ByteReader::ReadInitialLength(const char* start, size_t* len) {
++uint64 ByteReader::ReadInitialLength(const uint8_t *start, size_t* len) {
 +  const uint64 initial_length = ReadFourBytes(start);
 +  start += 4;
 +
@@ -69905,7 +70005,7 @@ index 0000000000000000000000000000000000000000..6802026449bd52af6477ff8d9acc1293
 +  }
 +}
 +
-+uint64 ByteReader::ReadEncodedPointer(const char *buffer,
++uint64 ByteReader::ReadEncodedPointer(const uint8_t *buffer,
 +                                      DwarfPointerEncoding encoding,
 +                                      size_t *len) const {
 +  // UsableEncoding doesn't approve of DW_EH_PE_omit, so we shouldn't
@@ -69934,7 +70034,7 @@ index 0000000000000000000000000000000000000000..6802026449bd52af6477ff8d9acc1293
 +    // Round up to the next boundary.
 +    uint64 aligned = (offset + AddressSize() - 1) & -AddressSize();
 +    // Convert back to a pointer.
-+    const char *aligned_buffer = buffer_base_ + (aligned - skew);
++    const uint8_t *aligned_buffer = buffer_base_ + (aligned - skew);
 +    // Finally, store the length and actually fetch the pointer.
 +    *len = aligned_buffer - buffer + AddressSize();
 +    return ReadAddress(aligned_buffer);
@@ -70050,10 +70150,10 @@ index 0000000000000000000000000000000000000000..6802026449bd52af6477ff8d9acc1293
 +}  // namespace dwarf2reader
 diff --git a/breakpad/src/common/dwarf/bytereader.h b/breakpad/src/common/dwarf/bytereader.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a343f4b36
+index 0000000000000000000000000000000000000000..cf583094463cc61d2dad494c600ce985700f8564
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/bytereader.h
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,314 @@
 +// -*- mode: C++ -*-
 +
 +// Copyright (c) 2010 Google Inc. All Rights Reserved.
@@ -70087,7 +70187,10 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +#ifndef COMMON_DWARF_BYTEREADER_H__
 +#define COMMON_DWARF_BYTEREADER_H__
 +
++#include <stdint.h>
++
 +#include <string>
++
 +#include "common/dwarf/types.h"
 +#include "common/dwarf/dwarf2enums.h"
 +
@@ -70115,22 +70218,22 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +
 +  // Read a single byte from BUFFER and return it as an unsigned 8 bit
 +  // number.
-+  uint8 ReadOneByte(const char* buffer) const;
++  uint8 ReadOneByte(const uint8_t *buffer) const;
 +
 +  // Read two bytes from BUFFER and return them as an unsigned 16 bit
 +  // number, using this ByteReader's endianness.
-+  uint16 ReadTwoBytes(const char* buffer) const;
++  uint16 ReadTwoBytes(const uint8_t *buffer) const;
 +
 +  // Read four bytes from BUFFER and return them as an unsigned 32 bit
 +  // number, using this ByteReader's endianness. This function returns
 +  // a uint64 so that it is compatible with ReadAddress and
 +  // ReadOffset. The number it returns will never be outside the range
 +  // of an unsigned 32 bit integer.
-+  uint64 ReadFourBytes(const char* buffer) const;
++  uint64 ReadFourBytes(const uint8_t *buffer) const;
 +
 +  // Read eight bytes from BUFFER and return them as an unsigned 64
 +  // bit number, using this ByteReader's endianness.
-+  uint64 ReadEightBytes(const char* buffer) const;
++  uint64 ReadEightBytes(const uint8_t *buffer) const;
 +
 +  // Read an unsigned LEB128 (Little Endian Base 128) number from
 +  // BUFFER and return it as an unsigned 64 bit integer. Set LEN to
@@ -70149,7 +70252,7 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +  // In other words, we break VALUE into groups of seven bits, put
 +  // them in little-endian order, and then write them as eight-bit
 +  // bytes with the high bit on all but the last.
-+  uint64 ReadUnsignedLEB128(const char* buffer, size_t* len) const;
++  uint64 ReadUnsignedLEB128(const uint8_t *buffer, size_t *len) const;
 +
 +  // Read a signed LEB128 number from BUFFER and return it as an
 +  // signed 64 bit integer. Set LEN to the number of bytes read.
@@ -70168,7 +70271,7 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +  // In other words, we break VALUE into groups of seven bits, put
 +  // them in little-endian order, and then write them as eight-bit
 +  // bytes with the high bit on all but the last.
-+  int64 ReadSignedLEB128(const char* buffer, size_t* len) const;
++  int64 ReadSignedLEB128(const uint8_t *buffer, size_t *len) const;
 +
 +  // Indicate that addresses on this architecture are SIZE bytes long. SIZE
 +  // must be either 4 or 8. (DWARF allows addresses to be any number of
@@ -70191,7 +70294,7 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +  // Read an address from BUFFER and return it as an unsigned 64 bit
 +  // integer, respecting this ByteReader's endianness and address size. You
 +  // must call SetAddressSize before calling this function.
-+  uint64 ReadAddress(const char* buffer) const;
++  uint64 ReadAddress(const uint8_t *buffer) const;
 +
 +  // DWARF actually defines two slightly different formats: 32-bit DWARF
 +  // and 64-bit DWARF. This is *not* related to the size of registers or
@@ -70228,14 +70331,14 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +  // - The 32-bit value 0xffffffff, followed by a 64-bit byte count,
 +  //   indicating that the data whose length is being measured uses
 +  //   the 64-bit DWARF format.
-+  uint64 ReadInitialLength(const char* start, size_t* len);
++  uint64 ReadInitialLength(const uint8_t *start, size_t *len);
 +
 +  // Read an offset from BUFFER and return it as an unsigned 64 bit
 +  // integer, respecting the ByteReader's endianness. In 32-bit DWARF, the
 +  // offset is 4 bytes long; in 64-bit DWARF, the offset is eight bytes
 +  // long. You must call ReadInitialLength or SetOffsetSize before calling
 +  // this function; see the comments above for details.
-+  uint64 ReadOffset(const char* buffer) const;
++  uint64 ReadOffset(const uint8_t *buffer) const;
 +
 +  // Return the current offset size, in bytes.
 +  // A return value of 4 indicates that we are reading 32-bit DWARF.
@@ -70290,7 +70393,7 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +  // is BUFFER_BASE. This allows us to find the address that a given
 +  // byte in our buffer would have when loaded into the program the
 +  // data describes. We need this to resolve DW_EH_PE_pcrel pointers.
-+  void SetCFIDataBase(uint64 section_base, const char *buffer_base);
++  void SetCFIDataBase(uint64 section_base, const uint8_t *buffer_base);
 +
 +  // Indicate that the base address of the program's ".text" section
 +  // is TEXT_BASE. We need this to resolve DW_EH_PE_textrel pointers.
@@ -70329,13 +70432,14 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +  // base address this reader hasn't been given, so you should check
 +  // with ValidEncoding and UsableEncoding first if you would rather
 +  // die in a more helpful way.
-+  uint64 ReadEncodedPointer(const char *buffer, DwarfPointerEncoding encoding,
++  uint64 ReadEncodedPointer(const uint8_t *buffer,
++                            DwarfPointerEncoding encoding,
 +                            size_t *len) const;
 +
 + private:
 +
 +  // Function pointer type for our address and offset readers.
-+  typedef uint64 (ByteReader::*AddressReader)(const char*) const;
++  typedef uint64 (ByteReader::*AddressReader)(const uint8_t *) const;
 +
 +  // Read an offset from BUFFER and return it as an unsigned 64 bit
 +  // integer.  DWARF2/3 define offsets as either 4 or 8 bytes,
@@ -70358,7 +70462,7 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +  bool have_section_base_, have_text_base_, have_data_base_;
 +  bool have_function_base_;
 +  uint64 section_base_, text_base_, data_base_, function_base_;
-+  const char *buffer_base_;
++  const uint8_t *buffer_base_;
 +};
 +
 +}  // namespace dwarf2reader
@@ -70366,10 +70470,10 @@ index 0000000000000000000000000000000000000000..e3894273f1d4b17e6b622ac6d0ab941a
 +#endif  // COMMON_DWARF_BYTEREADER_H__
 diff --git a/breakpad/src/common/dwarf/bytereader_unittest.cc b/breakpad/src/common/dwarf/bytereader_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e657a4cc20b
+index 0000000000000000000000000000000000000000..e66062d1fe48a35dc27000dbbec6dfbba8ff03ac
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/bytereader_unittest.cc
-@@ -0,0 +1,697 @@
+@@ -0,0 +1,707 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -70402,6 +70506,8 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +// Original author: Jim Blandy <jimb@mozilla.com> <jimb@red-bean.com>
 +
 +// bytereader_unittest.cc: Unit tests for dwarf2reader::ByteReader
++
++#include <stdint.h>
 +
 +#include <string>
 +
@@ -70443,7 +70549,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +    .LEB128(-0x4f337badf4483f83LL)
 +    .D32(0xfec319c9);
 +  ASSERT_TRUE(section.GetContents(&contents));
-+  const char *data = contents.data();
++  const uint8_t *data = reinterpret_cast<const uint8_t *>(contents.data());
 +  EXPECT_EQ(0xc0U, reader.ReadOneByte(data));
 +  EXPECT_EQ(0xcf0dU, reader.ReadTwoBytes(data + 1));
 +  EXPECT_EQ(0x96fdd219U, reader.ReadFourBytes(data + 3));
@@ -70747,7 +70853,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(ReaderDeathTest, DW_EH_PE_omit) {
-+  static const char data[1] = { 42 };
++  static const uint8_t data[] = { 42 };
 +  ByteReader reader(ENDIANNESS_BIG);
 +  reader.SetAddressSize(4);
 +  EXPECT_DEATH(reader.ReadEncodedPointer(data, dwarf2reader::DW_EH_PE_omit,
@@ -70756,7 +70862,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_absptr4) {
-+  static const char data[] = { 0x27, 0x57, 0xea, 0x40 };
++  static const uint8_t data[] = { 0x27, 0x57, 0xea, 0x40 };
 +  ByteReader reader(ENDIANNESS_LITTLE);
 +  reader.SetAddressSize(4);
 +  EXPECT_EQ(0x40ea5727U,
@@ -70766,7 +70872,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_absptr8) {
-+  static const char data[] = {
++  static const uint8_t data[] = {
 +    0x60, 0x27, 0x57, 0xea, 0x40, 0xc2, 0x98, 0x05, 0x01, 0x50
 +  };
 +  ByteReader reader(ENDIANNESS_LITTLE);
@@ -70778,7 +70884,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_uleb128) {
-+  static const char data[] = { 0x81, 0x84, 0x4c };
++  static const uint8_t data[] = { 0x81, 0x84, 0x4c };
 +  ByteReader reader(ENDIANNESS_LITTLE);
 +  reader.SetAddressSize(4);
 +  EXPECT_EQ(0x130201U,
@@ -70788,7 +70894,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_udata2) {
-+  static const char data[] = { 0xf4, 0x8d };
++  static const uint8_t data[] = { 0xf4, 0x8d };
 +  ByteReader reader(ENDIANNESS_BIG);
 +  reader.SetAddressSize(4);
 +  EXPECT_EQ(0xf48dU,
@@ -70798,7 +70904,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_udata4) {
-+  static const char data[] = { 0xb2, 0x68, 0xa5, 0x62, 0x8f, 0x8b };
++  static const uint8_t data[] = { 0xb2, 0x68, 0xa5, 0x62, 0x8f, 0x8b };
 +  ByteReader reader(ENDIANNESS_BIG);
 +  reader.SetAddressSize(8);
 +  EXPECT_EQ(0xa5628f8b,
@@ -70808,7 +70914,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_udata8Addr8) {
-+  static const char data[] = {
++  static const uint8_t data[] = {
 +    0x27, 0x04, 0x73, 0x04, 0x69, 0x9f, 0x19, 0xed, 0x8f, 0xfe
 +  };
 +  ByteReader reader(ENDIANNESS_LITTLE);
@@ -70820,7 +70926,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_udata8Addr4) {
-+  static const char data[] = {
++  static const uint8_t data[] = {
 +    0x27, 0x04, 0x73, 0x04, 0x69, 0x9f, 0x19, 0xed, 0x8f, 0xfe
 +  };
 +  ByteReader reader(ENDIANNESS_LITTLE);
@@ -70832,7 +70938,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_sleb128) {
-+  static const char data[] = { 0x42, 0xff, 0xfb, 0x73 };
++  static const uint8_t data[] = { 0x42, 0xff, 0xfb, 0x73 };
 +  ByteReader reader(ENDIANNESS_BIG);
 +  reader.SetAddressSize(4);
 +  EXPECT_EQ(-0x030201U & 0xffffffff,
@@ -70842,7 +70948,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_sdata2) {
-+  static const char data[] = { 0xb9, 0xbf };
++  static const uint8_t data[] = { 0xb9, 0xbf };
 +  ByteReader reader(ENDIANNESS_LITTLE);
 +  reader.SetAddressSize(8);
 +  EXPECT_EQ(0xffffffffffffbfb9ULL,
@@ -70852,7 +70958,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_sdata4) {
-+  static const char data[] = { 0xa0, 0xca, 0xf2, 0xb8, 0xc2, 0xad };
++  static const uint8_t data[] = { 0xa0, 0xca, 0xf2, 0xb8, 0xc2, 0xad };
 +  ByteReader reader(ENDIANNESS_LITTLE);
 +  reader.SetAddressSize(8);
 +  EXPECT_EQ(0xffffffffadc2b8f2ULL,
@@ -70862,7 +70968,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_sdata8) {
-+  static const char data[] = {
++  static const uint8_t data[] = {
 +    0xf6, 0x66, 0x57, 0x79, 0xe0, 0x0c, 0x9b, 0x26, 0x87
 +  };
 +  ByteReader reader(ENDIANNESS_LITTLE);
@@ -70874,7 +70980,9 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_pcrel) {
-+  static const char data[] = { 0x4a, 0x8b, 0x1b, 0x14, 0xc8, 0xc4, 0x02, 0xce };
++  static const uint8_t data[] = {
++    0x4a, 0x8b, 0x1b, 0x14, 0xc8, 0xc4, 0x02, 0xce
++  };
 +  ByteReader reader(ENDIANNESS_BIG);
 +  reader.SetAddressSize(4);
 +  DwarfPointerEncoding encoding =
@@ -70887,7 +70995,9 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_textrel) {
-+  static const char data[] = { 0xd9, 0x0d, 0x05, 0x17, 0xc9, 0x7a, 0x42, 0x1e };
++  static const uint8_t data[] = {
++    0xd9, 0x0d, 0x05, 0x17, 0xc9, 0x7a, 0x42, 0x1e
++  };
 +  ByteReader reader(ENDIANNESS_LITTLE);
 +  reader.SetAddressSize(4);
 +  reader.SetTextBase(0xb91beaf0);
@@ -70900,7 +71010,9 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_datarel) {
-+  static const char data[] = { 0x16, 0xf2, 0xbb, 0x82, 0x68, 0xa7, 0xbc, 0x39 };
++  static const uint8_t data[] = {
++    0x16, 0xf2, 0xbb, 0x82, 0x68, 0xa7, 0xbc, 0x39
++  };
 +  ByteReader reader(ENDIANNESS_BIG);
 +  reader.SetAddressSize(8);
 +  reader.SetDataBase(0xbef308bd25ce74f0ULL);
@@ -70913,7 +71025,9 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST_F(Reader, DW_EH_PE_funcrel) {
-+  static const char data[] = { 0x84, 0xf8, 0x14, 0x01, 0x61, 0xd1, 0x48, 0xc9 };
++  static const uint8_t data[] = {
++    0x84, 0xf8, 0x14, 0x01, 0x61, 0xd1, 0x48, 0xc9
++  };
 +  ByteReader reader(ENDIANNESS_BIG);
 +  reader.SetAddressSize(4);
 +  reader.SetFunctionBase(0x823c3520);
@@ -70926,7 +71040,7 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +}
 +
 +TEST(UsableBase, CFI) {
-+  static const char data[1] = { 0x42 };
++  static const uint8_t data[] = { 0x42 };
 +  ByteReader reader(ENDIANNESS_BIG);
 +  reader.SetCFIDataBase(0xb31cbd20, data);
 +  EXPECT_TRUE(reader.UsableEncoding(dwarf2reader::DW_EH_PE_absptr));
@@ -70989,12 +71103,12 @@ index 0000000000000000000000000000000000000000..4311ab6a25393b00190791f08d981e65
 +
 +struct AlignedFixture {
 +  AlignedFixture() : reader(ENDIANNESS_BIG) { reader.SetAddressSize(4); }
-+  static const char data[10];
++  static const uint8_t data[10];
 +  ByteReader reader;
 +  size_t pointer_size;
 +};
 +  
-+const char AlignedFixture::data[10] = {
++const uint8_t AlignedFixture::data[10] = {
 +  0xfe, 0x6e, 0x93, 0xd8, 0x34, 0xd5, 0x1c, 0xd3, 0xac, 0x2b
 +};
 +
@@ -71548,10 +71662,10 @@ index 0000000000000000000000000000000000000000..227812b588e29b1412d3ad4cb3ea04ff
 +#endif  // PROCESSOR_CFI_ASSEMBLER_H_
 diff --git a/breakpad/src/common/dwarf/dwarf2diehandler.cc b/breakpad/src/common/dwarf/dwarf2diehandler.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..20c15fa9d10262d69a2b6daf65115a4c117f0427
+index 0000000000000000000000000000000000000000..94542b5ea9e87eb46b7fc6a5cfaf9ff1ac8c97d9
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2diehandler.cc
-@@ -0,0 +1,198 @@
+@@ -0,0 +1,199 @@
 +// Copyright (c) 2010 Google Inc. All Rights Reserved.
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -71586,6 +71700,7 @@ index 0000000000000000000000000000000000000000..20c15fa9d10262d69a2b6daf65115a4c
 +// See dwarf2diehandler.h for details.
 +
 +#include <assert.h>
++#include <stdint.h>
 +
 +#include <string>
 +
@@ -71721,7 +71836,7 @@ index 0000000000000000000000000000000000000000..20c15fa9d10262d69a2b6daf65115a4c
 +void DIEDispatcher::ProcessAttributeBuffer(uint64 offset,
 +                                           enum DwarfAttribute attr,
 +                                           enum DwarfForm form,
-+                                           const char* data,
++                                           const uint8_t *data,
 +                                           uint64 len) {
 +  HandlerStack &current = die_handlers_.top();
 +  // This had better be an attribute of the DIE we were meant to handle.
@@ -71752,10 +71867,10 @@ index 0000000000000000000000000000000000000000..20c15fa9d10262d69a2b6daf65115a4c
 +} // namespace dwarf2reader
 diff --git a/breakpad/src/common/dwarf/dwarf2diehandler.h b/breakpad/src/common/dwarf/dwarf2diehandler.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..81f40f072f14a6de6a68a85537c8012795f569ed
+index 0000000000000000000000000000000000000000..a1e589a863e08d8ad9b87eddf1af4903e262eb9f
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2diehandler.h
-@@ -0,0 +1,363 @@
+@@ -0,0 +1,365 @@
 +// -*- mode: c++ -*-
 +
 +// Copyright (c) 2010 Google Inc. All Rights Reserved.
@@ -71914,6 +72029,8 @@ index 0000000000000000000000000000000000000000..81f40f072f14a6de6a68a85537c80127
 +#ifndef COMMON_DWARF_DWARF2DIEHANDLER_H__
 +#define COMMON_DWARF_DWARF2DIEHANDLER_H__
 +
++#include <stdint.h>
++
 +#include <stack>
 +#include <string>
 +
@@ -71964,7 +72081,7 @@ index 0000000000000000000000000000000000000000..81f40f072f14a6de6a68a85537c80127
 +                                         uint64 data) { }
 +  virtual void ProcessAttributeBuffer(enum DwarfAttribute attr,
 +                                      enum DwarfForm form,
-+                                      const char* data,
++                                      const uint8_t *data,
 +                                      uint64 len) { }
 +  virtual void ProcessAttributeString(enum DwarfAttribute attr,
 +                                      enum DwarfForm form,
@@ -72067,7 +72184,7 @@ index 0000000000000000000000000000000000000000..81f40f072f14a6de6a68a85537c80127
 +  void ProcessAttributeBuffer(uint64 offset,
 +                              enum DwarfAttribute attr,
 +                              enum DwarfForm form,
-+                              const char* data,
++                              const uint8_t *data,
 +                              uint64 len);
 +  void ProcessAttributeString(uint64 offset,
 +                              enum DwarfAttribute attr,
@@ -72121,10 +72238,10 @@ index 0000000000000000000000000000000000000000..81f40f072f14a6de6a68a85537c80127
 +#endif  // COMMON_DWARF_DWARF2DIEHANDLER_H__
 diff --git a/breakpad/src/common/dwarf/dwarf2diehandler_unittest.cc b/breakpad/src/common/dwarf/dwarf2diehandler_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c0a532aa01624e15c9620b49239c01e9b4b85411
+index 0000000000000000000000000000000000000000..db70eb31b9e3efcd176601192b20f52a67b00cd7
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2diehandler_unittest.cc
-@@ -0,0 +1,524 @@
+@@ -0,0 +1,527 @@
 +// -*- mode: c++ -*-
 +
 +// Copyright (c) 2010 Google Inc. All Rights Reserved.
@@ -72158,6 +72275,8 @@ index 0000000000000000000000000000000000000000..c0a532aa01624e15c9620b49239c01e9
 +// Original author: Jim Blandy <jimb@mozilla.com> <jimb@red-bean.com>
 +
 +// dwarf2diehander_unittest.cc: Unit tests for google_breakpad::DIEDispatcher.
++
++#include <stdint.h>
 +
 +#include <string>
 +#include <utility>
@@ -72194,7 +72313,7 @@ index 0000000000000000000000000000000000000000..c0a532aa01624e15c9620b49239c01e9
 +  MOCK_METHOD3(ProcessAttributeReference,
 +               void(DwarfAttribute, DwarfForm, uint64));
 +  MOCK_METHOD4(ProcessAttributeBuffer,
-+               void(DwarfAttribute, DwarfForm, const char *, uint64));
++               void(DwarfAttribute, DwarfForm, const uint8_t *, uint64));
 +  MOCK_METHOD3(ProcessAttributeString,
 +               void(DwarfAttribute, DwarfForm, const string &));
 +  MOCK_METHOD3(ProcessAttributeSignature,
@@ -72213,7 +72332,7 @@ index 0000000000000000000000000000000000000000..c0a532aa01624e15c9620b49239c01e9
 +  MOCK_METHOD3(ProcessAttributeReference,
 +               void(DwarfAttribute, DwarfForm, uint64));
 +  MOCK_METHOD4(ProcessAttributeBuffer,
-+               void(DwarfAttribute, DwarfForm, const char *, uint64));
++               void(DwarfAttribute, DwarfForm, const uint8_t *, uint64));
 +  MOCK_METHOD3(ProcessAttributeString,
 +               void(DwarfAttribute, DwarfForm, const string &));
 +  MOCK_METHOD3(ProcessAttributeSignature,
@@ -72312,8 +72431,9 @@ index 0000000000000000000000000000000000000000..c0a532aa01624e15c9620b49239c01e9
 +  MockRootDIEHandler mock_root_handler;
 +  DIEDispatcher die_dispatcher(&mock_root_handler);
 +
-+  const char buffer[10] = { 0x24, 0x24, 0x35, 0x9a, 0xca,
-+                            0xcf, 0xa8, 0x84, 0xa7, 0x18 };
++  const uint8_t buffer[10] = {
++    0x24, 0x24, 0x35, 0x9a, 0xca, 0xcf, 0xa8, 0x84, 0xa7, 0x18
++  };
 +  string str = "\xc8\x26\x2e\x0d\xa4\x9c\x37\xd6\xfb\x1d";
 +
 +  // Set expectations.
@@ -73307,10 +73427,10 @@ index 0000000000000000000000000000000000000000..5565d66e12d8b4cd0c4d31a5b223b78d
 +#endif  // COMMON_DWARF_DWARF2ENUMS_H__
 diff --git a/breakpad/src/common/dwarf/dwarf2reader.cc b/breakpad/src/common/dwarf/dwarf2reader.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1964bb1c3
+index 0000000000000000000000000000000000000000..fcd29b8c8e025e07bd71979a63e7df8b9cc04fe3
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2reader.cc
-@@ -0,0 +1,2346 @@
+@@ -0,0 +1,2348 @@
 +// Copyright (c) 2010 Google Inc. All Rights Reserved.
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -73396,9 +73516,9 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +  // The only way to check whether we are reading over the end of the
 +  // buffer would be to first compute the size of the leb128 data by
 +  // reading it, then go back and read it again.
-+  const char* abbrev_start = iter->second.first +
++  const uint8_t *abbrev_start = iter->second.first +
 +                                      header_.abbrev_offset;
-+  const char* abbrevptr = abbrev_start;
++  const uint8_t *abbrevptr = abbrev_start;
 +#ifndef NDEBUG
 +  const uint64 abbrev_length = iter->second.second - header_.abbrev_offset;
 +#endif
@@ -73445,8 +73565,8 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +}
 +
 +// Skips a single DIE's attributes.
-+const char* CompilationUnit::SkipDIE(const char* start,
-+                                              const Abbrev& abbrev) {
++const uint8_t *CompilationUnit::SkipDIE(const uint8_t* start,
++                                        const Abbrev& abbrev) {
 +  for (AttributeList::const_iterator i = abbrev.attributes.begin();
 +       i != abbrev.attributes.end();
 +       i++)  {
@@ -73456,8 +73576,8 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +}
 +
 +// Skips a single attribute form's data.
-+const char* CompilationUnit::SkipAttribute(const char* start,
-+                                                    enum DwarfForm form) {
++const uint8_t *CompilationUnit::SkipAttribute(const uint8_t *start,
++                                              enum DwarfForm form) {
 +  size_t len;
 +
 +  switch (form) {
@@ -73484,7 +73604,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +    case DW_FORM_ref_sig8:
 +      return start + 8;
 +    case DW_FORM_string:
-+      return start + strlen(start) + 1;
++      return start + strlen(reinterpret_cast<const char *>(start)) + 1;
 +    case DW_FORM_udata:
 +    case DW_FORM_ref_udata:
 +      reader_->ReadUnsignedLEB128(start, &len);
@@ -73531,7 +73651,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +// the offset in the .debug_abbrev section for our abbrevs, and an
 +// address size.
 +void CompilationUnit::ReadHeader() {
-+  const char* headerptr = buffer_;
++  const uint8_t *headerptr = buffer_;
 +  size_t initial_length_size;
 +
 +  assert(headerptr + 4 < buffer_ + buffer_length_);
@@ -73618,8 +73738,8 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +// If one really wanted, you could merge SkipAttribute and
 +// ProcessAttribute
 +// This is all boring data manipulation and calling of the handler.
-+const char* CompilationUnit::ProcessAttribute(
-+    uint64 dieoffset, const char* start, enum DwarfAttribute attr,
++const uint8_t *CompilationUnit::ProcessAttribute(
++    uint64 dieoffset, const uint8_t *start, enum DwarfAttribute attr,
 +    enum DwarfForm form) {
 +  size_t len;
 +
@@ -73653,7 +73773,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +                                         reader_->ReadEightBytes(start));
 +      return start + 8;
 +    case DW_FORM_string: {
-+      const char* str = start;
++      const char *str = reinterpret_cast<const char *>(start);
 +      handler_->ProcessAttributeString(dieoffset, attr, form,
 +                                       str);
 +      return start + strlen(str) + 1;
@@ -73753,7 +73873,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +      const uint64 offset = reader_->ReadOffset(start);
 +      assert(string_buffer_ + offset < string_buffer_ + string_buffer_length_);
 +
-+      const char* str = string_buffer_ + offset;
++      const char *str = reinterpret_cast<const char *>(string_buffer_ + offset);
 +      handler_->ProcessAttributeString(dieoffset, attr, form,
 +                                       str);
 +      return start + reader_->OffsetSize();
@@ -73763,9 +73883,9 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +  return NULL;
 +}
 +
-+const char* CompilationUnit::ProcessDIE(uint64 dieoffset,
-+                                                 const char* start,
-+                                                 const Abbrev& abbrev) {
++const uint8_t *CompilationUnit::ProcessDIE(uint64 dieoffset,
++                                           const uint8_t *start,
++                                           const Abbrev& abbrev) {
 +  for (AttributeList::const_iterator i = abbrev.attributes.begin();
 +       i != abbrev.attributes.end();
 +       i++)  {
@@ -73775,12 +73895,12 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +}
 +
 +void CompilationUnit::ProcessDIEs() {
-+  const char* dieptr = after_header_;
++  const uint8_t *dieptr = after_header_;
 +  size_t len;
 +
 +  // lengthstart is the place the length field is based on.
 +  // It is the point in the header after the initial length field
-+  const char* lengthstart = buffer_;
++  const uint8_t *lengthstart = buffer_;
 +
 +  // In 64 bit dwarf, the initial length is 12 bytes, because of the
 +  // 0xffffffff at the start.
@@ -73828,7 +73948,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +  }
 +}
 +
-+LineInfo::LineInfo(const char* buffer, uint64 buffer_length,
++LineInfo::LineInfo(const uint8_t *buffer, uint64 buffer_length,
 +                   ByteReader* reader, LineInfoHandler* handler):
 +    handler_(handler), reader_(reader), buffer_(buffer) {
 +#ifndef NDEBUG
@@ -73846,7 +73966,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +// The header for a debug_line section is mildly complicated, because
 +// the line info is very tightly encoded.
 +void LineInfo::ReadHeader() {
-+  const char* lineptr = buffer_;
++  const uint8_t *lineptr = buffer_;
 +  size_t initial_length_size;
 +
 +  const uint64 initial_length
@@ -73893,7 +74013,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +  if (*lineptr) {
 +    uint32 dirindex = 1;
 +    while (*lineptr) {
-+      const char* dirname = lineptr;
++      const char *dirname = reinterpret_cast<const char *>(lineptr);
 +      handler_->DefineDir(dirname, dirindex);
 +      lineptr += strlen(dirname) + 1;
 +      dirindex++;
@@ -73906,7 +74026,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +    uint32 fileindex = 1;
 +    size_t len;
 +    while (*lineptr) {
-+      const char* filename = lineptr;
++      const char *filename = reinterpret_cast<const char *>(lineptr);
 +      lineptr += strlen(filename) + 1;
 +
 +      uint64 dirindex = reader_->ReadUnsignedLEB128(lineptr, &len);
@@ -73931,7 +74051,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +bool LineInfo::ProcessOneOpcode(ByteReader* reader,
 +                                LineInfoHandler* handler,
 +                                const struct LineInfoHeader &header,
-+                                const char* start,
++                                const uint8_t *start,
 +                                struct LineStateMachine* lsm,
 +                                size_t* len,
 +                                uintptr pc,
@@ -74072,7 +74192,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +        }
 +          break;
 +        case DW_LNE_define_file: {
-+          const char* filename  = start;
++          const char *filename = reinterpret_cast<const char *>(start);
 +
 +          templen = strlen(filename) + 1;
 +          start += templen;
@@ -74119,7 +74239,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +
 +  // lengthstart is the place the length field is based on.
 +  // It is the point in the header after the initial length field
-+  const char* lengthstart = buffer_;
++  const uint8_t *lengthstart = buffer_;
 +
 +  // In 64 bit dwarf, the initial length is 12 bytes, because of the
 +  // 0xffffffff at the start.
@@ -74128,7 +74248,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +  else
 +    lengthstart += 4;
 +
-+  const char* lineptr = after_header_;
++  const uint8_t *lineptr = after_header_;
 +  lsm.Reset(header_.default_is_stmt);
 +
 +  // The LineInfoHandler interface expects each line's length along
@@ -74627,7 +74747,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +  const Entry *entry_;
 +
 +  // The next instruction to process.
-+  const char *cursor_;
++  const uint8_t *cursor_;
 +
 +  // The current set of rules.
 +  RuleMap rules_;
@@ -74725,7 +74845,8 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +        if (len > bytes_left || expression_length > bytes_left - len)
 +          return ReportIncomplete();
 +        cursor_ += len;
-+        operands->expression = string(cursor_, expression_length);
++        operands->expression = string(reinterpret_cast<const char *>(cursor_),
++                                      expression_length);
 +        cursor_ += expression_length;
 +        break;
 +      }
@@ -75078,8 +75199,8 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +  return DoRule(reg, rule);
 +}
 +
-+bool CallFrameInfo::ReadEntryPrologue(const char *cursor, Entry *entry) {
-+  const char *buffer_end = buffer_ + buffer_length_;
++bool CallFrameInfo::ReadEntryPrologue(const uint8_t *cursor, Entry *entry) {
++  const uint8_t *buffer_end = buffer_ + buffer_length_;
 +
 +  // Initialize enough of ENTRY for use in error reporting.
 +  entry->offset = cursor - buffer_;
@@ -75157,7 +75278,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +}
 +
 +bool CallFrameInfo::ReadCIEFields(CIE *cie) {
-+  const char *cursor = cie->fields;
++  const uint8_t *cursor = cie->fields;
 +  size_t len;
 +
 +  assert(cie->kind == kCIE);
@@ -75188,13 +75309,14 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +    return false;
 +  }
 +
-+  const char *augmentation_start = cursor;
-+  const void *augmentation_end =
-+      memchr(augmentation_start, '\0', cie->end - augmentation_start);
++  const uint8_t *augmentation_start = cursor;
++  const uint8_t *augmentation_end =
++      reinterpret_cast<const uint8_t *>(memchr(augmentation_start, '\0',
++                                               cie->end - augmentation_start));
 +  if (! augmentation_end) return ReportIncomplete(cie);
-+  cursor = static_cast<const char *>(augmentation_end);
-+  cie->augmentation = string(augmentation_start,
-+                                  cursor - augmentation_start);
++  cursor = augmentation_end;
++  cie->augmentation = string(reinterpret_cast<const char *>(augmentation_start),
++                             cursor - augmentation_start);
 +  // Skip the terminating '\0'.
 +  cursor++;
 +
@@ -75240,9 +75362,9 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +    if (size_t(cie->end - cursor) < len + data_size)
 +      return ReportIncomplete(cie);
 +    cursor += len;
-+    const char *data = cursor;
++    const uint8_t *data = cursor;
 +    cursor += data_size;
-+    const char *data_end = cursor;
++    const uint8_t *data_end = cursor;
 +
 +    cie->has_z_lsda = false;
 +    cie->has_z_personality = false;
@@ -75334,7 +75456,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +}
 +  
 +bool CallFrameInfo::ReadFDEFields(FDE *fde) {
-+  const char *cursor = fde->fields;
++  const uint8_t *cursor = fde->fields;
 +  size_t size;
 +
 +  fde->address = reader_->ReadEncodedPointer(cursor, fde->cie->pointer_encoding,
@@ -75400,10 +75522,10 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +}
 +  
 +bool CallFrameInfo::Start() {
-+  const char *buffer_end = buffer_ + buffer_length_;
-+  const char *cursor;
++  const uint8_t *buffer_end = buffer_ + buffer_length_;
++  const uint8_t *cursor;
 +  bool all_ok = true;
-+  const char *entry_end;
++  const uint8_t *entry_end;
 +  bool ok;
 +
 +  // Traverse all the entries in buffer_, skipping CIEs and offering
@@ -75659,7 +75781,7 @@ index 0000000000000000000000000000000000000000..49c2ee15179c5c6dff8e07f41a20fcb1
 +}  // namespace dwarf2reader
 diff --git a/breakpad/src/common/dwarf/dwarf2reader.h b/breakpad/src/common/dwarf/dwarf2reader.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19bee48e18
+index 0000000000000000000000000000000000000000..1f5b37a04d9d34c120bb8b70c3aaf7c9a814ce18
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2reader.h
 @@ -0,0 +1,1052 @@
@@ -75705,6 +75827,8 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +#ifndef COMMON_DWARF_DWARF2READER_H__
 +#define COMMON_DWARF_DWARF2READER_H__
 +
++#include <stdint.h>
++
 +#include <list>
 +#include <map>
 +#include <string>
@@ -75723,7 +75847,7 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +
 +// This maps from a string naming a section to a pair containing a
 +// the data for the section, and the size of the section.
-+typedef std::map<string, std::pair<const char*, uint64> > SectionMap;
++typedef std::map<string, std::pair<const uint8_t *, uint64> > SectionMap;
 +typedef std::list<std::pair<enum DwarfAttribute, enum DwarfForm> >
 +    AttributeList;
 +typedef AttributeList::iterator AttributeIterator;
@@ -75750,7 +75874,7 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +  // to the beginning and length of the line information to read.
 +  // Reader is a ByteReader class that has the endianness set
 +  // properly.
-+  LineInfo(const char* buffer_, uint64 buffer_length,
++  LineInfo(const uint8_t *buffer_, uint64 buffer_length,
 +           ByteReader* reader, LineInfoHandler* handler);
 +
 +  virtual ~LineInfo() {
@@ -75776,7 +75900,7 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +  static bool ProcessOneOpcode(ByteReader* reader,
 +                               LineInfoHandler* handler,
 +                               const struct LineInfoHeader &header,
-+                               const char* start,
++                               const uint8_t *start,
 +                               struct LineStateMachine* lsm,
 +                               size_t* len,
 +                               uintptr pc,
@@ -75804,11 +75928,11 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +  // buffer is the buffer for our line info, starting at exactly where
 +  // the line info to read is.  after_header is the place right after
 +  // the end of the line information header.
-+  const char* buffer_;
++  const uint8_t *buffer_;
 +#ifndef NDEBUG
 +  uint64 buffer_length_;
 +#endif
-+  const char* after_header_;
++  const uint8_t *after_header_;
 +};
 +
 +// This class is the main interface between the line info reader and
@@ -75933,29 +76057,27 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +
 +  // Processes a single DIE for this compilation unit and return a new
 +  // pointer just past the end of it
-+  const char* ProcessDIE(uint64 dieoffset,
-+                                  const char* start,
-+                                  const Abbrev& abbrev);
++  const uint8_t *ProcessDIE(uint64 dieoffset,
++                            const uint8_t *start,
++                            const Abbrev& abbrev);
 +
 +  // Processes a single attribute and return a new pointer just past the
 +  // end of it
-+  const char* ProcessAttribute(uint64 dieoffset,
-+                                        const char* start,
-+                                        enum DwarfAttribute attr,
-+                                        enum DwarfForm form);
++  const uint8_t *ProcessAttribute(uint64 dieoffset,
++                                  const uint8_t *start,
++                                  enum DwarfAttribute attr,
++                                  enum DwarfForm form);
 +
 +  // Processes all DIEs for this compilation unit
 +  void ProcessDIEs();
 +
 +  // Skips the die with attributes specified in ABBREV starting at
 +  // START, and return the new place to position the stream to.
-+  const char* SkipDIE(const char* start,
-+                               const Abbrev& abbrev);
++  const uint8_t *SkipDIE(const uint8_t *start, const Abbrev& abbrev);
 +
 +  // Skips the attribute starting at START, with FORM, and return the
 +  // new place to position the stream to.
-+  const char* SkipAttribute(const char* start,
-+                                     enum DwarfForm form);
++  const uint8_t *SkipAttribute(const uint8_t *start, enum DwarfForm form);
 +
 +  // Offset from section start is the offset of this compilation unit
 +  // from the beginning of the .debug_info section.
@@ -75964,9 +76086,9 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +  // buffer is the buffer for our CU, starting at .debug_info + offset
 +  // passed in from constructor.
 +  // after_header points to right after the compilation unit header.
-+  const char* buffer_;
++  const uint8_t *buffer_;
 +  uint64 buffer_length_;
-+  const char* after_header_;
++  const uint8_t *after_header_;
 +
 +  // The associated ByteReader that handles endianness issues for us
 +  ByteReader* reader_;
@@ -75985,7 +76107,7 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +  // String section buffer and length, if we have a string section.
 +  // This is here to avoid doing a section lookup for strings in
 +  // ProcessAttribute, which is in the hot path for DWARF2 reading.
-+  const char* string_buffer_;
++  const uint8_t *string_buffer_;
 +  uint64 string_buffer_length_;
 +};
 +
@@ -76048,7 +76170,7 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +  virtual void ProcessAttributeBuffer(uint64 offset,
 +                                      enum DwarfAttribute attr,
 +                                      enum DwarfForm form,
-+                                      const char* data,
++                                      const uint8_t *data,
 +                                      uint64 len) { }
 +
 +  // Called when we have an attribute with string data to give to our handler.
@@ -76304,7 +76426,7 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +  // The mechanics of C++ exception handling, personality routines,
 +  // and language-specific data areas are described here, rather nicely:
 +  // http://www.codesourcery.com/public/cxx-abi/abi-eh.html
-+  CallFrameInfo(const char *buffer, size_t buffer_length,
++  CallFrameInfo(const uint8_t *buffer, size_t buffer_length,
 +                ByteReader *reader, Handler *handler, Reporter *reporter,
 +                bool eh_frame = false)
 +      : buffer_(buffer), buffer_length_(buffer_length),
@@ -76332,7 +76454,7 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +    size_t offset;
 +
 +    // The start of this entry in the buffer.
-+    const char *start;
++    const uint8_t *start;
 +    
 +    // Which kind of entry this is.
 +    //
@@ -76343,16 +76465,16 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +
 +    // The end of this entry's common prologue (initial length and id), and
 +    // the start of this entry's kind-specific fields.
-+    const char *fields;
++    const uint8_t *fields;
 +
 +    // The start of this entry's instructions.
-+    const char *instructions;
++    const uint8_t *instructions;
 +
 +    // The address past the entry's last byte in the buffer. (Note that
 +    // since offset points to the entry's initial length field, and the
 +    // length field is the number of bytes after that field, this is not
 +    // simply buffer_ + offset + length.)
-+    const char *end;
++    const uint8_t *end;
 +
 +    // For both DWARF CFI and .eh_frame sections, this is the CIE id in a
 +    // CIE, and the offset of the associated CIE in an FDE.
@@ -76429,7 +76551,7 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +  // true. On failure, report the problem, and return false. Even if we
 +  // return false, set ENTRY->end to the first byte after the entry if we
 +  // were able to figure that out, or NULL if we weren't.
-+  bool ReadEntryPrologue(const char *cursor, Entry *entry);
++  bool ReadEntryPrologue(const uint8_t *cursor, Entry *entry);
 +
 +  // Parse the fields of a CIE after the entry prologue, including any 'z'
 +  // augmentation data. Assume that the 'Entry' fields of CIE are
@@ -76457,7 +76579,7 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +  }
 +
 +  // The contents of the DWARF .debug_info section we're parsing.
-+  const char *buffer_;
++  const uint8_t *buffer_;
 +  size_t buffer_length_;
 +
 +  // For reading multi-byte values with the appropriate endianness.
@@ -76717,10 +76839,10 @@ index 0000000000000000000000000000000000000000..e4f7f495c16a37adf90b9b3771576d19
 +#endif  // UTIL_DEBUGINFO_DWARF2READER_H__
 diff --git a/breakpad/src/common/dwarf/dwarf2reader_cfi_unittest.cc b/breakpad/src/common/dwarf/dwarf2reader_cfi_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e57334b8d24c
+index 0000000000000000000000000000000000000000..e50ea5fbd3d23e16bc92ada7318a744ee0e8abaf
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2reader_cfi_unittest.cc
-@@ -0,0 +1,2452 @@
+@@ -0,0 +1,2468 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -76754,6 +76876,7 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +
 +// dwarf2reader_cfi_unittest.cc: Unit tests for dwarf2reader::CallFrameInfo
 +
++#include <stdint.h>
 +#include <stdlib.h>
 +
 +#include <string>
@@ -76909,7 +77032,7 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +TEST_F(CFI, EmptyRegion) {
 +  EXPECT_CALL(handler, Entry(_, _, _, _, _, _)).Times(0);
 +  EXPECT_CALL(handler, End()).Times(0);
-+  static const char data[1] = { 42 };
++  static const uint8_t data[] = { 42 };
 +
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  CallFrameInfo parser(data, 0, &byte_reader, &handler, &reporter);
@@ -76936,7 +77059,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  byte_reader.SetAddressSize(8);
-+  CallFrameInfo parser(contents.data(), contents.size() - 2,
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size() - 2,
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_FALSE(parser.Start());
 +}
@@ -76961,7 +77085,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +
 +  ByteReader byte_reader(ENDIANNESS_LITTLE);
 +  byte_reader.SetAddressSize(4);
-+  CallFrameInfo parser(contents.data(), contents.size() - 4,
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size() - 4,
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_FALSE(parser.Start());
 +}
@@ -76985,7 +77110,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  byte_reader.SetAddressSize(8);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_FALSE(parser.Start());
 +}
@@ -77011,7 +77137,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  byte_reader.SetAddressSize(8);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_FALSE(parser.Start());
 +}
@@ -77032,7 +77159,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +  EXPECT_TRUE(section.GetContents(&contents));
 +  ByteReader byte_reader(ENDIANNESS_LITTLE);
 +  byte_reader.SetAddressSize(4);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_TRUE(parser.Start());
 +}
@@ -77062,7 +77190,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +  EXPECT_TRUE(section.GetContents(&contents));
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  byte_reader.SetAddressSize(4);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_TRUE(parser.Start());
 +}
@@ -77105,7 +77234,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +  EXPECT_TRUE(section.GetContents(&contents));
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  byte_reader.SetAddressSize(4);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_TRUE(parser.Start());
 +}
@@ -77154,7 +77284,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +  EXPECT_TRUE(section.GetContents(&contents));
 +  ByteReader byte_reader(ENDIANNESS_LITTLE);
 +  byte_reader.SetAddressSize(8);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_TRUE(parser.Start());
 +}
@@ -77198,7 +77329,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +  EXPECT_TRUE(section.GetContents(&contents));
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  byte_reader.SetAddressSize(4);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_FALSE(parser.Start());
 +}
@@ -77242,7 +77374,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +  EXPECT_TRUE(section.GetContents(&contents));
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  byte_reader.SetAddressSize(4);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_FALSE(parser.Start());
 +}
@@ -77276,7 +77409,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +  EXPECT_TRUE(section.GetContents(&contents));
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  byte_reader.SetAddressSize(4);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_TRUE(parser.Start());
 +}
@@ -77310,7 +77444,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +  EXPECT_TRUE(section.GetContents(&contents));
 +  ByteReader byte_reader(ENDIANNESS_BIG);
 +  byte_reader.SetAddressSize(4);
-+  CallFrameInfo parser(contents.data(), contents.size(),
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_TRUE(parser.Start());
 +}
@@ -77391,7 +77526,8 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +    }
 +    ByteReader byte_reader(endianness);
 +    byte_reader.SetAddressSize(section->AddressSize());
-+    CallFrameInfo parser(contents.data(), contents.size(),
++    CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                         contents.size(),
 +                         &byte_reader, &handler, &reporter);
 +    if (succeeds)
 +      EXPECT_TRUE(parser.Start());
@@ -78712,10 +78848,12 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +    }
 +    ByteReader byte_reader(endianness);
 +    byte_reader.SetAddressSize(section->AddressSize());
-+    byte_reader.SetCFIDataBase(encoded_pointer_bases.cfi, contents.data());
++    byte_reader.SetCFIDataBase(encoded_pointer_bases.cfi,
++                               reinterpret_cast<const uint8_t *>(contents.data()));
 +    byte_reader.SetTextBase(encoded_pointer_bases.text);
 +    byte_reader.SetDataBase(encoded_pointer_bases.data);
-+    CallFrameInfo parser(contents.data(), contents.size(),
++    CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                         contents.size(),
 +                         &byte_reader, &handler, &reporter, true);
 +    if (succeeds)
 +      EXPECT_TRUE(parser.Start());
@@ -79175,10 +79313,10 @@ index 0000000000000000000000000000000000000000..66c6198b11bec980d4ae5b4ac999e573
 +#endif
 diff --git a/breakpad/src/common/dwarf/dwarf2reader_die_unittest.cc b/breakpad/src/common/dwarf/dwarf2reader_die_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..4e34436931924ba736453e2fcd353a279b2cb7f3
+index 0000000000000000000000000000000000000000..b53104fbfdc45e737c0d16569c2aca37d0258f22
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2reader_die_unittest.cc
-@@ -0,0 +1,484 @@
+@@ -0,0 +1,487 @@
 +// Copyright (c) 2012, Google Inc.
 +// All rights reserved.
 +//
@@ -79212,6 +79350,7 @@ index 0000000000000000000000000000000000000000..4e34436931924ba736453e2fcd353a27
 +
 +// dwarf2reader_die_unittest.cc: Unit tests for dwarf2reader::CompilationUnit
 +
++#include <stdint.h>
 +#include <stdlib.h>
 +
 +#include <iostream>
@@ -79272,7 +79411,7 @@ index 0000000000000000000000000000000000000000..4e34436931924ba736453e2fcd353a27
 +  MOCK_METHOD5(ProcessAttributeBuffer, void(uint64 offset,
 +                                            enum DwarfAttribute attr,
 +                                            enum DwarfForm form,
-+                                            const char* data,
++                                            const uint8_t *data,
 +                                            uint64 len));
 +  MOCK_METHOD4(ProcessAttributeString, void(uint64 offset,
 +                                            enum DwarfAttribute attr,
@@ -79313,9 +79452,11 @@ index 0000000000000000000000000000000000000000..4e34436931924ba736453e2fcd353a27
 +    assert(info.GetContents(&info_contents));
 +    assert(abbrevs.GetContents(&abbrevs_contents));
 +    section_map.clear();
-+    section_map[".debug_info"].first  = info_contents.data();
++    section_map[".debug_info"].first
++      = reinterpret_cast<const uint8_t *>(info_contents.data());
 +    section_map[".debug_info"].second = info_contents.size();
-+    section_map[".debug_abbrev"].first  = abbrevs_contents.data();
++    section_map[".debug_abbrev"].first
++      = reinterpret_cast<const uint8_t *>(abbrevs_contents.data());
 +    section_map[".debug_abbrev"].second = abbrevs_contents.size();
 +    return section_map;
 +  }
@@ -80318,10 +80459,10 @@ index 0000000000000000000000000000000000000000..0ff72abcfc2810f9c7a0291981eba1b5
 +#endif  // COMMON_DWARF_LINE_STATE_MACHINE_H__
 diff --git a/breakpad/src/common/dwarf/types.h b/breakpad/src/common/dwarf/types.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..61ca4579a9b3846021c13a5df0383c9d4ecdf314
+index 0000000000000000000000000000000000000000..59dda3160085a75d33e0c91813b81f1c55366e02
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/types.h
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,51 @@
 +// Copyright 2008 Google, Inc.  All Rights reserved
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -80369,12 +80510,8 @@ index 0000000000000000000000000000000000000000..61ca4579a9b3846021c13a5df0383c9d
 +typedef unsigned int       uint32;
 +typedef unsigned long long uint64;
 +
-+#ifdef __PTRDIFF_TYPE__
-+typedef          __PTRDIFF_TYPE__ intptr;
-+typedef unsigned __PTRDIFF_TYPE__ uintptr;
-+#else
-+#error "Can't find pointer-sized integral types."
-+#endif
++typedef intptr_t           intptr;
++typedef uintptr_t          uintptr;
 +
 +#endif // _COMMON_DWARF_TYPES_H__
 diff --git a/breakpad/src/common/dwarf_cfi_to_module.cc b/breakpad/src/common/dwarf_cfi_to_module.cc
@@ -81200,10 +81337,10 @@ index 0000000000000000000000000000000000000000..807d1b20c338f5959040cb7687cd2a7b
 +}
 diff --git a/breakpad/src/common/dwarf_cu_to_module.cc b/breakpad/src/common/dwarf_cu_to_module.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..1729d4ac93af0ac80048fcc7b10a22e41aa16b47
+index 0000000000000000000000000000000000000000..c52dffb339b75ff51ddac281d1e8fb6f661bbfd1
 --- /dev/null
 +++ b/breakpad/src/common/dwarf_cu_to_module.cc
-@@ -0,0 +1,1073 @@
+@@ -0,0 +1,1074 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -81249,6 +81386,7 @@ index 0000000000000000000000000000000000000000..1729d4ac93af0ac80048fcc7b10a22e4
 +#include <cxxabi.h>
 +#endif
 +#include <inttypes.h>
++#include <stdint.h>
 +#include <stdio.h>
 +
 +#include <algorithm>
@@ -81346,7 +81484,7 @@ index 0000000000000000000000000000000000000000..1729d4ac93af0ac80048fcc7b10a22e4
 +}
 +
 +void DwarfCUToModule::FileContext::AddSectionToSectionMap(
-+    const string& name, const char* contents, uint64 length) {
++    const string& name, const uint8_t *contents, uint64 length) {
 +  section_map_[name] = std::make_pair(contents, length);
 +}
 +
@@ -82020,7 +82158,7 @@ index 0000000000000000000000000000000000000000..1729d4ac93af0ac80048fcc7b10a22e4
 +    cu_context_->reporter->MissingSection(".debug_line");
 +    return;
 +  }
-+  const char *section_start = map_entry->second.first;
++  const uint8_t *section_start = map_entry->second.first;
 +  uint64 section_length = map_entry->second.second;
 +  if (offset >= section_length) {
 +    cu_context_->reporter->BadLineInfoOffset(offset);
@@ -82279,10 +82417,10 @@ index 0000000000000000000000000000000000000000..1729d4ac93af0ac80048fcc7b10a22e4
 +} // namespace google_breakpad
 diff --git a/breakpad/src/common/dwarf_cu_to_module.h b/breakpad/src/common/dwarf_cu_to_module.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..fd9c380d9d8bbd48628fd387ee15b9049afd8e89
+index 0000000000000000000000000000000000000000..fca92710e6f74366d4e10a194edc41e81fd85f43
 --- /dev/null
 +++ b/breakpad/src/common/dwarf_cu_to_module.h
-@@ -0,0 +1,318 @@
+@@ -0,0 +1,320 @@
 +// -*- mode: c++ -*-
 +
 +// Copyright (c) 2010 Google Inc.
@@ -82323,6 +82461,8 @@ index 0000000000000000000000000000000000000000..fd9c380d9d8bbd48628fd387ee15b904
 +
 +#ifndef COMMON_LINUX_DWARF_CU_TO_MODULE_H__
 +#define COMMON_LINUX_DWARF_CU_TO_MODULE_H__
++
++#include <stdint.h>
 +
 +#include <string>
 +
@@ -82369,7 +82509,7 @@ index 0000000000000000000000000000000000000000..fd9c380d9d8bbd48628fd387ee15b904
 +
 +    // Add CONTENTS of size LENGTH to the section map as NAME.
 +    void AddSectionToSectionMap(const string& name,
-+                                const char* contents,
++                                const uint8_t *contents,
 +                                uint64 length);
 +
 +    // Clear the section map for testing.
@@ -82425,7 +82565,7 @@ index 0000000000000000000000000000000000000000..fd9c380d9d8bbd48628fd387ee15b904
 +    // mappings, given a pointer to some DWARF line number data
 +    // PROGRAM, and an overestimate of its size. Add no zero-length
 +    // lines to LINES.
-+    virtual void ReadProgram(const char *program, uint64 length,
++    virtual void ReadProgram(const uint8_t *program, uint64 length,
 +                             Module *module, vector<Module::Line> *lines) = 0;
 +  };
 +
@@ -82603,10 +82743,10 @@ index 0000000000000000000000000000000000000000..fd9c380d9d8bbd48628fd387ee15b904
 +#endif  // COMMON_LINUX_DWARF_CU_TO_MODULE_H__
 diff --git a/breakpad/src/common/dwarf_cu_to_module_unittest.cc b/breakpad/src/common/dwarf_cu_to_module_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..9ff842c882e6f9414b9e82bf5b64fee9b845718e
+index 0000000000000000000000000000000000000000..0ae73e8167946487711c4b3b760112e3faa2ad51
 --- /dev/null
 +++ b/breakpad/src/common/dwarf_cu_to_module_unittest.cc
-@@ -0,0 +1,1779 @@
+@@ -0,0 +1,1781 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -82639,6 +82779,8 @@ index 0000000000000000000000000000000000000000..9ff842c882e6f9414b9e82bf5b64fee9
 +// Original author: Jim Blandy <jimb@mozilla.com> <jimb@red-bean.com>
 +
 +// dwarf_cu_to_module.cc: Unit tests for google_breakpad::DwarfCUToModule.
++
++#include <stdint.h>
 +
 +#include <string>
 +#include <utility>
@@ -82674,7 +82816,7 @@ index 0000000000000000000000000000000000000000..9ff842c882e6f9414b9e82bf5b64fee9
 +class MockLineToModuleHandler: public DwarfCUToModule::LineToModuleHandler {
 + public:
 +  MOCK_METHOD1(StartCompilationUnit, void(const string& compilation_dir));
-+  MOCK_METHOD4(ReadProgram, void(const char* program, uint64 length,
++  MOCK_METHOD4(ReadProgram, void(const uint8_t *program, uint64 length,
 +                                 Module *module, vector<Module::Line> *lines));
 +};
 +
@@ -82720,7 +82862,7 @@ index 0000000000000000000000000000000000000000..9ff842c882e6f9414b9e82bf5b64fee9
 +   public:
 +    explicit AppendLinesFunctor(
 +        const vector<Module::Line> *lines) : lines_(lines) { }
-+    void operator()(const char *program, uint64 length,
++    void operator()(const uint8_t *program, uint64 length,
 +                    Module *module, vector<Module::Line> *lines) {
 +      lines->insert(lines->end(), lines_->begin(), lines_->end());
 +    }
@@ -82894,7 +83036,7 @@ index 0000000000000000000000000000000000000000..9ff842c882e6f9414b9e82bf5b64fee9
 +  // Mock line program reader.
 +  MockLineToModuleHandler line_reader_;
 +  AppendLinesFunctor appender_;
-+  static const char dummy_line_program_[];
++  static const uint8_t dummy_line_program_[];
 +  static const size_t dummy_line_size_;
 +
 +  MockWarningReporter reporter_;
@@ -82911,7 +83053,7 @@ index 0000000000000000000000000000000000000000..9ff842c882e6f9414b9e82bf5b64fee9
 +  bool functions_filled_;
 +};
 +
-+const char CUFixtureBase::dummy_line_program_[] = "lots of fun data";
++const uint8_t CUFixtureBase::dummy_line_program_[] = "lots of fun data";
 +const size_t CUFixtureBase::dummy_line_size_ =
 +    sizeof(CUFixtureBase::dummy_line_program_);
 +
@@ -82984,7 +83126,7 @@ index 0000000000000000000000000000000000000000..9ff842c882e6f9414b9e82bf5b64fee9
 +  handler->ProcessAttributeReference((DwarfAttribute) 0xf7f7480f,
 +                                     (DwarfForm) 0x829e038a,
 +                                     0x50fddef44734fdecULL);
-+  static const char buffer[10] = "frobynode";
++  static const uint8_t buffer[10] = "frobynode";
 +  handler->ProcessAttributeBuffer((DwarfAttribute) 0xa55ffb51,
 +                                  (DwarfForm) 0x2f43b041,
 +                                  buffer, sizeof(buffer));
@@ -85446,10 +85588,10 @@ index 0000000000000000000000000000000000000000..e3d9db92bef2a1418c6ee5b5e33ed7ff
 +#endif  // COMMON_LINUX_CRC32_H_
 diff --git a/breakpad/src/common/linux/dump_symbols.cc b/breakpad/src/common/linux/dump_symbols.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..5ae44e534c761056e280b6c213f91df86f9307b7
+index 0000000000000000000000000000000000000000..d6c593fa3fd37bd0b4620ec96efc83ddc6d7b550
 --- /dev/null
 +++ b/breakpad/src/common/linux/dump_symbols.cc
-@@ -0,0 +1,1006 @@
+@@ -0,0 +1,1009 @@
 +// Copyright (c) 2011 Google Inc.
 +// All rights reserved.
 +//
@@ -85491,6 +85633,7 @@ index 0000000000000000000000000000000000000000..5ae44e534c761056e280b6c213f91df8
 +#include <errno.h>
 +#include <fcntl.h>
 +#include <link.h>
++#include <stdint.h>
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <string.h>
@@ -85672,7 +85815,7 @@ index 0000000000000000000000000000000000000000..5ae44e534c761056e280b6c213f91df8
 +  void StartCompilationUnit(const string& compilation_dir) {
 +    compilation_dir_ = compilation_dir;
 +  }
-+  void ReadProgram(const char* program, uint64 length,
++  void ReadProgram(const uint8_t *program, uint64 length,
 +                   Module* module, std::vector<Module::Line>* lines) {
 +    DwarfLineToModule handler(module, compilation_dir_, lines);
 +    dwarf2reader::LineInfo parser(program, length, byte_reader_, &handler);
@@ -85710,8 +85853,8 @@ index 0000000000000000000000000000000000000000..5ae44e534c761056e280b6c213f91df8
 +    string name = GetOffset<ElfClass, char>(elf_header,
 +                                            section_names->sh_offset) +
 +                  section->sh_name;
-+    const char* contents = GetOffset<ElfClass, char>(elf_header,
-+                                                     section->sh_offset);
++    const uint8_t *contents = GetOffset<ElfClass, uint8_t>(elf_header,
++                                                           section->sh_offset);
 +    file_context.AddSectionToSectionMap(name, contents, section->sh_size);
 +  }
 +
@@ -85720,7 +85863,7 @@ index 0000000000000000000000000000000000000000..5ae44e534c761056e280b6c213f91df8
 +  dwarf2reader::SectionMap::const_iterator debug_info_entry =
 +      file_context.section_map().find(".debug_info");
 +  assert(debug_info_entry != file_context.section_map().end());
-+  const std::pair<const char*, uint64>& debug_info_section =
++  const std::pair<const uint8_t *, uint64>& debug_info_section =
 +      debug_info_entry->second;
 +  // This should never have been called if the file doesn't have a
 +  // .debug_info section.
@@ -85797,8 +85940,8 @@ index 0000000000000000000000000000000000000000..5ae44e534c761056e280b6c213f91df8
 +      dwarf2reader::ENDIANNESS_BIG : dwarf2reader::ENDIANNESS_LITTLE;
 +
 +  // Find the call frame information and its size.
-+  const char* cfi =
-+      GetOffset<ElfClass, char>(elf_header, section->sh_offset);
++  const uint8_t *cfi =
++      GetOffset<ElfClass, uint8_t>(elf_header, section->sh_offset);
 +  size_t cfi_size = section->sh_size;
 +
 +  // Plug together the parser, handler, and their entourages.
@@ -85885,12 +86028,13 @@ index 0000000000000000000000000000000000000000..5ae44e534c761056e280b6c213f91df8
 +
 +// Read the .gnu_debuglink and get the debug file name. If anything goes
 +// wrong, return an empty string.
-+string ReadDebugLink(const char* debuglink,
++string ReadDebugLink(const uint8_t *debuglink,
 +                     const size_t debuglink_size,
 +                     const bool big_endian,
 +                     const string& obj_file,
 +                     const std::vector<string>& debug_dirs) {
-+  size_t debuglink_len = strlen(debuglink) + 5;  // Include '\0' + CRC32.
++  // Include '\0' + CRC32 (4 bytes).
++  size_t debuglink_len = strlen(reinterpret_cast<const char *>(debuglink)) + 5;
 +  debuglink_len = 4 * ((debuglink_len + 3) / 4);  // Round up to 4 bytes.
 +
 +  // Sanity check.
@@ -85911,7 +86055,8 @@ index 0000000000000000000000000000000000000000..5ae44e534c761056e280b6c213f91df8
 +  std::vector<string>::const_iterator it;
 +  for (it = debug_dirs.begin(); it < debug_dirs.end(); ++it) {
 +    const string& debug_dir = *it;
-+    debuglink_path = debug_dir + "/" + debuglink;
++    debuglink_path = debug_dir + "/" +
++                     reinterpret_cast<const char *>(debuglink);
 +
 +    // There is the annoying case of /path/to/foo.so having foo.so as the
 +    // debug link file name. Thus this may end up opening /path/to/foo.so again,
@@ -86221,9 +86366,9 @@ index 0000000000000000000000000000000000000000..5ae44e534c761056e280b6c213f91df8
 +                                           names_end, elf_header->e_shnum);
 +      if (gnu_debuglink_section) {
 +        if (!info->debug_dirs().empty()) {
-+          const char* debuglink_contents =
-+              GetOffset<ElfClass, char>(elf_header,
-+                                        gnu_debuglink_section->sh_offset);
++          const uint8_t *debuglink_contents =
++              GetOffset<ElfClass, uint8_t>(elf_header,
++                                           gnu_debuglink_section->sh_offset);
 +          string debuglink_file =
 +              ReadDebugLink(debuglink_contents,
 +                            gnu_debuglink_section->sh_size,
@@ -94874,10 +95019,10 @@ index 0000000000000000000000000000000000000000..42e8fed390890f0f960a4ec4213f07e4
 +@end
 diff --git a/breakpad/src/common/mac/HTTPMultipartUpload.m b/breakpad/src/common/mac/HTTPMultipartUpload.m
 new file mode 100644
-index 0000000000000000000000000000000000000000..2b4b9bea7301ea2d522a14a96cb83d64b2da975f
+index 0000000000000000000000000000000000000000..9ac886d53ea2b20254f04513ec7576a013c9f21e
 --- /dev/null
 +++ b/breakpad/src/common/mac/HTTPMultipartUpload.m
-@@ -0,0 +1,266 @@
+@@ -0,0 +1,269 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -94910,9 +95055,6 @@ index 0000000000000000000000000000000000000000..2b4b9bea7301ea2d522a14a96cb83d64
 +#import "HTTPMultipartUpload.h"
 +#import "GTMDefines.h"
 +
-+#include <Availability.h>
-+#include <AvailabilityMacros.h>
-+
 +// As -[NSString stringByAddingPercentEscapesUsingEncoding:] has been
 +// deprecated with iOS 9.0 / OS X 10.11 SDKs, this function re-implements it
 +// using -[NSString stringByAddingPercentEncodingWithAllowedCharacters:] when
@@ -94924,7 +95066,7 @@ index 0000000000000000000000000000000000000000..2b4b9bea7301ea2d522a14a96cb83d64
 +     defined(MAC_OS_X_VERSION_10_11) &&                                        \
 +     MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)
 +  return [key stringByAddingPercentEncodingWithAllowedCharacters:
-+                  [NSCharacterSet alphanumericCharacterSet]];
++                  [NSCharacterSet URLQueryAllowedCharacterSet]];
 +#else
 +  return [key stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
 +#endif
@@ -94935,37 +95077,43 @@ index 0000000000000000000000000000000000000000..2b4b9bea7301ea2d522a14a96cb83d64
 +// it using -[NSURLSession dataTaskWithRequest:completionHandler:] when using
 +// those SDKs.
 +static NSData *SendSynchronousNSURLRequest(NSURLRequest *req,
-+                                           NSURLResponse **response,
-+                                           NSError **error) {
++                                           NSURLResponse **out_response,
++                                           NSError **out_error) {
 +#if (defined(__IPHONE_OS_VERSION_MIN_REQUIRED) && defined(__IPHONE_9_0) &&     \
 +     __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_9_0) ||                      \
 +    (defined(MAC_OS_X_VERSION_MIN_REQUIRED) &&                                 \
 +     defined(MAC_OS_X_VERSION_10_11) &&                                        \
 +     MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)
 +  __block NSData* result = nil;
-+     dispatch_semaphore_t wait_semaphone = dispatch_semaphore_create(0);
-+     [[[NSURLSession sharedSession]
-+         dataTaskWithRequest:req
-+           completionHandler:^(NSData *data, NSURLResponse *resp,
-+                               NSError *err) {
-+             if (error)
-+               *error = err;
-+             if (response)
-+               *response = resp;
-+             if (err == nil)
-+               result = data;
-+             dispatch_semaphore_signal(wait_semaphone);
-+           }] resume];
-+     dispatch_semaphore_wait(wait_semaphone, DISPATCH_TIME_FOREVER);
-+     dispatch_release(wait_semaphone);
-+     return result;
++  __block NSError* error = nil;
++  __block NSURLResponse* response = nil;
++  dispatch_semaphore_t wait_semaphone = dispatch_semaphore_create(0);
++  [[[NSURLSession sharedSession]
++      dataTaskWithRequest:req
++        completionHandler:^(NSData *data,
++                            NSURLResponse *resp,
++                            NSError *err) {
++            if (out_error)
++              error = [err retain];
++            if (out_response)
++              response = [resp retain];
++            if (err == nil)
++              result = [data retain];
++            dispatch_semaphore_signal(wait_semaphone);
++  }] resume];
++  dispatch_semaphore_wait(wait_semaphone, DISPATCH_TIME_FOREVER);
++  dispatch_release(wait_semaphone);
++  if (out_error)
++    *out_error = [error autorelease];
++  if (out_response)
++    *out_response = [response autorelease];
++  return [result autorelease];
 +#else
 +  return [NSURLConnection sendSynchronousRequest:req
-+                               returningResponse:response
-+                                           error:error];
++                               returningResponse:out_response
++                                           error:out_error];
 +#endif
 +}
-+
 +@interface HTTPMultipartUpload(PrivateMethods)
 +- (NSString *)multipartBoundary;
 +// Each of the following methods will append the starting multipart boundary,
@@ -96222,10 +96370,10 @@ index 0000000000000000000000000000000000000000..b7bbc0b95bbd8c3c4fb1615ca8fb0b76
 +#endif  // COMMON_MAC_BYTESWAP_H_
 diff --git a/breakpad/src/common/mac/dump_syms.cc b/breakpad/src/common/mac/dump_syms.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..4dcdb73e877102cd780255a2bd46b9d9d4da1745
+index 0000000000000000000000000000000000000000..b86a7c26e363ef7628bc992cdd0f546122c67f39
 --- /dev/null
 +++ b/breakpad/src/common/mac/dump_syms.cc
-@@ -0,0 +1,626 @@
+@@ -0,0 +1,627 @@
 +// -*- mode: c++ -*-
 +
 +// Copyright (c) 2011, Google Inc.
@@ -96269,6 +96417,7 @@ index 0000000000000000000000000000000000000000..4dcdb73e877102cd780255a2bd46b9d9
 +#include <libgen.h>
 +#include <mach-o/arch.h>
 +#include <mach-o/fat.h>
++#include <stdint.h>
 +#include <stdio.h>
 +#include <sys/stat.h>
 +#include <sys/types.h>
@@ -96544,7 +96693,7 @@ index 0000000000000000000000000000000000000000..4dcdb73e877102cd780255a2bd46b9d9
 +    compilation_dir_ = compilation_dir;
 +  }
 +
-+  void ReadProgram(const char *program, uint64 length,
++  void ReadProgram(const uint8_t *program, uint64 length,
 +                   Module *module, vector<Module::Line> *lines) {
 +    DwarfLineToModule handler(module, compilation_dir_, lines);
 +    dwarf2reader::LineInfo parser(program, length, byte_reader_, &handler);
@@ -96574,7 +96723,7 @@ index 0000000000000000000000000000000000000000..4dcdb73e877102cd780255a2bd46b9d9
 +       it != dwarf_sections.end(); ++it) {
 +    file_context.AddSectionToSectionMap(
 +        it->first,
-+        reinterpret_cast<const char *>(it->second.contents.start),
++        it->second.contents.start,
 +        it->second.contents.Size());
 +  }
 +
@@ -96582,7 +96731,7 @@ index 0000000000000000000000000000000000000000..4dcdb73e877102cd780255a2bd46b9d9
 +  dwarf2reader::SectionMap::const_iterator debug_info_entry =
 +      file_context.section_map().find("__debug_info");
 +  assert(debug_info_entry != file_context.section_map().end());
-+  const std::pair<const char*, uint64>& debug_info_section =
++  const std::pair<const uint8_t *, uint64>& debug_info_section =
 +      debug_info_entry->second;
 +  // There had better be a __debug_info section!
 +  if (!debug_info_section.first) {
@@ -96652,7 +96801,7 @@ index 0000000000000000000000000000000000000000..4dcdb73e877102cd780255a2bd46b9d9
 +  }
 +
 +  // Find the call frame information and its size.
-+  const char *cfi = reinterpret_cast<const char *>(section.contents.start);
++  const uint8_t *cfi = section.contents.start;
 +  size_t cfi_size = section.contents.Size();
 +
 +  // Plug together the parser, handler, and their entourages.
@@ -109792,6 +109941,55 @@ index 0000000000000000000000000000000000000000..d445d1d64b195c5990b934d71bb643e7
 +
 +// omitting functions outside the compilation unit's address range
 +// zero-line, one-line, many-line functions
+diff --git a/breakpad/src/common/stdio.h b/breakpad/src/common/stdio.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..1eec8a00867b0cf0fc6f5774eb373407d5d5568b
+--- /dev/null
++++ b/breakpad/src/common/stdio.h
+@@ -0,0 +1,43 @@
++// Copyright (c) 2016, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++#ifndef GOOGLE_BREAKPAD_COMMON_STDIO_H
++#define GOOGLE_BREAKPAD_COMMON_STDIO_H
++
++#include <stdio.h>
++
++#if defined(_MSC_VER) && MSC_VER < 1900
++#include <basetsd.h>
++
++#define snprintf _snprintf
++typedef SSIZE_T ssize_t;
++#endif
++
++
++#endif  // GOOGLE_BREAKPAD_COMMON_STDIO_H
 diff --git a/breakpad/src/common/string_conversion.cc b/breakpad/src/common/string_conversion.cc
 new file mode 100644
 index 0000000000000000000000000000000000000000..9c0d623fc1043f4d1c082db447686b0797b6eb00
@@ -115989,10 +116187,10 @@ index 0000000000000000000000000000000000000000..960a33f469c3326c7ac55ef6adcf0bd5
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/common/windows/pdb_source_line_writer.cc b/breakpad/src/common/windows/pdb_source_line_writer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..3c3401d281ec816b775645437b558c3fcbb06d39
+index 0000000000000000000000000000000000000000..f0edb721c07e86bd9658a984be55e6bf23749dbe
 --- /dev/null
 +++ b/breakpad/src/common/windows/pdb_source_line_writer.cc
-@@ -0,0 +1,1327 @@
+@@ -0,0 +1,1359 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -116028,6 +116226,7 @@ index 0000000000000000000000000000000000000000..3c3401d281ec816b775645437b558c3f
 +#include <winnt.h>
 +#include <atlbase.h>
 +#include <dia2.h>
++#include <diacreate.h>
 +#include <ImageHlp.h>
 +#include <stdio.h>
 +
@@ -116116,6 +116315,40 @@ index 0000000000000000000000000000000000000000..3c3401d281ec816b775645437b558c3f
 +  PLOADED_IMAGE img_;
 +};
 +
++bool CreateDiaDataSourceInstance(CComPtr<IDiaDataSource> &data_source) {
++  if (SUCCEEDED(data_source.CoCreateInstance(CLSID_DiaSource))) {
++    return true;
++  }
++
++  class DECLSPEC_UUID("B86AE24D-BF2F-4ac9-B5A2-34B14E4CE11D") DiaSource100;
++  class DECLSPEC_UUID("761D3BCD-1304-41D5-94E8-EAC54E4AC172") DiaSource110;
++  class DECLSPEC_UUID("3BFCEA48-620F-4B6B-81F7-B9AF75454C7D") DiaSource120;
++  class DECLSPEC_UUID("E6756135-1E65-4D17-8576-610761398C3C") DiaSource140;
++
++  // If the CoCreateInstance call above failed, msdia*.dll is not registered.
++  // We can try loading the DLL corresponding to the #included DIA SDK, but
++  // the DIA headers don't provide a version. Lets try to figure out which DIA
++  // version we're compiling against by comparing CLSIDs.
++  const wchar_t *msdia_dll = nullptr;
++  if (CLSID_DiaSource == _uuidof(DiaSource100)) {
++    msdia_dll = L"msdia100.dll";
++  } else if (CLSID_DiaSource == _uuidof(DiaSource110)) {
++    msdia_dll = L"msdia110.dll";
++  } else if (CLSID_DiaSource == _uuidof(DiaSource120)) {
++    msdia_dll = L"msdia120.dll";
++  } else if (CLSID_DiaSource == _uuidof(DiaSource140)) {
++    msdia_dll = L"msdia140.dll";
++  }
++
++  if (msdia_dll &&
++      SUCCEEDED(NoRegCoCreate(msdia_dll, CLSID_DiaSource, IID_IDiaDataSource,
++                              reinterpret_cast<void **>(&data_source)))) {
++    return true;
++  }
++
++  return false;
++}
++
 +}  // namespace
 +
 +PDBSourceLineWriter::PDBSourceLineWriter() : output_(NULL) {
@@ -116144,13 +116377,10 @@ index 0000000000000000000000000000000000000000..3c3401d281ec816b775645437b558c3f
 +  }
 +
 +  CComPtr<IDiaDataSource> data_source;
-+  if (FAILED(data_source.CoCreateInstance(CLSID_DiaSource))) {
++  if (!CreateDiaDataSourceInstance(data_source)) {
 +    const int kGuidSize = 64;
 +    wchar_t classid[kGuidSize] = {0};
 +    StringFromGUID2(CLSID_DiaSource, classid, kGuidSize);
-+    // vc80 uses bce36434-2c24-499e-bf49-8bd99b0eeb68.
-+    // vc90 uses 4C41678E-887B-4365-A09E-925D28DB33C2.
-+    // vc100 uses B86AE24D-BF2F-4AC9-B5A2-34B14E4CE11D.
 +    fprintf(stderr, "CoCreateInstance CLSID_DiaSource %S failed "
 +            "(msdia*.dll unregistered?)\n", classid);
 +    return false;
@@ -118572,10 +118802,10 @@ index 0000000000000000000000000000000000000000..5ace0d9de470c99ab845301ffee93ca0
 +#endif  /* GOOGLE_BREAKPAD_COMMON_MINIDUMP_CPU_ARM64_H__ */
 diff --git a/breakpad/src/google_breakpad/common/minidump_cpu_mips.h b/breakpad/src/google_breakpad/common/minidump_cpu_mips.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..6cbe3023f9c1ce44463035d0e1454d1694e64de7
+index 0000000000000000000000000000000000000000..f4e2b5891c34fb5034b794141755e048be18d59c
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/common/minidump_cpu_mips.h
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,176 @@
 +/* Copyright (c) 2013, Google Inc.
 + * All rights reserved.
 + *
@@ -118734,6 +118964,22 @@ index 0000000000000000000000000000000000000000..6cbe3023f9c1ce44463035d0e1454d16
 +#define MD_CONTEXT_MIPS_ALL               (MD_CONTEXT_MIPS_INTEGER | \
 +                                           MD_CONTEXT_MIPS_FLOATING_POINT \
 +                                           MD_CONTEXT_MIPS_DSP)
++
++/**
++ * Breakpad defines for MIPS64
++ */
++#define MD_CONTEXT_MIPS64  0x00080000
++#define MD_CONTEXT_MIPS64_INTEGER           (MD_CONTEXT_MIPS64 | 0x00000002)
++#define MD_CONTEXT_MIPS64_FLOATING_POINT    (MD_CONTEXT_MIPS64 | 0x00000004)
++#define MD_CONTEXT_MIPS64_DSP               (MD_CONTEXT_MIPS64 | 0x00000008)
++
++#define MD_CONTEXT_MIPS64_FULL              (MD_CONTEXT_MIPS64_INTEGER | \
++                                             MD_CONTEXT_MIPS64_FLOATING_POINT | \
++                                             MD_CONTEXT_MIPS64_DSP)
++
++#define MD_CONTEXT_MIPS64_ALL               (MD_CONTEXT_MIPS64_INTEGER | \
++                                             MD_CONTEXT_MIPS64_FLOATING_POINT \
++                                             MD_CONTEXT_MIPS64_DSP)
 +
 +#endif  // GOOGLE_BREAKPAD_COMMON_MINIDUMP_CPU_MIPS_H__
 diff --git a/breakpad/src/google_breakpad/common/minidump_cpu_ppc.h b/breakpad/src/google_breakpad/common/minidump_cpu_ppc.h
@@ -122145,10 +122391,10 @@ index 0000000000000000000000000000000000000000..e4cd59edd5f116bb7ab6d08bd4efff3a
 +#endif  /* GOOGLE_BREAKPAD_COMMON_MINIDUMP_EXCEPTION_WIN32_H__ */
 diff --git a/breakpad/src/google_breakpad/common/minidump_format.h b/breakpad/src/google_breakpad/common/minidump_format.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..17a5abba33f4a10b03447d13ed03db2635c1eb8d
+index 0000000000000000000000000000000000000000..da20f459727a1d5dc1c2ceb7f72af764624626b1
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/common/minidump_format.h
-@@ -0,0 +1,972 @@
+@@ -0,0 +1,984 @@
 +/* Copyright (c) 2006, Google Inc.
 + * All rights reserved.
 + *
@@ -122600,14 +122846,25 @@ index 0000000000000000000000000000000000000000..17a5abba33f4a10b03447d13ed03db26
 +
 +#define MD_CVINFOPDB70_SIGNATURE 0x53445352  /* cvSignature = 'SDSR' */
 +
++/*
++ * Modern ELF toolchains insert a "build id" into the ELF headers that
++ * usually contains a hash of some ELF headers + sections to uniquely
++ * identify a binary.
++ *
++ * https://access.redhat.com/documentation/en-US/Red_Hat_Enterprise_Linux/6/html/Developer_Guide/compiling-build-id.html
++ * https://sourceware.org/binutils/docs-2.26/ld/Options.html#index-g_t_002d_002dbuild_002did-292
++ */
 +typedef struct {
-+  uint32_t data1[2];
-+  uint32_t data2;
-+  uint32_t data3;
-+  uint32_t data4;
-+  uint32_t data5[3];
-+  uint8_t  extra[2];
++  uint32_t cv_signature;
++  uint8_t  build_id[1];  /* Bytes of build id from GNU_BUILD_ID ELF note.
++                          * This is variable-length, but usually 20 bytes
++                          * as the binutils ld default is a SHA-1 hash. */
 +} MDCVInfoELF;
++
++static const size_t MDCVInfoELF_minsize = offsetof(MDCVInfoELF,
++                                                   build_id[0]);
++
++#define MD_CVINFOELF_SIGNATURE 0x4270454c  /* cvSignature = 'BpEL' */
 +
 +/* In addition to the two CodeView record formats above, used for linking
 + * to external pdb files, it is possible for debugging data to be carried
@@ -122789,6 +123046,7 @@ index 0000000000000000000000000000000000000000..17a5abba33f4a10b03447d13ed03db26
 +  MD_CPU_ARCHITECTURE_SPARC     = 0x8001, /* Breakpad-defined value for SPARC */
 +  MD_CPU_ARCHITECTURE_PPC64     = 0x8002, /* Breakpad-defined value for PPC64 */
 +  MD_CPU_ARCHITECTURE_ARM64     = 0x8003, /* Breakpad-defined value for ARM64 */
++  MD_CPU_ARCHITECTURE_MIPS64    = 0x8004, /* Breakpad-defined value for MIPS64 */
 +  MD_CPU_ARCHITECTURE_UNKNOWN   = 0xffff  /* PROCESSOR_ARCHITECTURE_UNKNOWN */
 +} MDCPUArchitecture;
 +
@@ -123123,10 +123381,10 @@ index 0000000000000000000000000000000000000000..17a5abba33f4a10b03447d13ed03db26
 +#endif  /* GOOGLE_BREAKPAD_COMMON_MINIDUMP_FORMAT_H__ */
 diff --git a/breakpad/src/google_breakpad/common/minidump_size.h b/breakpad/src/google_breakpad/common/minidump_size.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..918544b66238d5e6e15b60544b98e6ff55bb6a33
+index 0000000000000000000000000000000000000000..fae57923cc4b1f97cd73aaa48fe75f0b18d87ec2
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/common/minidump_size.h
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,113 @@
 +// Copyright (c) 2007, Google Inc.
 +// All rights reserved.
 +//
@@ -123202,6 +123460,12 @@ index 0000000000000000000000000000000000000000..918544b66238d5e6e15b60544b98e6ff
 +class minidump_size<MDCVInfoPDB70> {
 + public:
 +  static size_t size() { return MDCVInfoPDB70_minsize; }
++};
++
++template<>
++class minidump_size<MDCVInfoELF> {
++ public:
++  static size_t size() { return MDCVInfoELF_minsize; }
 +};
 +
 +template<>
@@ -124133,10 +124397,10 @@ index 0000000000000000000000000000000000000000..30f88df4902e01adfd8a12901bd2a31c
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_MEMORY_REGION_H__
 diff --git a/breakpad/src/google_breakpad/processor/microdump.h b/breakpad/src/google_breakpad/processor/microdump.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..abdaecb19ab468ac063bad7ffc27df954c4e04a5
+index 0000000000000000000000000000000000000000..051dacda50a423ac82e2f846f7c049fceb7ee02f
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/processor/microdump.h
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,127 @@
 +// Copyright (c) 2014 Google Inc.
 +// All rights reserved.
 +//
@@ -124205,6 +124469,7 @@ index 0000000000000000000000000000000000000000..abdaecb19ab468ac063bad7ffc27df95
 + public:
 +  virtual void SetContextARM(MDRawContextARM* arm);
 +  virtual void SetContextARM64(MDRawContextARM64* arm64);
++  virtual void SetContextX86(MDRawContextX86* x86);
 +};
 +
 +// This class provides access to microdump memory regions.
@@ -127234,10 +127499,10 @@ index 0000000000000000000000000000000000000000..a042081f3b13bfb60bd4f07caa584cb7
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_SYMBOL_SUPPLIER_H__
 diff --git a/breakpad/src/google_breakpad/processor/system_info.h b/breakpad/src/google_breakpad/processor/system_info.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..9583d9e89c73714c30e825887954bba2ca3b070d
+index 0000000000000000000000000000000000000000..8d2f60be48b899d9ce08aaefc379b46d22db677a
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/processor/system_info.h
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,106 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -127284,7 +127549,7 @@ index 0000000000000000000000000000000000000000..9583d9e89c73714c30e825887954bba2
 +struct SystemInfo {
 + public:
 +  SystemInfo() : os(), os_short(), os_version(), cpu(), cpu_info(),
-+    cpu_count(0) {}
++    cpu_count(0), gl_version(), gl_vendor(), gl_renderer() {}
 +
 +  // Resets the SystemInfo object to its default values.
 +  void Clear() {
@@ -127294,6 +127559,9 @@ index 0000000000000000000000000000000000000000..9583d9e89c73714c30e825887954bba2
 +    cpu.clear();
 +    cpu_info.clear();
 +    cpu_count = 0;
++    gl_version.clear();
++    gl_vendor.clear();
++    gl_renderer.clear();
 +  }
 +
 +  // A string identifying the operating system, such as "Windows NT",
@@ -127331,6 +127599,11 @@ index 0000000000000000000000000000000000000000..9583d9e89c73714c30e825887954bba2
 +  // The number of processors in the system.  Will be greater than one for
 +  // multi-core systems.
 +  int cpu_count;
++
++  // The GPU information. Currently only populated in microdumps.
++  string gl_version;
++  string gl_vendor;
++  string gl_renderer;
 +};
 +
 +}  // namespace google_breakpad
@@ -131396,10 +131669,10 @@ index 0000000000000000000000000000000000000000..e5910da0d5dc8e1d3e3ca6abaa7962b9
 +}
 diff --git a/breakpad/src/processor/disassembler_x86.cc b/breakpad/src/processor/disassembler_x86.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..9eba848d8c72095e41ce2477687462903814ab61
+index 0000000000000000000000000000000000000000..559022404f6ee0ac1cac44ab67b4eb5d8c4ffb7b
 --- /dev/null
 +++ b/breakpad/src/processor/disassembler_x86.cc
-@@ -0,0 +1,241 @@
+@@ -0,0 +1,240 @@
 +// copyright notice, this list of conditions and the following disclaimer
 +// in the documentation and/or other materials provided with the
 +// distribution.
@@ -131429,7 +131702,6 @@ index 0000000000000000000000000000000000000000..9eba848d8c72095e41ce247768746290
 +#include "processor/disassembler_x86.h"
 +
 +#include <string.h>
-+#include <unistd.h>
 +
 +namespace google_breakpad {
 +
@@ -132015,10 +132287,10 @@ index 0000000000000000000000000000000000000000..352905f20dacb199c8193263b5c06a37
 +}
 diff --git a/breakpad/src/processor/dump_context.cc b/breakpad/src/processor/dump_context.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..49fb77b15fcade8bc406a1f154298be93d060792
+index 0000000000000000000000000000000000000000..33b02cb61283b9e540f30a9a01e30001d29f79f2
 --- /dev/null
 +++ b/breakpad/src/processor/dump_context.cc
-@@ -0,0 +1,657 @@
+@@ -0,0 +1,659 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -132055,17 +132327,14 @@ index 0000000000000000000000000000000000000000..49fb77b15fcade8bc406a1f154298be9
 +#include "google_breakpad/processor/dump_context.h"
 +
 +#include <assert.h>
-+#include <stdio.h>
 +
 +#ifdef _WIN32
 +#include <io.h>
-+#if defined(_MSC_VER) && _MSC_VER < 1900
-+#define snprintf _snprintf
-+#endif
 +#else  // _WIN32
 +#include <unistd.h>
 +#endif  // _WIN32
 +
++#include "common/stdio.h"
 +#include "processor/logging.h"
 +
 +namespace google_breakpad {
@@ -132155,7 +132424,8 @@ index 0000000000000000000000000000000000000000..49fb77b15fcade8bc406a1f154298be9
 +}
 +
 +const MDRawContextMIPS* DumpContext::GetContextMIPS() const {
-+  if (GetContextCPU() != MD_CONTEXT_MIPS) {
++  if ((GetContextCPU() != MD_CONTEXT_MIPS) &&
++      (GetContextCPU() != MD_CONTEXT_MIPS64)) {
 +    BPLOG(ERROR) << "DumpContext cannot get MIPS context";
 +    return NULL;
 +  }
@@ -132196,6 +132466,7 @@ index 0000000000000000000000000000000000000000..49fb77b15fcade8bc406a1f154298be9
 +    *ip = GetContextX86()->eip;
 +    break;
 +  case MD_CONTEXT_MIPS:
++  case MD_CONTEXT_MIPS64:
 +    *ip = GetContextMIPS()->epc;
 +    break;
 +  default:
@@ -132239,6 +132510,7 @@ index 0000000000000000000000000000000000000000..49fb77b15fcade8bc406a1f154298be9
 +    *sp = GetContextX86()->esp;
 +    break;
 +  case MD_CONTEXT_MIPS:
++  case MD_CONTEXT_MIPS64:
 +    *sp = GetContextMIPS()->iregs[MD_CONTEXT_MIPS_REG_SP];
 +    break;
 +  default:
@@ -132316,6 +132588,7 @@ index 0000000000000000000000000000000000000000..49fb77b15fcade8bc406a1f154298be9
 +      break;
 +
 +    case MD_CONTEXT_MIPS:
++    case MD_CONTEXT_MIPS64:
 +      delete context_.ctx_mips;
 +      break;
 +
@@ -132622,7 +132895,8 @@ index 0000000000000000000000000000000000000000..49fb77b15fcade8bc406a1f154298be9
 +      break;
 +    }
 +
-+    case MD_CONTEXT_MIPS: {
++    case MD_CONTEXT_MIPS:
++    case MD_CONTEXT_MIPS64: {
 +      const MDRawContextMIPS* context_mips = GetContextMIPS();
 +      printf("MDRawContextMIPS\n");
 +      printf("  context_flags        = 0x%x\n",
@@ -132848,10 +133122,10 @@ index 0000000000000000000000000000000000000000..6ee1e962222ebd9b260b45c1f7779b3b
 +
 diff --git a/breakpad/src/processor/exploitability_linux.cc b/breakpad/src/processor/exploitability_linux.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..a196da79ab78ea204714c11c9ea5efd30cc0fa20
+index 0000000000000000000000000000000000000000..c520059c10b2d386ffd48ac7a42432e82eba6da5
 --- /dev/null
 +++ b/breakpad/src/processor/exploitability_linux.cc
-@@ -0,0 +1,604 @@
+@@ -0,0 +1,620 @@
 +// Copyright (c) 2013 Google Inc.
 +// All rights reserved.
 +//
@@ -133085,21 +133359,10 @@ index 0000000000000000000000000000000000000000..a196da79ab78ea204714c11c9ea5efd3
 +                   MAX_OBJDUMP_BUFFER_LEN,
 +                   objdump_output_buffer);
 +
-+  // Put buffer data into stream to output line-by-line.
-+  std::stringstream objdump_stream;
-+  objdump_stream.str(string(objdump_output_buffer));
 +  string line;
-+
-+  // Pipe each output line into the string until the string contains
-+  // the first instruction from objdump.
-+  // Loop until the line shows the first instruction or there are no lines left.
-+  do {
-+    if (!getline(objdump_stream, line)) {
-+      BPLOG(INFO) << "Objdump instructions not found";
-+      return false;
-+    }
-+  } while (line.find("0:") == string::npos);
-+  // This first instruction contains the above substring.
++  if (!GetObjdumpInstructionLine(objdump_output_buffer, &line)) {
++    return false;
++  }
 +
 +  // Convert objdump instruction line into the operation and operands.
 +  string instruction = "";
@@ -133249,6 +133512,33 @@ index 0000000000000000000000000000000000000000..a196da79ab78ea204714c11c9ea5efd3
 +  *write_address =
 +      positive_add_constant ?
 +      *write_address + add_constant : *write_address - add_constant;
++
++  return true;
++}
++
++// static
++bool ExploitabilityLinux::GetObjdumpInstructionLine(
++    const char *objdump_output_buffer,
++    string *instruction_line) {
++  // Put buffer data into stream to output line-by-line.
++  std::stringstream objdump_stream;
++  objdump_stream.str(string(objdump_output_buffer));
++
++  // Pipe each output line into the string until the string contains the first
++  // instruction from objdump.  All lines before the "<.data>:" section are
++  // skipped.  Loop until the line shows the first instruction or there are no
++  // lines left.
++  bool data_section_seen = false;
++  do {
++    if (!getline(objdump_stream, *instruction_line)) {
++      BPLOG(INFO) << "Objdump instructions not found";
++      return false;
++    }
++    if (instruction_line->find("<.data>:") != string::npos) {
++      data_section_seen = true;
++    }
++  } while (!data_section_seen || instruction_line->find("0:") == string::npos);
++  // This first instruction contains the above substring.
 +
 +  return true;
 +}
@@ -133458,10 +133748,10 @@ index 0000000000000000000000000000000000000000..a196da79ab78ea204714c11c9ea5efd3
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/processor/exploitability_linux.h b/breakpad/src/processor/exploitability_linux.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..93c5082fb3c26398cacbd17c1c8a65bf667579e1
+index 0000000000000000000000000000000000000000..e3ff13b6e07da325316639bf55739432c01381b1
 --- /dev/null
 +++ b/breakpad/src/processor/exploitability_linux.h
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,129 @@
 +// Copyright (c) 2013 Google Inc.
 +// All rights reserved.
 +//
@@ -133550,6 +133840,13 @@ index 0000000000000000000000000000000000000000..93c5082fb3c26398cacbd17c1c8a65bf
 +                               const unsigned int MAX_OBJDUMP_BUFFER_LEN,
 +                               char *objdump_output_buffer);
 +
++  // Parses the objdump output given in |objdump_output_buffer| and extracts
++  // the line of the first instruction into |instruction_line|.  Returns true
++  // when the instruction line is successfully extracted.
++  static bool GetObjdumpInstructionLine(
++      const char *objdump_output_buffer,
++      string *instruction_line);
++
 +  // Tokenizes out the operation and operands from a line of instruction
 +  // disassembled by objdump. This method modifies the pointers to match the
 +  // tokens of the instruction, and returns if the tokenizing was a success.
@@ -133586,10 +133883,10 @@ index 0000000000000000000000000000000000000000..93c5082fb3c26398cacbd17c1c8a65bf
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_EXPLOITABILITY_LINUX_H_
 diff --git a/breakpad/src/processor/exploitability_unittest.cc b/breakpad/src/processor/exploitability_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..dc5650e3890dd69d8b3ae1b468d3f0ce0a4e8932
+index 0000000000000000000000000000000000000000..502edcc79504a48193d08402570eae65700294ce
 --- /dev/null
 +++ b/breakpad/src/processor/exploitability_unittest.cc
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,304 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -133639,9 +133936,10 @@ index 0000000000000000000000000000000000000000..dc5650e3890dd69d8b3ae1b468d3f0ce
 +
 +class ExploitabilityLinuxTest : public ExploitabilityLinux {
 + public:
-+  using ExploitabilityLinux::DisassembleBytes;
-+  using ExploitabilityLinux::TokenizeObjdumpInstruction;
 +  using ExploitabilityLinux::CalculateAddress;
++  using ExploitabilityLinux::DisassembleBytes;
++  using ExploitabilityLinux::GetObjdumpInstructionLine;
++  using ExploitabilityLinux::TokenizeObjdumpInstruction;
 +};
 +
 +class ExploitabilityLinuxTestMinidumpContext : public MinidumpContext {
@@ -133786,11 +134084,52 @@ index 0000000000000000000000000000000000000000..dc5650e3890dd69d8b3ae1b468d3f0ce
 +  std::stringstream objdump_stream;
 +  objdump_stream.str(string(buffer));
 +  string line = "";
-+  while ((line.find("<.data>") == string::npos) &&
-+         getline(objdump_stream, line)) {
-+  }
-+  ASSERT_TRUE(getline(objdump_stream, line));
++  while (line.find("<.data>") == string::npos)
++    getline(objdump_stream, line);
++  getline(objdump_stream, line);
 +  ASSERT_EQ(line, "   0:\tc7 00 05 00 00 00    \tmov    DWORD PTR [rax],0x5");
++}
++
++TEST(ExploitabilityLinuxUtilsTest, GetObjdumpInstructionLine) {
++  string disassebly =
++      "\n"
++      "/tmp/breakpad_mem_region-raw_bytes-tMmMo0:     file format binary\n"
++      "// Trying to confuse the parser 0:\n"
++      "\n"
++      "Disassembly of section .data:\n"
++      "\n"
++      "0000000000000000 <.data>:\n"
++      "   0:\tc7 00 01 00 00 00    \tmov    DWORD PTR [rax],0x1\n"
++      "   6:\t5d                   \tpop    rbp\n"
++      "   7:\tc3                   \tret    \n"
++      "   8:\t55                   \tpush   rbp\n"
++      "   9:\t48 89 e5             \tmov    rbp,rsp\n"
++      "   c:\t53                   \tpush   rbx\n"
++      "   d:\t48                   \trex.W\n"
++      "   e:\t81                   \t.byte 0x81\n";
++  string line;
++  EXPECT_TRUE(ExploitabilityLinuxTest::GetObjdumpInstructionLine(
++      disassebly.c_str(), &line));
++  EXPECT_EQ("   0:\tc7 00 01 00 00 00    \tmov    DWORD PTR [rax],0x1", line);
++
++  // There is no "0:" after "<.data>:".  Expected to return false.
++  disassebly =
++      "\n"
++      "/tmp/breakpad_mem_region-raw_bytes-tMmMo0:     file format binary\n"
++      "// Trying to confuse the parser 0:\n"
++      "\n"
++      "Disassembly of section .data:\n"
++      "\n"
++      "   0:\tc7 00 01 00 00 00    \tmov    DWORD PTR [rax],0x1\n"
++      "   6:\t5d                   \tpop    rbp\n"
++      "   7:\tc3                   \tret    \n"
++      "   8:\t55                   \tpush   rbp\n"
++      "   9:\t48 89 e5             \tmov    rbp,rsp\n"
++      "   d:\t48                   \trex.W\n"
++      "0000000000000000 <.data>:\n"
++      "   c:\t53                   \tpush   rbx\n";
++  EXPECT_FALSE(ExploitabilityLinuxTest::GetObjdumpInstructionLine(
++      disassebly.c_str(), &line));
 +}
 +
 +TEST(ExploitabilityLinuxUtilsTest, TokenizeObjdumpInstructionTest) {
@@ -133831,17 +134170,17 @@ index 0000000000000000000000000000000000000000..dc5650e3890dd69d8b3ae1b468d3f0ce
 +  MDRawContextAMD64 raw_context;
 +  raw_context.rdx = 12345;
 +  ExploitabilityLinuxTestMinidumpContext context(raw_context);
-+  ASSERT_EQ(context.GetContextAMD64()->rdx, 12345);
++  ASSERT_EQ(context.GetContextAMD64()->rdx, 12345U);
 +  ASSERT_FALSE(ExploitabilityLinuxTest::CalculateAddress("", context, NULL));
 +  uint64_t write_address = 0;
 +  ASSERT_TRUE(ExploitabilityLinuxTest::CalculateAddress("rdx-0x4D2",
 +                                                        context,
 +                                                        &write_address));
-+  ASSERT_EQ(write_address, 11111);
++  ASSERT_EQ(write_address, 11111U);
 +  ASSERT_TRUE(ExploitabilityLinuxTest::CalculateAddress("rdx+0x4D2",
 +                                                        context,
 +                                                        &write_address));
-+  ASSERT_EQ(write_address, 13579);
++  ASSERT_EQ(write_address, 13579U);
 +  ASSERT_FALSE(ExploitabilityLinuxTest::CalculateAddress("rdx+rax",
 +                                                         context,
 +                                                         &write_address));
@@ -135368,588 +135707,3 @@ index 0000000000000000000000000000000000000000..72fbba84a9f1d5965136799c077775f1
 +}  // namespace google_breakpad
 +
 +#endif  // PROCESSOR_LINKED_PTR_H__
-diff --git a/breakpad/src/processor/logging.cc b/breakpad/src/processor/logging.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..8bb95a695aa9ebb9acbfdef8208972bd39a37204
---- /dev/null
-+++ b/breakpad/src/processor/logging.cc
-@@ -0,0 +1,115 @@
-+// Copyright (c) 2007, Google Inc.
-+// All rights reserved.
-+//
-+// Redistribution and use in source and binary forms, with or without
-+// modification, are permitted provided that the following conditions are
-+// met:
-+//
-+//     * Redistributions of source code must retain the above copyright
-+// notice, this list of conditions and the following disclaimer.
-+//     * Redistributions in binary form must reproduce the above
-+// copyright notice, this list of conditions and the following disclaimer
-+// in the documentation and/or other materials provided with the
-+// distribution.
-+//     * Neither the name of Google Inc. nor the names of its
-+// contributors may be used to endorse or promote products derived from
-+// this software without specific prior written permission.
-+//
-+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+
-+// logging.cc: Breakpad logging
-+//
-+// See logging.h for documentation.
-+//
-+// Author: Mark Mentovai
-+
-+#include <assert.h>
-+#include <errno.h>
-+#include <stdio.h>
-+#include <string.h>
-+#include <time.h>
-+
-+#include <string>
-+
-+#include "common/using_std_string.h"
-+#include "processor/logging.h"
-+#include "processor/pathname_stripper.h"
-+
-+#ifdef _WIN32
-+#define snprintf _snprintf
-+#endif
-+
-+namespace google_breakpad {
-+
-+LogStream::LogStream(std::ostream &stream, Severity severity,
-+                     const char *file, int line)
-+    : stream_(stream) {
-+  time_t clock;
-+  time(&clock);
-+  struct tm tm_struct;
-+#ifdef _WIN32
-+  localtime_s(&tm_struct, &clock);
-+#else
-+  localtime_r(&clock, &tm_struct);
-+#endif
-+  char time_string[20];
-+  strftime(time_string, sizeof(time_string), "%Y-%m-%d %H:%M:%S", &tm_struct);
-+
-+  const char *severity_string = "UNKNOWN_SEVERITY";
-+  switch (severity) {
-+    case SEVERITY_INFO:
-+      severity_string = "INFO";
-+      break;
-+    case SEVERITY_ERROR:
-+      severity_string = "ERROR";
-+      break;
-+  }
-+
-+  stream_ << time_string << ": " << PathnameStripper::File(file) << ":" <<
-+             line << ": " << severity_string << ": ";
-+}
-+
-+LogStream::~LogStream() {
-+  stream_ << std::endl;
-+}
-+
-+string HexString(uint32_t number) {
-+  char buffer[11];
-+  snprintf(buffer, sizeof(buffer), "0x%x", number);
-+  return string(buffer);
-+}
-+
-+string HexString(uint64_t number) {
-+  char buffer[19];
-+  snprintf(buffer, sizeof(buffer), "0x%" PRIx64, number);
-+  return string(buffer);
-+}
-+
-+string HexString(int number) {
-+  char buffer[19];
-+  snprintf(buffer, sizeof(buffer), "0x%x", number);
-+  return string(buffer);
-+}
-+
-+int ErrnoString(string *error_string) {
-+  assert(error_string);
-+
-+  // strerror isn't necessarily thread-safe.  strerror_r would be preferrable,
-+  // but GNU libc uses a nonstandard strerror_r by default, which returns a
-+  // char* (rather than an int success indicator) and doesn't necessarily
-+  // use the supplied buffer.
-+  error_string->assign(strerror(errno));
-+  return errno;
-+}
-+
-+}  // namespace google_breakpad
-diff --git a/breakpad/src/processor/logging.h b/breakpad/src/processor/logging.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..406fb67cf6efad92da947f084ab13eb763565fa3
---- /dev/null
-+++ b/breakpad/src/processor/logging.h
-@@ -0,0 +1,186 @@
-+// Copyright (c) 2007, Google Inc.
-+// All rights reserved.
-+//
-+// Redistribution and use in source and binary forms, with or without
-+// modification, are permitted provided that the following conditions are
-+// met:
-+//
-+//     * Redistributions of source code must retain the above copyright
-+// notice, this list of conditions and the following disclaimer.
-+//     * Redistributions in binary form must reproduce the above
-+// copyright notice, this list of conditions and the following disclaimer
-+// in the documentation and/or other materials provided with the
-+// distribution.
-+//     * Neither the name of Google Inc. nor the names of its
-+// contributors may be used to endorse or promote products derived from
-+// this software without specific prior written permission.
-+//
-+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+
-+// logging.h: Breakpad logging
-+//
-+// Breakpad itself uses Breakpad logging with statements of the form:
-+//   BPLOG(severity) << "message";
-+// severity may be INFO, ERROR, or other values defined in this file.
-+//
-+// BPLOG is an overridable macro so that users can customize Breakpad's
-+// logging.  Left at the default, logging messages are sent to stderr along
-+// with a timestamp and the source code location that produced a message.
-+// The streams may be changed by redefining BPLOG_*_STREAM, the logging
-+// behavior may be changed by redefining BPLOG_*, and the entire logging
-+// system may be overridden by redefining BPLOG(severity).  These
-+// redefinitions may be passed to the preprocessor as a command-line flag
-+// (-D).
-+//
-+// If an additional header is required to override Breakpad logging, it can
-+// be specified by the BP_LOGGING_INCLUDE macro.  If defined, this header
-+// will #include the header specified by that macro.
-+//
-+// If any initialization is needed before logging, it can be performed by
-+// a function called through the BPLOG_INIT macro.  Each main function of
-+// an executable program in the Breakpad processor library calls
-+// BPLOG_INIT(&argc, &argv); before any logging can be performed; define
-+// BPLOG_INIT appropriately if initialization is required.
-+//
-+// Author: Mark Mentovai
-+
-+#ifndef PROCESSOR_LOGGING_H__
-+#define PROCESSOR_LOGGING_H__
-+
-+#include <iostream>
-+#include <string>
-+
-+#include "common/using_std_string.h"
-+#include "google_breakpad/common/breakpad_types.h"
-+
-+#ifdef BP_LOGGING_INCLUDE
-+#include BP_LOGGING_INCLUDE
-+#endif  // BP_LOGGING_INCLUDE
-+
-+#ifndef THIRD_PARTY_BREAKPAD_GOOGLE_GLUE_LOGGING_H_
-+namespace base_logging {
-+
-+// The open-source copy of logging.h has diverged from Google's internal copy
-+// (temporarily, at least).  To support the transition to structured logging
-+// a definition for base_logging::LogMessage is needed, which is a ostream-
-+// like object for streaming arguments to construct a log message.
-+typedef std::ostream LogMessage;
-+
-+}  // namespace base_logging
-+#endif  // THIRD_PARTY_BREAKPAD_GOOGLE_GLUE_LOGGING_H_
-+
-+namespace google_breakpad {
-+
-+// These are defined in Microsoft headers.
-+#ifdef SEVERITY_ERROR
-+#undef SEVERITY_ERROR
-+#endif
-+
-+#ifdef ERROR
-+#undef ERROR
-+#endif
-+
-+class LogStream {
-+ public:
-+  enum Severity {
-+    SEVERITY_INFO,
-+    SEVERITY_ERROR
-+  };
-+
-+  // Begin logging a message to the stream identified by |stream|, at the
-+  // indicated severity.  The file and line parameters should be set so as to
-+  // identify the line of source code that is producing a message.
-+  LogStream(std::ostream &stream, Severity severity,
-+            const char *file, int line);
-+
-+  // Finish logging by printing a newline and flushing the output stream.
-+  ~LogStream();
-+
-+  template<typename T> std::ostream& operator<<(const T &t) {
-+    return stream_ << t;
-+  }
-+
-+ private:
-+  std::ostream &stream_;
-+
-+  // Disallow copy constructor and assignment operator
-+  explicit LogStream(const LogStream &that);
-+  void operator=(const LogStream &that);
-+};
-+
-+// This class is used to explicitly ignore values in the conditional logging
-+// macros.  This avoids compiler warnings like "value computed is not used"
-+// and "statement has no effect".
-+class LogMessageVoidify {
-+ public:
-+  LogMessageVoidify() {}
-+
-+  // This has to be an operator with a precedence lower than << but higher
-+  // than ?:
-+  void operator&(base_logging::LogMessage &) {}
-+};
-+
-+// Returns number formatted as a hexadecimal string, such as "0x7b".
-+string HexString(uint32_t number);
-+string HexString(uint64_t number);
-+string HexString(int number);
-+
-+// Returns the error code as set in the global errno variable, and sets
-+// error_string, a required argument, to a string describing that error
-+// code.
-+int ErrnoString(string *error_string);
-+
-+}  // namespace google_breakpad
-+
-+#ifndef BPLOG_INIT
-+#define BPLOG_INIT(pargc, pargv)
-+#endif  // BPLOG_INIT
-+
-+#define BPLOG_LAZY_STREAM(stream, condition) \
-+    !(condition) ? (void) 0 : \
-+                   google_breakpad::LogMessageVoidify() & (BPLOG_ ## stream)
-+
-+#ifndef BPLOG_MINIMUM_SEVERITY
-+#define BPLOG_MINIMUM_SEVERITY SEVERITY_INFO
-+#endif
-+
-+#define BPLOG_LOG_IS_ON(severity) \
-+    ((google_breakpad::LogStream::SEVERITY_ ## severity) >= \
-+     (google_breakpad::LogStream::BPLOG_MINIMUM_SEVERITY))
-+
-+#ifndef BPLOG
-+#define BPLOG(severity) BPLOG_LAZY_STREAM(severity, BPLOG_LOG_IS_ON(severity))
-+#endif  // BPLOG
-+
-+#ifndef BPLOG_INFO
-+#ifndef BPLOG_INFO_STREAM
-+#define BPLOG_INFO_STREAM std::clog
-+#endif  // BPLOG_INFO_STREAM
-+#define BPLOG_INFO google_breakpad::LogStream(BPLOG_INFO_STREAM, \
-+                       google_breakpad::LogStream::SEVERITY_INFO, \
-+                       __FILE__, __LINE__)
-+#endif  // BPLOG_INFO
-+
-+#ifndef BPLOG_ERROR
-+#ifndef BPLOG_ERROR_STREAM
-+#define BPLOG_ERROR_STREAM std::cerr
-+#endif  // BPLOG_ERROR_STREAM
-+#define BPLOG_ERROR google_breakpad::LogStream(BPLOG_ERROR_STREAM, \
-+                        google_breakpad::LogStream::SEVERITY_ERROR, \
-+                        __FILE__, __LINE__)
-+#endif  // BPLOG_ERROR
-+
-+#define BPLOG_IF(severity, condition) \
-+    BPLOG_LAZY_STREAM(severity, ((condition) && BPLOG_LOG_IS_ON(severity)))
-+
-+#endif  // PROCESSOR_LOGGING_H__
-diff --git a/breakpad/src/processor/map_serializers-inl.h b/breakpad/src/processor/map_serializers-inl.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..61c7bbd7c83306741a5248620d2250999d15f302
---- /dev/null
-+++ b/breakpad/src/processor/map_serializers-inl.h
-@@ -0,0 +1,266 @@
-+// Copyright (c) 2010, Google Inc.
-+// All rights reserved.
-+//
-+// Redistribution and use in source and binary forms, with or without
-+// modification, are permitted provided that the following conditions are
-+// met:
-+//
-+//     * Redistributions of source code must retain the above copyright
-+// notice, this list of conditions and the following disclaimer.
-+//     * Redistributions in binary form must reproduce the above
-+// copyright notice, this list of conditions and the following disclaimer
-+// in the documentation and/or other materials provided with the
-+// distribution.
-+//     * Neither the name of Google Inc. nor the names of its
-+// contributors may be used to endorse or promote products derived from
-+// this software without specific prior written permission.
-+//
-+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+//
-+// map_serializers_inl.h: implementation for serializing std::map and its
-+// wrapper classes.
-+//
-+// See map_serializers.h for documentation.
-+//
-+// Author: Siyang Xie (lambxsy@google.com)
-+
-+#ifndef PROCESSOR_MAP_SERIALIZERS_INL_H__
-+#define PROCESSOR_MAP_SERIALIZERS_INL_H__
-+
-+#include <map>
-+#include <string>
-+
-+#include "processor/map_serializers.h"
-+#include "processor/simple_serializer.h"
-+
-+#include "processor/address_map-inl.h"
-+#include "processor/range_map-inl.h"
-+#include "processor/contained_range_map-inl.h"
-+
-+#include "processor/logging.h"
-+
-+namespace google_breakpad {
-+
-+template<typename Key, typename Value>
-+size_t StdMapSerializer<Key, Value>::SizeOf(
-+    const std::map<Key, Value> &m) const {
-+  size_t size = 0;
-+  size_t header_size = (1 + m.size()) * sizeof(uint32_t);
-+  size += header_size;
-+
-+  typename std::map<Key, Value>::const_iterator iter;
-+  for (iter = m.begin(); iter != m.end(); ++iter) {
-+    size += key_serializer_.SizeOf(iter->first);
-+    size += value_serializer_.SizeOf(iter->second);
-+  }
-+  return size;
-+}
-+
-+template<typename Key, typename Value>
-+char *StdMapSerializer<Key, Value>::Write(const std::map<Key, Value> &m,
-+                                          char *dest) const {
-+  if (!dest) {
-+    BPLOG(ERROR) << "StdMapSerializer failed: write to NULL address.";
-+    return NULL;
-+  }
-+  char *start_address = dest;
-+
-+  // Write header:
-+  // Number of nodes.
-+  dest = SimpleSerializer<uint32_t>::Write(m.size(), dest);
-+  // Nodes offsets.
-+  uint32_t *offsets = reinterpret_cast<uint32_t*>(dest);
-+  dest += sizeof(uint32_t) * m.size();
-+
-+  char *key_address = dest;
-+  dest += sizeof(Key) * m.size();
-+
-+  // Traverse map.
-+  typename std::map<Key, Value>::const_iterator iter;
-+  int index = 0;
-+  for (iter = m.begin(); iter != m.end(); ++iter, ++index) {
-+    offsets[index] = static_cast<uint32_t>(dest - start_address);
-+    key_address = key_serializer_.Write(iter->first, key_address);
-+    dest = value_serializer_.Write(iter->second, dest);
-+  }
-+  return dest;
-+}
-+
-+template<typename Key, typename Value>
-+char *StdMapSerializer<Key, Value>::Serialize(
-+    const std::map<Key, Value> &m, unsigned int *size) const {
-+  // Compute size of memory to be allocated.
-+  unsigned int size_to_alloc = SizeOf(m);
-+  // Allocate memory.
-+  char *serialized_data = new char[size_to_alloc];
-+  if (!serialized_data) {
-+    BPLOG(INFO) << "StdMapSerializer memory allocation failed.";
-+    if (size) *size = 0;
-+    return NULL;
-+  }
-+  // Write serialized data into memory.
-+  Write(m, serialized_data);
-+
-+  if (size) *size = size_to_alloc;
-+  return serialized_data;
-+}
-+
-+template<typename Address, typename Entry>
-+size_t RangeMapSerializer<Address, Entry>::SizeOf(
-+    const RangeMap<Address, Entry> &m) const {
-+  size_t size = 0;
-+  size_t header_size = (1 + m.map_.size()) * sizeof(uint32_t);
-+  size += header_size;
-+
-+  typename std::map<Address, Range>::const_iterator iter;
-+  for (iter = m.map_.begin(); iter != m.map_.end(); ++iter) {
-+    // Size of key (high address).
-+    size += address_serializer_.SizeOf(iter->first);
-+    // Size of base (low address).
-+    size += address_serializer_.SizeOf(iter->second.base());
-+    // Size of entry.
-+    size += entry_serializer_.SizeOf(iter->second.entry());
-+  }
-+  return size;
-+}
-+
-+template<typename Address, typename Entry>
-+char *RangeMapSerializer<Address, Entry>::Write(
-+    const RangeMap<Address, Entry> &m, char *dest) const {
-+  if (!dest) {
-+    BPLOG(ERROR) << "RangeMapSerializer failed: write to NULL address.";
-+    return NULL;
-+  }
-+  char *start_address = dest;
-+
-+  // Write header:
-+  // Number of nodes.
-+  dest = SimpleSerializer<uint32_t>::Write(m.map_.size(), dest);
-+  // Nodes offsets.
-+  uint32_t *offsets = reinterpret_cast<uint32_t*>(dest);
-+  dest += sizeof(uint32_t) * m.map_.size();
-+
-+  char *key_address = dest;
-+  dest += sizeof(Address) * m.map_.size();
-+
-+  // Traverse map.
-+  typename std::map<Address, Range>::const_iterator iter;
-+  int index = 0;
-+  for (iter = m.map_.begin(); iter != m.map_.end(); ++iter, ++index) {
-+    offsets[index] = static_cast<uint32_t>(dest - start_address);
-+    key_address = address_serializer_.Write(iter->first, key_address);
-+    dest = address_serializer_.Write(iter->second.base(), dest);
-+    dest = entry_serializer_.Write(iter->second.entry(), dest);
-+  }
-+  return dest;
-+}
-+
-+template<typename Address, typename Entry>
-+char *RangeMapSerializer<Address, Entry>::Serialize(
-+    const RangeMap<Address, Entry> &m, unsigned int *size) const {
-+  // Compute size of memory to be allocated.
-+  unsigned int size_to_alloc = SizeOf(m);
-+  // Allocate memory.
-+  char *serialized_data = new char[size_to_alloc];
-+  if (!serialized_data) {
-+    BPLOG(INFO) << "RangeMapSerializer memory allocation failed.";
-+    if (size) *size = 0;
-+    return NULL;
-+  }
-+
-+  // Write serialized data into memory.
-+  Write(m, serialized_data);
-+
-+  if (size) *size = size_to_alloc;
-+  return serialized_data;
-+}
-+
-+
-+template<class AddrType, class EntryType>
-+size_t ContainedRangeMapSerializer<AddrType, EntryType>::SizeOf(
-+    const ContainedRangeMap<AddrType, EntryType> *m) const {
-+  size_t size = 0;
-+  size_t header_size = addr_serializer_.SizeOf(m->base_)
-+                       + entry_serializer_.SizeOf(m->entry_)
-+                       + sizeof(uint32_t);
-+  size += header_size;
-+  // In case m.map_ == NULL, we treat it as an empty map:
-+  size += sizeof(uint32_t);
-+  if (m->map_) {
-+    size += m->map_->size() * sizeof(uint32_t);
-+    typename Map::const_iterator iter;
-+    for (iter = m->map_->begin(); iter != m->map_->end(); ++iter) {
-+      size += addr_serializer_.SizeOf(iter->first);
-+      // Recursive calculation of size:
-+      size += SizeOf(iter->second);
-+    }
-+  }
-+  return size;
-+}
-+
-+template<class AddrType, class EntryType>
-+char *ContainedRangeMapSerializer<AddrType, EntryType>::Write(
-+    const ContainedRangeMap<AddrType, EntryType> *m, char *dest) const {
-+  if (!dest) {
-+    BPLOG(ERROR) << "StdMapSerializer failed: write to NULL address.";
-+    return NULL;
-+  }
-+  dest = addr_serializer_.Write(m->base_, dest);
-+  dest = SimpleSerializer<uint32_t>::Write(entry_serializer_.SizeOf(m->entry_),
-+                                            dest);
-+  dest = entry_serializer_.Write(m->entry_, dest);
-+
-+  // Write map<<AddrType, ContainedRangeMap*>:
-+  char *map_address = dest;
-+  if (m->map_ == NULL) {
-+    dest = SimpleSerializer<uint32_t>::Write(0, dest);
-+  } else {
-+    dest = SimpleSerializer<uint32_t>::Write(m->map_->size(), dest);
-+    uint32_t *offsets = reinterpret_cast<uint32_t*>(dest);
-+    dest += sizeof(uint32_t) * m->map_->size();
-+
-+    char *key_address = dest;
-+    dest += sizeof(AddrType) * m->map_->size();
-+
-+    // Traverse map.
-+    typename Map::const_iterator iter;
-+    int index = 0;
-+    for (iter = m->map_->begin(); iter != m->map_->end(); ++iter, ++index) {
-+      offsets[index] = static_cast<uint32_t>(dest - map_address);
-+      key_address = addr_serializer_.Write(iter->first, key_address);
-+      // Recursively write.
-+      dest = Write(iter->second, dest);
-+    }
-+  }
-+  return dest;
-+}
-+
-+template<class AddrType, class EntryType>
-+char *ContainedRangeMapSerializer<AddrType, EntryType>::Serialize(
-+    const ContainedRangeMap<AddrType, EntryType> *m, unsigned int *size) const {
-+  unsigned int size_to_alloc = SizeOf(m);
-+  // Allocating memory.
-+  char *serialized_data = new char[size_to_alloc];
-+  if (!serialized_data) {
-+    BPLOG(INFO) << "ContainedRangeMapSerializer memory allocation failed.";
-+    if (size) *size = 0;
-+    return NULL;
-+  }
-+  Write(m, serialized_data);
-+  if (size) *size = size_to_alloc;
-+  return serialized_data;
-+}
-+
-+}  // namespace google_breakpad
-+
-+#endif  // PROCESSOR_MAP_SERIALIZERS_INL_H__
