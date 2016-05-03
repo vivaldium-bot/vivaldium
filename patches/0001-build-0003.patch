@@ -1,3 +1,331 @@
+diff --git a/tools/gyp/test/msvs/multiple_actions_error_handling/actions.gyp b/tools/gyp/test/msvs/multiple_actions_error_handling/actions.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..ab99e929e2496628ac3e4e24c8a89e92b634eda8
+--- /dev/null
++++ b/tools/gyp/test/msvs/multiple_actions_error_handling/actions.gyp
+@@ -0,0 +1,40 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'actions-test',
++      'type': 'none',
++      'actions': [
++        {
++          'action_name': 'first action (fails)',
++          'inputs': [
++            'action_fail.py',
++          ],
++          'outputs': [
++            'ALWAYS_OUT_OF_DATE',
++          ],
++          'action': [
++            'python', '<@(_inputs)'
++          ],
++          'msvs_cygwin_shell': 0,
++        },
++        {
++          'action_name': 'second action (succeeds)',
++          'inputs': [
++            'action_succeed.py',
++          ],
++          'outputs': [
++            'ALWAYS_OUT_OF_DATE',
++          ],
++          'action': [
++            'python', '<@(_inputs)'
++          ],
++          'msvs_cygwin_shell': 0,
++        },
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/msvs/multiple_actions_error_handling/gyptest.py b/tools/gyp/test/msvs/multiple_actions_error_handling/gyptest.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3aa6b8fdb2b52b9e3f2b6a2f221cf91f8f1a4834
+--- /dev/null
++++ b/tools/gyp/test/msvs/multiple_actions_error_handling/gyptest.py
+@@ -0,0 +1,26 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that failing actions make the build fail reliably, even when there
++are multiple actions in one project.
++"""
++
++import os
++import sys
++import TestGyp
++import TestCmd
++
++test = TestGyp.TestGyp(formats=['msvs'], workdir='workarea_all')
++
++test.run_gyp('actions.gyp')
++test.build('actions.gyp',
++           target='actions-test',
++           status=1,
++           stdout=r'.*"cmd\.exe" exited with code 1\..*',
++           match=TestCmd.match_re_dotall)
++
++test.pass_test()
+diff --git a/tools/gyp/test/msvs/props/AppName.props b/tools/gyp/test/msvs/props/AppName.props
+new file mode 100644
+index 0000000000000000000000000000000000000000..b688f663d588131b0a15e148b7495743ec6efc75
+--- /dev/null
++++ b/tools/gyp/test/msvs/props/AppName.props
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="utf-8"?>
++<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
++  <PropertyGroup Label="UserMacros">
++    <AppName>Greet</AppName>
++  </PropertyGroup>
++  <PropertyGroup>
++    <_ProjectFileVersion>10.0.40219.1</_ProjectFileVersion>
++  </PropertyGroup>
++  <ItemGroup>
++    <BuildMacro Include="AppName">
++      <Value>$(AppName)</Value>
++    </BuildMacro>
++  </ItemGroup>
++</Project>
+diff --git a/tools/gyp/test/msvs/props/AppName.vsprops b/tools/gyp/test/msvs/props/AppName.vsprops
+new file mode 100644
+index 0000000000000000000000000000000000000000..84b9af3800c6205727f2ae884650e948fe354dcf
+--- /dev/null
++++ b/tools/gyp/test/msvs/props/AppName.vsprops
+@@ -0,0 +1,11 @@
++<?xml version="1.0" encoding="Windows-1252"?>
++<VisualStudioPropertySheet
++    ProjectType="Visual C++"
++    Version="8.00"
++    Name="Common"
++    >
++    <UserMacro
++        Name="AppName"
++        Value="Greet"
++    />
++</VisualStudioPropertySheet>
+diff --git a/tools/gyp/test/msvs/props/gyptest-props.py b/tools/gyp/test/msvs/props/gyptest-props.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..abd4df2241e26762d5fb1fa98890ba56893e764c
+--- /dev/null
++++ b/tools/gyp/test/msvs/props/gyptest-props.py
+@@ -0,0 +1,22 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies props files are added by using a
++props file to set the name of the built executable.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp(workdir='workarea_all', formats=['msvs'])
++
++test.run_gyp('hello.gyp')
++
++test.build('hello.gyp')
++
++test.built_file_must_exist('Greet.exe')
++
++test.pass_test()
+diff --git a/tools/gyp/test/msvs/props/hello.c b/tools/gyp/test/msvs/props/hello.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..faadc75e2c0a5975e50cc6e9a8ee1c83e2c248bb
+--- /dev/null
++++ b/tools/gyp/test/msvs/props/hello.c
+@@ -0,0 +1,11 @@
++/* Copyright (c) 2012 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#include <stdio.h>
++
++int main(void)
++{
++  printf("Hello, world!\n");
++  return 0;
++}
+diff --git a/tools/gyp/test/msvs/props/hello.gyp b/tools/gyp/test/msvs/props/hello.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..5a58317fa7bdb9e1d4c19092ef25c0afecbce8c1
+--- /dev/null
++++ b/tools/gyp/test/msvs/props/hello.gyp
+@@ -0,0 +1,22 @@
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++{
++  'targets': [
++    {
++      'target_name': 'hello',
++      'product_name': '$(AppName)',
++      'type': 'executable',
++      'sources': [
++        'hello.c',
++      ],
++      'msvs_props': [
++        '$(SolutionDir)AppName.vsprops'
++      ],
++      'msbuild_props': [
++        '$(SolutionDir)AppName.props'
++      ],
++    },
++  ],
++}
++
+diff --git a/tools/gyp/test/msvs/rules_stdout_stderr/dummy.bar b/tools/gyp/test/msvs/rules_stdout_stderr/dummy.bar
+new file mode 100644
+index 0000000000000000000000000000000000000000..25178696d2bad754523d99b7cab33e788c3bfef5
+--- /dev/null
++++ b/tools/gyp/test/msvs/rules_stdout_stderr/dummy.bar
+@@ -0,0 +1,5 @@
++# Copyright (c) 2015 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++A dummy file with the .bar extension (used for stderr rule).
+diff --git a/tools/gyp/test/msvs/rules_stdout_stderr/dummy.foo b/tools/gyp/test/msvs/rules_stdout_stderr/dummy.foo
+new file mode 100644
+index 0000000000000000000000000000000000000000..6a7990bb98c1278db2d2da9cfa8f996b0fda9cd1
+--- /dev/null
++++ b/tools/gyp/test/msvs/rules_stdout_stderr/dummy.foo
+@@ -0,0 +1,5 @@
++# Copyright (c) 2015 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++A dummy file with the .foo extension (used for stdout rule).
+diff --git a/tools/gyp/test/msvs/rules_stdout_stderr/gyptest-rules-stdout-stderr.py b/tools/gyp/test/msvs/rules_stdout_stderr/gyptest-rules-stdout-stderr.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..804505a23d26a2d419370a5365e045d05d24ec3f
+--- /dev/null
++++ b/tools/gyp/test/msvs/rules_stdout_stderr/gyptest-rules-stdout-stderr.py
+@@ -0,0 +1,29 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2015 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++""" Verifies that stdout and stderr from rules get logged in the build's
++stdout."""
++
++import sys
++import TestGyp
++
++if sys.platform == 'win32':
++  test = TestGyp.TestGyp(formats=['msvs'])
++
++  test.run_gyp('rules-stdout-stderr.gyp')
++  test.build('rules-stdout-stderr.gyp', test.ALL)
++
++  expected_stdout_lines = [
++    'testing stdout',
++    'This will go to stdout',
++
++    # Note: stderr output from rules will go to the build's stdout.
++    'testing stderr',
++    'This will go to stderr',
++  ]
++  test.must_contain_all_lines(test.stdout(), expected_stdout_lines)
++
++  test.pass_test()
+diff --git a/tools/gyp/test/msvs/rules_stdout_stderr/rule_stderr.py b/tools/gyp/test/msvs/rules_stdout_stderr/rule_stderr.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f4860624f3daef32a3aae72b3570700643f2857e
+--- /dev/null
++++ b/tools/gyp/test/msvs/rules_stdout_stderr/rule_stderr.py
+@@ -0,0 +1,7 @@
++#!/usr/bin/env python
++# Copyright (c) 2015 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++print >>sys.stderr, "This will go to stderr"
+diff --git a/tools/gyp/test/msvs/rules_stdout_stderr/rule_stdout.py b/tools/gyp/test/msvs/rules_stdout_stderr/rule_stdout.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..2b58d2a374ea5801662d57808ed5b798e6b044a4
+--- /dev/null
++++ b/tools/gyp/test/msvs/rules_stdout_stderr/rule_stdout.py
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python
++# Copyright (c) 2015 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++print "This will go to stdout"
+diff --git a/tools/gyp/test/msvs/rules_stdout_stderr/rules-stdout-stderr.gyp b/tools/gyp/test/msvs/rules_stdout_stderr/rules-stdout-stderr.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..ce93643f8e7ef35d577a3c50a089750b37e9287c
+--- /dev/null
++++ b/tools/gyp/test/msvs/rules_stdout_stderr/rules-stdout-stderr.gyp
+@@ -0,0 +1,52 @@
++# Copyright (c) 2015 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'test',
++      'type': 'none',
++      'sources': [
++        'dummy.foo',
++        'dummy.bar',
++      ],
++      'rules': [
++        {
++          'rule_name': 'test_stdout',
++          'extension': 'foo',
++          'message': 'testing stdout',
++          'msvs_cygwin_shell': 0,
++          'inputs': [
++            'rule_stdout.py',
++          ],
++          'outputs': [
++            'dummy.foo_output',
++          ],
++          'action': [
++            'python',
++            'rule_stdout.py',
++            '<(RULE_INPUT_PATH)',
++          ],
++        },
++        {
++          'rule_name': 'test_stderr',
++          'extension': 'bar',
++          'message': 'testing stderr',
++          'msvs_cygwin_shell': 0,
++          'inputs': [
++            'rule_stderr.py',
++          ],
++          'outputs': [
++            'dummy.bar_output',
++          ],
++          'action': [
++            'python',
++            'rule_stderr.py',
++            '<(RULE_INPUT_PATH)',
++          ],
++        },
++      ],
++    },
++  ],
++}
 diff --git a/tools/gyp/test/msvs/shared_output/common.gypi b/tools/gyp/test/msvs/shared_output/common.gypi
 new file mode 100644
 index 0000000000000000000000000000000000000000..c6fa341d68ca09a8584c0930d0c2a69f13a23eda
@@ -16408,506 +16736,6 @@ index 0000000000000000000000000000000000000000..cc2982eb2799cbec96d929b237252e3f
 +        },
 +      },
 +      'sources': ['hello.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/force-symbol-reference.gyp b/tools/gyp/test/win/linker-flags/force-symbol-reference.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..d6d02a6848c9a8fb01bf904ea8c7cc7b5ee45f80
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/force-symbol-reference.gyp
-@@ -0,0 +1,39 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_force_reference_lib',
-+      'type': 'static_library',
-+      'sources': ['x.cc', 'y.cc'],
-+    },
-+    {
-+      'target_name': 'test_force_reference',
-+      'type': 'executable',
-+      # Turn on debug info to get symbols in disasm for the test code, and
-+      # turn on opt:ref to drop unused symbols to make sure we wouldn't
-+      # otherwise have the symbols.
-+      'msvs_settings': {
-+        'VCCLCompilerTool': {
-+          'DebugInformationFormat': '3',
-+        },
-+        'VCLinkerTool': {
-+          'GenerateDebugInformation': 'true',
-+          'AdditionalOptions': [
-+            '/OPT:REF',
-+          ],
-+          'ForceSymbolReferences': [
-+            '?x@@YAHXZ',
-+            '?y@@YAHXZ',
-+          ],
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+      'dependencies': [
-+        'test_force_reference_lib',
-+      ],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/generate-manifest.gyp b/tools/gyp/test/win/linker-flags/generate-manifest.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..34a68d1a489db79de2fd90c43eb902df06f945b1
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/generate-manifest.gyp
-@@ -0,0 +1,166 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_generate_manifest_true',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+          'GenerateManifest': 'true',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'false',
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_false',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+          'GenerateManifest': 'false',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'false',
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_default',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'false',
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_true_as_embedded',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+          'GenerateManifest': 'true',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_false_as_embedded',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+          'GenerateManifest': 'false',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_default_as_embedded',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_true_with_extra_manifest',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+          'GenerateManifest': 'true',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'false',
-+          'AdditionalManifestFiles': 'extra.manifest;extra2.manifest',
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_false_with_extra_manifest',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+          'GenerateManifest': 'false',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'false',
-+          'AdditionalManifestFiles': 'extra.manifest;extra2.manifest',
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_true_with_extra_manifest_list',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+          'GenerateManifest': 'true',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'false',
-+          'AdditionalManifestFiles': [
-+            'extra.manifest',
-+            'extra2.manifest',
-+          ],
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_false_with_extra_manifest_list',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+          'GenerateManifest': 'false',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'false',
-+          'AdditionalManifestFiles': [
-+            'extra.manifest',
-+            'extra2.manifest',
-+          ],
-+        },
-+      },
-+    },
-+    {
-+      'target_name': 'test_generate_manifest_default_embed_default',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'true',
-+        },
-+      },
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/hello.cc b/tools/gyp/test/win/linker-flags/hello.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..1711567ef566703fcd9c33e0a236b1b30454df6a
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/hello.cc
-@@ -0,0 +1,7 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+int main() {
-+  return 0;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/incremental.gyp b/tools/gyp/test/win/linker-flags/incremental.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..59f3103253ce8376ee32b227c59329cab7c5564c
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/incremental.gyp
-@@ -0,0 +1,65 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    # Turn on debug information so the incremental linking tables have a
-+    # visible symbolic name in the disassembly.
-+    {
-+      'target_name': 'test_incremental_unset',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCCLCompilerTool': {
-+          'DebugInformationFormat': '3',
-+        },
-+        'VCLinkerTool': {
-+          'GenerateDebugInformation': 'true',
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_incremental_default',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCCLCompilerTool': {
-+          'DebugInformationFormat': '3',
-+        },
-+        'VCLinkerTool': {
-+          'GenerateDebugInformation': 'true',
-+          'LinkIncremental': '0',
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_incremental_no',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCCLCompilerTool': {
-+          'DebugInformationFormat': '3',
-+        },
-+        'VCLinkerTool': {
-+          'GenerateDebugInformation': 'true',
-+          'LinkIncremental': '1',
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_incremental_yes',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCCLCompilerTool': {
-+          'DebugInformationFormat': '3',
-+        },
-+        'VCLinkerTool': {
-+          'GenerateDebugInformation': 'true',
-+          'LinkIncremental': '2',
-+        }
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/inline_test.cc b/tools/gyp/test/win/linker-flags/inline_test.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..a9f177e4768a2995fc8939aacf89e6ce5a160732
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/inline_test.cc
-@@ -0,0 +1,12 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "inline_test.h"
-+
-+#include <intrin.h>
-+#pragma intrinsic(_ReturnAddress)
-+
-+bool IsFunctionInlined(void* caller_return_address) {
-+  return _ReturnAddress() == caller_return_address;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/inline_test.h b/tools/gyp/test/win/linker-flags/inline_test.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..117913c4f50403e8772623d3203585b2749a9f91
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/inline_test.h
-@@ -0,0 +1,5 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+bool IsFunctionInlined(void* current_return_address);
-diff --git a/tools/gyp/test/win/linker-flags/inline_test_main.cc b/tools/gyp/test/win/linker-flags/inline_test_main.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..23cafe8f94a3bcc8f713a844aa728bfc7df171ed
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/inline_test_main.cc
-@@ -0,0 +1,15 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "inline_test.h"
-+
-+#include <intrin.h>
-+#include <stdio.h>
-+
-+#pragma intrinsic(_ReturnAddress)
-+
-+int main() {
-+  if (IsFunctionInlined(_ReturnAddress()))
-+    puts("==== inlined ====\n");
-+}
-diff --git a/tools/gyp/test/win/linker-flags/large-address-aware.gyp b/tools/gyp/test/win/linker-flags/large-address-aware.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..fa56d3789ce318b0cac0ea5e87f8f52739dafbb2
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/large-address-aware.gyp
-@@ -0,0 +1,28 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_large_address_aware_no',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'LargeAddressAware': '1',
-+        }
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_large_address_aware_yes',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'LargeAddressAware': '2',
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/library-adjust.cc b/tools/gyp/test/win/linker-flags/library-adjust.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..7dfb589d26d198b5f33a0c42be39b9f2519ed846
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/library-adjust.cc
-@@ -0,0 +1,10 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include <winsock2.h>
-+
-+int main() {
-+  WSAStartup(0, 0);
-+  return 0;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/library-adjust.gyp b/tools/gyp/test/win/linker-flags/library-adjust.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..10e9996f5c6a8cf8eae1dc0e410719af770f95f2
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/library-adjust.gyp
-@@ -0,0 +1,16 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_adjust',
-+      'type': 'executable',
-+      'libraries': [
-+        '-lws2_32.lib'
-+      ],
-+      'sources': ['library-adjust.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/library-directories-define.cc b/tools/gyp/test/win/linker-flags/library-directories-define.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..211ef062c1390aa9cb0ebc917bed9f091aea7957
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/library-directories-define.cc
-@@ -0,0 +1,7 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+int library_function() {
-+  return 0;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/library-directories-reference.cc b/tools/gyp/test/win/linker-flags/library-directories-reference.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..335097839a18b8dc2d835354906cdf2c0c48d74e
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/library-directories-reference.cc
-@@ -0,0 +1,10 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+extern int library_function();
-+
-+int main() {
-+  library_function();
-+  return 0;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/library-directories.gyp b/tools/gyp/test/win/linker-flags/library-directories.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..25395d6c879de42d652f055996c95c02232b0a7b
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/library-directories.gyp
-@@ -0,0 +1,42 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_libdirs_none',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'AdditionalDependencies': [
-+            'test_lib.lib',
-+          ],
-+        },
-+      },
-+      'sources': ['library-directories-reference.cc'],
-+    },
-+    {
-+      'target_name': 'test_libdirs_with',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          # NOTE: Don't use this for general dependencies between gyp
-+          # libraries (use 'dependencies' instead). This is done here only for
-+          # testing.
-+          #
-+          # This setting should only be used to depend on third party prebuilt
-+          # libraries that are stored as binaries at a known location.
-+          'AdditionalLibraryDirectories': [
-+            '<(DEPTH)/out/Default/obj/subdir', # ninja style
-+            '<(DEPTH)/subdir/Default/lib', # msvs style
-+          ],
-+          'AdditionalDependencies': [
-+            'test_lib.lib',
-+          ],
-+        },
-+      },
-+      'sources': ['library-directories-reference.cc'],
 +    },
 +  ]
 +}
