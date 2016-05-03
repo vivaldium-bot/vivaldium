@@ -1,5 +1,5 @@
 diff --git a/ash/ash_strings.gyp b/ash/ash_strings.gyp
-index e71aa4639d3936cedb3c17979bdcf6f54ad5c5ad..200ab1040f0825edf88c3636e56522786aaba2dd 100644
+index 2865b5c16efef3b4ba368f63375a4fa4e13a18cf..c7ba7711476c1da5ccea0aa324819947d2401c25 100644
 --- a/ash/ash_strings.gyp
 +++ b/ash/ash_strings.gyp
 @@ -11,9 +11,11 @@
@@ -81,8 +81,46 @@ index 1819405fb4b9b065689a4f1ee4dabdbc5e4f2597..b4caa6889f97b0189f19c867e01ba9fc
  };
  
  }  // namespace ui
+diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
+index c3e850da221a50c14e294bbd17b631670db2f470..c9d02a6aa0868fc3966cecdbce9857bde94e3ac0 100644
+--- a/ui/base/l10n/l10n_util.cc
++++ b/ui/base/l10n/l10n_util.cc
+@@ -32,6 +32,8 @@
+ #include "ui/base/resource/resource_bundle.h"
+ #include "ui/base/ui_base_paths.h"
+ 
++#include "app/vivaldi_apptools.h"
++
+ #if defined(OS_ANDROID)
+ #include "base/android/locale_utils.h"
+ #include "ui/base/l10n/l10n_util_android.h"
+@@ -401,6 +403,13 @@ bool CheckAndResolveLocale(const std::string& locale,
+ 
+ std::string GetApplicationLocaleInternal(const std::string& pref_locale) {
+ #if defined(OS_MACOSX)
++  if (vivaldi::IsVivaldiRunning()) {
++    if (!pref_locale.empty()) {
++      std::string app_locale = base::i18n::GetCanonicalLocale(pref_locale);
++      if (!app_locale.empty())
++        return app_locale;
++    }
++  }
+ 
+   // Use any override (Cocoa for the browser), otherwise use the preference
+   // passed to the function.
+@@ -449,6 +458,10 @@ std::string GetApplicationLocaleInternal(const std::string& pref_locale) {
+   candidates.push_back(base::android::GetDefaultLocale());
+ 
+ #elif defined(USE_GLIB) && !defined(OS_CHROMEOS)
++  if (vivaldi::IsVivaldiRunning()) {
++    if (!pref_locale.empty())
++      candidates.push_back(base::i18n::GetCanonicalLocale(pref_locale));
++  }
+ 
+   // GLib implements correct environment variable parsing with
+   // the precedence order: LANGUAGE, LC_ALL, LC_MESSAGES and LANG.
 diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
-index a2aa5824a19ead6a593c0d9865b7240eb83b4833..84122040ff7e41e6ce724abc671abeef4941f4a5 100644
+index 93230b42da493bda79098aa0bc246ff9a8f98ad5..e3357e11ea2a466181bc149b6a8104a0cdc8fa70 100644
 --- a/ui/base/resource/resource_bundle.cc
 +++ b/ui/base/resource/resource_bundle.cc
 @@ -10,6 +10,7 @@
@@ -93,7 +131,7 @@ index a2aa5824a19ead6a593c0d9865b7240eb83b4833..84122040ff7e41e6ce724abc671abeef
  #include "base/big_endian.h"
  #include "base/command_line.h"
  #include "base/files/file.h"
-@@ -219,7 +220,11 @@ ResourceBundle& ResourceBundle::GetSharedInstance() {
+@@ -215,7 +216,11 @@ ResourceBundle& ResourceBundle::GetSharedInstance() {
  
  #if !defined(OS_ANDROID)
  bool ResourceBundle::LocaleDataPakExists(const std::string& locale) {
@@ -106,7 +144,7 @@ index a2aa5824a19ead6a593c0d9865b7240eb83b4833..84122040ff7e41e6ce724abc671abeef
  }
  #endif  // !defined(OS_ANDROID)
  
-@@ -306,10 +311,17 @@ std::string ResourceBundle::LoadLocaleResources(
+@@ -302,10 +307,17 @@ std::string ResourceBundle::LoadLocaleResources(
    if (locale_file_path.empty())
      locale_file_path = GetLocaleFilePath(app_locale, true);
  
@@ -125,7 +163,7 @@ index a2aa5824a19ead6a593c0d9865b7240eb83b4833..84122040ff7e41e6ce724abc671abeef
    }
  
    scoped_ptr<DataPack> data_pack(
-@@ -670,13 +682,13 @@ void ResourceBundle::LoadChromeResources() {
+@@ -692,13 +704,13 @@ void ResourceBundle::LoadChromeResources() {
    if (MaterialDesignController::IsModeMaterial()) {
      if (IsScaleFactorSupported(SCALE_FACTOR_100P)) {
        AddMaterialDesignDataPackFromPath(
@@ -141,7 +179,7 @@ index a2aa5824a19ead6a593c0d9865b7240eb83b4833..84122040ff7e41e6ce724abc671abeef
            SCALE_FACTOR_200P);
      }
    }
-@@ -686,12 +698,12 @@ void ResourceBundle::LoadChromeResources() {
+@@ -708,12 +720,12 @@ void ResourceBundle::LoadChromeResources() {
    // scale factor to gfx::ImageSkia::AddRepresentation.
    if (IsScaleFactorSupported(SCALE_FACTOR_100P)) {
      AddDataPackFromPath(GetResourcesPakFilePath(
@@ -156,7 +194,7 @@ index a2aa5824a19ead6a593c0d9865b7240eb83b4833..84122040ff7e41e6ce724abc671abeef
    }
  }
  
-@@ -716,7 +728,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
+@@ -738,7 +750,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
    data_pack->set_has_only_material_design_assets(has_only_material_assets);
    if (data_pack->LoadFromPath(pack_path)) {
      AddDataPack(data_pack.release());
@@ -166,7 +204,7 @@ index a2aa5824a19ead6a593c0d9865b7240eb83b4833..84122040ff7e41e6ce724abc671abeef
                 << "\nSome features may not be available.";
    }
 diff --git a/ui/base/resource/resource_bundle_android.cc b/ui/base/resource/resource_bundle_android.cc
-index ae731d680cb4849d6fd7a78716abd52226a88196..7a31a68550d032acef4c3e86b3dd8d56daa5164f 100644
+index e19a8b8301ded09040fdb5f9e764a27aada51d15..7fe878907dbeadba4df665db3fa730bbbf35ae87 100644
 --- a/ui/base/resource/resource_bundle_android.cc
 +++ b/ui/base/resource/resource_bundle_android.cc
 @@ -56,8 +56,8 @@ bool LoadFromApkOrFile(const char* apk_path,
@@ -181,7 +219,7 @@ index ae731d680cb4849d6fd7a78716abd52226a88196..7a31a68550d032acef4c3e86b3dd8d56
                          &g_chrome_100_percent_fd,
                          &g_chrome_100_percent_region)) {
 diff --git a/ui/base/resource/resource_bundle_ios.mm b/ui/base/resource/resource_bundle_ios.mm
-index 88cf829c6dd8c360d7079fddb4c77fe8e351f7b4..948167abb7db62dcb6deb3d8d46e61b36ba7475e 100644
+index 17f1c79ac07f436b798761c53560d13fd47514ac..b85c76aa3cff6c6864bd04d2edf35ba278dd229a 100644
 --- a/ui/base/resource/resource_bundle_ios.mm
 +++ b/ui/base/resource/resource_bundle_ios.mm
 @@ -44,17 +44,17 @@ base::FilePath GetResourcesPakFilePath(NSString* name, NSString* mac_locale) {
@@ -206,7 +244,7 @@ index 88cf829c6dd8c360d7079fddb4c77fe8e351f7b4..948167abb7db62dcb6deb3d8d46e61b3
    }
  }
 diff --git a/ui/base/resource/resource_bundle_mac.mm b/ui/base/resource/resource_bundle_mac.mm
-index 74d8261560623953aa66ec7550346d484bd200d3..d9341587feee8c62afa4057b5f31f78fcf55fed9 100644
+index 0ebd7554385d9f3e82635c28a50b41a66416dfe2..b493c76db895e5f8cd7bc3ca17096aac05a05541 100644
 --- a/ui/base/resource/resource_bundle_mac.mm
 +++ b/ui/base/resource/resource_bundle_mac.mm
 @@ -55,21 +55,21 @@ void ResourceBundle::LoadCommonResources() {
@@ -270,10 +308,10 @@ index 60a93dbd49db768ec9c1440670f836f7e16c819f..065df786ad5fdc3ad0a3e38261c70e8e
              'grit_grd_file': 'ui_resources.grd',
            },
 diff --git a/ui/shell_dialogs/select_file_dialog_win.cc b/ui/shell_dialogs/select_file_dialog_win.cc
-index 40215a344fee59fc74d0d75987bfd0e974dbb43a..7429592875dc785c4a56be8a05dbc7d56a93daa9 100644
+index cbccd3a36049d976dd9ab00bd365c3d3f44c7243..c4f37c89bda9797958755196c239ef9fa6abf7f6 100644
 --- a/ui/shell_dialogs/select_file_dialog_win.cc
 +++ b/ui/shell_dialogs/select_file_dialog_win.cc
-@@ -641,6 +641,10 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
+@@ -586,6 +586,10 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
      else
        ofn.SetInitialSelection(path->DirName(), path->BaseName());
    }
@@ -304,10 +342,10 @@ index d0bd0c7f953c1448ae8e815d3ecb0f780e0319a8..96283fb7fe45a5b0b7e8a5b929b27b08
              'grit_grd_file': 'ui_strings.grd',
            },
 diff --git a/ui/views/controls/menu/menu_controller.cc b/ui/views/controls/menu/menu_controller.cc
-index 10b2cd914e768af579dec903fc6996c741838c10..06127e8ead9b3d3f3b3b295ae7d080ccf36fb979 100644
+index 5127085d464930d5f7cf054470234dc832d61503..df2edcb30cfa0f48e662192e871d3fff2b7c7597 100644
 --- a/ui/views/controls/menu/menu_controller.cc
 +++ b/ui/views/controls/menu/menu_controller.cc
-@@ -388,6 +388,10 @@ MenuItemView* MenuController::Run(Widget* parent,
+@@ -493,6 +493,10 @@ MenuItemView* MenuController::Run(Widget* parent,
    return ExitMenuRun();
  }
  
@@ -319,10 +357,10 @@ index 10b2cd914e768af579dec903fc6996c741838c10..06127e8ead9b3d3f3b3b295ae7d080cc
    // If the menu has already been destroyed, no further cancellation is
    // needed.  We especially don't want to set the |exit_type_| to a lesser
 diff --git a/ui/views/controls/menu/menu_controller.h b/ui/views/controls/menu/menu_controller.h
-index 12af0aa18746cde6c38d22e5239e00ee097dc491..7919c8b75e614d270241f03f27ac0b5d4c80ac96 100644
+index a5eb56910ece0cebf7064b2f7f0192f4e01b6b7d..322d6e48b266bd1ba2cd6833f45aad10ae5f049b 100644
 --- a/ui/views/controls/menu/menu_controller.h
 +++ b/ui/views/controls/menu/menu_controller.h
-@@ -195,6 +195,8 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
+@@ -194,6 +194,8 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
    // Only used for testing.
    bool IsCancelAllTimerRunningForTest();
  
@@ -367,7 +405,7 @@ index a8e088c92c6bb3c36d9439ad25047dd783234a1d..7d16072de8ba8782d06bd8d8f727a1b0
  }
  
 diff --git a/ui/views/widget/desktop_aura/desktop_screen_x11.cc b/ui/views/widget/desktop_aura/desktop_screen_x11.cc
-index 07bcfca61899920bbca2f94f4301df74350af4b2..ccc012dbc0abe42f54f3a052dab6b2fdfab0162a 100644
+index 89ea817147ffba719d4135875eb2af25acfc2460..7e30a013eab443fc05c5012501586cddf3385b6b 100644
 --- a/ui/views/widget/desktop_aura/desktop_screen_x11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_screen_x11.cc
 @@ -172,6 +172,7 @@ gfx::Display DesktopScreenX11::GetDisplayNearestWindow(
@@ -387,7 +425,7 @@ index 07bcfca61899920bbca2f94f4301df74350af4b2..ccc012dbc0abe42f54f3a052dab6b2fd
    return GetPrimaryDisplay();
  }
 diff --git a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
-index e2fb724b9146b073cbb06b8b2d997c12ba6c4888..d586f2516abd7ff979fb9acde6ad26f6fa3ac767 100644
+index e2eaf147b954f7cfc527db9825e60eeebbba6630..34d2e2e04c5d66a41dbcd4eed4886ca596237317 100644
 --- a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
 @@ -44,6 +44,7 @@
@@ -438,10 +476,10 @@ index e2fb724b9146b073cbb06b8b2d997c12ba6c4888..d586f2516abd7ff979fb9acde6ad26f6
      SendEventToProcessor(event);
    } else {
 diff --git a/ui/views/widget/native_widget_aura.cc b/ui/views/widget/native_widget_aura.cc
-index fb2396c8399b45eb78997a79f30e97d0c65c482b..718840853d133820b10e73a5be9cea7c8ac3f89e 100644
+index 85ab0aee9c0de3c74cd08d52dc8b9764d3a1a745..9a6871b77d4fab7d23b01e458ac788668bf9ee66 100644
 --- a/ui/views/widget/native_widget_aura.cc
 +++ b/ui/views/widget/native_widget_aura.cc
-@@ -1144,6 +1144,8 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
+@@ -1143,6 +1143,8 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
      // matches our previous behaviour; the global stacking client would almost
      // always reattach the window to the same RootWindow.
      aura::Window* root_window = native_view->GetRootWindow();
@@ -451,18 +489,10 @@ index fb2396c8399b45eb78997a79f30e97d0c65c482b..718840853d133820b10e73a5be9cea7c
          native_view, root_window, root_window->GetBoundsInScreen());
    }
 diff --git a/ui/views/widget/widget.cc b/ui/views/widget/widget.cc
-index 02a570db6da1d350414ef1df80c626d185a186ed..955dfecbd05fd40a186ab5fd9a89e78524e7295f 100644
+index 3effd1b4d9e86dde9fdbc75fd2e1441a6fcbd77c..d9c2e426a45102c2b660ebeca4c18308e263fe8c 100644
 --- a/ui/views/widget/widget.cc
 +++ b/ui/views/widget/widget.cc
-@@ -132,6 +132,7 @@ Widget::InitParams::InitParams()
-       layer_type(ui::LAYER_TEXTURED),
-       context(nullptr),
-       force_show_in_taskbar(false),
-+      thumbnail_window(false),
-       force_software_compositing(false) {
- }
- 
-@@ -157,6 +158,7 @@ Widget::InitParams::InitParams(Type type)
+@@ -134,6 +134,7 @@ Widget::InitParams::InitParams(Type type)
        layer_type(ui::LAYER_TEXTURED),
        context(nullptr),
        force_show_in_taskbar(false),
@@ -471,10 +501,10 @@ index 02a570db6da1d350414ef1df80c626d185a186ed..955dfecbd05fd40a186ab5fd9a89e785
  }
  
 diff --git a/ui/views/widget/widget.h b/ui/views/widget/widget.h
-index 80aaddee1a61610b0e154cd8da5cd3398c35f69d..1397b45dda8882709af2dec3ad03bc5d8b41c66c 100644
+index 456cbb56e6c821bf582592b4fd32f4f74f1bd352..dcdf406e9e42f41f4781b3c4bbdd69c1adeb4e6c 100644
 --- a/ui/views/widget/widget.h
 +++ b/ui/views/widget/widget.h
-@@ -263,6 +263,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+@@ -261,6 +261,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
      // If true, forces the window to be shown in the taskbar, even for window
      // types that do not appear in the taskbar by default (popup and bubble).
      bool force_show_in_taskbar;
@@ -484,7 +514,7 @@ index 80aaddee1a61610b0e154cd8da5cd3398c35f69d..1397b45dda8882709af2dec3ad03bc5d
      // Only used by X11, for root level windows. Specifies the res_name and
      // res_class fields, respectively, of the WM_CLASS window property. Controls
      // window grouping and desktop file matching in Linux window managers.
-@@ -641,6 +644,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+@@ -643,6 +646,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
    void set_frame_type(FrameType frame_type) { frame_type_ = frame_type; }
    FrameType frame_type() const { return frame_type_; }
  
@@ -535,10 +565,10 @@ index ca561b6d6dc106cce9c94b5c2e38298156845633..e9c150644cd433064ccebf060b67fd91
      }
      case Widget::InitParams::TYPE_CONTROL:
 diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
-index 0cacffe4a76dfdde167943bf1f232f87736b9a76..a54e956daa12d65a00f70b4ee0a4d57bd7f68a05 100644
+index 039b802f1f992ef1db678c40f3f6ca07579731f7..50ccf1a7721ed76530783ae02204f027644037fb 100644
 --- a/ui/views/win/hwnd_message_handler.cc
 +++ b/ui/views/win/hwnd_message_handler.cc
-@@ -345,6 +345,7 @@ HWNDMessageHandler::~HWNDMessageHandler() {
+@@ -347,6 +347,7 @@ HWNDMessageHandler::~HWNDMessageHandler() {
  
  void HWNDMessageHandler::Init(HWND parent, const gfx::Rect& bounds) {
    TRACE_EVENT0("views", "HWNDMessageHandler::Init");
@@ -546,7 +576,7 @@ index 0cacffe4a76dfdde167943bf1f232f87736b9a76..a54e956daa12d65a00f70b4ee0a4d57b
    GetMonitorAndRects(bounds.ToRECT(), &last_monitor_, &last_monitor_rect_,
                       &last_work_area_);
  
-@@ -459,6 +460,9 @@ gfx::Rect HWNDMessageHandler::GetClientAreaBoundsInScreen() const {
+@@ -461,6 +462,9 @@ gfx::Rect HWNDMessageHandler::GetClientAreaBoundsInScreen() const {
    GetClientRect(hwnd(), &r);
    POINT point = { r.left, r.top };
    ClientToScreen(hwnd(), &point);
@@ -556,7 +586,7 @@ index 0cacffe4a76dfdde167943bf1f232f87736b9a76..a54e956daa12d65a00f70b4ee0a4d57b
    return gfx::Rect(point.x, point.y, r.right - r.left, r.bottom - r.top);
  }
  
-@@ -1678,7 +1682,9 @@ LRESULT HWNDMessageHandler::OnNCCalcSize(BOOL mode, LPARAM l_param) {
+@@ -1702,7 +1706,9 @@ LRESULT HWNDMessageHandler::OnNCCalcSize(BOOL mode, LPARAM l_param) {
      if (autohide_edges & ViewsDelegate::EDGE_LEFT)
        client_rect->left += kAutoHideTaskbarThicknessPx;
      if (autohide_edges & ViewsDelegate::EDGE_TOP) {
@@ -568,10 +598,10 @@ index 0cacffe4a76dfdde167943bf1f232f87736b9a76..a54e956daa12d65a00f70b4ee0a4d57b
          // WM_NCHITTEST, having any nonclient area atop the window causes the
          // caption buttons to draw onscreen but not respond to mouse
 diff --git a/ui/webui/resources/js/util.js b/ui/webui/resources/js/util.js
-index 3907c5215aa302660dd221706cfda9e6028ea6c0..e495d8520e89451c310bc1fafae2030e1d86868f 100644
+index a683b5f87d88091cb0e66a61c8e14bb96db6334d..88db1c1a0b0e24e8cdf9a35711378797b146d902 100644
 --- a/ui/webui/resources/js/util.js
 +++ b/ui/webui/resources/js/util.js
-@@ -285,6 +285,13 @@ function queryRequiredElement(selectors, opt_context) {
+@@ -279,6 +279,13 @@ function queryRequiredElement(selectors, opt_context) {
                            'Missing required element: ' + selectors);
  }
  
@@ -585,7 +615,7 @@ index 3907c5215aa302660dd221706cfda9e6028ea6c0..e495d8520e89451c310bc1fafae2030e
  // Handle click on a link. If the link points to a chrome: or file: url, then
  // call into the browser to do the navigation.
  document.addEventListener('click', function(e) {
-@@ -298,6 +305,12 @@ document.addEventListener('click', function(e) {
+@@ -292,6 +299,12 @@ document.addEventListener('click', function(e) {
        el = el.parentElement;
      }
  
