@@ -1,3 +1,1844 @@
+diff --git a/third_party/WebKit/LayoutTests/editing/input/resources/reveal-utilities.js b/third_party/WebKit/LayoutTests/editing/input/resources/reveal-utilities.js
+deleted file mode 100644
+index c668b35e1e0087b8577e82ece7d529e60301b36b..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/resources/reveal-utilities.js
++++ /dev/null
+@@ -1,90 +0,0 @@
+-function offsetFromViewportTop(element)
+-{
+-    return element.getClientRects()[0].top;
+-}
+-
+-function offsetOfMiddleFromViewportTop(element)
+-{
+-    return element.getClientRects()[0].top + Math.round(element.getClientRects()[0].height / 2);
+-}
+-
+-function copyText()
+-{
+-    var copy = document.getElementById("copy");
+-    copy.focus();
+-    document.execCommand("selectall");
+-    document.execCommand("copy");
+-}
+-
+-function generateNumbers(from, to, zeroPaddedWidth, delimiter)
+-{
+-    var result = "";
+-    for (var i = from; i <= to; ++i) {
+-        var number = i.toString();
+-        while (number.length < zeroPaddedWidth)
+-            number = "0" + number;
+-        result += number + delimiter;
+-    }
+-    return result;
+-}
+-
+-function assertInputIsInTheMiddleOfViewport()
+-{
+-    var viewportMiddle = Math.round(window.innerHeight / 2);
+-    var offsetOfInput = offsetOfMiddleFromViewportTop(document.getElementById("input"));
+-    document.getElementById("results").innerHTML += "ScrollVertically: " +
+-        (Math.abs(offsetOfInput - viewportMiddle) <= 3 ?
+-         "PASS" :
+-         "FAIL<br>viewportMiddle: " + viewportMiddle + ", offsetOfInput: " + offsetOfInput);
+-}
+-
+-function performVerticalScrollingTest()
+-{
+-    var initialOffset = offsetFromViewportTop(document.body.children[0]);
+-    document.getElementById("input").focus();
+-    if (window.eventSender) {
+-        while (offsetFromViewportTop(document.body.children[0]) < initialOffset)
+-            eventSender.keyDown("pageUp");
+-        return true;
+-    }
+-    return false;
+-}
+-
+-function performVerticalScrollingInputTest()
+-{
+-    if (performVerticalScrollingTest())
+-        eventSender.keyDown("a");
+-}
+-
+-function performVerticalScrollingPasteTest()
+-{
+-    copyText();
+-    if (performVerticalScrollingTest()) {
+-        document.execCommand("selectall");
+-        document.execCommand("paste");
+-    }
+-}
+-
+-function performJumpAtTheEdgeTest(useCtrlKeyModifier)
+-{
+-    var textArea = document.getElementById("input");
+-    textArea.focus();
+-    if (window.eventSender) {
+-        var previousScrollTop = 0, currentScrollTop = 0;
+-        var jumpDetected = false;
+-        for (var i = 0; i < 120; ++i) {
+-            previousScrollTop = document.documentElement.scrollTop;
+-            eventSender.keyDown("\r", useCtrlKeyModifier ? ["ctrlKey"] : []);
+-            currentScrollTop = document.documentElement.scrollTop;
+-            // Smooth scrolls are allowed.
+-            if (Math.abs(previousScrollTop - currentScrollTop) > 24) {
+-                jumpDetected = true;
+-                break;
+-            }
+-        }
+-        if (!jumpDetected)
+-            document.write("PASS");
+-        else
+-            document.write("FAIL<br>Jump scroll from " + previousScrollTop + " to " + currentScrollTop);
+-    }
+-}
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-multiline-contenteditable.html b/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-multiline-contenteditable.html
+deleted file mode 100644
+index 4e01426d287cc7c954fe5e2d06173016d191a08f..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-multiline-contenteditable.html
++++ /dev/null
+@@ -1,25 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-</head>
+-<body>
+-<div>When the caret is scrolled out, on starting typing it must be brought to the center of the control.</div>
+-<span style="position:absolute; visibility:hidden" id="single-digit">0</span>
+-<div style="border:thin solid black; overflow:scroll" contenteditable="true" id="input-contenteditable"></div>
+-<script>
+-
+-var contentEditable = document.getElementById("input-contenteditable");
+-contentEditable.innerHTML = generateNumbers(0, 30, 2, "<br>");
+-var singleDigitHeight = document.getElementById("single-digit").clientHeight;
+-var contentEditableSize = 10;
+-contentEditable.style.height = (singleDigitHeight * contentEditableSize) + "px";
+-contentEditable.focus();
+-var child = contentEditable.firstChild;
+-for (var i = 0; i < 36; ++i)
+-    child = child.nextSibling;
+-getSelection().collapse(child, 0);
+-if (window.eventSender)
+-    eventSender.keyDown(">");
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-multiline-input.html b/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-multiline-input.html
+deleted file mode 100644
+index d5e5ba2367336723cee18c38bf2da286a0e98e50..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-multiline-input.html
++++ /dev/null
+@@ -1,19 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-</head>
+-<body>
+-<div>When the caret is scrolled out, on starting typing it must be brought to the center of the control.</div>
+-<textarea name="textarea" id="textarea" rows="10" cols="10"></textarea>
+-<script>
+-
+-var textArea = document.getElementById("textarea");
+-textArea.textContent = generateNumbers(0, 30, 2, "\n");
+-textArea.setSelectionRange(0, 0);
+-textArea.focus();
+-textArea.selectionStart = 36;
+-if (window.eventSender)
+-    eventSender.keyDown(">");
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-input-scrollable-parent-expected.txt b/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-input-scrollable-parent-expected.txt
+deleted file mode 100644
+index 7ef22e9a431ad0272713b71fdc8794016c8ef12f..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-input-scrollable-parent-expected.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-input-scrollable-parent.html b/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-input-scrollable-parent.html
+deleted file mode 100644
+index c767709662364a3d403cc530e4a7fadc186e31ff..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-input-scrollable-parent.html
++++ /dev/null
+@@ -1,30 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-</head>
+-<body>
+-<div>When the caret is scrolled out, on starting typing it must be brought to the center of the control.</div>
+-<div style="overflow:auto; height:150px; width:300px">
+-<textarea name="textarea" id="textarea" rows="10" cols="10"
+-  style="transform:translate(110px, 110px) scale(2); height:200px"></textarea>
+-<div style="height:1000px"></div>
+-</div>
+-<script>
+-
+-var textArea = document.getElementById("textarea");
+-textArea.textContent = generateNumbers(0, 500, 2, "\n");
+-textArea.focus();
+-textArea.selectionStart = 1200;
+-if (window.eventSender) {
+-    eventSender.keyDown(">");
+-    // If the parentNode's scrollTop is greater than 500, then the textarea
+-    // isn't even visible.
+-    document.body.innerHTML = textarea.parentNode.scrollTop < 600 ? "PASS" : "FAIL";
+-}
+-
+-if (window.testRunner) {
+-    testRunner.dumpAsText();
+-}
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-multiline-input-expected.txt b/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-multiline-input-expected.txt
+deleted file mode 100644
+index 7ef22e9a431ad0272713b71fdc8794016c8ef12f..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-multiline-input-expected.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-multiline-input.html b/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-multiline-input.html
+deleted file mode 100644
+index a4590bc0d1695e2c204b16290843d518e11d1284..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-caret-of-transformed-multiline-input.html
++++ /dev/null
+@@ -1,24 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-</head>
+-<body>
+-<div>When the caret is scrolled out, on starting typing it must be brought to the center of the control.</div>
+-<textarea name="textarea" id="textarea" rows="10" cols="10" style="transform:rotate(180deg)"></textarea>
+-<script>
+-
+-var textArea = document.getElementById("textarea");
+-textArea.textContent = generateNumbers(0, 30, 2, "\n");
+-textArea.focus();
+-textArea.selectionStart = 36;
+-if (window.eventSender) {
+-    eventSender.keyDown(">");
+-    document.body.innerHTML = textarea.scrollTop > 0 ? "PASS" : "FAIL";
+-}
+-
+-if (window.testRunner) {
+-    testRunner.dumpAsText();
+-}
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-input-vertically-expected.txt b/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-input-vertically-expected.txt
+deleted file mode 100644
+index 35077988db43e5ca86049468b5941e62c115d97a..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-input-vertically-expected.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-After starting typing in a scrolled out of view editor control, the control is to be brought in the center of the view
+-To test manually, scroll the page up to the top, then start typing. Input box should be scrolled into the middle of the view.
+-a
+-ScrollVertically: PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-input-vertically.html b/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-input-vertically.html
+deleted file mode 100644
+index fe0dd0396bf7506e2ce7568f713d9c00c3274ecc..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-input-vertically.html
++++ /dev/null
+@@ -1,27 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-<style type="text/css">
+-/* This is needed for divs percent heights to work. */
+-html { height:100%; }
+-body { margin:0; padding:0; height:100%; }
+-</style>
+-</head>
+-<body>
+-<div>After starting typing in a scrolled out of view editor control, the control is to be brought in the center of the view</div>
+-<div style="height:200%"></div>
+-<div>To test manually, scroll the page up to the top, then start typing. Input box should be scrolled into the middle of the view.</div>
+-<div style="width:150px; border:thin solid black" contenteditable="true" id="input"></div>
+-<div style="height:200%"></div>
+-<div id="results"></div>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-if (window.internals)
+-    internals.settings.setScrollAnimatorEnabled(false);
+-performVerticalScrollingInputTest();
+-assertInputIsInTheMiddleOfViewport();
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-paste-vertically-expected.txt b/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-paste-vertically-expected.txt
+deleted file mode 100644
+index 84e2ee12e7308a8f0c390ce36a8c48b53ddc6b90..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-paste-vertically-expected.txt
++++ /dev/null
+@@ -1,5 +0,0 @@
+-After pasting text in a scrolled out of view editor control, the control is to be brought in the center of the view
+-To test manually, have some text in the clipboard, scroll the page up to the top, then paste. The control should be scrolled into the middle of the view.
+-WebKit
+-WebKit
+-ScrollVertically: PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-paste-vertically.html b/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-paste-vertically.html
+deleted file mode 100644
+index b9e04db65d472d740382c3e4d2777654a30b258f..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-contenteditable-on-paste-vertically.html
++++ /dev/null
+@@ -1,26 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-<style type="text/css">
+-/* This is needed for divs percent heights to work. */
+-html { height:100%; }
+-body { margin:0; padding:0; height:100%; }
+-</style>
+-</head>
+-<body>
+-<div>After pasting text in a scrolled out of view editor control, the control is to be brought in the center of the view</div>
+-<div style="height:200%"></div>
+-<div>To test manually, have some text in the clipboard, scroll the page up to the top, then paste. The control should be scrolled into the middle of the view.</div>
+-<div style="width:150px; border:thin solid black" contenteditable="true" id="input"></div>
+-<div style="height:200%"></div>
+-<div contenteditable="true" id="copy">WebKit</div>
+-<div id="results"></div>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-performVerticalScrollingPasteTest();
+-assertInputIsInTheMiddleOfViewport();
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-input-vertically-expected.txt b/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-input-vertically-expected.txt
+deleted file mode 100644
+index cf6f4cadec0b56e90b2df6af4f2d1d0eef020ffd..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-input-vertically-expected.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-After starting typing in a scrolled out of view editor control, the control is to be brought in the center of the view
+-To test manually, scroll the page up to the top, then start typing. Input box should be scrolled into the middle of the view.
+-
+-ScrollVertically: PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-input-vertically.html b/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-input-vertically.html
+deleted file mode 100644
+index f5c461dd0fd7b409c24b7abba1efe5a20420c892..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-input-vertically.html
++++ /dev/null
+@@ -1,27 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-<style type="text/css">
+-/* This is needed for divs percent heights to work. */
+-html { height:100%; }
+-body { margin:0; padding:0; height:100%; }
+-</style>
+-</head>
+-<body>
+-<div>After starting typing in a scrolled out of view editor control, the control is to be brought in the center of the view</div>
+-<div style="height:200%"></div>
+-<div>To test manually, scroll the page up to the top, then start typing. Input box should be scrolled into the middle of the view.</div>
+-<input type="text" name="input" id="input" />
+-<div style="height:200%"></div>
+-<div id="results"></div>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-if (window.internals)
+-    internals.settings.setScrollAnimatorEnabled(false);
+-performVerticalScrollingInputTest();
+-assertInputIsInTheMiddleOfViewport();
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-paste-vertically-expected.txt b/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-paste-vertically-expected.txt
+deleted file mode 100644
+index 4f21fa86ecbb7141a6e0ba15d5d7e3130f3b03c9..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-paste-vertically-expected.txt
++++ /dev/null
+@@ -1,5 +0,0 @@
+-After pasting text in a scrolled out of view editor control, the control is to be brought in the center of the view
+-To test manually, have some text in the clipboard, then scroll the page up to the top, then paste. Input box should be scrolled into the middle of the view.
+-
+-WebKit
+-ScrollVertically: PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-paste-vertically.html b/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-paste-vertically.html
+deleted file mode 100644
+index d882d84dcd6097e952307dda2323aa51a53d8c07..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-edit-on-paste-vertically.html
++++ /dev/null
+@@ -1,26 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-<style type="text/css">
+-/* This is needed for divs percent heights to work. */
+-html { height:100%; }
+-body { margin:0; padding:0; height:100%; }
+-</style>
+-</head>
+-<body>
+-<div>After pasting text in a scrolled out of view editor control, the control is to be brought in the center of the view</div>
+-<div style="height:200%"></div>
+-<div>To test manually, have some text in the clipboard, then scroll the page up to the top, then paste. Input box should be scrolled into the middle of the view.</div>
+-<input type="text" name="input" id="input" />
+-<div style="height:200%"></div>
+-<div contenteditable="true" id="copy">WebKit</div>
+-<div id="results"></div>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-performVerticalScrollingPasteTest();
+-assertInputIsInTheMiddleOfViewport();
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-password-expected.txt b/third_party/WebKit/LayoutTests/editing/input/reveal-password-expected.txt
+deleted file mode 100644
+index 70a38dab090bc52be3f4063b4e160e6058eb2ed0..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-password-expected.txt
++++ /dev/null
+@@ -1,5 +0,0 @@
+-Tests that passwords are revealed by calling setShouldRevealPassword() 
+-
+-Success: secured by default. expected=true, actual=true
+-Success: properly revealed expected=true, actual=true
+-Success: hidden again expected=true, actual=true
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-password.html b/third_party/WebKit/LayoutTests/editing/input/reveal-password.html
+deleted file mode 100644
+index c80a20ee351631d13566e2a81baaf56bc70c84da..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-password.html
++++ /dev/null
+@@ -1,25 +0,0 @@
+-<!DOCTYPE html>
+-<script src="resources/password-echo.js"></script>
+-<script>
+-onload = function() {
+-  window.testRunner.dumpAsText();
+-  window.internals.settings.setPasswordEchoEnabled(false);
+-  var testnode = document.getElementById('testnode');
+-  setTestNode(testnode);
+-
+-  testnode.value = 'test';
+-  assert(true, window.find(secureText(testnode.value.length)), "secured by default.");
+-
+-  window.getSelection().removeAllRanges();
+-  window.internals.setShouldRevealPassword(testnode, true);
+-  assert(true, window.find(testnode.value), "properly revealed");
+-
+-  window.getSelection().removeAllRanges();
+-  window.internals.setShouldRevealPassword(testnode, false);
+-  assert(true, window.find(secureText(testnode.value.length)), "hidden again");
+-}
+-</script>
+-
+-<p>Tests that passwords are revealed by calling setShouldRevealPassword()
+-<input type="password" id="testnode">
+-<ul id="console"></ul>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-selection-having-stored-scroll-position-expected.txt b/third_party/WebKit/LayoutTests/editing/input/reveal-selection-having-stored-scroll-position-expected.txt
+deleted file mode 100644
+index cadbe03b3bbb00b17411b48678433dc47a965ce2..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-selection-having-stored-scroll-position-expected.txt
++++ /dev/null
+@@ -1,5 +0,0 @@
+-
+-Success! The scroll position in history was not restored after navigation as input field is revealed on selection.
+-
+-
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/input/reveal-selection-having-stored-scroll-position.html b/third_party/WebKit/LayoutTests/editing/input/reveal-selection-having-stored-scroll-position.html
+deleted file mode 100644
+index 64fcd8dfec6c17527b9579bec1599b781786b589..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/reveal-selection-having-stored-scroll-position.html
++++ /dev/null
+@@ -1,40 +0,0 @@
+-<html>
+-<head>
+-<script>
+-
+-function navigate()
+-{
+-    if (location.hash == "") {
+-        if (window.testRunner) {
+-            testRunner.dumpAsText();
+-            testRunner.waitUntilDone();
+-        }
+-
+-        scrollTo(0,100);
+-        history.pushState({ }, "", window.location + "#1");
+-        setTimeout("window.location.href = 'resources/empty-document-goes-back.html'", 0);
+-        return;
+-    }
+-    var input = document.getElementById("text-input");
+-    input.focus();
+-    if (window.eventSender)
+-        eventSender.keyDown("a");
+-
+-    setTimeout(function () { 
+-        var scrollPosition = document.scrollingElement.scrollTop;
+-        var result = document.getElementById("result");
+-        if (scrollPosition != 100)
+-            result.innerHTML = "Success! The scroll position in history was not restored after navigation as input field is revealed on selection."
+-        if (window.testRunner)
+-            testRunner.notifyDone();
+-    }, 0);
+-}
+-
+-</script>
+-</head>
+-<body style="width:800px" onpageshow="navigate();">
+-    <input id="text-input" type="text"/>
+-    <div id="result">Fail. The scroll position in history was restored after navigation.</div><br/><br/>
+-    <div style="width:600; height:1200; background-color:purple;"></div>
+-</body>
+-</htmL>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-contenteditable-expected.txt b/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-contenteditable-expected.txt
+deleted file mode 100644
+index ed3bca927d395cd1e1eb35d77628fba05912f02e..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-contenteditable-expected.txt
++++ /dev/null
+@@ -1,123 +0,0 @@
+-When the caret is scrolled out and resides at the end of the contenteditable, on pressing "Ctrl+Return" it must be scrolled to the bottom of the view, not to the center to avoid undesirable content view jumping.
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-contenteditable.html b/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-contenteditable.html
+deleted file mode 100644
+index 0dafcc2512c6a081f871b161d82445c4c37efccb..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-contenteditable.html
++++ /dev/null
+@@ -1,19 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-</head>
+-<body>
+-<div>When the caret is scrolled out and resides at the end of the contenteditable,
+-on pressing &quot;Ctrl+Return&quot; it must be scrolled to the bottom of the view,
+-not to the center to avoid undesirable content view jumping.</div>
+-<div style="height:1000px;">
+-  <div style="overflow:visible; height:100px;" contenteditable="true" id="input"></div>
+-</div>
+-<script>
+-if (window.testRunner)
+-   testRunner.dumpAsText();
+-
+-performJumpAtTheEdgeTest(true);
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-textarea-expected.txt b/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-textarea-expected.txt
+deleted file mode 100644
+index 4f5015b441f9e7a0190e89f74542f79912152b12..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-textarea-expected.txt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-When the caret is scrolled out and resides at the end of the textarea, on pressing "Return" it must be scrolled to the bottom of the view, not to the center to avoid undesirable content view jumping.
+-
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-textarea.html b/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-textarea.html
+deleted file mode 100644
+index 40a134fa30e11ba5e9b11f8955ed691cb3464ee9..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-line-break-at-end-of-document-textarea.html
++++ /dev/null
+@@ -1,19 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-</head>
+-<body>
+-<div>When the caret is scrolled out and resides at the end of the textarea,
+-on pressing &quot;Return&quot; it must be scrolled to the bottom of the view,
+-not to the center to avoid undesirable content view jumping.</div>
+-<div style="overflow:auto;height:1000px;">
+-  <textarea rows="50" cols="20" id="input"></textarea>
+-</div>
+-<script>
+-if (window.testRunner)
+-   testRunner.dumpAsText();
+-
+-performJumpAtTheEdgeTest(false);
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-paragraph-separator-at-end-of-document-contenteditable-expected.txt b/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-paragraph-separator-at-end-of-document-contenteditable-expected.txt
+deleted file mode 100644
+index a922c34d773f9d187b7700536798fcf90447dab1..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-paragraph-separator-at-end-of-document-contenteditable-expected.txt
++++ /dev/null
+@@ -1,123 +0,0 @@
+-When the caret is scrolled out and resides at the end of the contenteditable, on pressing "Return" it must be scrolled to the bottom of the view, not to the center to avoid undesirable content view jumping.
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-paragraph-separator-at-end-of-document-contenteditable.html b/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-paragraph-separator-at-end-of-document-contenteditable.html
+deleted file mode 100644
+index 45fd96cabfa50595892d460d8dd2ff8e93a5680f..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/scroll-to-edge-if-paragraph-separator-at-end-of-document-contenteditable.html
++++ /dev/null
+@@ -1,19 +0,0 @@
+-<!DOCTYPE html>
+-<head>
+-<script type="text/javascript" src="resources/reveal-utilities.js"></script>
+-</head>
+-<body>
+-<div>When the caret is scrolled out and resides at the end of the contenteditable,
+-on pressing &quot;Return&quot; it must be scrolled to the bottom of the view,
+-not to the center to avoid undesirable content view jumping.</div>
+-<div style="height:1000px;">
+-  <div style="overflow:visible; height:100px;" contenteditable="true" id="input"></div>
+-</div>
+-<script>
+-if (window.testRunner)
+-   testRunner.dumpAsText();
+-
+-performJumpAtTheEdgeTest(false);
+-
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/scroll-viewport-page-up-down-expected.txt b/third_party/WebKit/LayoutTests/editing/input/scroll-viewport-page-up-down-expected.txt
+deleted file mode 100644
+index 308d67a6a247b6875d16eb985f5778b7d6406621..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/scroll-viewport-page-up-down-expected.txt
++++ /dev/null
+@@ -1,25 +0,0 @@
+-Page up/down (option+page up/down on Mac) should move the move cursor and scroll the content in contenteditable elements. This sample covers scroll position test of a) iframe element containing contenteditable body and b) content editable div element. Even though the cursor will move exactly to the same location on all platforms (covered by test option-page-up-down.html), please note that Mac will scroll the visible area by placing the cursor position in the middle. All other platforms will scroll by keeping the cursor aligned with the top edge of the visible area.
+-
+-line 0
+-
+-line 1
+-
+-line 2
+-
+-line 3
+-
+-line 4
+-
+-line 5
+-
+-line 6
+-
+-line 7
+-
+-line 8
+-
+-line 9
+-
+-iframe PASS
+-div PASS
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/input/scroll-viewport-page-up-down.html b/third_party/WebKit/LayoutTests/editing/input/scroll-viewport-page-up-down.html
+deleted file mode 100644
+index 71c1cc3d86e952003d08167ba4ad449a63e18edb..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/scroll-viewport-page-up-down.html
++++ /dev/null
+@@ -1,90 +0,0 @@
+-<head>
+-<script src="../../resources/ahem.js"></script>
+-<style type="text/css">
+-  .ahem { font: 20px Ahem; }
+-</style>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-
+-var onMacPlatform = navigator.userAgent.search(/\bMac OS X\b/) != -1;
+-
+-function runTest() {
+-    runFrameScrollTest();
+-    runDivScrollTest();
+-}
+-
+-function generateContent() {
+-    var content = "";
+-    for (var i = 0; i < 10; ++i)
+-        content += "<p>line " + i + "</p>\n";
+-    return content;
+-}
+-
+-function runFrameScrollTest() {
+-    var frame = frames[0];
+-    var doc = frame.document;
+-    var body = doc.body;
+-    body.innerHTML = generateContent();
+-    frame.focus();
+-    frame.getSelection().collapse(body.firstChild, 0);
+-    if (onMacPlatform)
+-        offsets = [ 55, 175 ];
+-    else 
+-        offsets = [ 120, 240 ];
+-    runScrollingTest("iframe", frame, offsets, function() { return frame.pageYOffset; });
+-}
+-
+-function runDivScrollTest() {
+-    var editable = document.getElementById('editable');
+-    editable.innerHTML = generateContent();
+-    editable.focus();
+-    window.getSelection().collapse(editable, 0);
+-    if (onMacPlatform)
+-        offsets = [ 75, 195 ];
+-    else 
+-        offsets = [ 140, 260 ];
+-    runScrollingTest("div", editable, offsets, function() { return editable.scrollTop; });
+-}
+-
+-function runScrollingTest(testName, frame, offsets, scrollFunction) {
+-    var tolerance = 0;
+-    var modifiers = onMacPlatform ? ["altKey"] : [];
+-    
+-    if (!window.eventSender)
+-        return;
+-
+-    eventSender.keyDown("pageDown", modifiers);
+-    if (Math.abs(scrollFunction() - offsets[0]) > tolerance) {
+-        throw "Frame viewport should be around " + offsets[0] +
+-            "px , not at " + scrollFunction();
+-    }
+-
+-    eventSender.keyDown("pageDown", modifiers);
+-    if (Math.abs(scrollFunction() - offsets[1]) > tolerance) {
+-        throw "Frame viewport should be around " + offsets[1] +
+-            "px , not " + scrollFunction();
+-    }
+-
+-    eventSender.keyDown("pageUp", modifiers);
+-    if (Math.abs(scrollFunction() - offsets[0]) > tolerance) {
+-        throw "Frame viewport should be around " + offsets[0] +
+-            "px , not at " + scrollFunction();
+-    }
+-
+-    document.getElementById("results").innerHTML += testName + " PASS<br/>";
+-}
+-</script>
+-</head>
+-<body onload="runTest()">
+-<div>Page up/down (option+page up/down on Mac) should move the move cursor and scroll the content
+-in contenteditable elements. This sample covers scroll position test of a) iframe element containing
+-contenteditable body and b) content editable div element. Even though the cursor will move exactly to
+-the same location on all platforms (covered by test option-page-up-down.html), please note that Mac will
+-scroll the visible area by placing the cursor position in the middle. All other platforms will scroll by
+-keeping the cursor aligned with the top edge of the visible area. </div>
+-<iframe src="../resources/contenteditable-iframe-fixed-size-src.html" style="height:150px; padding: 0px;"></iframe>
+-<div id="editable" contenteditable="true" class="ahem" style="height:150px; overflow:auto; padding: 0px; margin: 0px;"></div>
+-<div id="results"></div>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/search-field-crash-in-designmode-expected.txt b/third_party/WebKit/LayoutTests/editing/input/search-field-crash-in-designmode-expected.txt
+deleted file mode 100644
+index 022b654f55dbae7b5aee44232e47cf5df3e874f1..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/search-field-crash-in-designmode-expected.txt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-This test ensures WebKit does not crash when user modifies the contents of search fields in the design mode. WebKit should not crash and you should see PASS below:
+-
+- PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/search-field-crash-in-designmode.html b/third_party/WebKit/LayoutTests/editing/input/search-field-crash-in-designmode.html
+deleted file mode 100644
+index 387f1de8e937e70ed53d7c6f799265aa93b8cb01..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/search-field-crash-in-designmode.html
++++ /dev/null
+@@ -1,20 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<body>
+-<p>This test ensures WebKit does not crash when user modifies the contents of search fields in the design mode.
+-WebKit should not crash and you should see PASS below:</p>
+-<input type="search">
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-
+-document.designMode = 'on';
+-document.getElementsByTagName('input')[0].focus();
+-document.execCommand('delete', false, null);
+-
+-document.write('PASS');
+-
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/select-all-clear-input-method-expected.txt b/third_party/WebKit/LayoutTests/editing/input/select-all-clear-input-method-expected.txt
+deleted file mode 100644
+index f4c4bec77cd7444db320308d750430a19e37bbe5..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/select-all-clear-input-method-expected.txt
++++ /dev/null
+@@ -1,6 +0,0 @@
+-This tests selecting all with an open input method composition.
+-To manually test, type some letter in the editable region below and then select all.
+-WebKit should not delete contents.
+-| <div>
+-|   contenteditable=""
+-|   "<#selection-anchor>PASS<#selection-focus>"
+diff --git a/third_party/WebKit/LayoutTests/editing/input/select-all-clear-input-method.html b/third_party/WebKit/LayoutTests/editing/input/select-all-clear-input-method.html
+deleted file mode 100644
+index 2d779c4471246ea9d16454a8e4711517ee37c756..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/select-all-clear-input-method.html
++++ /dev/null
+@@ -1,28 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<body>
+-<p>This tests selecting all with an open input method composition.
+-To manually test, type some letter in the editable region below and then select all.
+-WebKit should not delete contents.</p>
+-<div id="container"><div contenteditable>PAS</div></div>
+-<script src="../../resources/dump-as-markup.js"></script>
+-<script>
+-
+-if (window.testRunner) {
+-    var container = document.getElementById('container');
+-    container.firstChild.focus();
+-    getSelection().collapse(container.firstChild.firstChild, 3);
+-    if (window.textInputController) {
+-        Markup.description(document.getElementsByTagName('p')[0].textContent);
+-
+-        textInputController.setMarkedText("S", 0, 1);
+-        document.execCommand('selectAll', false, null);
+-
+-        Markup.dump(container);
+-    } else
+-        Markup.description('FAIL - This test requires textInputController');
+-}
+-
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-delete-expected.txt b/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-delete-expected.txt
+deleted file mode 100644
+index 63964acdf8740898fbedca44e8a20833889e0cfe..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-delete-expected.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-This tests deleting a character after input event handler modified values of textarea. WebKit should not crash and you should see PASS below:
+-
+-
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-delete.html b/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-delete.html
+deleted file mode 100644
+index 4cc44c305e24da618356fe37508e4cce9b36da94..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-delete.html
++++ /dev/null
+@@ -1,20 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<body>
+-<p>This tests deleting a character after input event handler modified values of textarea. WebKit should not crash and you should see PASS below:</p>
+-<form><textarea oninput="this.value != '' ? this.value = 'b' : null">a</textarea></form>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-
+-var text = document.forms[0].elements[0];
+-text.focus();
+-text.setSelectionRange(text.value.length, text.value.length);
+-document.execCommand('InsertLineBreak', false, null);
+-document.execCommand('Delete', false, null);
+-document.write(text.value == '' ? 'PASS' : 'FAIL');
+-
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-forward-delete-expected.txt b/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-forward-delete-expected.txt
+deleted file mode 100644
+index 99de07d178dc610dc69f36c13899366ce094a884..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-forward-delete-expected.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-This tests forward-deleting a character after input event handler modified values of textarea. WebKit should not crash and you should see PASS below:
+-
+-
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-forward-delete.html b/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-forward-delete.html
+deleted file mode 100644
+index 819019d3efbdfe753ad27250dd1b406967933983..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-forward-delete.html
++++ /dev/null
+@@ -1,20 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<body>
+-<p>This tests forward-deleting a character after input event handler modified values of textarea. WebKit should not crash and you should see PASS below:</p>
+-<form><textarea oninput="this.value != 'b' ? this.value = 'b' : null">a</textarea></form>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-
+-var text = document.forms[0].elements[0];
+-text.focus();
+-text.setSelectionRange(text.value.length, text.value.length);
+-document.execCommand('InsertLineBreak', false, null);
+-document.execCommand('ForwardDelete', false, null);
+-document.write(text.value == 'b' ? 'PASS' : 'FAIL');
+-
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-input-expected.txt b/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-input-expected.txt
+deleted file mode 100644
+index e84308454b35d4a1498bbd08649bb94e995b5a42..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-input-expected.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-This tests typing a character after input event handler modified values of input element. WebKit should not crash and you should see PASS below:
+-
+-
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-input.html b/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-input.html
+deleted file mode 100644
+index 782f9a5a593b6f504dcbcdbe0712067ac7ff6f4f..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-input.html
++++ /dev/null
+@@ -1,20 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<body>
+-<p>This tests typing a character after input event handler modified values of input element. WebKit should not crash and you should see PASS below:</p>
+-<form><input type="text" oninput="this.value == 'ab' ? this.value = '' : null" value="a"></form>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-
+-var text = document.forms[0].elements[0];
+-text.focus();
+-text.setSelectionRange(text.value.length, text.value.length);
+-document.execCommand('InsertText', false, 'b');
+-document.execCommand('InsertText', false, 'c');
+-document.write(text.value == 'c' ? 'PASS' : 'FAIL');
+-
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-textarea-expected.txt b/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-textarea-expected.txt
+deleted file mode 100644
+index 4614e5b8fef080f0a8a0ca0cc4f33a1c714549db..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-textarea-expected.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-This tests typing a character after input event handler modified values of textarea. WebKit should not crash and you should see PASS below:
+-
+-
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-textarea.html b/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-textarea.html
+deleted file mode 100644
+index fa5ae27b53aded95533ae7911e23f073d6def7bb..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/set-value-on-input-and-type-textarea.html
++++ /dev/null
+@@ -1,20 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<body>
+-<p>This tests typing a character after input event handler modified values of textarea. WebKit should not crash and you should see PASS below:</p>
+-<form><textarea oninput="this.value == 'ab' ? this.value = '' : null">a</textarea></form>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-
+-var text = document.forms[0].elements[0];
+-text.focus();
+-text.setSelectionRange(text.value.length, text.value.length);
+-document.execCommand('InsertText', false, 'b');
+-document.execCommand('InsertText', false, 'c');
+-document.write(text.value == 'c' ? 'PASS' : 'FAIL');
+-
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/setting-input-value-cancel-ime-composition-expected.txt b/third_party/WebKit/LayoutTests/editing/input/setting-input-value-cancel-ime-composition-expected.txt
+deleted file mode 100644
+index 2436d59fdb34c288e63dd8f170fd5bb35eb7b197..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/setting-input-value-cancel-ime-composition-expected.txt
++++ /dev/null
+@@ -1,21 +0,0 @@
+-This test ensures WebKit clears IME composition inside an input element when the value is programmatically set.
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-nihao should marked from 0 to 5
+-PASS textInputController.hasMarkedText() is true
+-PASS textInputController.markedRange().toString() is "0,5"
+-text was removed so there should be no marked text
+-PASS textInputController.hasMarkedText() is false
+-nihao should marked from 0 to 5
+-PASS textInputController.hasMarkedText() is true
+-PASS textInputController.markedRange().toString() is "0,5"
+-the text was changed so there should be no marked text
+-PASS textInputController.hasMarkedText() is false
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/input/setting-input-value-cancel-ime-composition.html b/third_party/WebKit/LayoutTests/editing/input/setting-input-value-cancel-ime-composition.html
+deleted file mode 100644
+index 9aef5c9dd76e9828b7d30173a72ac8eb343f12bc..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/setting-input-value-cancel-ime-composition.html
++++ /dev/null
+@@ -1,50 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<head>
+-<title> Testcase for bug crbug.com/242715 </title>
+-<script src="../../resources/js-test.js"></script>
+-<script>
+-function runTest() {
+-    description('This test ensures WebKit clears IME composition inside an input element \
+-when the value is programmatically set.');
+-
+-    var test = document.getElementById('test');
+-    test.addEventListener('keyup', function(event) {
+-        if (event.keyCode == 40)
+-            test.value = 'henhao';
+-    });
+-
+-    test.focus();
+-    test.selectionStart = 0;
+-    test.selectionEnd = 0;
+-    textInputController.setMarkedText("nihao", 0, 5);
+-
+-    debug('nihao should marked from 0 to 5');
+-    shouldBeTrue("textInputController.hasMarkedText()");
+-    shouldBeEqualToString("textInputController.markedRange().toString()", "0,5");
+-
+-    test.value = '';
+-    debug('text was removed so there should be no marked text');
+-    shouldBeFalse("textInputController.hasMarkedText()");
+-
+-    textInputController.setMarkedText("nihao", 0, 5);
+-    debug('nihao should marked from 0 to 5');
+-    shouldBeTrue("textInputController.hasMarkedText()");
+-    shouldBeEqualToString("textInputController.markedRange().toString()", "0,5");
+-
+-    eventSender.keyDown('downArrow');
+-
+-    debug('the text was changed so there should be no marked text');
+-    shouldBeFalse("textInputController.hasMarkedText()");
+-
+-    document.body.removeChild(test);
+-    isSuccessfullyParsed();
+-}
+-</script>
+-</body>
+-<body onload="runTest();">
+- <input id="test" type="text">
+- <div id="description"></div>
+- <div id="console"></div>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/style-change-during-input-expected.txt b/third_party/WebKit/LayoutTests/editing/input/style-change-during-input-expected.txt
+deleted file mode 100644
+index 69d522507600d6043b1cad9c974948416796b85e..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/style-change-during-input-expected.txt
++++ /dev/null
+@@ -1,7 +0,0 @@
+-
+-The text field should accept typed characters.
+-PASS window.target.value is "hello"
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/input/style-change-during-input.html b/third_party/WebKit/LayoutTests/editing/input/style-change-during-input.html
+deleted file mode 100644
+index faace5b09b3165c4753e2d2bec05c44e6499c223..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/style-change-during-input.html
++++ /dev/null
+@@ -1,33 +0,0 @@
+-<html>
+-<head>
+-<script src="../../resources/js-test.js"></script>
+-<style>
+-body[style] { }
+-</style>
+-</head>
+-<body>
+-<textarea id="target"></textarea>
+-<div>The text field should accept typed characters.</div>
+-<pre id="console"></pre>
+-<script>
+-document.getElementById("target").addEventListener("textInput", function (evt) { evt.target.style.width = 100; });
+-if (window.testRunner) {
+-    testRunner.dumpAsText();
+-    testRunner.waitUntilDone();
+-    window.target = document.getElementById("target");
+-    window.setTimeout(function() {
+-        window.target.focus();
+-        eventSender.keyDown("h");
+-        eventSender.keyDown("e");
+-        eventSender.keyDown("l");
+-        eventSender.keyDown("l");
+-        eventSender.keyDown("o");
+-        shouldBe("window.target.value", '"hello"');
+-        finishJSTest();
+-    }, 0);
+-}
+-
+-window.jsTestIsAsync = true;
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/text-input-controller-leak-document-expected.txt b/third_party/WebKit/LayoutTests/editing/input/text-input-controller-leak-document-expected.txt
+deleted file mode 100644
+index d4c46f8243d2425a99411eaf4b0b7bdab213f309..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/text-input-controller-leak-document-expected.txt
++++ /dev/null
+@@ -1,7 +0,0 @@
+-PASS markedRangeResultGC.wasCollected is true
+-PASS selectedRangeResultGC.wasCollected is true
+-PASS firstRectForCharacterRangeGC.wasCollected is true
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/input/text-input-controller-leak-document.html b/third_party/WebKit/LayoutTests/editing/input/text-input-controller-leak-document.html
+deleted file mode 100644
+index 06e65c066f443b795aa844588804f375c755b69a..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/text-input-controller-leak-document.html
++++ /dev/null
+@@ -1,19 +0,0 @@
+-<html>
+-<body>
+-    <input id='text' type='text'></input>
+-
+-    <script src="../../resources/js-test.js"></script>
+-    <script>
+-        var input = document.getElementById('text');
+-        input.focus();
+-        textInputController.setMarkedText("hello", 0, 5);
+-        var markedRangeResultGC = internals.observeGC(textInputController.markedRange());
+-        var selectedRangeResultGC = internals.observeGC(textInputController.selectedRange());
+-        var firstRectForCharacterRangeGC = internals.observeGC(textInputController.firstRectForCharacterRange(0, 0));
+-        gc();
+-        shouldBeTrue('markedRangeResultGC.wasCollected');
+-        shouldBeTrue('selectedRangeResultGC.wasCollected');
+-        shouldBeTrue('firstRectForCharacterRangeGC.wasCollected');
+-    </script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/text-input-controller-no-editable-no-crash-expected.txt b/third_party/WebKit/LayoutTests/editing/input/text-input-controller-no-editable-no-crash-expected.txt
+deleted file mode 100644
+index 6fd0a9d9bc7aee4b8fc457f6ded26415c0cda3c6..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/text-input-controller-no-editable-no-crash-expected.txt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-Accessing a frame without an editable element should not crash.
+-
+-PASS (no crash).
+diff --git a/third_party/WebKit/LayoutTests/editing/input/text-input-controller-no-editable-no-crash.html b/third_party/WebKit/LayoutTests/editing/input/text-input-controller-no-editable-no-crash.html
+deleted file mode 100644
+index c9a48ef85e7640c42909e961dc064afa45c98299..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/text-input-controller-no-editable-no-crash.html
++++ /dev/null
+@@ -1,15 +0,0 @@
+-<html>
+-<body onload="runTest();">
+-    <script>
+-        testRunner.dumpAsText();
+-        function runTest()
+-        {
+-            document.open();
+-            textInputController.firstRectForCharacterRange(0, 0);
+-            document.write("Accessing a frame without an editable element should not crash.");
+-            document.write("<br/><br/>");
+-            document.write("PASS (no crash).");
+-        }
+-    </script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/input/textcontrol-doubleclick-at-end.html b/third_party/WebKit/LayoutTests/editing/input/textcontrol-doubleclick-at-end.html
+deleted file mode 100644
+index ac3e9ca6df7cb31dbbc24502fa7614d810cb90ff..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/input/textcontrol-doubleclick-at-end.html
++++ /dev/null
+@@ -1,37 +0,0 @@
+-<!DOCTYPE html>
+-<body>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<div id="log"></div>
+-<input value="foo" style="border:0; padding:0;" placeholder="input">
+-<textarea style="border:0; padding:0;" placeholder="textarea">foo</textarea>
+-<script>
+-test(function() {
+-    var input = document.querySelector('input');
+-    input.focus();
+-    input.selectionStart = 0;
+-    input.selectionEnd = 0;
+-    eventSender.mouseMoveTo(input.offsetLeft + input.offsetWidth - 10, input.offsetTop + 4);
+-    eventSender.mouseDown();
+-    eventSender.mouseUp();
+-    eventSender.mouseDown();
+-    eventSender.mouseUp();
+-    assert_equals(input.selectionStart, 0);
+-    assert_equals(input.selectionEnd, 3);
+-}, 'Double-clicking whitespace after the value in an INPUT element should select the last word.');
+-
+-test(function() {
+-    var textarea = document.querySelector('textarea');
+-    textarea.focus();
+-    textarea.selectionStart = 0;
+-    textarea.selectionEnd = 0;
+-    eventSender.mouseMoveTo(textarea.offsetLeft + textarea.offsetWidth - 10, textarea.offsetTop + 4);
+-    eventSender.mouseDown();
+-    eventSender.mouseUp();
+-    eventSender.mouseDown();
+-    eventSender.mouseUp();
+-    assert_equals(textarea.selectionStart, 0);
+-    assert_equals(textarea.selectionEnd, 3);
+-}, 'Double-clicking whitespace after the value in a TEXTAREA element should select the last word.');
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/12882.html b/third_party/WebKit/LayoutTests/editing/inserting/12882.html
+deleted file mode 100644
+index 19d3931d717c37ec605914126ea58f50ae9186ea..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/12882.html
++++ /dev/null
+@@ -1,12 +0,0 @@
+-<p>This tests for a bug where images with align right/left would fail to be inserted on paste.  You should see a picture of abe in the editable region below, aligned to the right. <b>This demonstrates a bug: the focus halo for the editable region doesn't expand to fit an image with align='right'.</b></p>
+-<div id="div" contenteditable="true">Four score and seven years ago our fathers brought forth on this continent a new nation, conceived in liberty and dedicated to the proposition that all men are created equal.</div>
+-
+-<script>
+-var sel = window.getSelection();
+-var div = document.getElementById("div");
+-var text = div.firstChild;
+-
+-sel.collapse(text, 30);
+-
+-document.execCommand("InsertHTML", false, "<img src='../resources/abe.png' align='right'>");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/4278698.html b/third_party/WebKit/LayoutTests/editing/inserting/4278698.html
+deleted file mode 100644
+index eda40cc855a33f0104be66571ce67733319fa242..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/4278698.html
++++ /dev/null
+@@ -1,35 +0,0 @@
+-<html> 
+-<head>
+-
+-<link rel=stylesheet href="../editingStyle.css" type="text/css">
+-<script src=../editing.js language="JavaScript" type="text/JavaScript" ></script>
+-
+-<script>
+-
+-function editingTest() {
+-    moveSelectionForwardByCharacterCommand();
+-    moveSelectionForwardByCharacterCommand();
+-    typeCharacterCommand(' ');
+-}
+-
+-</script>
+-
+-<title>Adding a space inside whitespace:pre text collapses space</title> 
+-</head> 
+-<body>
+-
+-<p>This tests to see if inserting a space inside normal whitespace inside of a whitespace:pre element will collapse other spaces surrounding it.</p>
+-<p>If successful, you should see 'a' followed by 10 spaces followed by 'b'.</p>
+-
+-<hr>
+-
+-<div contenteditable id="root" style="word-wrap: break-word; -khtml-nbsp-mode: space; -khtml-line-break: after-white-space;">
+-<pre id="test" class="editing">a         b</pre>
+-</div>
+-
+-<script>
+-runEditingTest();
+-</script>
+-
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/4840662.html b/third_party/WebKit/LayoutTests/editing/inserting/4840662.html
+deleted file mode 100644
+index 0d87f526622f8a136b7b02eb88c7c535cb01ad57..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/4840662.html
++++ /dev/null
+@@ -1,14 +0,0 @@
+-<p>This tests insertion before/after links that are also display:block.  Insertion before/after display:block links should go inside the links so that text is inserted in the expected paragraph.</p>
+-<div id="div" contenteditable="true"><a href="http://www.google.com/" style="display:block;">all be</a></div>
+-
+-<script>
+-var sel = window.getSelection();
+-var div = document.getElementById("div");
+-sel.collapse(div, 0);
+-
+-document.execCommand("InsertText", false, "This sentence should ");
+-
+-sel.collapse(div, div.childNodes.length);
+-
+-document.execCommand("InsertText", false, " on one line.");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/4875189-1.html b/third_party/WebKit/LayoutTests/editing/inserting/4875189-1.html
+deleted file mode 100644
+index 19532c5b90aea2c536c045051b5133e9c2ed3865..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/4875189-1.html
++++ /dev/null
+@@ -1,12 +0,0 @@
+-<p>This tests for a bug when replacing the contents of a list.  The list shouldn't be removed, just its contents.</p>
+-<div contenteditable="true"><ul><li id="li">You shouldn't see this.</li></ul></div>
+-
+-<script>
+-var r = document.createRange();
+-var li = document.getElementById("li");
+-r.setStart(li, 0);
+-r.setEnd(li, li.childNodes.length);
+-var selection = window.getSelection();
+-selection.addRange(r);
+-document.execCommand("InsertHTML", false, "This should be in a list item.")
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/4875189-2.html b/third_party/WebKit/LayoutTests/editing/inserting/4875189-2.html
+deleted file mode 100644
+index ad9c104e695148f2e8cdb03422257e5493b99d22..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/4875189-2.html
++++ /dev/null
+@@ -1,12 +0,0 @@
+-<p>This tests for a bug when replacing the contents of a floating element.  Just its contents should be removed during the replace.</p>
+-<div contenteditable="true">This shouldn't be in the bordered div.<div id="div" style="float:left; border: 1px solid blue;">You shouldn't see this.</div></div>
+-
+-<script>
+-var r = document.createRange();
+-var div = document.getElementById("div");
+-r.setStart(div, 0);
+-r.setEnd(div, div.childNodes.length);
+-var selection = window.getSelection();
+-selection.addRange(r);
+-document.execCommand("InsertHTML", false, "This should be in a floating blue bordered div.")
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/4959067.html b/third_party/WebKit/LayoutTests/editing/inserting/4959067.html
+deleted file mode 100644
+index 498cfd9bd22cb1694d312c3d11e04836f65626b2..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/4959067.html
++++ /dev/null
+@@ -1,22 +0,0 @@
+-<p>This tests to make sure that insertion over a fully selected special element doesn't do expansion.</p>
+-<div contenteditable="true">
+-<ul id="ul"><li><a id="anchor" href="http://www.google.com/">foo</a></li></ul>
+-</div>
+-<ul id="console"></ul>
+-<script>
+-function log(str) {
+-    var li = document.createElement("li");
+-    var text = document.createTextNode(str);
+-    var console = document.getElementById("console");
+-    li.appendChild(text);
+-    console.appendChild(li);
+-}
+-
+-var sel = window.getSelection();
+-var anchor = document.getElementById("anchor");
+-sel.setBaseAndExtent(anchor, 0, anchor, anchor.childNodes.length);
+-document.execCommand("InsertText", false, "foo");
+-anchor = document.getElementById("anchor");
+-if (!anchor)
+-    log("Failure: a special element was removed during insertion.");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/4960120-1.html b/third_party/WebKit/LayoutTests/editing/inserting/4960120-1.html
+deleted file mode 100644
+index 1dba6859d771c90d519779fd179df2fd6655c261..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/4960120-1.html
++++ /dev/null
+@@ -1,9 +0,0 @@
+-<p>This tests for a bug where the first newline entered into a text area would be lost.</p>
+-<textarea id="textarea"></textarea>
+-
+-<script>
+-var textarea = document.getElementById("textarea");
+-textarea.setSelectionRange(0, 0);
+-
+-document.execCommand("InsertLineBreak");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/4960120-2.html b/third_party/WebKit/LayoutTests/editing/inserting/4960120-2.html
+deleted file mode 100644
+index ab792194a7943f994504fc785bc5a6cb4d4fd02d..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/4960120-2.html
++++ /dev/null
+@@ -1,14 +0,0 @@
+-<p>This tests for a bug where a newline inserted at the end of an anonymous block would be lost.</p>
+-<div id="div" contenteditable="true">foo<div>bar</div></div>
+-
+-<script>
+-if (window.internals)
+-    internals.settings.setEditingBehavior('mac');
+-var div = document.getElementById("div");
+-var sel = window.getSelection();
+-
+-sel.collapse(div, 0);
+-sel.modify("move", "forward", "word");
+-
+-document.execCommand("InsertLineBreak");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5002441.html b/third_party/WebKit/LayoutTests/editing/inserting/5002441.html
+deleted file mode 100644
+index ff7a082b7083b0328641c367638814ee2a114f59..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5002441.html
++++ /dev/null
+@@ -1,8 +0,0 @@
+-<p>This tests for a bug where spaces couldn't be inserted before signatures and replies.</p>
+-<div id="div" contenteditable="true"><br><div>There should be a single space in the paragraph above.</div></div>
+-<script>
+-var div = document.getElementById("div");
+-var selection = window.getSelection();
+-selection.collapse(div, 0);
+-document.execCommand("InsertText", false, " ");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5058163-1.html b/third_party/WebKit/LayoutTests/editing/inserting/5058163-1.html
+deleted file mode 100644
+index 3dd0a399c06d7457953ec6a230fd92520dd323ca..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5058163-1.html
++++ /dev/null
+@@ -1,13 +0,0 @@
+-<style>
+-table {
+-    border: 1px solid #aaa;
+-}
+-</style>
+-<p>This tests for a bug where hitting return between two tables would add a new paragraph at the end of the editable region.</p>
+-<div id="div" contenteditable="true"><table contenteditable="false"><tr><td contenteditable="true">There should be two empty paragraphs after this table and before the next.</td></tr></table><br><table contenteditable="false"><tr><td contenteditable="true">And the caret should be in the second one.</td></tr></table></div>
+-<script>
+-var sel = window.getSelection();
+-var div = document.getElementById("div");
+-sel.collapse(div, 1);
+-document.execCommand("InsertParagraph");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5058163-2.html b/third_party/WebKit/LayoutTests/editing/inserting/5058163-2.html
+deleted file mode 100644
+index 54baf4d005b6678ca4500eff81609698f218fdc1..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5058163-2.html
++++ /dev/null
+@@ -1,10 +0,0 @@
+-<p>This tests for a bug where hitting return after a line break in text that preserves newlines wouldn't do anything.</p>
+-<div id="div" contenteditable="true" style="white-space: pre;">xxx
+-There should be an empty paragraph before this one, and the caret should be at the start of this paragraph.</div>
+-<script>
+-var sel = window.getSelection();
+-var div = document.getElementById("div");
+-var text = div.firstChild;
+-sel.collapse(text, 4);
+-document.execCommand("InsertParagraph");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5156401-2.html b/third_party/WebKit/LayoutTests/editing/inserting/5156401-2.html
+deleted file mode 100644
+index 2224cd81d9741220fa85aed235823c2b303e7a0d..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5156401-2.html
++++ /dev/null
+@@ -1,11 +0,0 @@
+-<body>
+-<p>This tests for a bug where inserting at the end of a link would place content in the wrong paragraph.</p>
+-<div contenteditable="true"><a id="link" href="#">Everything&nbsp;<br></a></div>
+-               
+-<script>
+-var sel = window.getSelection();
+-var link = document.getElementById("link");
+-sel.collapse(link, link.childNodes.length);
+-document.execCommand("InsertText", false, "in this editable region should be in the same paragraph.");
+-</script>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5378847-expected.txt b/third_party/WebKit/LayoutTests/editing/inserting/5378847-expected.txt
+deleted file mode 100644
+index 1927f893423b65b7fd05ed59e4865ff9eda0f432..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5378847-expected.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-This tests character insertion on a line with an unrendered text node. You should see 'Hello' and then 'World' below.
+-
+-Hello
+-World
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5378847.html b/third_party/WebKit/LayoutTests/editing/inserting/5378847.html
+deleted file mode 100644
+index 541ed81858c4a6c657055cfb8d61065441e399ae..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5378847.html
++++ /dev/null
+@@ -1,16 +0,0 @@
+-<p>This tests character insertion on a line with an unrendered text node.  You should see 'Hello' and then 'World' below.</p>
+-<div id="div" contenteditable="true"><table border="1"><tr><td>Hello</td></tr></table><br></div>
+-
+-<script>
+-if (window.testRunner)
+-    window.testRunner.dumpAsText();
+-    
+-var div = document.getElementById("div");
+-children = div.childNodes;
+-br = children[1];
+-text = document.createTextNode('\n');
+-div.insertBefore(text, br);
+-sel = window.getSelection();
+-sel.collapse(div, 1);
+-document.execCommand("InsertText", false, "World");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5418891.html b/third_party/WebKit/LayoutTests/editing/inserting/5418891.html
+deleted file mode 100644
+index 008af890a4c13de48e52101cc89af84d72f3892b..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5418891.html
++++ /dev/null
+@@ -1,22 +0,0 @@
+-<style>
+-blockquote {
+-    color: blue;
+-    border-left: 2px solid blue;
+-    padding-left: 5px;
+-    margin: 0px;
+-}
+-</style>
+-<p>This tests for a crash when attempting to break a blockquote at the end of its content.  The caret should be in the first of two empty paragraphs between two pieces of quoted content.</p>
+-<div contenteditable="true">
+-<blockquote type="cite"><div id="dv">foo</div></blockquote>
+-<br>
+-<blockquote type="cite"><div>bar</div></blockquote>
+-</div>
+-
+-<script>
+-dv = document.getElementById("dv");
+-text = dv.firstChild;
+-s = window.getSelection();
+-s.collapse(text, 3);
+-document.execCommand("InsertNewlineInQuotedContent");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5510537.html b/third_party/WebKit/LayoutTests/editing/inserting/5510537.html
+deleted file mode 100644
+index 103708a501a706da7c3a572647521fb6d6736fc7..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5510537.html
++++ /dev/null
+@@ -1,37 +0,0 @@
+-<html>
+-    <head>
+-        <style>
+-            blockquote {
+-                color: blue;
+-                border-left: 2px solid blue;
+-                margin: 0px;
+-                padding-left: 10px;
+-            }
+-        </style>
+-        <script>
+-            function log(msg)
+-            {
+-                document.getElementById('console').appendChild(document.createTextNode(msg + '\n'));
+-            }
+-            
+-            function test()
+-            {
+-                var s = window.getSelection();
+-                s.collapse(document.getElementById('qt'), 0);
+-                document.execCommand("InsertNewlineInQuotedContent");
+-                document.execCommand("InsertText", true, "unquoted");
+-                s.collapse(document.getElementById('qt2'), 0);
+-                document.execCommand("InsertNewlineInQuotedContent");
+-                document.execCommand("InsertText", true, "unquoted");
+-            }
+-        </script>
+-    </head>
+-    <body onload="test()">
+-        <p>This tests that inserting a newline at the beginning of quoted content doesn't add an extra quoted line.  The test has passed if there are no empty lines (quoted or unquoted) in the box below.</p>
+-        <div contenteditable="true">
+-            <blockquote type="cite"><div id="qt">quote level one</div></blockquote>
+-            <blockquote type="cite"><div>quote level one</div><div><blockquote type="cite"><div id="qt2">quote level two</div></blockquote></div></blockquote>
+-        </div>
+-        <pre id="console"></pre>
+-    </body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5549929-1-expected.txt b/third_party/WebKit/LayoutTests/editing/inserting/5549929-1-expected.txt
+deleted file mode 100644
+index 46a839f8b61a03f5457629790ab8acd984c270fb..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5549929-1-expected.txt
++++ /dev/null
+@@ -1,5 +0,0 @@
+-This tests for a crash when inserting into a tab into a tab span that contains a br. You should no longer be able to get a br inside a tab span while editing but we should still avoid the crash.
+-
+-foo
+-	
+-bar
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5549929-1.html b/third_party/WebKit/LayoutTests/editing/inserting/5549929-1.html
+deleted file mode 100644
+index ff3baeffdce8adb96e5a73b56dfe87324f7cb22e..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5549929-1.html
++++ /dev/null
+@@ -1,14 +0,0 @@
+-<p>This tests for a crash when inserting into a tab into a tab span that contains a br.  You should no longer be able to get a br inside a tab span while editing but we should still avoid the crash.</p>
+-<div id="div" contenteditable="true">
+-<div>foo</div>
+-<div><span id="span" class="Apple-tab-span"><br></span></div>
+-<div>bar</div>
+-
+-<script>
+-if (window.testRunner)
+-    window.testRunner.dumpAsText();
+-document.getElementById("div").focus();
+-span = document.getElementById("span");
+-window.getSelection().collapse(span, 0);
+-document.execCommand("InsertText", false, "\t");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5549929-2.html b/third_party/WebKit/LayoutTests/editing/inserting/5549929-2.html
+deleted file mode 100644
+index aa98ad072b635a60cba71127d1961bac4cba263d..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/5549929-2.html
++++ /dev/null
+@@ -1,14 +0,0 @@
+-<p>This tests to make sure that a br isn't inserted into a tab span during an InsertLineBreak operation.  You can test for its existence with the DOM inspector or you can look at the render tree.</p>
+-<div id="div" contenteditable="true">
+-<div><span class="Apple-tab-span" style="white-space:pre">	</span>foo</div>
+-<div><span class="Apple-tab-span" style="white-space:pre">	</span>bar</div>
+-</div>
+-
+-<script>
+-div = document.getElementById("div");
+-div.focus();
+-sel = window.getSelection();
+-sel.collapse(div, 0);
+-sel.modify("extend", "forward", "paragraph");
+-document.execCommand("InsertLineBreak");
+-</script>
 diff --git a/third_party/WebKit/LayoutTests/editing/inserting/5549929-3.html b/third_party/WebKit/LayoutTests/editing/inserting/5549929-3.html
 deleted file mode 100644
 index ce884d37282448a4c2798b4f937b623d78428145..0000000000000000000000000000000000000000
@@ -5025,6 +6866,34 @@ index 033e26addd6406649b757715f1f6001954bbc5bb..00000000000000000000000000000000
 -<a>A</a>
 -</ruby>
 -</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/inserting/insert-paragraph-separator-crash2.html b/third_party/WebKit/LayoutTests/editing/inserting/insert-paragraph-separator-crash2.html
+deleted file mode 100644
+index 18bc86ce08f3d36cf729920561edbad1acfafcbe..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/inserting/insert-paragraph-separator-crash2.html
++++ /dev/null
+@@ -1,22 +0,0 @@
+-<!DOCTYPE html>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<script>
+-test(function() {
+-    var p = document.createElement('p');
+-    document.replaceChild(p, document.documentElement);
+-    p.innerHTML = '<form>\n<p>\n<ruby>\n<rb>\n</rb></ruby></p><table>\n</table></form>\n<ruby>\n<p>\n</p><table></table></ruby>';
+-    var s = document.querySelector('rb').firstChild;
+-    var e = document.querySelector('table');
+-    var ol = document.createElement('ol');
+-    ol.innerHTML = '\n<li>\n\n</li>\n';
+-    e.insertBefore(ol, e.firstChild);
+-    var r = document.createRange();
+-    r.setStart(s, 0);
+-    r.setEnd(e, 1);
+-    window.getSelection().removeAllRanges();
+-    window.getSelection().addRange(r);
+-    document.designMode = 'on';
+-    document.execCommand('InsertParagraph');
+-}, 'InsertParagraph command should not crash with editable P root element.');
+-</script>
 diff --git a/third_party/WebKit/LayoutTests/editing/inserting/insert-paragraph-separator-in-blockquote-expected.txt b/third_party/WebKit/LayoutTests/editing/inserting/insert-paragraph-separator-in-blockquote-expected.txt
 deleted file mode 100644
 index 1e396f7832f945c3b56cafac83d6ef7604838926..0000000000000000000000000000000000000000
@@ -15850,2062 +17719,3 @@ index d0573ff8e86def5685998cff5d95d1d11eca0aba..00000000000000000000000000000000
 -
 -TEST COMPLETE
 -
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/files-during-page-drags.html b/third_party/WebKit/LayoutTests/editing/pasteboard/files-during-page-drags.html
-deleted file mode 100644
-index d08efa889589f4c02096f193579e13adf4f7d80d..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/files-during-page-drags.html
-+++ /dev/null
-@@ -1,11 +0,0 @@
--<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
--<html>
--<head>
--<script src="../../resources/js-test.js"></script>
--</head>
--<body>
--<p id="description"></p>
--<div id="console"></div>
--<script src="script-tests/files-during-page-drags.js"></script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-drop-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-drop-expected.txt
-deleted file mode 100644
-index fa109875243d64be510e157346d9a5f511882ddb..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-drop-expected.txt
-+++ /dev/null
-@@ -1,5 +0,0 @@
--This tests that getData is supported for type text/plain during drop. We select "drag", drag it, and then check that on drop getData returns "drag". To run this test manually, just drag "drag" on to "drop".
--
--drag
--drop
--SUCCESS: Pasted text matched expected text
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-drop.html b/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-drop.html
-deleted file mode 100644
-index 24cdb6d85546b0fe08a107e9286de3ef873066a5..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-drop.html
-+++ /dev/null
-@@ -1,68 +0,0 @@
--<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
--<html>
--<head>
--<script src="../editing.js" type="text/javascript"></script>
--<script type="text/javascript">
--if (window.testRunner) {  
--    window.testRunner.waitUntilDone(); 
--    testRunner.dumpAsText();
--}
--
--var handleDrop = function(e) {
--    var console = document.getElementById('console');
--    var pasteText = e.dataTransfer.getData("text/plain");
--    // Check that the content we get is the same content we dragged.
--    var expectedText = 'drag';
--    if (pasteText == expectedText)
--        console.innerHTML += "SUCCESS: Pasted text matched expected text";
--    else
--        console.innerHTML += "FAILURE: Expected: " +expectedText + "\nbut was: " + pasteText;
--}
--
--var handleDrag = function(e) {
--    e.dataTransfer.dropEffect = "copy";
--    // Cancel the drag, so we get the drop.
--    e.preventDefault();
--}
--    
--function runTest() {
--    if (window.internals)
--        internals.settings.setEditingBehavior('mac');
--    var console = document.getElementById('console');
--    var editDiv = document.getElementById('test');
--    editDiv.addEventListener('drop', handleDrop, false);
--    editDiv.addEventListener('dragover', handleDrag, false);
--  
--    // Select the text to drag.
--    selection.collapse(editDiv, 0);
--    extendSelectionForwardByWordCommand(); 
--
--    if (!window.testRunner)
--        return;
--    
--    // Now, drag foo.
--    var drag = document.getElementById('drag');
--    var x = drag.offsetLeft + drag.offsetWidth / 2;
--    var y = drag.offsetTop + drag.offsetHeight / 2;
--    eventSender.mouseMoveTo(x, y);
--    eventSender.mouseDown();
--    eventSender.leapForward(400);
--
--    // And drop it.
--    var drop = document.getElementById("drop");
--    x = drop.offsetLeft + drop.offsetWidth / 2;
--    y = drop.offsetTop + drop.offsetHeight / 2;
--    eventSender.mouseMoveTo(x, y);
--    eventSender.mouseUp();
--    window.testRunner.notifyDone();
--}
--
--</script>
--<title>Test getData during drag and drop.</title>
--</head>
--<body onload='runTest();'>
--<p>This tests that getData is supported for type text/plain during drop.  We select "drag", drag it, and then check that on drop getData returns "drag".  To run this test manually, just drag "drag" on to "drop".</p>
--<div contentEditable id='test'><div><span id='drag'>drag</span></div><div><span id='drop'>drop</span></div></div>
--<div id='console'></div>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-paste-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-paste-expected.txt
-deleted file mode 100644
-index d78e0855c422344860cd632b4db503f6648f7670..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-paste-expected.txt
-+++ /dev/null
-@@ -1,10 +0,0 @@
--This tests that getData is supported for type text/plain during paste. We select "foo", copy it, and then check that on paste getData returns "foo". To run manually, select "foo", copy it, and paste it.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS Pasted text matched expected text
--PASS successfullyParsed is true
--
--TEST COMPLETE
--foo
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-paste.html b/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-paste.html
-deleted file mode 100644
-index 33fe9b64ece6cac36b1d39037fe385deba3b04f4..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/get-data-text-plain-paste.html
-+++ /dev/null
-@@ -1,11 +0,0 @@
--<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
--<html>
--<head>
--<script src="../../resources/js-test.js"></script>
--</head>
--<body>
--<p id="description"></p>
--<div id="console"></div>
--<script src="script-tests/get-data-text-plain-paste.js"></script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/innerText-inline-table.html b/third_party/WebKit/LayoutTests/editing/pasteboard/innerText-inline-table.html
-deleted file mode 100644
-index 00cba29597938ff52ac33c2f731c9b721a4b88dd..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/innerText-inline-table.html
-+++ /dev/null
-@@ -1,32 +0,0 @@
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--<div id="explanation">Checks that the text iterator is emitting a space before and after an inline table.</div>
--
--<div id="test">hello<table style="display:inline"><tr><td>1</td></tr></table>world</div>
--<div id="test2">foo <table style="display:inline"><tr><td>2</td></tr></table> bar</div>
--<ul id="console"></ul>
--<script>
--
--function log(message) {
--    var console = document.getElementById("console");
--    var li = document.createElement("li");
--    var pre = document.createElement("pre");
--    pre.appendChild(document.createTextNode(message));
--    li.appendChild(pre);
--    console.appendChild(li);
--}
--
--var e = document.getElementById("test");
--var e2 = document.getElementById("test2");
--var expected = "hello 1 world\nfoo  2  bar";
--var actual = e.innerText + "\n" + e2.innerText;
--if (expected == actual)
--    log("Success!");
--else {
--    log("Failure!");
--    log("Expected \n\"" + expected + "\"");
--    log("Received \n\"" + actual + "\"");
--}
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/input-field-1.html b/third_party/WebKit/LayoutTests/editing/pasteboard/input-field-1.html
-deleted file mode 100644
-index 6e1247230ca75563a3a5a9a236dd4675b78b7277..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/input-field-1.html
-+++ /dev/null
-@@ -1,34 +0,0 @@
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--</script>
--<script>
--function log(str) {
--    var li = document.createElement("li");
--    li.appendChild(document.createTextNode(str));
--    var console = document.getElementById("console");
--    console.appendChild(li);
--}
--function shouldBe(expected, actual) {
--    if (expected != actual)
--        log("Failure. Expected: " + expected + ", Actual: " + actual);
--    else
--        log("Passed");
--}
--</script>
--
--<p>This tests Copy/Paste of a input field.</p>
--<div id="div" contenteditable="true"><input type="text"></div>
--<ul id="console"></ul>
--<script>
--var div = document.getElementById("div");
--div.focus();
--document.execCommand("SelectAll");
--
--document.execCommand("Copy");
--var sel = window.getSelection();
--sel.modify("move", "forward", "character");
--document.execCommand("Paste");
--
--shouldBe(document.getElementsByTagName("input").length, 2);
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-display-none-div-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-display-none-div-expected.txt
-deleted file mode 100644
-index a6799a6cfc28802a0fbadeb6bfdb01a95c16c35d..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-display-none-div-expected.txt
-+++ /dev/null
-@@ -1,4 +0,0 @@
--This tests pasting (InsertHTML) into an input element with a CSS rule div { display: none}. You should see PASS below.
--
--
--PASS
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-display-none-div.html b/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-display-none-div.html
-deleted file mode 100644
-index 51a5f8e0ecd3a6f8284e4ea65f903ed11a3f7986..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-display-none-div.html
-+++ /dev/null
-@@ -1,26 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<style type="text/css">
--div { display: none; }
--</style>
--</head>
--<body>
--<p>This tests pasting (InsertHTML) into an input element with a CSS rule div { display: none}.
--You should see PASS below.</p>
--<input type="text" value="FAIL">
--<p><script>
--
--if (window.testRunner)
--    testRunner.dumpAsText();
--
--var input = document.querySelector('input');
--input.focus();
--input.select();
--document.execCommand('InsertHTML', false, 'PASS');
--
--document.write(input.value);
--
--</script></p>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-visibility-hidden-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-visibility-hidden-expected.txt
-deleted file mode 100644
-index 87155c32fd5bee87c37e987b5ada72662cf6b699..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-visibility-hidden-expected.txt
-+++ /dev/null
-@@ -1,4 +0,0 @@
--This tests pasting (InsertHTML) into an input element when body element has visibility set to hidden. You should see PASS below.
--
--
--PASS
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-visibility-hidden.html b/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-visibility-hidden.html
-deleted file mode 100644
-index 2f7a7ea6106accb67c5ca2c0cb6afce9e5c5f350..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/input-with-visibility-hidden.html
-+++ /dev/null
-@@ -1,22 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body style="visibility: hidden;">
--<div  style="visibility: visible;">
--<p>This tests pasting (InsertHTML) into an input element when body element has visibility set to hidden.
--You should see PASS below.</p>
--<input type="text" value="FAIL">
--<p><script>
--
--if (window.testRunner)
--    testRunner.dumpAsText();
--
--var input = document.querySelector('input');
--input.select();
--document.execCommand('InsertHTML', false, 'PASS');
--
--document.write(input.value);
--
--</script></p>
--</div>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-div-text-into-text-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/insert-div-text-into-text-expected.txt
-deleted file mode 100644
-index da4b16642a39727bbbc997c1c35c0939fb329f59..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-div-text-into-text-expected.txt
-+++ /dev/null
-@@ -1,8 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--This tests inserting a text wrapped in a div inside a text node.
--| "There should<#selection-caret> be no line breaks in this sentence."
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-div-text-into-text.html b/third_party/WebKit/LayoutTests/editing/pasteboard/insert-div-text-into-text.html
-deleted file mode 100644
-index 0b38ed8984c2b48d155fbe88a5ce16a4221b2bf3..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-div-text-into-text.html
-+++ /dev/null
-@@ -1,26 +0,0 @@
--<!DOCTYPE>
--<html>
--<body>
--<div id="test" contenteditable="true">There&nbsp; be no line breaks in this sentence.</div>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--if (window.internals)
--    internals.settings.setEditingBehavior('mac');
--
--Markup.description('This tests inserting a text wrapped in a div inside a text node.');
--
--var sel = window.getSelection();
--var e = document.getElementById("test").firstChild;
--
--sel.collapse(e, 0);
--sel.modify("move", "forward", "word");
--sel.modify("move", "forward", "character");
--document.execCommand("InsertHTML", false, "<div>should</div>");
--
--Markup.dump('test');
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-weight-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-weight-expected.txt
-deleted file mode 100644
-index 0415f9b0fb7a4e545258ca3b4cb7089017939682..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-weight-expected.txt
-+++ /dev/null
-@@ -1,17 +0,0 @@
--This tests inserting elements with font-weight set to lighter and bolder values
--
--Content to insert:
--| <span>
--|   style="font-weight: lighter;"
--|   "hello"
--| <span>
--|   style="font-weight: bolder;"
--|   "world"
--
--After insertion:
--| <span>
--|   style="font-weight: lighter;"
--|   "hello"
--| <span>
--|   style="font-weight: bolder;"
--|   "world<#selection-caret>"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-weight.html b/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-weight.html
-deleted file mode 100644
-index 5b610615948e9efc1f938d632ff74c7b56010aa7..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-weight.html
-+++ /dev/null
-@@ -1,19 +0,0 @@
--<!DOCTYPE html>
--<html>
--    <body>
--        <div id="container" contenteditable="true"></div>
--        <div id="content"><span style="font-weight: lighter;">hello</span><span style="font-weight: bolder;">world</span></div>
--        <script src="../../resources/dump-as-markup.js"></script>
--        <script>
--            Markup.description('This tests inserting elements with font-weight set to lighter and bolder values');
--
--            var content = document.getElementById('content');
--            Markup.dump(content, 'Content to insert');
--
--            document.querySelector('div[contenteditable]').focus();
--            document.execCommand('InsertHTML', null, content.innerHTML);
--
--            Markup.dump('container', 'After insertion');
--        </script>
--    </body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-weight2.html b/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-weight2.html
-deleted file mode 100644
-index c72b31f7e8080233df7ba4f0aaf683371fccc928..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-weight2.html
-+++ /dev/null
-@@ -1,23 +0,0 @@
--<!DOCTYPE html>
--<script src="../../resources/testharness.js"></script>
--<script src="../../resources/testharnessreport.js"></script>
--a
--<style>
--* {
--    font-weight:lighter;
--}
--</style>
--a
--<style>
--* {
--    font-weight:900;
--}
--</style>
--<div id="log"></div>
--<script>
--test(function() {
--    document.designMode = 'on';
--    document.execCommand("selectAll");
--    document.execCommand("insertOrderedList");
--});
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-with-size-and-css-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-with-size-and-css-expected.txt
-deleted file mode 100644
-index 340fc8db4605d909fa3b803683f223c5b87f332a..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-with-size-and-css-expected.txt
-+++ /dev/null
-@@ -1,30 +0,0 @@
--This tests inserting a font element with both font-size CSS property and size attribute.
--WebKit should not strip just font-size property. Two instances of "hello world" should look identical to each other.
--
--Insertion point:
--| <div>
--|   contenteditable=""
--|   style="font-size: 25px;"
--|   "WebKit"
--
--Content to insert:
--| <font>
--|   size="7"
--|   style="font-size: 25px;"
--|   "hello "
--| <font>
--|   color="blue"
--|   size="7"
--|   style="font-size: 15px;"
--|   "world "
--
--After insertion:
--| <div>
--|   contenteditable=""
--|   style="font-size: 25px;"
--|   "hello "
--|   <font>
--|     color="blue"
--|     style="font-size: 15px;"
--|     "world <#selection-caret>"
--|   "WebKit"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-with-size-and-css.html b/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-with-size-and-css.html
-deleted file mode 100644
-index 6d97e8ac469785cc8cf0bc553851163c1b017a4e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-font-with-size-and-css.html
-+++ /dev/null
-@@ -1,24 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<div id="container"><div contenteditable style="font-size: 25px;">WebKit</div></div>
--<div id="content"><font size="7" style="font-size: 25px;">hello </font><font size="7" color="blue" style="font-size: 15px;">world </font></div>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--
--Markup.description('This tests inserting a font element with both font-size CSS property and size attribute.\n'
--    + 'WebKit should not strip just font-size property. Two instances of "hello world" should look identical to each other.');
--
--Markup.dump('container', 'Insertion point');
--
--var content = document.getElementById('content');
--Markup.dump(content, 'Content to insert');
--
--document.querySelector('div[contenteditable]').focus();
--document.execCommand('InsertHTML', null, content.innerHTML);
--
--Markup.dump('container', 'After insertion');
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-u-with-text-decoration-none-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/insert-u-with-text-decoration-none-expected.txt
-deleted file mode 100644
-index 570709354113a4e724e63339dc51de4e24fc46ec..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-u-with-text-decoration-none-expected.txt
-+++ /dev/null
-@@ -1,24 +0,0 @@
--This tests inserting an u element with text-decoration property set to none.
--WebKit should not strip just font-size property. Two instances of "hello world" should look identical to each other.
--
--Insertion point:
--| <div>
--|   contenteditable=""
--|   " WebKit"
--
--Content to insert:
--| <u>
--|   style="text-decoration: none;"
--|   "hello "
--| <u>
--|   style="text-decoration: line-through;"
--|   "world"
--
--After insertion:
--| <div>
--|   contenteditable=""
--|   "hello "
--|   <span>
--|     style="text-decoration-line: line-through;"
--|     "world<#selection-caret>"
--|   " WebKit"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-u-with-text-decoration-none.html b/third_party/WebKit/LayoutTests/editing/pasteboard/insert-u-with-text-decoration-none.html
-deleted file mode 100644
-index 6c5a1c3156704c9e610e2991f1c7919a368b40cd..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/insert-u-with-text-decoration-none.html
-+++ /dev/null
-@@ -1,24 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<div id="container"><div contenteditable>&nbsp;WebKit</div></div>
--<div id="content"><u style="text-decoration: none;">hello </u><u style="text-decoration: line-through;">world</u></div>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--
--Markup.description('This tests inserting an u element with text-decoration property set to none.\n'
--    + 'WebKit should not strip just font-size property. Two instances of "hello world" should look identical to each other.');
--
--Markup.dump('container', 'Insertion point');
--
--var content = document.getElementById('content');
--Markup.dump(content, 'Content to insert');
--
--document.querySelector('div[contenteditable]').focus();
--document.execCommand('InsertHTML', null, content.innerHTML);
--
--Markup.dump('container', 'After insertion');
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-1-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-1-expected.txt
-deleted file mode 100644
-index 66bd66c52b839f83892aa0f8b9964604c1fa0d80..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-1-expected.txt
-+++ /dev/null
-@@ -1,11 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--There is an interchange newline at the end of the incoming fragment. "bar" and "x" should be in separate paragraphs
--The paragraph "bar" is inside a div wrapped in a span, and the old paste code that handled interchange newlines did not handle this case.
--| "xfoo"
--| <div>
--|   "bar"
--| "<#selection-caret>x"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-1.html b/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-1.html
-deleted file mode 100644
-index 900bfd59bd5f7cd9bd3ba32da688c6874e115c00..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-1.html
-+++ /dev/null
-@@ -1,24 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<div id="test" contenteditable="true">xx</div>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--Markup.description('There is an interchange newline at the end of the incoming fragment. "bar" and "x" should be in separate paragraphs\n'
--+ 'The paragraph "bar" is inside a div wrapped in a span, and the old paste code that handled interchange newlines did not handle this case.');
--
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--s.modify("move", "forward", "character");
--document.execCommand("InsertHTML", false, "<div>foo</div><span><div>bar</div></span><br class='Apple-interchange-newline'>");
--
--Markup.dump('test');
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-2-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-2-expected.txt
-deleted file mode 100644
-index 6a70be7d89097907f28a09db8f1c81e3eb1a1867..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-2-expected.txt
-+++ /dev/null
-@@ -1,13 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--This demonstrates a bug in interchange newline handling during paste.
--The selection being pasted into contain multiple blocks, which breaks the old code in paste that handled interchange newlines.
--| <div>
--|   "fbar"
--| "baz"
--| <div>
--|   "<#selection-caret>ar"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-2.html b/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-2.html
-deleted file mode 100644
-index 2d3d15a730f5b32e8787e217e0a707ec4a8a3392..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-2.html
-+++ /dev/null
-@@ -1,24 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<div id="test" contenteditable="true"><div>foo</div>bar</div>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--Markup.description('This demonstrates a bug in interchange newline handling during paste.\n'
--+ 'The selection being pasted into contain multiple blocks, which breaks the old code in paste that handled interchange newlines.')
--
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--s.modify("move", "forward", "character");
--s.modify("extend", "forward", "line");
--document.execCommand("InsertHTML", false, "<div>bar</div>baz<br class='Apple-interchange-newline'>");
--
--Markup.dump('test');
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-3-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-3-expected.txt
-deleted file mode 100644
-index d4d4e4ccb849013936310e97602323d87eb183e2..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-3-expected.txt
-+++ /dev/null
-@@ -1,25 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--This demonstrates a bug in interchange newline handling during paste.
--There is an interchange newline at the end of the incoming fragment and so the caret should end up on an empty line.
--The editable region is followed by non-editable content, which breaks the old code in paste that handled interchange newlines.
--| "
--"
--| <div>
--|   contenteditable="true"
--|   id="test"
--|   "foo"
--|   <div>
--|     "bar"
--|   <div>
--|     <#selection-caret>
--|     <br>
--| "
--This is non-editable content.
--
--"
--| <script>
--|   "
--runTest();
--"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-3.html b/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-3.html
-deleted file mode 100644
-index ccf443e829c4995a288f303634f5ede593b0ab8d..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-3.html
-+++ /dev/null
-@@ -1,34 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--function runTest() {
--    Markup.description('This demonstrates a bug in interchange newline handling during paste.\n'
--    + 'There is an interchange newline at the end of the incoming fragment and so the caret should end up on an empty line.\n'
--    + 'The editable region is followed by non-editable content, which breaks the old code in paste that handled interchange newlines.');
--
--    var s = window.getSelection();
--    var e = document.getElementById("test");
--
--    s.collapse(e, 0);
--    document.execCommand("InsertHTML", false, "foo<div>bar</div><br class='Apple-interchange-newline'>");
--
--    Markup.dump(document.body);
--}
--
--</script>
--</head>
--<body>
--<div id="test" contenteditable="true"></div>
--This is non-editable content.
--
--<script>
--runTest();
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-4-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-4-expected.txt
-deleted file mode 100644
-index 5b6f2265e065f3cecae31b56f36bd3918fb066cf..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-4-expected.txt
-+++ /dev/null
-@@ -1,22 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--This tests for a bug where pasted content starting with an interchange newline would end up
--outside of the editable region where it was pasted. You should see 'foo\nbar' below.
--| "
--"
--| <div>
--|   contenteditable="true"
--|   id="test"
--|   "foo"
--|   <div>
--|     "bar<#selection-caret>"
--|     <br>
--| "
--non-editable
--"
--| <script>
--|   "
--runTest();
--"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-4.html b/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-4.html
-deleted file mode 100644
-index 352c2528fbfbcd0ed7cd71555df7c354f35065dc..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/interchange-newline-4.html
-+++ /dev/null
-@@ -1,33 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--function runTest() {
--    Markup.description("This tests for a bug where pasted content starting with an interchange newline would end up\n"
--    + "outside of the editable region where it was pasted. You should see 'foo\\nbar' below.");
--
--    var sel = window.getSelection();
--    var e = document.getElementById("test");
--
--    sel.collapse(e, 0);
--    sel.modify("move", "forward", "word");
--    document.execCommand("InsertHTML", false, "<br class='Apple-interchange-newline'>bar");
--
--    Markup.dump(document.body);
--}
--
--</script>
--</head>
--<body>
--<div id="test" contenteditable="true">foo</div>
--non-editable
--<script>
--runTest();
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/line-feed-between-br-and-b-should-not-reorder-pasted-content-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/line-feed-between-br-and-b-should-not-reorder-pasted-content-expected.txt
-deleted file mode 100644
-index 8e383a787ec3089698f886d21ac4e2b7b2ea778f..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/line-feed-between-br-and-b-should-not-reorder-pasted-content-expected.txt
-+++ /dev/null
-@@ -1,65 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--Tests: 
--Bug fix for <rdar://problem/4035648> REGRESSION (Mail): line feed in source HTML file causes bad copy/paste behavior 
--In particular, the line feed that appears between br and b elements should not reorder the content in createMarkup.
--Expected Results: 
--Should see the text self-documenting itself correctly: 
--bold
--plain
--
--
--Before cut:
--| "
--"
--| <div>
--|   class="editing"
--|   id="test"
--|   "
--"
--|   <#selection-anchor>
--|   <br>
--|   "
--"
--|   <b>
--|     "bold"
--|     <br>
--|     "
--"
--|   "
--plain<#selection-focus>
--"
--| "
--"
--
--After cut:
--| "
--"
--| <div>
--|   class="editing"
--|   id="test"
--|   <#selection-caret>
--|   <br>
--| "
--"
--
--After paste:
--| "
--"
--| <div>
--|   class="editing"
--|   id="test"
--|   <br>
--|   <b>
--|     "bold"
--|     <br>
--|   "plain<#selection-caret>"
--|   <br>
--| "
--"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/line-feed-between-br-and-b-should-not-reorder-pasted-content.html b/third_party/WebKit/LayoutTests/editing/pasteboard/line-feed-between-br-and-b-should-not-reorder-pasted-content.html
-deleted file mode 100644
-index e2e6fabbee71f21826b0ab472bf0188cecdceea9..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/line-feed-between-br-and-b-should-not-reorder-pasted-content.html
-+++ /dev/null
-@@ -1,77 +0,0 @@
--<!DOCTYPE html>
--<html> 
--<head>
--
--<style>
--.editing { 
--    border: 2px solid red; 
--    font-size: 24px; 
--}
--.explanation { 
--    border: 2px solid blue; 
--    padding: 12px; 
--    font-size: 24px; 
--    margin-bottom: 24px;
--}
--.scenario { margin-bottom: 16px;}
--.scenario:first-line { font-weight: bold; margin-bottom: 16px;}
--.expected-results:first-line { font-weight: bold }
--</style>
--<script src=../editing.js language="JavaScript" type="text/JavaScript" ></script>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--
--function editingTest() {
--    for (i = 0; i < 3; i++)
--        extendSelectionForwardByLineCommand();
--
--    Markup.description(document.querySelector('.explanation').innerText);
--
--    Markup.dump('root', 'Before cut');
--    cutCommand();
--    Markup.dump('root', 'After cut');
--
--    pasteCommand();
--    Markup.dump('root', 'After paste');
--}
--
--</script>
--
--<title>Editing Test</title> 
--</head> 
--<body>
--
--<div class="explanation">
--<div class="scenario">
--Tests: 
--<br>
--Bug fix for <a href="rdar://problem/4035648">&lt;rdar://problem/4035648&gt;</a> REGRESSION (Mail): line feed in source HTML file causes bad copy/paste behavior
--<br>
--In particular, the line feed that appears between br and b elements should not reorder the content in createMarkup.
--</div>
--<div class="expected-results">
--Expected Results:
--<br>
--Should see the text self-documenting itself correctly:
--<BR>
--<B>bold<BR>
--</B>
--plain
--</div>
--</div>
--
--<div contenteditable id="root" style="word-wrap: break-word; -khtml-nbsp-mode: space; -khtml-line-break: after-white-space;">
--<div id="test" class="editing">
--<BR>
--<B>bold<BR>
--</B>
--plain
--</div>
--</div>
--
--<script>
--runEditingTest();
--</script>
--
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-after-delete-1.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-after-delete-1.html
-deleted file mode 100644
-index 978af9a47df1882b94608579ce93082a9e8f7f8a..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-after-delete-1.html
-+++ /dev/null
-@@ -1,24 +0,0 @@
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--<style>
--div {
--    border: 1px solid black;
--    margin: 2px;
--}
--</style>
--<p>When ReplaceSelectionCommand deletes the current selection, it should request that the deletion do a merge in some cases (normally, though, it should ask that a merge not be done, because a merge will cause information about block nesting to be lost).  It wasn't requesting a merge in cases where it should have.</p>
--<p>The failing case is where the incoming fragment has more than one block, and the selection being pasted into ends at the end of a paragraph.  Any time the selection being pasted into ends at the end of a paragraph, deleting will leave leave a) a br or b) an empty block at the end of the deleted selection.  So, not merging will leave an extraneous empty line or a collapsed block after the paste operation.</p>
--<div id="test" contenteditable="true"><div style="border: 1px solid red;">bar</div><div style="border: 1px solid blue;">bar<br></div></div>
--
--<script>
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--s.modify("move", "forward", "character");
--s.modify("extend", "forward", "line");
--s.modify("extend", "forward", "line");
--document.execCommand("InsertHTML", false, "<div>foo</div><div>bar</div>");
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-after-delete-2.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-after-delete-2.html
-deleted file mode 100644
-index ec596bf22c46380b7d5763c9d7534f40179650c1..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-after-delete-2.html
-+++ /dev/null
-@@ -1,24 +0,0 @@
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--<style>
--div {
--    border: 1px solid black;
--    margin: 2px;
--}
--</style>
--<p>When ReplaceSelectionCommand deletes the current selection, it should request that the deletion do a merge in some cases (normally, though, it should ask that a merge not be done, because a merge will cause information about block nesting to be lost).  It wasn't requesting a merge in cases where it should have.</p>
--<p>The failing case is where the incoming fragment has more than one block, and the selection being pasted into ends at the end of a paragraph.  Any time the selection being pasted into ends at the end of a paragraph, deleting will leave leave a) a br or b) an empty block at the end of the deleted selection.  So, not merging will leave an extraneous empty line or a collapsed block after the paste operation.</p>
--<div id="test" contenteditable="true"><div style="border: 1px solid red;">bar</div>bar<br></div>
--
--<script>
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--s.modify("move", "forward", "character");
--s.modify("extend", "forward", "line");
--s.modify("extend", "forward", "line");
--document.execCommand("InsertHTML", false, "<div>foo</div><div>bar</div>");
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-after-delete.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-after-delete.html
-deleted file mode 100644
-index fe88ae4939ec1d53251368ebc7c818b66e0e4d25..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-after-delete.html
-+++ /dev/null
-@@ -1,26 +0,0 @@
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--<style>
--div {
--    border: 1px solid blue;
--    margin: 4px;
--}
--</style>
--
--<div id="test" contenteditable="true"><div>foo</div>bar<br></div>
--
--<script>
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--
--s.modify("move", "forward", "character");
--s.modify("extend", "forward", "line");
--s.modify("extend", "forward", "line");
--
--document.execCommand("InsertHTML", false, "<div>foo</div><br class='Apple-interchange-newline'>");
--
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-1-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-1-expected.txt
-deleted file mode 100644
-index b5916fc4e4a8201bc49eb5bf7fca94def0252e45..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-1-expected.txt
-+++ /dev/null
-@@ -1,10 +0,0 @@
--This tests the last paragraph in the pasted fragment is merged with the content after the insertion position.
--"baz" and "oo" should be in the same paragraph below.
--| <span>
--|   "f"
--| "bar"
--| <span>
--|   <br>
--| "baz<#selection-caret>"
--| <span>
--|   "oo"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-1.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-1.html
-deleted file mode 100644
-index d50c656c166db90fb2c240d9412a3d164f1b6a0e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-1.html
-+++ /dev/null
-@@ -1,22 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<div id="test" contenteditable="true"><span>foo</span></div>
--
--<script src="../editing.js"></script>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--e.focus();
--moveSelectionForwardByCharacterCommand();
--insertHTMLCommand("<div>bar</div>baz");
--
--Markup.description('This tests the last paragraph in the pasted fragment is merged with the content after the insertion position.\n'
--+ '"baz" and "oo" should be in the same paragraph below.');
--Markup.dump('test');
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-2-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-2-expected.txt
-deleted file mode 100644
-index 2bec9e05fe2329187b683a5f5479bcb114255ee0..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-2-expected.txt
-+++ /dev/null
-@@ -1,16 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--This tests the last paragraph in the pasted fragment is merged with the content after the insertion position
--"baz" and "oobar" should be in the same paragraph below
--| <span>
--|   "f"
--| "bar"
--| <span>
--|   <br>
--| "baz<#selection-caret>"
--| <span>
--|   "oo"
--| "bar"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-2.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-2.html
-deleted file mode 100644
-index a6eeb7c6c27484d1437c7b5f508e608ceddb5e92..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-2.html
-+++ /dev/null
-@@ -1,25 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<div id="test" contenteditable="true"><span>foo</span>bar</div>
--
--<script src="../editing.js"></script>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--Markup.description('This tests the last paragraph in the pasted fragment is merged with the content after the insertion position\n'
--+ '"baz" and "oobar" should be in the same paragraph below');
--
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--e.focus();
--moveSelectionForwardByCharacterCommand();
--insertHTMLCommand("<div>bar</div>baz");
--
--Markup.dump('test');
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-3-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-3-expected.txt
-deleted file mode 100644
-index 1c2ba9d9c81a81bdca3247ca4c4f89b2549d7a7e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-3-expected.txt
-+++ /dev/null
-@@ -1,11 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--The last paragraph of the incoming fragment should be in the same paragraph as 'three'.
--| "one "
--| <div>
--|   "two<#selection-caret>three"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-3.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-3.html
-deleted file mode 100644
-index a80237968920d83baaa4a9b2e0d4ef7e5e3fe533..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-3.html
-+++ /dev/null
-@@ -1,28 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<div id="test" contenteditable="true">one three</div>
--
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--if (window.internals)
--    internals.settings.setEditingBehavior("mac");
--
--Markup.description("The last paragraph of the incoming fragment should be in the same paragraph as 'three'.");
--
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--s.modify("move", "forward", "word");
--s.modify("move", "forward", "character");
--
--document.execCommand("InsertHTML", false , "<br class='Apple-interchange-newline'><div>two</div>");
--
--Markup.dump('test');
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-4-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-4-expected.txt
-deleted file mode 100644
-index afe4c2fe651de7746a5c6249e461f3ad2f8b94c5..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-4-expected.txt
-+++ /dev/null
-@@ -1,13 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--Tests for a case where paste's end merge was failing. You should see xfoo
--bar
--bazx.
--| "xfoo"
--| <div>
--|   "bar"
--| "baz<#selection-caret>"
--| "x"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-4.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-4.html
-deleted file mode 100644
-index 1e42b13ce5057902460027ef548cf1b7ced1b508..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-4.html
-+++ /dev/null
-@@ -1,25 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<div id="test" contenteditable="true">xx</div>
--
--<script src="../editing.js"></script>
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--Markup.description("Tests for a case where paste's end merge was failing. You should see xfoo\nbar\nbazx.");
--
--var e = document.getElementById("test");
--var s = window.getSelection();
--
--s.collapse(e, 0);
--moveSelectionForwardByCharacterCommand();
--insertHTMLCommand("<div>foo</div><div>bar</div>baz");
--
--Markup.dump('test');
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-5-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-5-expected.txt
-deleted file mode 100644
-index b2bd2f5e7cce783abbbd26a3703b4b54ef087fe8..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-5-expected.txt
-+++ /dev/null
-@@ -1,13 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--Pasting a paragraph or less into a selection that spans multiple blocks should insert content into the block containing the start of the selection.
--| <div>
--|   style="border: 1px solid red;"
--|   "This text should have a red border around<#selection-caret> it."
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-5.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-5.html
-deleted file mode 100644
-index a19cec2230b20c1623ac67a5c74e73a3862a85b1..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-5.html
-+++ /dev/null
-@@ -1,31 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<div id="test" contenteditable="true"><div style="border: 1px solid red;">This x</div><div style="border: 1px solid blue;">x it.</div></div>
--
--<script src="../../resources/dump-as-markup.js"></script>
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--if (window.internals)
--    internals.settings.setEditingBehavior("mac");
--
--Markup.description('Pasting a paragraph or less into a selection that spans multiple blocks should insert content into the block containing the start of the selection.');
--
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--
--s.modify("move", "forward", "word");
--s.modify("move", "forward", "character");
--s.modify("extend", "forward", "word");
--s.modify("extend", "forward", "word");
--
--document.execCommand("InsertHTML", false, "<div><div>text should have a red border around</div></div>");
--
--Markup.dump('test');
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-blockquote.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-blockquote.html
-deleted file mode 100644
-index 0d84b29c64ee1fd2f686237eba84ddb743037272..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-blockquote.html
-+++ /dev/null
-@@ -1,27 +0,0 @@
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--<p>This tests pasting a Mail blockquote at the start of a paragraph.  Blockquoting should be stripped.</p>
--<div id="test1" contenteditable="true">x</div>
--
--<script type="text/javascript" src="../editing.js"></script>
--<script>
--var e = document.getElementById("test1");
--var s = window.getSelection();
--
--setSelectionCommand(e, 0, e, 0);
--insertHTMLCommand("<blockquote type='cite'><div>Blockquoted Text</div></blockquote>");
--</script>
--
--<p>This tests pasting text into a Mail blockquote.  The last bit of content in the incoming fragment should be merged with the paragraph after the position being pasted into.</p>
--<div id="test2" contenteditable="true"><blockquote type='cite'><div>Blockquoted Text</div></blockquote></div>
--
--<script>
--var e = document.getElementById("test2");
--var s = window.getSelection();
--
--setSelectionCommand(e, 0, e, 0);
--moveSelectionForwardByWordCommand();
--insertHTMLCommand("<div>foo</div><div>bar</div>");
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-borders.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-borders.html
-deleted file mode 100644
-index 2d84fec74f68434bd94b30c8de2178e7504e72c4..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-borders.html
-+++ /dev/null
-@@ -1,25 +0,0 @@
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--<p>This is a test for the merge that paste does of the last paragraph of the incoming fragment with content after the end of the selection being pasted into.  A fragment that ends in with paragraph surrounded by a blue border is pasted into a selection ending in a paragraph surrounded by a red border.  The red border should win.</p><p><b>The second paragraph should be surrounded by a red border before and after the test.</b></p> 
--
--<div id="test" contenteditable="true">First paragraph<div style="border: 1px solid red;">This text should be surrounded by a red border.</div></div>
--
--<script type="text/javascript" src="../editing.js"></script>
--<script>
--if (window.internals)
--    internals.settings.setEditingBehavior('mac');
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--// Move to the last word in the first paragraph
--moveSelectionForwardByWordCommand();
--moveSelectionForwardByCharacterCommand();
--// Select from here to the end of the first word of the next paragraph.
--extendSelectionForwardByWordCommand();
--extendSelectionForwardByWordCommand();
--
--insertHTMLCommand("paragraph<div style='border: 1px solid blue;'>This</div>");
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list-2-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list-2-expected.txt
-deleted file mode 100644
-index b78af75d314d357def87e8137c561f799f032283..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list-2-expected.txt
-+++ /dev/null
-@@ -1,18 +0,0 @@
--This tests pasting text ('foo\nbar') into a list item. The last bit of content in the incoming fragment should be merged with the paragraph after the position being pasted into.
--
--Before insertion:
--| <ul>
--|   <li>
--|     <div>
--|       "Item 1"
--
--After insertion:
--| <ul>
--|   <li>
--|     <div>
--|       "Item foo"
--|     <div>
--|       "bar<#selection-caret>"
--|   <li>
--|     <div>
--|       "1"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list-2.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list-2.html
-deleted file mode 100644
-index 30613d24803107d8c3fcab75dcefbad7c6eb938e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list-2.html
-+++ /dev/null
-@@ -1,23 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<p>This tests pasting text ('foo\nbar') into a list item. The last bit of content in the incoming fragment should be merged with the paragraph after the position being pasted into.</p>
--<div id="test2" contenteditable="true"><ul><li><div>Item 1</div></li></ul></div>
--<script src="../../resources/dump-as-markup.js"></script>
--<script src="../editing.js"></script>
--<script>
--var e = document.getElementById("test2");
--var s = window.getSelection();
--
--Markup.description(document.querySelector('p').textContent);
--Markup.dump(e, 'Before insertion');
--
--setSelectionCommand(e, 0, e, 0);
--for (var i = 0; i < 5; ++i)
--    moveSelectionForwardByCharacterCommand();
--insertHTMLCommand("<div>foo</div><div>bar</div>");
--
--Markup.dump(e, 'After insertion');
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list-expected.txt
-deleted file mode 100644
-index a7dd63165a10a3f9b394ec9602cfbe915bcabc65..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list-expected.txt
-+++ /dev/null
-@@ -1,17 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--This tests pasting a list ('Item 1') into a position that would normally result in an end merge.
--
--Before insertion:
--| "xx"
--
--After insertion:
--| "x"
--| <ul>
--|   <li>
--|     <div>
--|       "Item 1<#selection-caret>"
--| "x"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list.html
-deleted file mode 100644
-index 5da2ac7e05ac59415e0f7e91444f4c3d6bce6949..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-list.html
-+++ /dev/null
-@@ -1,25 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<p>This tests pasting a list ('Item 1') into a position that would normally result in an end merge.</p>
--<div id="test1" contenteditable="true">xx</div>
--<script src="../../resources/dump-as-markup.js"></script>
--<script src="../editing.js"></script>
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--var e = document.getElementById("test1");
--var s = window.getSelection();
--
--Markup.description(document.querySelector('p').textContent);
--Markup.dump(e, 'Before insertion');
--
--setSelectionCommand(e, 0, e, 0);
--moveSelectionForwardByCharacterCommand();
--insertHTMLCommand("<ul><li><div>Item 1</div></li></ul>");
--
--Markup.dump(e, 'After insertion');
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table-2-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table-2-expected.txt
-deleted file mode 100644
-index caf58bc55f9d5ad75348402388660530802ef0b1..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table-2-expected.txt
-+++ /dev/null
-@@ -1,29 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--This tests pasting text into a table cell.  The last bit of content in the incoming fragment should be merged with the paragraph after the position being pasted into.
--
--Before insertion:
--| <tbody>
--|   <tr>
--|     <td>
--|       <div>
--|         id="test2"
--|         "Item 1"
--|     <td>
--|       "Item 2"
--
--After insertion:
--| <tbody>
--|   <tr>
--|     <td>
--|       <div>
--|         id="test2"
--|         "Itemfoo"
--|       <div>
--|         id="test2"
--|         "bar<#selection-caret> 1"
--|     <td>
--|       "Item 2"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table-2.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table-2.html
-deleted file mode 100644
-index e995364c3f7c3e85ddc8ceda693f203e5f4f5c53..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table-2.html
-+++ /dev/null
-@@ -1,25 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<p>This tests pasting text into a table cell.  The last bit of content in the incoming fragment should be merged with the paragraph after the position being pasted into.</p>
--<div contenteditable="true"><table border='1'><tr><td><div id="test2">Item 1</div></td><td>Item 2</td></tr></table></div>
--<script src="../../resources/dump-as-markup.js"></script>
--<script src="../editing.js"></script>
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--var e = document.getElementById("test2");
--var s = window.getSelection();
--
--Markup.description(document.querySelector('p').textContent);
--Markup.dump(document.querySelector('table'), 'Before insertion');
--
--setSelectionCommand(e, 0, e, 0);
--moveSelectionForwardByWordCommand();
--insertHTMLCommand("<div>foo</div><div>bar</div>");
--
--Markup.dump(document.querySelector('table'), 'After insertion');
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table-expected.txt
-deleted file mode 100644
-index fcb004bf32daf8ba86df89989eb5fd88daa6c37c..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table-expected.txt
-+++ /dev/null
-@@ -1,21 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--This tests pasting a table into a position that would normally result in an end merge.
--
--Before insertion:
--| "xx"
--
--After insertion:
--| "x"
--| <table>
--|   border="1"
--|   <tbody>
--|     <tr>
--|       <td>
--|         "1"
--|       <td>
--|         "2<#selection-caret>"
--| "x"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table.html
-deleted file mode 100644
-index 9f458cb761efa0dbc0a24ecea39c7f4c63a73450..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-end-table.html
-+++ /dev/null
-@@ -1,25 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<p>This tests pasting a table into a position that would normally result in an end merge.</p>
--<div id="test1" contenteditable="true">xx</div>
--<script src="../../resources/dump-as-markup.js"></script>
--<script src="../editing.js"></script>
--<script>
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--var e = document.getElementById("test1");
--var s = window.getSelection();
--
--Markup.description(document.querySelector('p').textContent);
--Markup.dump(e, 'Before insertion');
--
--setSelectionCommand(e, 0, e, 0);
--moveSelectionForwardByCharacterCommand();
--insertHTMLCommand("<table border='1'><tr><td>1</td><td>2</td></tr></table>");
--
--Markup.dump(e, 'After insertion');
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-start-blockquote.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-start-blockquote.html
-deleted file mode 100644
-index e63b0eb0d6ed71fcfdab5d0699d67ee2d66412b5..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-start-blockquote.html
-+++ /dev/null
-@@ -1,23 +0,0 @@
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--<style>
--blockquote {
--    border: 1px solid blue;
--}
--</style>
--
--<p>This test makes sure that content inside a Mail blockquote in an incoming fragment isn't pulled out of the blockquote during paste.</p>
--<p><b>You should see 'bar' inside a blockquote (it will have a blue border around it if it is).</b></p>
--
--<div id="test" contenteditable="true"></div>
--
--<script>
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--
--document.execCommand("InsertHTML", false , "<blockquote type='cite'>bar</blockquote>");
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-start-list.html b/third_party/WebKit/LayoutTests/editing/pasteboard/merge-start-list.html
-deleted file mode 100644
-index a6b164ee6511118e22d1b6aabf49aa9a185f5bef..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/merge-start-list.html
-+++ /dev/null
-@@ -1,17 +0,0 @@
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--<p>This test makes sure that content inside a list in an incoming fragment isn't pulled out of the list during paste.</p>
--<p><b>You should see 'bar' inside a list item.</b></p>
--
--<div id="test" contenteditable="true"></div>
--
--<script>
--var s = window.getSelection();
--var e = document.getElementById("test");
--
--s.collapse(e, 0);
--
--document.execCommand("InsertHTML", false , "<ul><li>bar</li></ul>");
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-area-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-area-expected.txt
-deleted file mode 100644
-index d3c8413b7ffcdbdd76954492226a95b60c6c1321..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-area-expected.txt
-+++ /dev/null
-@@ -1,33 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--| "
--These demonstrate 11475: the '\n's at the end of the fragment should be unrendered."
--| <br>
--| <div>
--|   "This test checks that pasing in a combination of nested blocks where one starts with a text field doesn't crash or fail assertions."
--| "
--"
--| <div>
--|   "
--"
--|   <div>
--|     "
--"
--|     <textarea>
--|       this.value=" "
--|       " "
--|       <shadow:root>
--|         <div>
--|           id="inner-editor"
--|           " "
--|     " 
--"
--|     "x<#selection-caret>"
--|     "
--"
--| "
--
--"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-area.html b/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-area.html
-deleted file mode 100644
-index e023f7b5f0b5d08ca79bfa1d3d9cd06e90a6d3ff..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-area.html
-+++ /dev/null
-@@ -1,29 +0,0 @@
--<html>
--<head>
--<script src="../../resources/dump-as-markup.js"></script>
--<style>
--div { text-align: center; }
--</style>
--</head>
--
--<body contentEditable="true">
--These demonstrate 11475: the '\n's at the end of the fragment should be unrendered.<br><br>
--
--<script id="script">
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--var s = window.getSelection();
--var e = document.body;
--
--s.collapse(e, 0);
--document.execCommand("SelectAll");
--s.modify("move", "forward", "character");
--document.execCommand("InsertHTML", false, "<div>This test checks that pasing in a combination of nested blocks where one starts with a text field doesn't crash or fail assertions.</div>\n<div>\n<div>\n<textarea> </textarea> \n<span>x</span>\n</div>\n</div>");
--
--e.removeChild(document.getElementById('script'));
--Markup.dump(e);
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-field-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-field-expected.txt
-deleted file mode 100644
-index 2d500aef06d0fe27950aec73e88d7dce34837903..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-field-expected.txt
-+++ /dev/null
-@@ -1,32 +0,0 @@
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
--EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
--| "
--These demonstrate 11475: the '\n's at the end of the fragment should be unrendered."
--| <br>
--| <div>
--|   "This test checks that pasing in a combination of nested blocks where one starts with a text field doesn't crash or fail assertions."
--| "
--"
--| <div>
--|   "
--"
--|   <div>
--|     "
--"
--|     <input>
--|       type="text"
--|       this.value=""
--|       <shadow:root>
--|         <div>
--|           id="inner-editor"
--|     " 
--"
--|     "x<#selection-caret>"
--|     "
--"
--| "
--
--"
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-field.html b/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-field.html
-deleted file mode 100644
-index 3dbe7f2eb8243ffef7ad8504966b22290ccf0141..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/nested-blocks-with-text-field.html
-+++ /dev/null
-@@ -1,29 +0,0 @@
--<html>
--<head>
--<script src="../../resources/dump-as-markup.js"></script>
--<style>
--div { text-align: center; }
--</style>
--</head>
--
--<body contentEditable="true">
--These demonstrate 11475: the '\n's at the end of the fragment should be unrendered.<br><br>
--
--<script id="test">
--if (window.testRunner)
--    testRunner.dumpEditingCallbacks();
--
--var s = window.getSelection();
--var e = document.body;
--
--s.collapse(e, 0);
--document.execCommand("SelectAll");
--s.modify("move", "forward", "character");
--document.execCommand("InsertHTML", false, "<div>This test checks that pasing in a combination of nested blocks where one starts with a text field doesn't crash or fail assertions.</div>\n<div>\n<div>\n<input type='text'> \n<span>x</span>\n</div>\n</div>");
--
--e.removeChild(document.getElementById('test'));
--Markup.dump(e);
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/newlines-around-floating-or-positioned-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/newlines-around-floating-or-positioned-expected.txt
-deleted file mode 100644
-index 6052af3eb08d4e053a4f4b7e1c48dd99e0e17ac6..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/newlines-around-floating-or-positioned-expected.txt
-+++ /dev/null
-@@ -1,8 +0,0 @@
--test1 PASS: innerText is Lorem-ipsum as expected
--test2 PASS: innerText is Loremipsum as expected
--test3 PASS: innerText is Lorem-ipsum as expected
--test4 PASS: innerText is Loremipsum as expected
--Lorem-ipsum
--Loremipsum
--Lorem-ipsum
--Loremipsum
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/newlines-around-floating-or-positioned.html b/third_party/WebKit/LayoutTests/editing/pasteboard/newlines-around-floating-or-positioned.html
-deleted file mode 100644
-index cae327083e622b46b6b17954bc41e4046b7619c9..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/newlines-around-floating-or-positioned.html
-+++ /dev/null
-@@ -1,29 +0,0 @@
--<pre id="console"></pre>
--<div id="test1">Lorem<span style="float: left;">-</span>ipsum</div>
--<div id="test2">Lorem<span style="float: left;"></span>ipsum</div>
--<div id="test3">Lorem<div style="position: absolute;">-</div>ipsum</div>
--<div id="test4">Lorem<div style="position: absolute;"></div>ipsum</div>
--<script>
--    function log(message)
--    {
--        var console = document.getElementById("console");
--        console.appendChild(document.createTextNode(message + "\n"));
--    }
--
--    function test(id, expected)
--    {
--        var actual = document.getElementById(id).innerText;
--        if (actual == expected)
--            log(id + " PASS: innerText is " + actual + " as expected");
--        else
--            log(id + " FAIL: innerText is " + actual + " instead of " + expected);
--    }
--
--    if (window.testRunner)
--        testRunner.dumpAsText();
--
--    test("test1", "Lorem-ipsum");
--    test("test2", "Loremipsum");
--    test("test3", "Lorem-ipsum");
--    test("test4", "Loremipsum");
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-expected.txt
-deleted file mode 100644
-index 52841fee13d369dfba42a3759f2f3f73681e0168..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-expected.txt
-+++ /dev/null
-@@ -1,6 +0,0 @@
--CONSOLE MESSAGE: line 21: text/plain: This test verifies that we can get text/html from the clipboard during an onpaste event. 
--CONSOLE MESSAGE: line 23: text/html: <span style="color: rgb(0, 0, 0); font-size: medium; font-style: normal; font-variant: normal; font-weight: normal; letter-spacing: normal; line-height: normal; orphans: auto; text-align: start; text-indent: 0px; text-transform: none; white-space: normal; widows: 1; word-spacing: 0px; -webkit-text-stroke-width: 0px; display: inline !important; float: none;">This test verifies that we can get text/html from the clipboard during an onpaste event.<span class="Apple-converted-space"> </span></span>
--This test verifies that we can get text/html from the clipboard during an onpaste event. This test requires DRT.
--Paste content in this div.This test verifies that we can get text/html from the clipboard during an onpaste event. 
--PASS
--
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-types-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-types-expected.txt
-deleted file mode 100644
-index cabd76feb092601d26682842d1628c5131ed6911..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-types-expected.txt
-+++ /dev/null
-@@ -1,3 +0,0 @@
--This test verifies that we can get types from the clipboard during an onpaste event. This test requires DRT.
--PASS
--
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-types.html b/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-types.html
-deleted file mode 100644
-index 3b74ce487acf1367392ef65e515ab4d1b860ee33..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-types.html
-+++ /dev/null
-@@ -1,26 +0,0 @@
--<div id="test" onpaste="paste(event)">This test verifies that we can get types from the clipboard
--during an onpaste event.  This test requires DRT.</div>
--
--<div id="results">FAIL</div>
--
--<script src="../editing.js"></script>
--<script>
--function paste(ev)
--{
--    var types = ev.clipboardData.types;
--    if (types.indexOf('text/plain') >= 0 &&
--        types.indexOf('text/html') >= 0)
--        document.getElementById("results").innerHTML = "PASS";
--}
--
--function editingTest()
--{
--    var selection = window.getSelection();
--    selection.modify("extend", "forward", "sentence");
--    copyCommand();
--
--    pasteCommand();
--}
--
--runDumpAsTextEditingTest(false);
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html.html b/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html.html
-deleted file mode 100644
-index b9dc9d37384ef01bde2175499830a019337b364b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html.html
-+++ /dev/null
-@@ -1,41 +0,0 @@
--<div id="test">This test verifies that we can get text/html from the clipboard
--during an onpaste event.  This test requires DRT.</div>
--
--<div id="target" contenteditable onpaste="paste(event)">
--Paste content in this div.
--</div>
--<div id="results">FAIL</div>
--
--<script src="../editing.js"></script>
--<script>
--var undefined;
--function removeFontName(text)
--{
--    if (!text)
--        return text;
--    return text.replace(/font-family: [^;]+;\s*/g, "");
--}
--
--function paste(ev)
--{
--    console.log("text/plain: " + ev.clipboardData.getData("text/plain"));
--    // Remove the font name because it varies depending on the platform.
--    console.log("text/html: " + removeFontName(ev.clipboardData.getData("text/html")));
--    if (ev.clipboardData.getData("text/html") != undefined)
--        document.getElementById("results").innerHTML = "PASS";
--}
--
--function editingTest()
--{
--    var selection = window.getSelection();
--    selection.modify("extend", "forward", "sentence");
--    copyCommand();
--
--    var elem = document.getElementById("target");
--    selection.collapse(elem, 0);
--    selection.modify("move", "forward", "sentence");
--    pasteCommand();
--}
--
--runDumpAsTextEditingTest(false);
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/page-zoom-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/page-zoom-expected.txt
-deleted file mode 100644
-index 9283f564143f69292f6397279ee138ef15a1c3d2..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/page-zoom-expected.txt
-+++ /dev/null
-@@ -1,12 +0,0 @@
--Copy this 16px text.
--PasteCopy this 16px text it here.
--The pasted text should have a font size of 16px.
--
--
--Copy this x-small text.
--PasteCopy this x-small it here.
--The pasted text should have a font size of x-small.
--
--
--PASS
--
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/page-zoom.html b/third_party/WebKit/LayoutTests/editing/pasteboard/page-zoom.html
-deleted file mode 100644
-index 6cfcbe6235222da58faeca78af203d139f980216..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/page-zoom.html
-+++ /dev/null
-@@ -1,49 +0,0 @@
--<body>
--<div id="test" style="font-size:16px;zoom:200%;">Copy this 16px text.</div> 
--<div id="target" contentEditable style="zoom:200%; border:1px solid">Paste it here.</div> 
--<div>The pasted text should have a font size of 16px.</div>
--<br /><br />
--<div id="test2" style="font-size:x-small;zoom:200%;">Copy this x-small text.</div> 
--<div id="target2" contentEditable style="zoom:150%; border:1px solid">Paste it here.</div> 
--<div>The pasted text should have a font size of x-small.</div>
--<br /><br />
--<div id="results">FAIL (this test requires DRT)<div>
--</body>
--<script src="../editing.js"></script>
--<script>
--function editingTest()
--{
--    for (var i = 0; i < 4; ++i)
--        execExtendSelectionForwardByWordCommand();
--    execCopyCommand();
--
--    var elem = document.getElementById("target");
--    var selection = window.getSelection();
--    selection.collapse(elem, 0);
--    execMoveSelectionForwardByWordCommand();
--    execPasteCommand();
--
--    if (document.getElementById("target").innerHTML.toString().indexOf("font-size: 16px") == -1)
--        throw "absolute font size is wrong";
--
--    // Make sure relative font sizes are not adjusted.
--    var elem = document.getElementById("test2");
--    var selection = window.getSelection();
--    selection.collapse(elem, 0);
--    for (var i = 0; i < 4; ++i)
--        execExtendSelectionForwardByWordCommand();
--    execCopyCommand();
--
--    var elem = document.getElementById("target2");
--    var selection = window.getSelection();
--    selection.collapse(elem, 0);
--    execMoveSelectionForwardByWordCommand();
--    execPasteCommand();
--
--    if (document.getElementById("target2").innerHTML.toString().indexOf("font-size: x-small") == -1)
--        throw "relative font size not preserved";
--    document.getElementById("results").innerText = "PASS";
--}
--
--runDumpAsTextEditingTest(false);
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-4038267-fix.html b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-4038267-fix.html
-deleted file mode 100644
-index 50c994145f0eab99fd272eebe8761eac49001f60..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-4038267-fix.html
-+++ /dev/null
-@@ -1,61 +0,0 @@
--<html> 
--<head>
--
--<style>
--.editing { 
--    border: 2px solid red; 
--    font-size: 24px; 
--}
--.explanation { 
--    border: 2px solid blue; 
--    padding: 12px; 
--    font-size: 24px; 
--    margin-bottom: 24px;
--}
--.scenario { margin-bottom: 16px;}
--.scenario:first-line { font-weight: bold; margin-bottom: 16px;}
--.expected-results:first-line { font-weight: bold }
--</style>
--<script src=../editing.js language="JavaScript" type="text/JavaScript" ></script>
--
--<script>
--
--function editingTest() {
--    for (i = 0; i < 3; i++)
--        moveSelectionForwardByCharacterCommand();
--    extendSelectionForwardByCharacterCommand();
--    copyCommand();
--    pasteCommand();
--}
--
--</script>
--
--<title>Editing Test</title> 
--</head> 
--<body>
--
--<div class="explanation">
--<div class="scenario">
--Tests: 
--<br>
--Bug fix for <a href="rdar://problem/4038267">&lt;rdar://problem/4038267&gt;</a> REGRESSION (Mail): Crash copying and pasting end of paragraph.
--</div>
--<div class="expected-results">
--Expected Results:
--<br>
--Should see this content in the red box below (insertion point must be on the second line, right before "bar"): <div>foo</div><div>bar</div>
--</div>
--</div>
--
--<div contenteditable id="root" style="word-wrap: break-word; -khtml-nbsp-mode: space; -khtml-line-break: after-white-space;">
--<div id="test" class="editing">
--<div>foo</div><div>bar</div>
--</div>
--</div>
--
--<script>
--runEditingTest();
--</script>
--
--</body>
--</html>

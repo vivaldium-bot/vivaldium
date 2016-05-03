@@ -1,344 +1,3 @@
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-gc-closed-cloned.html b/third_party/WebKit/LayoutTests/fast/events/message-port-gc-closed-cloned.html
-deleted file mode 100644
-index 8aadb6ae96bdb6ccd690ec670a1898996618f9d1..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-gc-closed-cloned.html
-+++ /dev/null
-@@ -1,21 +0,0 @@
--<!DOCTYPE html>
--<body>
--<script src="../../resources/js-test.js"></script>
--<script>
--jsTestIsAsync = true;
--description("MessagePorts (and their execution contexts) should be collected by GC once close() has been called on them");
--function runTest() {
--    var channel = new MessageChannel();
--    var port = channel.port1;
--    port.onmessage = function() {
--        iframeDocGC = internals.observeGC(document.querySelector('iframe').contentDocument);
--        document.querySelector('iframe').remove();
--        gc();
--        shouldBeTrue("iframeDocGC.wasCollected");
--        finishJSTest();
--    };
--    window.frames[0].postMessage("connect", "*", [channel.port2]);
--}
--</script>
--<iframe src="resources/message-port-gc-closed-cloned-iframe.html" onload="runTest()"></iframe>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-gc-closed-expected.txt b/third_party/WebKit/LayoutTests/fast/events/message-port-gc-closed-expected.txt
-deleted file mode 100644
-index 94a0a38840f33242e6ed5500dd4c6dc93f450b3e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-gc-closed-expected.txt
-+++ /dev/null
-@@ -1,10 +0,0 @@
--MessagePorts (and their execution contexts) should be collected by GC once close() has been called on them
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS iframeDocGC.wasCollected is true
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-gc-closed.html b/third_party/WebKit/LayoutTests/fast/events/message-port-gc-closed.html
-deleted file mode 100644
-index 4cc906ac01e6d48f7137bbe1ba35e4e19ad4ad8b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-gc-closed.html
-+++ /dev/null
-@@ -1,26 +0,0 @@
--<!DOCTYPE html>
--<body>
--<script src="../../resources/js-test.js"></script>
--<script>
--description("MessagePorts (and their execution contexts) should be collected by GC once close() has been called on them");
--
--window.jsTestIsAsync = true;
--
--function runGCAndTest() {
--    gc();
--    shouldBeTrue("iframeDocGC.wasCollected");
--    finishJSTest();
--}
--
--window.onmessage = function(evt) {
--    iframeDocGC = internals.observeGC(document.querySelector('iframe').contentDocument);
--    document.querySelector('iframe').remove();
--    // The iframe is reachable via evt.source, and evt is on the
--    // stack. Force a GC upon return from the event handler, so
--    // that it no longer will be in scope and the iframe can
--    // be GCed.
--    setTimeout(runGCAndTest, 0);
--}
--</script>
--<iframe src="resources/message-port-gc-closed-iframe.html"></iframe>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-inactive-document-expected.txt b/third_party/WebKit/LayoutTests/fast/events/message-port-inactive-document-expected.txt
-deleted file mode 100644
-index ecb4e30c050c7d0e916633bfc814cbfb0e845171..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-inactive-document-expected.txt
-+++ /dev/null
-@@ -1,4 +0,0 @@
--Test that messaging an inactive frameless document works as expected.
--
--Didn't crash, freeze or respond: SUCCESS
--
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-inactive-document.html b/third_party/WebKit/LayoutTests/fast/events/message-port-inactive-document.html
-deleted file mode 100644
-index 23f7fb6301b0c82abb5a952c7dc3beda2d996f3b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-inactive-document.html
-+++ /dev/null
-@@ -1,72 +0,0 @@
--<body>
--<p>Test that messaging an inactive frameless document works as expected.</p>
--<pre id=log></pre>
--<script>
--function gc()
--{
--    if (window.GCController)
--        return GCController.collect();
--
--    for (var i = 0; i < 10000; i++) { // > force garbage collection (FF requires about 9K allocations before a collect)
--        var s = new String("abc");
--    }
--}
--
--function log(message)
--{
--    document.getElementById("log").innerHTML += message + "<br>";
--}
--
--if (window.testRunner) {
--    testRunner.dumpAsText();
--    testRunner.waitUntilDone();
--}
--
--var otherDocument;
--var mainPort;
--
--function test()
--{
--    otherDocument = window.frames[0].document;
--    var channel = new MessageChannel;
--    window.frames[0].postMessage("msg", [channel.port2], "*");
--    mainPort = channel.port1;
--    mainPort.start();
--
--    mainPort.postMessage("ping");
--    mainPort.onmessage = test2;
--}
--
--function test2()
--{
--    var frameElement = document.getElementsByTagName("iframe")[0];
--    frameElement.src = "resources/window-opened.html";
--    frameElement.onload = test3;
--    gc();
--}
--
--function test3()
--{
--    gc();
--    mainPort.postMessage("alert FAIL: the document is inactive.");
--    mainPort.postMessage("freeze");
--    mainPort.postMessage("ping");
--    mainPort.onmessage = function(evt) {
--        log("Unexpected response: FAIL");
--    };
--    setTimeout(test4, 10);
--}
--
--function test4()
--{
--    mainPort.close();
--
--    log("Didn't crash, freeze or respond: SUCCESS");
--
--    if (window.testRunner)
--        testRunner.notifyDone();
--}
--
--</script>
--<iframe src="resources/message-port-iframe.html" onload="test()" width=0 height=0 frameborder=0></iframe>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-multi-expected.txt b/third_party/WebKit/LayoutTests/fast/events/message-port-multi-expected.txt
-deleted file mode 100644
-index 981a7d95eedb01a7e93c062651fdf3fe41abf420..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-multi-expected.txt
-+++ /dev/null
-@@ -1,31 +0,0 @@
--This test checks the various use cases around sending multiple ports through MessagePort.postMessage
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS channel.port1.postMessage() threw exception TypeError: Failed to execute 'postMessage' on 'MessagePort': 1 argument required, but only 0 present..
--PASS channel.port1.postMessage("same port", [channel.port1]) threw exception DataCloneError: Failed to execute 'postMessage' on 'MessagePort': Port at index 0 contains the source port..
--PASS channel.port1.postMessage("null port", [channel3.port1, null, channel3.port2]) threw exception TypeError: Failed to execute 'postMessage' on 'MessagePort': Value at index 1 is an untransferable 'null' value..
--PASS channel.port1.postMessage("notAPort", [channel3.port1, {}, channel3.port2]) threw exception TypeError: Failed to execute 'postMessage' on 'MessagePort': Value at index 1 does not have a transferable type..
--PASS channel.port1.postMessage("duplicate port", [channel3.port1, channel3.port1]) threw exception DataCloneError: Failed to execute 'postMessage' on 'MessagePort': Message port at index 1 is a duplicate of an earlier port..
--PASS channel.port1.postMessage("notAnArray", channel3.port1) threw exception TypeError: Failed to execute 'postMessage' on 'MessagePort': The 2nd argument is neither an array, nor does it have indexed properties..
--PASS channel.port1.postMessage("notASequence", [{length: 3}]) threw exception TypeError: Failed to execute 'postMessage' on 'MessagePort': Value at index 0 does not have a transferable type..
--PASS channel.port1.postMessage("duplicate buffer", [arrayBuffer, arrayBuffer]) threw exception DataCloneError: Failed to execute 'postMessage' on 'MessagePort': ArrayBuffer at index 1 is a duplicate of an earlier ArrayBuffer..
--PASS channel.port1.postMessage("largeSequence", largePortArray) threw exception TypeError: Failed to execute 'postMessage' on 'MessagePort': Value at index 0 is an untransferable 'undefined' value..
--PASS successfullyParsed is true
--
--TEST COMPLETE
--PASS event.ports is non-null and zero length when no port sent
--PASS event.ports is non-null and zero length when empty array sent
--PASS event.ports contains two ports when two ports sent
--PASS event.ports contains two ports when two ports re-sent after error
--PASS Sending host object has thrown DataCloneError: Failed to execute 'postMessage' on 'MessagePort': An object could not be cloned.
--PASS Sending host object has thrown DataCloneError: Failed to execute 'postMessage' on 'MessagePort': An object could not be cloned.
--PASS Sending Function object has thrown DataCloneError: Failed to execute 'postMessage' on 'MessagePort': An object could not be cloned.
--PASS Sending Error object has thrown DataCloneError: Failed to execute 'postMessage' on 'MessagePort': An object could not be cloned.
--PASS send-port: transferred one port
--PASS send-port-twice: transferred one port twice
--PASS send-two-ports: transferred two ports
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-multi.html b/third_party/WebKit/LayoutTests/fast/events/message-port-multi.html
-deleted file mode 100644
-index 3ff36b2481bfff50432c9756f62b89e711f1aad6..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-multi.html
-+++ /dev/null
-@@ -1,7 +0,0 @@
--<head>
--<script src="../../resources/js-test.js"></script>
--</head>
--<body>
--<script src="resources/message-port-multi.js"></script>
--<!-- We don't use the standard js-test-post as this is an asynchronous test -->
--</body>
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-no-wrapper-expected.txt b/third_party/WebKit/LayoutTests/fast/events/message-port-no-wrapper-expected.txt
-deleted file mode 100644
-index 5eabd403ec796be8fef7d9997733d98c3d1cf4ab..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-no-wrapper-expected.txt
-+++ /dev/null
-@@ -1,4 +0,0 @@
--Test that delivering a message to a port that was never referenced from JS doesn't cause a crash.
--
--PASS
--
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-no-wrapper.html b/third_party/WebKit/LayoutTests/fast/events/message-port-no-wrapper.html
-deleted file mode 100644
-index 3ec81155de84f69e97d9a9f8af9ac2c51fbfbaa3..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-no-wrapper.html
-+++ /dev/null
-@@ -1,35 +0,0 @@
--<body>
--<p>Test that delivering a message to a port that was never referenced from JS doesn't cause a crash.</p>
--<pre id=log></pre>
--
--<script>
--function gc()
--{
--    if (window.GCController)
--        return GCController.collect();
--
--    for (var i = 0; i < 10000; i++) { // > force garbage collection (FF requires about 9K allocations before a collect)
--        var s = new String("abc");
--    }
--}
--
--function log(message)
--{
--    document.getElementById("log").innerHTML += message + "<br>";
--}
--
--if (window.testRunner) {
--    testRunner.dumpAsText();
--    testRunner.waitUntilDone();
--}
--
--var channel = new MessageChannel;
--channel.port1.postMessage("msg");
--channel.port1.start();
--channel = 0;
--gc();
--
--setTimeout("log('PASS'); if (window.testRunner) testRunner.notifyDone()", 100);
--
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-different-microtask-expected.txt b/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-different-microtask-expected.txt
-deleted file mode 100644
-index 9b72eec4527db7d9095433d28d13d303b9cf5893..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-different-microtask-expected.txt
-+++ /dev/null
-@@ -1,8 +0,0 @@
--Test whether opening and closing a messageport in different microtasks correctly receives an in-flight message.
--
--Should be a START message, followed by a HELLO message then DONE.
--
--START
--PASS. Got Message: HELLO before close
--DONE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-different-microtask.html b/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-different-microtask.html
-deleted file mode 100644
-index ca440fe80c38464ffd3a89f64068ff691651d2f5..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-different-microtask.html
-+++ /dev/null
-@@ -1,44 +0,0 @@
--<body>
--<p>Test whether opening and closing a messageport in different microtasks correctly receives an in-flight message.</p>
--<p>Should be a START message, followed by a HELLO message then DONE.</p>
--<pre id=log></pre>
--<script>
--function log(message)
--{
--    document.getElementById("log").innerHTML += message + "<br>";
--}
--
--if (window.testRunner) {
--    testRunner.dumpAsText();
--    testRunner.waitUntilDone();
--}
--
--log("START");
--
--var channel = new MessageChannel;
--channel.port2.postMessage("HELLO");
--openThenPostClose();
--done();
--
--function openThenPostClose() {
--    setTimeout(function() {
--        channel.port1.onmessage = function(evt) {
--            log("PASS. Got Message: " +  evt.data + " before close");
--        }
--        setTimeout(function() {
--            channel.port1.close();
--        }, 0);
--    }, 0);
--}
--
--function done() {
--    // Wait a short period of time to ensure no messages come in from previous tests.
--    setTimeout(function() {
--        log("DONE");
--        if (window.testRunner)
--            testRunner.notifyDone();
--    }, 100);
--}
--
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-same-microtask-expected.txt b/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-same-microtask-expected.txt
-deleted file mode 100644
-index 9a8aa150f25ac6a408822e07683cc73bf55e4906..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-same-microtask-expected.txt
-+++ /dev/null
-@@ -1,7 +0,0 @@
--Test whether opening and closing a messageport in the same microtask correctly discards an in-flight message.
--
--Should be a START message, followed with DONE.
--
--START
--DONE
--
 diff --git a/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-same-microtask.html b/third_party/WebKit/LayoutTests/fast/events/message-port-start-and-close-same-microtask.html
 deleted file mode 100644
 index 5f08ab3fa45ad7bdf46f1f1c99451b76a25a5c89..0000000000000000000000000000000000000000
@@ -1792,7 +1451,7 @@ index b59f3de88ef06ebd15900cb4ced75019bb951f0a..00000000000000000000000000000000
 -</html>
 diff --git a/third_party/WebKit/LayoutTests/fast/events/mouse-event-buttons-attribute-expected.txt b/third_party/WebKit/LayoutTests/fast/events/mouse-event-buttons-attribute-expected.txt
 deleted file mode 100644
-index fa867ba066d9df4a93d7f7ac3cc23a1648c0664b..0000000000000000000000000000000000000000
+index b12b0b4843bc8ef3894a26fd5e324e85a5d74f84..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/events/mouse-event-buttons-attribute-expected.txt
 +++ /dev/null
 @@ -1,212 +0,0 @@
@@ -1903,8 +1562,8 @@ index fa867ba066d9df4a93d7f7ac3cc23a1648c0664b..00000000000000000000000000000000
 -1. targetDiv received mouseover buttons: 0
 -2. targetDiv received mouseenter buttons: 0
 -3. targetDiv received mousemove buttons: 0
--4. targetDiv received mousedown buttons: 0
--5. targetDiv received contextmenu buttons: 0
+-4. targetDiv received mousedown buttons: 2
+-5. targetDiv received contextmenu buttons: 2
 -6. targetDiv received mouseout buttons: 0
 -7. targetDiv received mouseleave buttons: 0
 -
@@ -1921,8 +1580,8 @@ index fa867ba066d9df4a93d7f7ac3cc23a1648c0664b..00000000000000000000000000000000
 -1. targetDiv received mouseover buttons: 0
 -2. targetDiv received mouseenter buttons: 0
 -3. targetDiv received mousemove buttons: 0
--4. targetDiv received mousedown buttons: 0
--5. targetDiv received contextmenu buttons: 0
+-4. targetDiv received mousedown buttons: 2
+-5. targetDiv received contextmenu buttons: 2
 -6. targetDiv received mouseout buttons: 0
 -7. targetDiv received mouseleave buttons: 0
 -
@@ -1937,8 +1596,8 @@ index fa867ba066d9df4a93d7f7ac3cc23a1648c0664b..00000000000000000000000000000000
 -8. targetDiv received mouseenter buttons: 1
 -9. targetDiv received mousemove buttons: 1
 -10. dragImg received dragstart buttons: 1
--11. dragImg received drag buttons: 0
--12. targetDiv received dragenter buttons: 0
+-11. dragImg received drag buttons: 1
+-12. targetDiv received dragenter buttons: 1
 -13. dragImg received drag buttons: 1
 -14. dragImg received dragenter buttons: 1
 -15. targetDiv received dragleave buttons: 1
@@ -1963,8 +1622,8 @@ index fa867ba066d9df4a93d7f7ac3cc23a1648c0664b..00000000000000000000000000000000
 -8. targetDiv received mouseenter buttons: 3
 -9. targetDiv received mousemove buttons: 3
 -10. dragImg received dragstart buttons: 3
--11. dragImg received drag buttons: 0
--12. targetDiv received dragenter buttons: 0
+-11. dragImg received drag buttons: 3
+-12. targetDiv received dragenter buttons: 3
 -13. dragImg received drag buttons: 3
 -14. dragImg received dragenter buttons: 3
 -15. targetDiv received dragleave buttons: 3
@@ -1989,8 +1648,8 @@ index fa867ba066d9df4a93d7f7ac3cc23a1648c0664b..00000000000000000000000000000000
 -8. targetDiv received mouseenter buttons: 7
 -9. targetDiv received mousemove buttons: 7
 -10. dragImg received dragstart buttons: 7
--11. dragImg received drag buttons: 0
--12. targetDiv received dragenter buttons: 0
+-11. dragImg received drag buttons: 7
+-12. targetDiv received dragenter buttons: 7
 -13. dragImg received drag buttons: 7
 -14. dragImg received dragenter buttons: 7
 -15. targetDiv received dragleave buttons: 7
@@ -2010,10 +1669,10 @@ index fa867ba066d9df4a93d7f7ac3cc23a1648c0664b..00000000000000000000000000000000
 -
 diff --git a/third_party/WebKit/LayoutTests/fast/events/mouse-event-buttons-attribute.html b/third_party/WebKit/LayoutTests/fast/events/mouse-event-buttons-attribute.html
 deleted file mode 100644
-index 2aed2d9e8d3f4fb5e07971e816c3aced7509ee1a..0000000000000000000000000000000000000000
+index cc8ad65bc1bfbe51e752dad9836bc6862603a9ca..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/events/mouse-event-buttons-attribute.html
 +++ /dev/null
-@@ -1,168 +0,0 @@
+@@ -1,163 +0,0 @@
 -<!DOCTYPE html>
 -<style>
 -#target {
@@ -2054,14 +1713,9 @@ index 2aed2d9e8d3f4fb5e07971e816c3aced7509ee1a..00000000000000000000000000000000
 -  { initialButtons: [],        action: doubleTapAction },
 -  { initialButtons: [],        action: tapAction },
 -  { initialButtons: [],        action: longPressAction, showContextMenuOnMouseUp: false },
--
--  //TODO(nzolghadr): crbug.com/576281 "buttons" field should be set in mousedown and contextmenu events
 -  { initialButtons: [],        action: longPressAction, showContextMenuOnMouseUp: true },
--
 -  { initialButtons: [],        action: longTapAction, showContextMenuOnMouseUp: false },
 -  { initialButtons: [],        action: longTapAction, showContextMenuOnMouseUp: true },
--
--  //TODO(nzolghadr): crbug.com/576290 "buttons" field seems to be set to 0 incorrectly in some events
 -  { initialButtons: [],        action: dragDropAction },
 -  { initialButtons: [R],       action: dragDropAction },
 -  { initialButtons: [M, R],    action: dragDropAction },
@@ -11994,10 +11648,10 @@ index eba96f6503e31efc1c1473079ecffa5d9940abef..00000000000000000000000000000000
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/events/pointerevents/mouse-pointer-chorded-buttons.html b/third_party/WebKit/LayoutTests/fast/events/pointerevents/mouse-pointer-chorded-buttons.html
 deleted file mode 100644
-index dc52a920f526b6527fb5392d8520f44606369606..0000000000000000000000000000000000000000
+index ee886c3bb584dcf4d2995fbc0a33b747a30cb092..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/events/pointerevents/mouse-pointer-chorded-buttons.html
 +++ /dev/null
-@@ -1,136 +0,0 @@
+@@ -1,156 +0,0 @@
 -<!DOCTYPE HTML>
 -<script src="../../../resources/testharness.js"></script>
 -<script src="../../../resources/testharnessreport.js"></script>
@@ -12012,6 +11666,7 @@ index dc52a920f526b6527fb5392d8520f44606369606..00000000000000000000000000000000
 -
 -<script>
 -var receivedEvents = [];
+-var preventDefaultOnPointerDown = false;
 -
 -function testReceivedEvents(expectedEvents, testLabel) {
 -  test(function() {
@@ -12028,6 +11683,8 @@ index dc52a920f526b6527fb5392d8520f44606369606..00000000000000000000000000000000
 -    targetDiv.addEventListener(eventName, function(event) {
 -      receivedEvents.push(event.type + " " + event.button + "," + event.buttons);
 -      if (event.type.startsWith("mouse"))
+-        event.preventDefault();
+-      if (event.type == "pointerdown" && preventDefaultOnPointerDown)
 -        event.preventDefault();
 -    });
 -  });
@@ -12092,7 +11749,7 @@ index dc52a920f526b6527fb5392d8520f44606369606..00000000000000000000000000000000
 -  eventSender.mouseMoveTo(rect.left + 5, rect.top + 5);
 -  testReceivedEvents([
 -    "pointerdown 1,4", "mousedown 1,4",
--    "pointermove 1,4", "mousemove 1,4",
+-    "pointermove -1,4", "mousemove 1,4",
 -    "pointerup 1,0", "mouseup 1,0",
 -    "pointermove -1,0", "mousemove 0,0",
 -  ], "Move with & without button");
@@ -12109,6 +11766,23 @@ index dc52a920f526b6527fb5392d8520f44606369606..00000000000000000000000000000000
 -    "pointermove 2,1", "mouseup 2,1",
 -    "pointerup 0,0", "mouseup 0,0",
 -  ], "Off-the-page button changes");
+-
+-  preventDefaultOnPointerDown = true;
+-  eventSender.mouseDown(0);
+-  preventDefaultOnPointerDown = false;
+-  eventSender.mouseDown(1);
+-  eventSender.mouseUp(1);
+-  eventSender.mouseUp(0);
+-  eventSender.mouseDown(0);
+-  eventSender.mouseUp(0);
+-  testReceivedEvents([
+-    "pointerdown 0,1",
+-    "pointermove 1,5",
+-    "pointermove 1,1",
+-    "pointerup 0,0",
+-    "pointerdown 0,1", "mousedown 0,1",
+-    "pointerup 0,0", "mouseup 0,0"
+-  ], "LM button with preventDefault on pointerdown");
 -}
 -
 -function run() {
@@ -12136,23 +11810,23 @@ index dc52a920f526b6527fb5392d8520f44606369606..00000000000000000000000000000000
 -</body>
 diff --git a/third_party/WebKit/LayoutTests/fast/events/pointerevents/mouse-pointer-event-properties-expected.txt b/third_party/WebKit/LayoutTests/fast/events/pointerevents/mouse-pointer-event-properties-expected.txt
 deleted file mode 100644
-index 0ee5c095cc45eba15a925bd409dcdc166a3580fd..0000000000000000000000000000000000000000
+index 616f32337b352d389d7d0ff75659f68c5c9d448b..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/events/pointerevents/mouse-pointer-event-properties-expected.txt
 +++ /dev/null
 @@ -1,378 +0,0 @@
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
--CONSOLE ERROR: line 62: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
+-CONSOLE ERROR: line 63: Uncaught TypeError: Cannot read property 'type' of null
 -Verifies that pointer event parameters are correct when fired for mouse events.
 -
 -On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -12520,10 +12194,10 @@ index 0ee5c095cc45eba15a925bd409dcdc166a3580fd..00000000000000000000000000000000
 -
 diff --git a/third_party/WebKit/LayoutTests/fast/events/pointerevents/mouse-pointer-event-properties.html b/third_party/WebKit/LayoutTests/fast/events/pointerevents/mouse-pointer-event-properties.html
 deleted file mode 100644
-index b0cdefa7106fe5f7af4abcdae3b5f2864fe9a426..0000000000000000000000000000000000000000
+index f79c6dbeecfbdce82961c1971adcb9a91b3690cc..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/events/pointerevents/mouse-pointer-event-properties.html
 +++ /dev/null
-@@ -1,140 +0,0 @@
+@@ -1,147 +0,0 @@
 -<!DOCTYPE HTML>
 -<script src="../../../resources/js-test.js"></script>
 -<script src="../resources/input-modifiers.js"></script>
@@ -12566,6 +12240,7 @@ index b0cdefa7106fe5f7af4abcdae3b5f2864fe9a426..00000000000000000000000000000000
 -    "y",
 -    "button",
 -    "buttons",
+-    "pressure",
 -];
 -
 -function init() {
@@ -12602,6 +12277,12 @@ index b0cdefa7106fe5f7af4abcdae3b5f2864fe9a426..00000000000000000000000000000000
 -            var expectedValue = eval("event." + attribute);
 -            if (attribute == "button" && event.type != "mousedown" && event.type != "mouseup")
 -              expectedValue = -1;
+-            if (attribute == "pressure") {
+-              if (event.buttons == 0)
+-                expectedValue = 0.0;
+-              else
+-                expectedValue = 0.5;
+-            }
 -            shouldBeEqualToNumber("lastPointerEvent." + attribute, expectedValue);
 -          });
 -
@@ -13292,255 +12973,6 @@ index 0b0f11893c3a800ea3375feee917b0c1ec26d26e..00000000000000000000000000000000
 -    }, "Received pointer events");
 -  }));
 -}, "Pointer property propagation from touches to PointerEvents");
--</script>
-diff --git a/third_party/WebKit/LayoutTests/fast/events/pointerevents/touch-pointer-events-expected.txt b/third_party/WebKit/LayoutTests/fast/events/pointerevents/touch-pointer-events-expected.txt
-deleted file mode 100644
-index 3e2f1118758b5335bd2202cc8136bd6ff64117c9..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/pointerevents/touch-pointer-events-expected.txt
-+++ /dev/null
-@@ -1,50 +0,0 @@
--CONSOLE ERROR: line 105: Uncaught TypeError: Cannot read property 'pointerId' of undefined
--Verifies that tapping on an element fires appropriate pointer events.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
----- test PE+TE event sequences without preventDefault ---
--green received touchstart at phase=target
--lightgreen received touchstart at phase=bubbling
--grey received touchstart at phase=bubbling
--green received touchmove at phase=target
--lightgreen received touchmove at phase=bubbling
--grey received touchmove at phase=bubbling
--green received touchend at phase=target
--lightgreen received touchend at phase=bubbling
--grey received touchend at phase=bubbling
--
----- test PE+TE event sequences with PE preventDefault ---
--green received touchstart at phase=target
--lightgreen received touchstart at phase=bubbling
--grey received touchstart at phase=bubbling
--green received touchmove at phase=target
--lightgreen received touchmove at phase=bubbling
--grey received touchmove at phase=bubbling
--green received touchend at phase=target
--lightgreen received touchend at phase=bubbling
--grey received touchend at phase=bubbling
--
----- test PE params for single-touch ---
--FAIL receivedPEsAtTarget[0].isPrimary should be true. Threw exception TypeError: Cannot read property 'isPrimary' of undefined
--FAIL receivedPEsAtTarget[0].button should be 0. Threw exception TypeError: Cannot read property 'button' of undefined
--FAIL receivedPEsAtTarget[0].buttons should be 1. Threw exception TypeError: Cannot read property 'buttons' of undefined
--FAIL receivedPEsAtTarget[0].clientX should be 148. Threw exception TypeError: Cannot read property 'clientX' of undefined
--FAIL receivedPEsAtTarget[0].clientY should be 156. Threw exception TypeError: Cannot read property 'clientY' of undefined
--FAIL receivedPEsAtTarget[1].isPrimary should be true. Threw exception TypeError: Cannot read property 'isPrimary' of undefined
--FAIL receivedPEsAtTarget[1].button should be 0. Threw exception TypeError: Cannot read property 'button' of undefined
--FAIL receivedPEsAtTarget[1].buttons should be 1. Threw exception TypeError: Cannot read property 'buttons' of undefined
--FAIL receivedPEsAtTarget[1].clientX should be 168. Threw exception TypeError: Cannot read property 'clientX' of undefined
--FAIL receivedPEsAtTarget[1].clientY should be 176. Threw exception TypeError: Cannot read property 'clientY' of undefined
--FAIL receivedPEsAtTarget[2].isPrimary should be true. Threw exception TypeError: Cannot read property 'isPrimary' of undefined
--FAIL receivedPEsAtTarget[2].button should be 0. Threw exception TypeError: Cannot read property 'button' of undefined
--FAIL receivedPEsAtTarget[2].buttons should be 0. Threw exception TypeError: Cannot read property 'buttons' of undefined
--FAIL receivedPEsAtTarget.length should be 3. Was 0.
--
----- test PE isPrimary values ---
--FAIL receivedPEsAtTarget[0].isPrimary should be true. Threw exception TypeError: Cannot read property 'isPrimary' of undefined
--FAIL successfullyParsed should be true. Was false.
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/events/pointerevents/touch-pointer-events.html b/third_party/WebKit/LayoutTests/fast/events/pointerevents/touch-pointer-events.html
-deleted file mode 100644
-index 0f7ec733371e527ef204f421a2abb113df907556..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/events/pointerevents/touch-pointer-events.html
-+++ /dev/null
-@@ -1,187 +0,0 @@
--<!DOCTYPE HTML>
--<script src="../../../resources/js-test.js"></script>
--<style>
--div.box {
--  margin: 10px;
--  padding: 50px;
--  float: left;
--}
--</style>
--
--<div id="grey" class="box" style="background-color:grey">
--  <div id="lightgreen" class="box" style="background-color:lightgreen">
--    <div id="green" class="box" style="background-color:green;">
--    </div>
--  </div>
--</div>
--
--<div id="console"></div>
--
--<script>
--description("Verifies that tapping on an element fires appropriate pointer events.");
--
--var preventDefault;
--var logAllEvents;
--var receivedPEsAtTarget = [];
--
--function getPhaseString(event) {
--  return event.eventPhase == Event.NONE ? "none" :
--      event.eventPhase == Event.CAPTURING_PHASE ? "capturing" :
--      event.eventPhase == Event.AT_TARGET ? "target" :
--      event.eventPhase == Event.BUBBLING_PHASE ? "bubbling" :
--      "error";
--}
--
--function init() {
--  ["grey", "lightgreen", "green"].forEach(function(id) {
--    var targetDiv = document.getElementById(id);
--
--    ["touchstart", "touchend", "touchmove"].forEach(function(eventName) {
--      targetDiv.addEventListener(eventName, function(event) {
--        if (logAllEvents)
--          debug(id + " received " + event.type + " at phase=" + getPhaseString(event));
--      });
--    });
--
--    ["pointerdown", "pointerup", "pointermove", "pointercancel"].forEach(function(eventName) {
--      targetDiv.addEventListener(eventName, function(event) {
--        if (event.eventPhase == Event.AT_TARGET)
--          receivedPEsAtTarget.push(event);
--        if (logAllEvents || event.eventPhase == Event.AT_TARGET)
--          debug(id + " received " + event.type + " at phase=" + getPhaseString(event));
--        if (preventDefault)
--          event.preventDefault();
--      });
--    });
--
--  });
--}
--
--function testEventSequences(x, y) {
--  eventSender.addTouchPoint(x, y);
--  eventSender.touchStart();
--
--  eventSender.updateTouchPoint(0, x+20, y+20);
--  eventSender.touchMove();
--
--  eventSender.releaseTouchPoint(0);
--  eventSender.touchEnd();
--}
--
--function testPEParamsSingleTouch(x, y) {
--  receivedPEsAtTarget = [];
--
--  eventSender.addTouchPoint(x, y);
--  eventSender.touchStart();
--  shouldBeTrue("receivedPEsAtTarget[0].isPrimary");
--  shouldBeEqualToNumber("receivedPEsAtTarget[0].button", 0);
--  shouldBeEqualToNumber("receivedPEsAtTarget[0].buttons", 1);
--  shouldBeEqualToNumber("receivedPEsAtTarget[0].clientX", x);
--  shouldBeEqualToNumber("receivedPEsAtTarget[0].clientY", y);
--
--  eventSender.updateTouchPoint(0, x+20, y+20);
--  eventSender.touchMove();
--  shouldBeTrue("receivedPEsAtTarget[1].isPrimary");
--  shouldBeEqualToNumber("receivedPEsAtTarget[1].button", 0);
--  shouldBeEqualToNumber("receivedPEsAtTarget[1].buttons", 1);
--  shouldBeEqualToNumber("receivedPEsAtTarget[1].clientX", x+20);
--  shouldBeEqualToNumber("receivedPEsAtTarget[1].clientY", y+20);
--
--  eventSender.releaseTouchPoint(0);
--  eventSender.touchEnd();
--  shouldBeTrue("receivedPEsAtTarget[2].isPrimary");
--  shouldBeEqualToNumber("receivedPEsAtTarget[2].button", 0);
--  shouldBeEqualToNumber("receivedPEsAtTarget[2].buttons", 0);
--
--  shouldBeEqualToNumber("receivedPEsAtTarget.length", 3);
--}
--
--function testPEParamsMultiTouch(x, y) {
--  receivedPEsAtTarget = [];
--
--  eventSender.addTouchPoint(x, y);
--  eventSender.touchStart();
--  shouldBeTrue("receivedPEsAtTarget[0].isPrimary");
--  var idFirst = receivedPEsAtTarget[0].pointerId;
--  debug("receivedPEsAtTarget[0].pointerId=" + idFirst)
--
--  eventSender.addTouchPoint(x+10, y+10);
--  eventSender.touchStart();
--  shouldBeFalse("receivedPEsAtTarget[1].isPrimary");
--  var idSecond = receivedPEsAtTarget[1].pointerId;
--  debug("receivedPEsAtTarget[1].pointerId=" + idSecond)
--
--  eventSender.updateTouchPoint(1, x+20, y+20);
--  eventSender.touchMove();
--  shouldBeFalse("receivedPEsAtTarget[2].isPrimary");
--  shouldBeEqualToNumber("receivedPEsAtTarget[2].pointerId", idSecond);
--
--  eventSender.releaseTouchPoint(0);
--  eventSender.touchEnd();
--  shouldBeTrue("receivedPEsAtTarget[3].isPrimary");
--  shouldBeEqualToNumber("receivedPEsAtTarget[3].pointerId", idFirst);
--
--  eventSender.updateTouchPoint(0, x+10, y+10);
--  eventSender.touchMove();
--  shouldBeFalse("receivedPEsAtTarget[4].isPrimary");
--  shouldBeEqualToNumber("receivedPEsAtTarget[4].pointerId", idSecond);
--
--  eventSender.addTouchPoint(x, y);
--  eventSender.touchStart();
--  shouldBeFalse("receivedPEsAtTarget[5].isPrimary");
--  var idThird = receivedPEsAtTarget[5].pointerId;
--  debug("receivedPEsAtTarget[5].pointerId=" + idThird)
--
--  eventSender.releaseTouchPoint(0);
--  eventSender.touchEnd();
--  shouldBeFalse("receivedPEsAtTarget[6].isPrimary");
--  shouldBeEqualToNumber("receivedPEsAtTarget[6].pointerId", idSecond);
--
--  eventSender.releaseTouchPoint(0);
--  eventSender.touchEnd();
--  shouldBeFalse("receivedPEsAtTarget[7].isPrimary");
--  shouldBeEqualToNumber("receivedPEsAtTarget[7].pointerId", idThird);
--
--  eventSender.addTouchPoint(x, y);
--  eventSender.touchStart();
--  shouldBeTrue("receivedPEsAtTarget[8].isPrimary");
--
--  shouldBeEqualToNumber("receivedPEsAtTarget.length", 9);
--}
--
--function runTests() {
--  var rect = document.getElementById("green").getBoundingClientRect();
--  var x = rect.left + 10;
--  var y = rect.top + 10;
--
--  logAllEvents = true;
--  preventDefault = false;
--
--  debug("--- test PE+TE event sequences without preventDefault ---");
--  testEventSequences(x, y);
--  debug("");
--
--  preventDefault = true;
--
--  debug("--- test PE+TE event sequences with PE preventDefault ---");
--  testEventSequences(x, y);
--  debug("");
--
--  logAllEvents = false;
--
--  debug("--- test PE params for single-touch ---");
--  testPEParamsSingleTouch(x, y);
--  debug("");
--
--  debug("--- test PE isPrimary values ---");
--  testPEParamsMultiTouch(x, y);
--  debug("");
--}
--
--init();
--if (window.eventSender)
--  runTests();
--else
--  debug("This test requires eventSender");
--
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/events/pointerevents/touch-pointercancel-expected.txt b/third_party/WebKit/LayoutTests/fast/events/pointerevents/touch-pointercancel-expected.txt
 deleted file mode 100644
@@ -17494,6 +16926,9 @@ index 11a18258e5656e4d03383422178a46fb8dbcb68a..00000000000000000000000000000000
 -{
 -    e.preventDefault();
 -}
+diff --git a/third_party/WebKit/LayoutTests/fast/events/resources/empty.html b/third_party/WebKit/LayoutTests/fast/events/resources/empty.html
+deleted file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..0000000000000000000000000000000000000000
 diff --git a/third_party/WebKit/LayoutTests/fast/events/resources/expect-cursor-update.js b/third_party/WebKit/LayoutTests/fast/events/resources/expect-cursor-update.js
 deleted file mode 100644
 index ab01bbb715175b4c3ac8e1e41a0310345f067e9f..0000000000000000000000000000000000000000
@@ -17558,14 +16993,15 @@ index 2b6531c7f992f276e0a57d40b3d8993476a1de58..00000000000000000000000000000000
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/events/resources/focus-anchor-by-mouse.js b/third_party/WebKit/LayoutTests/fast/events/resources/focus-anchor-by-mouse.js
 deleted file mode 100644
-index f6dc80f2997d73369a69251a659f6f2f2af020d5..0000000000000000000000000000000000000000
+index 414429664bac15274c2772fd7c0c780ed71efce2..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/events/resources/focus-anchor-by-mouse.js
 +++ /dev/null
-@@ -1,7 +0,0 @@
+@@ -1,8 +0,0 @@
 -window.onload = function() {
 -    if (window.eventSender) {
 -        var aElement = document.getElementById('anchor');
--        eventSender.mouseMoveTo(aElement.offsetLeft + 2, aElement.offsetTop + 2);
+-        var aRect = aElement.getBoundingClientRect();
+-        eventSender.mouseMoveTo(aRect.left + 2, aRect.top + 2);
 -        eventSender.mouseDown();
 -    }
 -};
@@ -21261,3 +20697,544 @@ z83crf7sJ|S&hZ&WkC*zM`!&z@!A{+KS2yWwR%bX+_2(cHLkFi0L&J;%qm0o&7;Gs)
 z_Mcqe@yEclx{QHgPy1hq<Zo;Y4ci}e3NR?BZD3$XV&WcUj0VDJN*K)rqq$%-7mR>h
 b@QpduPL6pd$M)aA#x#SctDnm{r-UW|v`Sl9
 
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-body-expected.txt b/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-body-expected.txt
+deleted file mode 100644
+index fd529b1dc6e95940b8a2ae58fa0f5f21b97c9d04..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-body-expected.txt
++++ /dev/null
+@@ -1,9 +0,0 @@
+-
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-PASS frame.contentDocument.scrollingElement.scrollTop is 100
+-PASS frame.contentDocument.scrollingElement.scrollLeft is 100
+-PASS frame.contentWindow.scrollX is 100
+-PASS frame.contentWindow.scrollY is 100
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-body.html b/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-body.html
+deleted file mode 100644
+index 32d728c0ed51fb685b8cb491032f450dbd5024c1..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-body.html
++++ /dev/null
+@@ -1,62 +0,0 @@
+-<html>
+-<head>
+-    <style>
+-        ::-webkit-scrollbar {
+-            width: 0px;
+-            height: 0px;
+-        }
+-    </style>
+-    <script>
+-        window.enablePixelTesting = true;
+-
+-        function scroll() {
+-            window.scrollTo(0, 100);
+-            var frame = document.getElementById('frame');
+-            frame.contentDocument.scrollingElement.scrollTop = 100;
+-            frame.contentDocument.scrollingElement.scrollLeft = 100;
+-
+-            shouldBe("frame.contentDocument.scrollingElement.scrollTop", "100");
+-            shouldBe("frame.contentDocument.scrollingElement.scrollLeft", "100");
+-            shouldBe("frame.contentWindow.scrollX", "100");
+-            shouldBe("frame.contentWindow.scrollY", "100");
+-        }
+-
+-        function scaleWithEventSender() {
+-            var scaleFactor = 0.5;
+-            if (window.internals) {
+-                internals.setPageScaleFactorLimits(scaleFactor, scaleFactor);
+-                internals.setPageScaleFactor(scaleFactor);
+-            }
+-        }
+-
+-        function test() {
+-            scaleWithEventSender();
+-            scroll();
+-        }
+-    </script>
+-    <script src="../../resources/js-test.js"></script>
+-</head>
+-<body onload="test();" style="width: 4000px; height: 4000px">
+-    <iframe id="frame" style="width:400px; height: 400px; position: absolute; top: 100px;"></iframe>
+-    <div id="console"></div>
+-
+-    <script>
+-        var frame = document.getElementById('frame');
+-        var doc = frame.contentDocument.open();
+-        doc.write("<div style='left:0; top:0; width:100px; height:100px; position:absolute; background:yellow;'></div>");
+-        doc.write("<div style='left:100px; top:0; width:100px; height:100px; position:absolute; background:green;'></div>");
+-        doc.write("<div style='left:200px; top:0; width:100px; height:100px; position:absolute; background:blue;'></div>");
+-        doc.write("<div style='left:300px; top:0; width:100px; height:100px; position:absolute; background:green;'></div>");
+-        doc.write("<div style='left:400px; top:0; width:100px; height:100px; position:absolute; background:blue;'></div>");
+-
+-        doc.write("<div style='left:0; top:100px; width:100px; height:100px; position:absolute; background: green;'></div>");
+-        doc.write("<div style='left:100px; top:100px; width:100px; height:100px; position:absolute; background:blue;'></div>");
+-        doc.write("<div style='left:200px; top:100px; width:100px; height:100px; position:absolute; background:green;'></div>");
+-        doc.write("<div style='left:300px; top:100px; width:100px; height:100px; position:absolute; background:blue;'></div>");
+-        doc.write("<div style='left:400px; top:100px; width:100px; height:100px; position:absolute; background:green;'></div>");
+-        doc.close();
+-        frame.contentDocument.body.style.width = "2000px";
+-        frame.contentDocument.body.style.height = "2000px";
+-    </script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-window-expected.png b/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-window-expected.png
+deleted file mode 100644
+index 1c932ef5719244ca26765e8175afe2cc924e0451..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 2938
+zcmeAS@N?(olHy`uVBq!ia0y~yU{+vYV2a>i0*Z)=h^hlA%@Ws$lH`ok<m}?oT!y4n
+zGh=fLOCw{0L}POkLxV(v#1x}cV?z@ILvv#jqvV;we{>iaxOqHX978JRyuEoalgW{x
+zEs*!y!m~FVqdIbr*uA-^n^?rfBDkmKX5^E-w-3nGJ^Qk8vwZTKy1RMXW&bo^epzBS
+zKYcwz!&Di$bJI^>pCYRt^L?|pO|k6y{gL<8-oN@+Ip3C%;o4`zY6gY_y9FZ{7z`U(
+z83crf7sJ|S&hZ&WkC*zM`!&z@!A{+KS2yWwR%bX+_2(cHLkFi0L&J;%qm0o&7;Gs)
+z_Mcqe@yEclx{QHgPy1hq<Zo;Y4ci}e3NR?BZD3$XV&WcUj0VDJN*K)rqq$%-7mR>h
+b@QpduPL6pd$M)aA#x#SctDnm{r-UW|v`Sl9
+
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-window-expected.txt b/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-window-expected.txt
+deleted file mode 100644
+index 3b338be91beb49ba0bb83e45d79682ed36a2604d..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-window-expected.txt
++++ /dev/null
+@@ -1,8 +0,0 @@
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-PASS frame.contentDocument.scrollingElement.scrollTop is 100
+-PASS frame.contentDocument.scrollingElement.scrollLeft is 100
+-PASS frame.contentWindow.scrollX is 100
+-PASS frame.contentWindow.scrollY is 100
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-window.html b/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-window.html
+deleted file mode 100644
+index fe64a206896a6fd6b4cddb7ba0952b2ea4a88f44..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-iframe-window.html
++++ /dev/null
+@@ -1,61 +0,0 @@
+-<html>
+-<head>
+-    <style>
+-        ::-webkit-scrollbar {
+-            width: 0px;
+-            height: 0px;
+-        }
+-    </style>
+-    <script>
+-        window.enablePixelTesting = true;
+-
+-        function scroll() {
+-            window.scrollTo(0, 100);
+-            var frame = document.getElementById('frame');
+-            frame.contentWindow.scrollTo(100,100);
+-
+-            shouldBe("frame.contentDocument.scrollingElement.scrollTop", "100");
+-            shouldBe("frame.contentDocument.scrollingElement.scrollLeft", "100");
+-            shouldBe("frame.contentWindow.scrollX", "100");
+-            shouldBe("frame.contentWindow.scrollY", "100");
+-        }
+-
+-        function scaleWithEventSender() {
+-            var scaleFactor = 0.5;
+-            if (window.internals) {
+-                internals.setPageScaleFactorLimits(scaleFactor, scaleFactor);
+-                internals.setPageScaleFactor(scaleFactor);
+-            }
+-        }
+-
+-        function test() {
+-            scaleWithEventSender();
+-            scroll();
+-        }
+-    </script>
+-    <script src="../../resources/js-test.js"></script>
+-</head>
+-<body onload="test();" style="width: 4000px; height: 4000px">
+-    <div id="console"></div>
+-    <iframe id="frame" style="width:400px; height: 400px; position: absolute; top: 100px;"></iframe>
+-
+-    <script>
+-        var frame = document.getElementById('frame');
+-        var doc = frame.contentDocument.open();
+-        doc.write("<div style='left:0; top:0; width:100px; height:100px; position:absolute; background:yellow;'></div>");
+-        doc.write("<div style='left:100px; top:0; width:100px; height:100px; position:absolute; background:green;'></div>");
+-        doc.write("<div style='left:200px; top:0; width:100px; height:100px; position:absolute; background:blue;'></div>");
+-        doc.write("<div style='left:300px; top:0; width:100px; height:100px; position:absolute; background:green;'></div>");
+-        doc.write("<div style='left:400px; top:0; width:100px; height:100px; position:absolute; background:blue;'></div>");
+-
+-        doc.write("<div style='left:0; top:100px; width:100px; height:100px; position:absolute; background: green;'></div>");
+-        doc.write("<div style='left:100px; top:100px; width:100px; height:100px; position:absolute; background:blue;'></div>");
+-        doc.write("<div style='left:200px; top:100px; width:100px; height:100px; position:absolute; background:green;'></div>");
+-        doc.write("<div style='left:300px; top:100px; width:100px; height:100px; position:absolute; background:blue;'></div>");
+-        doc.write("<div style='left:400px; top:100px; width:100px; height:100px; position:absolute; background:green;'></div>");
+-        doc.close();
+-        frame.contentDocument.body.style.width = "2000px";
+-        frame.contentDocument.body.style.height = "2000px";
+-    </script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-window-expected.png b/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-window-expected.png
+deleted file mode 100644
+index bb4403287c6cdb65a3aecc1c4db30497c90277d8..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 2854
+zcmeAS@N?(olHy`uVBq!ia0y~yU{+vYV2a>i0*Z)=h^hlA%@Ws$lH`ok<m}?oTm}<k
+zla#ciWaC70BlD!RG{aOAGt0C@3sXyr6eDvBGh_cGrFaGgt{t8(jv*Cu-rl&#$)L!?
+z>bUn`^*Pgx3a5Nn-)rmK%s$(6>x`Xkqx#P91G4)rGcz#6DQ{q4NMhn<P*59Xj0VDJ
+zN}yvd*p~k63mZej@*fF|3`bbR7#w^?8KZ$Pni58H!DucR%>^SX7t}qP$i4C-OV@E=
+P!<WI+)z4*}Q$iB}RMRDz
+
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-window-expected.txt b/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-window-expected.txt
+deleted file mode 100644
+index 8219570698ae690f784b2aa9bba5435aacb64a50..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-window-expected.txt
++++ /dev/null
+@@ -1,8 +0,0 @@
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-PASS window.document.scrollingElement.scrollTop is 100
+-PASS window.document.scrollingElement.scrollLeft is 100
+-PASS window.scrollX is 100
+-PASS window.scrollY is 100
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-window.html b/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-window.html
+deleted file mode 100644
+index d0bb4c5da723b42b1921cb5f785c65083e8afc22..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/scale-and-scroll-window.html
++++ /dev/null
+@@ -1,48 +0,0 @@
+-<html>
+-<head>
+-    <style>
+-        ::-webkit-scrollbar {
+-            width: 0px;
+-            height: 0px;
+-        }
+-    </style>
+-    <script>
+-      window.enablePixelTesting = true;
+-
+-      function scroll() {
+-          // The page scale, as set by window.internals.setPageScaleFactor should not be apparent
+-          // to javascript. So, we expect scrolling to (100,100) to be page coordinates, rather
+-          // than device pixels.
+-          window.scrollTo(100,100);
+-
+-          shouldBe("window.document.scrollingElement.scrollTop", "100");
+-          shouldBe("window.document.scrollingElement.scrollLeft", "100");
+-          shouldBe("window.scrollX", "100");
+-          shouldBe("window.scrollY", "100");
+-      }
+-
+-      function scaleWithEventSender() {
+-          var scaleFactor = 2.0;
+-          if (window.internals)
+-            internals.setPageScaleFactor(scaleFactor);
+-      }
+-
+-      function test() {
+-          scaleWithEventSender();
+-          scroll();
+-      }
+-    </script>
+-    <script src="../../resources/js-test.js"></script>
+-</head>
+-<body style="width:2000px; height:2000px; margin:0px;" onload="test();">
+-    <div style="left:0; top:0; width:100px; height:100px; position:absolute; background:yellow;"></div>
+-    <div style="left:100px; top:0; width:100px; height:100px; position:absolute; background:green;"></div>
+-    <div style="left:200px; top:0; width:100px; height:100px; position:absolute; background:blue;"></div>
+-
+-    <div style="left:0; top:100px; width:100px; height:100px; position:absolute; background: green;"></div>
+-    <div style="left:100px; top:100px; width:100px; height:100px; position:absolute; background:blue;"></div>
+-    <div style="left:200px; top:100px; width:100px; height:100px; position:absolute; background:yellow;"></div>
+-
+-    <div id="console"></div>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scoped/editing-commands-expected.txt b/third_party/WebKit/LayoutTests/fast/events/scoped/editing-commands-expected.txt
+deleted file mode 100644
+index 8de312656d49fc48a207086b50b40e5c95d1d035..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/scoped/editing-commands-expected.txt
++++ /dev/null
+@@ -1,40 +0,0 @@
+-This test ensures WebKit does not fire DOM mutation events while execCommand is in progress.
+-
+-PASS: execCommand('BackColor', false, 'blue')
+-PASS: execCommand('CreateLink', false, 'about:blank')
+-PASS: execCommand('Delete', false, null)
+-PASS: execCommand('FontName', false, 'Arial')
+-PASS: execCommand('FontSize', false, '5')
+-PASS: execCommand('FontSizeDelta', false, '5')
+-PASS: execCommand('ForeColor', false, 'blue')
+-PASS: execCommand('FormatBlock', false, 'pre')
+-PASS: execCommand('ForwardDelete', false, null)
+-PASS: execCommand('HiliteColor', false, 'red')
+-PASS: execCommand('Indent', false, null)
+-PASS: execCommand('InsertHTML', false, '<i>hello')
+-PASS: execCommand('InsertHorizontalRule', false, null)
+-PASS: execCommand('InsertImage', false, '../resources/abe.png')
+-PASS: execCommand('InsertLineBreak', false, null)
+-PASS: execCommand('InsertNewlineInQuotedContent', false, null)
+-PASS: execCommand('InsertOrderedList', false, null)
+-PASS: execCommand('InsertParagraph', false, null)
+-PASS: execCommand('InsertText', false, 'webkit')
+-PASS: execCommand('InsertUnorderedList', false, null)
+-PASS: execCommand('Italic', false, null)
+-PASS: execCommand('JustifyCenter', false, null)
+-PASS: execCommand('JustifyFull', false, null)
+-PASS: execCommand('JustifyLeft', false, null)
+-PASS: execCommand('JustifyNone', false, null)
+-PASS: execCommand('JustifyRight', false, null)
+-PASS: execCommand('Outdent', false, null)
+-PASS: execCommand('RemoveFormat', false, null)
+-PASS: execCommand('Strikethrough', false, null)
+-PASS: execCommand('Subscript', false, null)
+-PASS: execCommand('Superscript', false, null)
+-PASS: execCommand('Transpose', false, null)
+-PASS: execCommand('Underline', false, null)
+-PASS: execCommand('Unlink', false, null)
+-
+-
+-DONE
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/events/scoped/editing-commands.html b/third_party/WebKit/LayoutTests/fast/events/scoped/editing-commands.html
+deleted file mode 100644
+index 929fb35687ecb737d1c044ffeb90f8d259af185f..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/scoped/editing-commands.html
++++ /dev/null
+@@ -1,130 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<body>
+-<p>This test ensures WebKit does not fire DOM mutation events while execCommand is in progress.</p>
+-<div id="test" contenteditable></div>
+-<pre>
+-<script>
+-
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-
+-var commands = [
+-    {name: 'BackColor', value: 'blue'},
+-    {name: 'CreateLink', value: 'about:blank'},
+-    {name: 'Delete', value: null},
+-    {name: 'FontName', value: 'Arial'},
+-    {name: 'FontSize', value: '5'},
+-    {name: 'FontSizeDelta', value: '5'},
+-    {name: 'ForeColor', value: 'blue'},
+-    {name: 'FormatBlock', value: 'pre'},
+-    {name: 'ForwardDelete', value: null},
+-    {name: 'HiliteColor', value: 'red'},
+-    {name: 'Indent', value: null},
+-    {name: 'InsertHTML', value: "<i>hello</i>"},
+-    {name: 'InsertHorizontalRule', value: null},
+-    {name: 'InsertImage', value: '../resources/abe.png'},
+-    {name: 'InsertLineBreak', value: null},
+-    {name: 'InsertNewlineInQuotedContent', value: null},
+-    {name: 'InsertOrderedList', value: null},
+-    {name: 'InsertParagraph', value: null},
+-    {name: 'InsertText', value: 'webkit'},
+-    {name: 'InsertUnorderedList', value: null},
+-    {name: 'Italic', value: null},
+-    {name: 'JustifyCenter', value: null},
+-    {name: 'JustifyFull', value: null},
+-    {name: 'JustifyLeft', value: null},
+-    {name: 'JustifyNone', value: null},
+-    {name: 'JustifyRight', value: null},
+-    {name: 'Outdent', value: null},
+-    {name: 'RemoveFormat', value: null},
+-    {name: 'Strikethrough', value: null},
+-    {name: 'Subscript', value: null},
+-    {name: 'Superscript', value: null},
+-    {name: 'Transpose', value: null, selector: function (test) { window.getSelection().collapse(test.firstChild, 1); }},
+-    {name: 'Underline', value: null},
+-    {name: 'Unlink', value: null},
+-];
+-
+-var events = {
+-    'DOMCharacterDataModified': false,
+-    'DOMSubtreeModified': false,
+-    'DOMNodeInserted': false,
+-    'DOMNodeRemoved': false,
+-    'DOMNodeRemovedFromDocument': false,
+-    'DOMNodeInsertedIntoDocument': true, // this event can never be observed.
+-    'DOMFocusIn': false,
+-    'DOMFocusOut': false,
+-    'focusin': false,
+-    'focusout': false,
+-};
+-
+-var log = [];
+-var test = document.getElementById('test');
+-
+-function addEventListeners(node) {
+-    for (var e in events) {
+-        node.addEventListener(e, function (event) {
+-            log.push(test.innerHTML);
+-            events[event.type] = true;
+-        }, false);
+-    }
+-}
+-
+-function isLogConsistent() {
+-    for (var i= 1; i < log.length; i++) {
+-        if (log[0] != log[i]) {
+-            console.log(log);
+-            return false;
+-        }
+-    }
+-    return true;
+-}
+-
+-addEventListeners(test);
+-
+-var initial = 'hello, <input type="text"><blockquote align="right"><u><a href="about:blank">world</a></u></blockquote>';
+-for (var i = 0; i < commands.length; i++) {
+-    test.innerHTML = initial;
+-    if (i)
+-        document.write("\n");
+-
+-    if (test.innerHTML != initial) {
+-        document.write("FAIL: initial innerHTML didn't match");
+-        continue;
+-    }
+-
+-    if (commands[i].selector)
+-        commands[i].selector(test);
+-    else {    
+-        document.getElementsByTagName('input')[0].focus();
+-        window.getSelection().selectAllChildren(test);
+-    }
+-    addEventListeners(test.childNodes[2]);
+-    log = []; // clear log
+-    document.execCommand(commands[i].name, false, commands[i].value);
+-
+-    var quotedValue = commands[i].value ? "'" + commands[i].value.replace('<', '&lt;') + "'" : null;
+-    var action = "execCommand('" + commands[i].name + "', false, " + quotedValue + ")";
+-
+-    if (test.innerHTML == initial || log.length <= 0)
+-        document.write('FAIL: ' + action + ' made no change to the DOM.');
+-    else if (!isLogConsistent())
+-        document.write('FAIL: ' + action + ' dispatched events before finalizing the DOM tree.');
+-    else
+-        document.write('PASS: ' + action);
+-}
+-test.style.display = 'none';
+-
+-document.write('\n');
+-for (var e in events) {
+-    if (!events[e])
+-        document.write('\nWARNING: ' + e + ' was never observed.');
+-}
+-
+-document.write('\n\nDONE');
+-
+-</script>
+-</pre>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/events/script-tests/TEMPLATE.html b/third_party/WebKit/LayoutTests/fast/events/script-tests/TEMPLATE.html
+deleted file mode 100644
+index 397d74168dda26d533c379d3ed57b5b672a791ee..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/script-tests/TEMPLATE.html
++++ /dev/null
+@@ -1,9 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<script src="YOUR_JS_FILE_HERE"></script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/events/script-tests/blur-focus-window-should-blur-focus-element.js b/third_party/WebKit/LayoutTests/fast/events/script-tests/blur-focus-window-should-blur-focus-element.js
+deleted file mode 100644
+index 862ee42d8b3892502497c9352a4fae24dd17eef3..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/script-tests/blur-focus-window-should-blur-focus-element.js
++++ /dev/null
+@@ -1,64 +0,0 @@
+-description('Blurring and focusing the window should blur and focus the focused element');
+-
+-var divElement = document.createElement('div');
+-divElement.tabIndex = 0;
+-divElement.textContent = 'Outer';
+-document.body.appendChild(divElement);
+-
+-var iframeElement = document.createElement('iframe');
+-document.body.appendChild(iframeElement);
+-var iframe = window.frames[0];
+-var innerDiv = iframeElement.contentDocument.createElement('div');
+-innerDiv.textContent = 'Inner';
+-innerDiv.tabIndex = 0;
+-iframeElement.contentDocument.body.appendChild(innerDiv);
+-
+-var thisObjects = [];
+-var events = [];
+-var targets = [];
+-
+-// Focus before setting up event listeners.
+-divElement.focus();
+-
+-divElement.onfocus = divElement.onblur = window.onfocus = window.onblur =
+-    innerDiv.onfocus = innerDiv.onblur = iframe.onfocus = iframe.onblur = function(e)
+-{    
+-    thisObjects.push(this);
+-    events.push(e.type);
+-    targets.push(e.target);
+-};
+-
+-if (window.testRunner) {
+-    window.testRunner.setWindowIsKey(false);
+-    window.testRunner.setWindowIsKey(true);
+-    
+-    innerDiv.focus();
+-    divElement.focus();
+-}
+-
+-var i = 0;
+-function testNextEvent(target, eventType)
+-{
+-    shouldBe('thisObjects[' + i + ']', target);
+-    shouldBeEqualToString('events[' + i + ']', eventType);
+-    shouldBe('targets[' + i + ']', target);
+-    i++;
+-}
+-
+-testNextEvent('divElement', 'blur');
+-testNextEvent('window', 'blur');
+-testNextEvent('window', 'focus');
+-testNextEvent('divElement', 'focus');
+-
+-testNextEvent('divElement', 'blur');
+-testNextEvent('window', 'blur');
+-testNextEvent('iframe', 'focus');
+-testNextEvent('innerDiv', 'focus');
+-
+-testNextEvent('innerDiv', 'blur');
+-testNextEvent('iframe', 'blur');
+-testNextEvent('window', 'focus');
+-testNextEvent('divElement', 'focus');
+-
+-document.body.removeChild(divElement);
+-document.body.removeChild(iframeElement);
+diff --git a/third_party/WebKit/LayoutTests/fast/events/script-tests/create-document-crash-on-attach-event.js b/third_party/WebKit/LayoutTests/fast/events/script-tests/create-document-crash-on-attach-event.js
+deleted file mode 100644
+index aa5f6a1be406ecbc9cc928140d7ab7677b8911f0..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/events/script-tests/create-document-crash-on-attach-event.js
++++ /dev/null
+@@ -1,6 +0,0 @@
+-description('This test checks for crashes in setting an event handler on a document element created by '
+-            + 'document.implementation.createDocument.');
+-
+-var doc = document.implementation.createDocument('', '', null);
+-doc.onload = function() { };
+-testPassed('Attached onload event handler to created document.');
