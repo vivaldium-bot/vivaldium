@@ -150,14 +150,7 @@ def model_summary(token: str, model: str, note: dict) -> str:
             {'role': 'user', 'content': prompt},
         ],
     }
-    for attempt in range(5):
-        try:
-            response = request_json('https://openrouter.ai/api/v1/chat/completions', token, payload)
-            break
-        except HTTPError as error:
-            if error.code != 429 or attempt == 4:
-                raise
-            time.sleep(5 * (attempt + 1))
+    response = request_json('https://openrouter.ai/api/v1/chat/completions', token, payload)
     raw = response['choices'][0]['message'].get('content')
     if not isinstance(raw, str):
         raise RuntimeError('OpenRouter returned no final text for ' + note['tag'])
@@ -179,6 +172,8 @@ def main():
     parser.add_argument('--sleep', type=float, default=0.35)
     parser.add_argument('--force', action='store_true')
     parser.add_argument('--openrouter', action='store_true', help='add free-model release-context summaries')
+    parser.add_argument('--tag', help='summarize only one release family, such as 1.2')
+    parser.add_argument('--limit', type=int, default=0, help='maximum new model requests; zero means all')
     args = parser.parse_args()
     inventory = json.loads(INVENTORY.read_text())
     old = json.loads(OUTPUT.read_text()) if OUTPUT.exists() and not args.force else {'notes': []}
@@ -214,17 +209,37 @@ def main():
             raise RuntimeError('OPENROUTER_KEY is required for --openrouter')
         model = free_model(token)
         previous = {row['source']: row for row in old.get('notes', [])}
+        attempts = 0
         for note in document['notes']:
+            if args.tag and note['tag'] != args.tag:
+                continue
             cached_note = previous.get(note['source'], {})
             cached = cached_note.get('openrouter')
-            if cached and cached.get('model') == model and cached.get('source_html_sha256') == note['source_html_sha256']:
+            if cached and cached.get('summary') and cached.get('model') == model and cached.get('source_html_sha256') == note['source_html_sha256']:
                 note['openrouter'] = cached
                 continue
+            if args.limit and attempts >= args.limit:
+                break
+            attempts += 1
+            try:
+                summary = model_summary(token, model, note)
+            except HTTPError as error:
+                if error.code != 429:
+                    raise
+                note['openrouter'] = {
+                    'model': model,
+                    'prompt_format': 1,
+                    'source_html_sha256': note['source_html_sha256'],
+                    'status': 'rate-limited',
+                }
+                print('rate-limited', note['tag'], 'with', model, flush=True)
+                write_snapshot(document)
+                break
             note['openrouter'] = {
                 'model': model,
                 'prompt_format': 1,
                 'source_html_sha256': note['source_html_sha256'],
-                'summary': model_summary(token, model, note),
+                'summary': summary,
             }
             print('summarized', note['tag'], 'with', model, flush=True)
             # Preserve completed model work across free-tier rate limits.
@@ -233,7 +248,7 @@ def main():
         document['openrouter'] = {
             'enabled': True,
             'model': model,
-            'method': 'Free OpenRouter model, temperature 0, with official announcement excerpt only.',
+            'method': 'Free OpenRouter model, temperature 0, with official announcement excerpt only. Rate limits are accepted without retrying.',
         }
     write_snapshot(document)
     print(f'wrote {len(notes)} release-note summaries to {OUTPUT}')

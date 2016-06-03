@@ -45,7 +45,20 @@ Final release commit descriptions and `.vivaldium/changelog.json` include a
 date-compatible, matching major/minor announcement. Unmatched early snapshots
 are recorded as unmatched. These are release-family references, not evidence of
 original commit boundaries or assignments of advertised features to patches.
-No AI service is used. Article dates do not replace source-index timestamps.
+Article dates do not replace source-index timestamps.
+
+To add short model-written release context from the official announcement only:
+
+```bash
+uv run --frozen python scripts/sync_release_notes.py --openrouter --sleep 2
+```
+
+This uses an API-advertised free OpenRouter model at temperature zero. It stores
+the selected model, source HTML digest, prompt format, and output alongside the
+extractive synopsis. Free-tier rate limits are recorded without retrying and
+completed summaries are checkpointed. If no model summary is available, the release commit uses the
+source-extracted official synopsis instead. Neither form assigns advertised
+features to a patch group or claims original Vivaldi commit history.
 
 Actions uses a self-hosted runner labelled `vivaldium`, with uv installed by
 `astral-sh/setup-uv`. Set repository variable `VIVALDI_DATA_DIR` to persistent
