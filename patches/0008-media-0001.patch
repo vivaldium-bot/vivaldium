@@ -1,16 +1,137 @@
+diff --git a/gpu/config/gpu_switches.cc b/gpu/config/gpu_switches.cc
+index 554582d81aaf4bd2b14a520a4bb86c7f875a19a9..b67722b74134fbb867a3c127eeb73c82b49f29d2 100644
+--- a/gpu/config/gpu_switches.cc
++++ b/gpu/config/gpu_switches.cc
+@@ -31,4 +31,11 @@ const char kGpuTestingGLRenderer[] = "gpu-testing-gl-renderer";
+ // Override gl version from the GpuInfoCollector.
+ const char kGpuTestingGLVersion[] = "gpu-testing-gl-version";
+ 
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++// Attempts to turn on hardware accelerated video decoding. Relevant when
++// platform decoders are used.
++const char kEnablePlatformAcceleratedVideoDecoding[] =
++    "enable-platform-accelerated-video-decoding";
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
++
+ }  // namespace switches
+diff --git a/gpu/config/gpu_switches.h b/gpu/config/gpu_switches.h
+index 8bf00f17c3b5082153b67d4e0d1104b3d379d084..5c6320e90ca060ab32b068d5694ca21bd413c242 100644
+--- a/gpu/config/gpu_switches.h
++++ b/gpu/config/gpu_switches.h
+@@ -18,6 +18,10 @@ GPU_EXPORT extern const char kGpuTestingGLVendor[];
+ GPU_EXPORT extern const char kGpuTestingGLRenderer[];
+ GPU_EXPORT extern const char kGpuTestingGLVersion[];
+ 
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++GPU_EXPORT extern const char kEnablePlatformAcceleratedVideoDecoding[];
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
++
+ }  // namespace switches
+ 
+ #endif  // GPU_CONFIG_GPU_SWITCHES_H_
+diff --git a/gpu/gles2_conform_support/gles2_conform_support.gyp b/gpu/gles2_conform_support/gles2_conform_support.gyp
+index d4f187089104f13bd2c47add78d3532aed1d0a0b..f585d92e7d644c451b3c8ea924724d29208cdcf6 100644
+--- a/gpu/gles2_conform_support/gles2_conform_support.gyp
++++ b/gpu/gles2_conform_support/gles2_conform_support.gyp
+@@ -96,6 +96,7 @@
+       'type': 'executable',
+       'dependencies': [
+         'egl_native',
++        '../../base/allocator/allocator.gyp:allocator',
+         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+         '../../gpu/gpu.gyp:gles2_c_lib_nocheck',
+         '../../third_party/expat/expat.gyp:expat',
+diff --git a/gpu/gpu.gyp b/gpu/gpu.gyp
+index 4968aa322c93e0a46b3eef1b22fd9d57ac616df0..5f03d41865b5b0ab0b6d4dde944482d444a93a23 100644
+--- a/gpu/gpu.gyp
++++ b/gpu/gpu.gyp
+@@ -502,7 +502,7 @@
+         '..',
+       ],
+       'sources': [
+-        'gpu/ipc/service/gpu_memory_buffer_factory_test_template.h',
++        #'gpu/ipc/service/gpu_memory_buffer_factory_test_template.h',
+       ],
+     },
+     {
+diff --git a/gpu/ipc/service/gpu_channel.cc b/gpu/ipc/service/gpu_channel.cc
+index 7661318de18f0a31e4997dd5267986cf54d0579a..2cf9379c708c25ccbe3c082a91d8d2046d0c4829 100644
+--- a/gpu/ipc/service/gpu_channel.cc
++++ b/gpu/ipc/service/gpu_channel.cc
+@@ -30,6 +30,7 @@
+ #include "base/trace_event/process_memory_dump.h"
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
++#include "content/public/common/content_switches.h"
+ #include "gpu/command_buffer/common/mailbox.h"
+ #include "gpu/command_buffer/common/value_state.h"
+ #include "gpu/command_buffer/service/command_executor.h"
+diff --git a/gpu/ipc/service/gpu_channel.h b/gpu/ipc/service/gpu_channel.h
+index 8090b40b8a6fd98c1779132bc818285cd7363e8b..05fa48da48ce2f48091cfd06146b3eee736be95b 100644
+--- a/gpu/ipc/service/gpu_channel.h
++++ b/gpu/ipc/service/gpu_channel.h
+@@ -183,9 +183,10 @@ class GPU_EXPORT GpuChannel
+   // Map of routing id to command buffer stub.
+   base::ScopedPtrHashMap<int32_t, scoped_ptr<GpuCommandBufferStub>> stubs_;
+ 
+- private:
+-  bool OnControlMessageReceived(const IPC::Message& msg);
++ protected:
++  virtual bool OnControlMessageReceived(const IPC::Message& msg);
+ 
++ private:
+   void HandleMessage(const scoped_refptr<GpuChannelMessageQueue>& queue);
+ 
+   // Some messages such as WaitForGetOffsetInRange and WaitForTokenInRange are
+@@ -195,12 +196,14 @@ class GPU_EXPORT GpuChannel
+ 
+   void HandleMessageHelper(const IPC::Message& msg);
+ 
++ protected:
+   scoped_refptr<GpuChannelMessageQueue> CreateStream(
+       int32_t stream_id,
+       GpuStreamPriority stream_priority);
+ 
+   scoped_refptr<GpuChannelMessageQueue> LookupStream(int32_t stream_id);
+ 
++ private:
+   void DestroyStreamIfNecessary(
+       const scoped_refptr<GpuChannelMessageQueue>& queue);
+ 
+@@ -355,7 +358,7 @@ struct GpuChannelMessage {
+   DISALLOW_COPY_AND_ASSIGN(GpuChannelMessage);
+ };
+ 
+-class GpuChannelMessageQueue
++class GPU_EXPORT GpuChannelMessageQueue
+     : public base::RefCountedThreadSafe<GpuChannelMessageQueue> {
+  public:
+   static scoped_refptr<GpuChannelMessageQueue> Create(
+diff --git a/gpu/ipc/service/gpu_channel_manager.h b/gpu/ipc/service/gpu_channel_manager.h
+index 9b39cda81be774e5079d9294317d4ab84e1933e9..91af0373c5f554e26df76c518f582d80901f297f 100644
+--- a/gpu/ipc/service/gpu_channel_manager.h
++++ b/gpu/ipc/service/gpu_channel_manager.h
+@@ -170,6 +170,7 @@ class GPU_EXPORT GpuChannelManager {
+   PreemptionFlag* preemption_flag() const {
+     return preemption_flag_.get();
+   }
++  GpuWatchdog* watchdog() {return watchdog_;}
+ 
+   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 diff --git a/media/base/audio_decoder_config.cc b/media/base/audio_decoder_config.cc
-index 3f279f228e237d467f79f0938279a9c9a280be57..8a274923a992a16e93ea29c59823db1b51c789fc 100644
+index 253c82b147c96b0304ce49d83ec7c4334bb78fdb..7c2b784c19dba5fa560c392e096501676394450c 100644
 --- a/media/base/audio_decoder_config.cc
 +++ b/media/base/audio_decoder_config.cc
-@@ -55,6 +55,7 @@ AudioDecoderConfig::AudioDecoderConfig()
+@@ -15,6 +15,7 @@ AudioDecoderConfig::AudioDecoderConfig()
        bytes_per_channel_(0),
        channel_layout_(CHANNEL_LAYOUT_UNSUPPORTED),
        samples_per_second_(0),
 +      input_samples_per_second_(0),
        bytes_per_frame_(0),
-       is_encrypted_(false),
-       codec_delay_(0) {
-@@ -84,6 +85,7 @@ void AudioDecoderConfig::Initialize(AudioCodec codec,
+       codec_delay_(0) {}
+ 
+@@ -43,6 +44,7 @@ void AudioDecoderConfig::Initialize(AudioCodec codec,
    codec_ = codec;
    channel_layout_ = channel_layout;
    samples_per_second_ = samples_per_second;
@@ -18,7 +139,7 @@ index 3f279f228e237d467f79f0938279a9c9a280be57..8a274923a992a16e93ea29c59823db1b
    sample_format_ = sample_format;
    bytes_per_channel_ = SampleFormatToBytesPerChannel(sample_format);
    extra_data_ = extra_data;
-@@ -104,9 +106,10 @@ bool AudioDecoderConfig::IsValidConfig() const {
+@@ -63,9 +65,10 @@ bool AudioDecoderConfig::IsValidConfig() const {
           bytes_per_channel_ <= limits::kMaxBytesPerSample &&
           samples_per_second_ > 0 &&
           samples_per_second_ <= limits::kMaxSampleRate &&
@@ -32,12 +153,12 @@ index 3f279f228e237d467f79f0938279a9c9a280be57..8a274923a992a16e93ea29c59823db1b
  
  bool AudioDecoderConfig::Matches(const AudioDecoderConfig& config) const {
 diff --git a/media/base/audio_decoder_config.h b/media/base/audio_decoder_config.h
-index c3489cc2a456ca8239a2430992feafa6ac61f568..057eabd94c024587d38c3b5d72a8521d49635104 100644
+index 266de82d605277543a3fec40b2c5a8faec165266..24d26192e1f2f986ccc9d59359ef2aa9e452bd08 100644
 --- a/media/base/audio_decoder_config.h
 +++ b/media/base/audio_decoder_config.h
-@@ -113,12 +113,25 @@ class MEDIA_EXPORT AudioDecoderConfig {
-   // can be encrypted or not encrypted.
-   bool is_encrypted() const { return is_encrypted_; }
+@@ -87,12 +87,25 @@ class MEDIA_EXPORT AudioDecoderConfig {
+     return encryption_scheme_;
+   }
  
 +  // The sampling rate on decoder input.  Note that |samples_per_second| refers
 +  // to the output sampling rate.
@@ -60,20 +181,7 @@ index c3489cc2a456ca8239a2430992feafa6ac61f568..057eabd94c024587d38c3b5d72a8521d
 +  int input_samples_per_second_;
    int bytes_per_frame_;
    std::vector<uint8_t> extra_data_;
-   bool is_encrypted_;
-diff --git a/media/base/audio_video_metadata_extractor_unittest.cc b/media/base/audio_video_metadata_extractor_unittest.cc
-index 744d3ebd96acab46a70470c5e7deb5028a460bb6..98643580825df8a02a9fb245b37a9e556dfee27b 100644
---- a/media/base/audio_video_metadata_extractor_unittest.cc
-+++ b/media/base/audio_video_metadata_extractor_unittest.cc
-@@ -121,7 +121,7 @@ TEST(AudioVideoMetadataExtractorTest, VideoWebM) {
-   EXPECT_EQ(0u, extractor->attached_images_bytes().size());
- }
- 
--#if defined(USE_PROPRIETARY_CODECS)
-+#if 0 && defined(USE_PROPRIETARY_CODECS)
- TEST(AudioVideoMetadataExtractorTest, AndroidRotatedMP4Video) {
-   scoped_ptr<AudioVideoMetadataExtractor> extractor =
-       GetExtractor("90rotation.mp4", true, true, 0, 1920, 1080);
+   EncryptionScheme encryption_scheme_;
 diff --git a/media/base/container_names.cc b/media/base/container_names.cc
 index 24d8ea953ffe58789c7493f1f73b2e69d0595402..8a237962f52779fe8f34d0a3b5579ada73138dd4 100644
 --- a/media/base/container_names.cc
@@ -270,7 +378,7 @@ index 9010eaa3172d655d59625d67728a4ccb272216ae..16b4d8271c846c378445cf040981f86c
    void Initialize();
  
 diff --git a/media/base/mac/avfoundation_glue.h b/media/base/mac/avfoundation_glue.h
-index fd744a3eeb797fee363bfaac34be3a2b258d9d5e..ddc1467fa3fd2630d4a84c4621d83014b1163287 100644
+index a5b430412fdcfe3da37983f4d41fcdf19bbb0451..5d0a3907d10f845b0af1a42f19c5398630c5a08e 100644
 --- a/media/base/mac/avfoundation_glue.h
 +++ b/media/base/mac/avfoundation_glue.h
 @@ -14,12 +14,14 @@
@@ -288,7 +396,7 @@ index fd744a3eeb797fee363bfaac34be3a2b258d9d5e..ddc1467fa3fd2630d4a84c4621d83014
  #include "media/base/media_export.h"
  
  class MEDIA_EXPORT AVFoundationGlue {
-@@ -49,10 +51,30 @@ class MEDIA_EXPORT AVFoundationGlue {
+@@ -45,10 +47,30 @@ class MEDIA_EXPORT AVFoundationGlue {
    static NSString* AVCaptureSessionDidStopRunningNotification();
    static NSString* AVCaptureSessionErrorKey();
  
@@ -319,7 +427,7 @@ index fd744a3eeb797fee363bfaac34be3a2b258d9d5e..ddc1467fa3fd2630d4a84c4621d83014
    static Class AVCaptureSessionClass();
    static Class AVCaptureVideoDataOutputClass();
  #endif  // defined(__OBJC__)
-@@ -63,6 +85,64 @@ class MEDIA_EXPORT AVFoundationGlue {
+@@ -59,6 +81,64 @@ class MEDIA_EXPORT AVFoundationGlue {
  
  #if defined(__OBJC__)
  
@@ -384,7 +492,7 @@ index fd744a3eeb797fee363bfaac34be3a2b258d9d5e..ddc1467fa3fd2630d4a84c4621d83014
  // Originally AVCaptureDevice and coming from AVCaptureDevice.h
  MEDIA_EXPORT
  @interface CrAVCaptureDevice : NSObject
-@@ -170,6 +250,13 @@ MEDIA_EXPORT
+@@ -166,6 +246,13 @@ MEDIA_EXPORT
  
  @end
  
@@ -399,40 +507,18 @@ index fd744a3eeb797fee363bfaac34be3a2b258d9d5e..ddc1467fa3fd2630d4a84c4621d83014
  MEDIA_EXPORT
  @interface AVCaptureDeviceInputGlue : NSObject
 diff --git a/media/base/mac/avfoundation_glue.mm b/media/base/mac/avfoundation_glue.mm
-index 543be6ceef32dc23bd36a1cce9aee101d3003d3f..675001f418a57963164241cc09c586c10223f125 100644
+index 84b773477256a0ebdca6d52f945a6f02efb429d9..83bc09cac860362bd72fdd2fff96a59a3c27c531 100644
 --- a/media/base/mac/avfoundation_glue.mm
 +++ b/media/base/mac/avfoundation_glue.mm
-@@ -54,6 +54,10 @@ class AVFoundationInternal {
-       NSString** loaded_string;
-       const char* symbol;
-     } av_strings[] = {
-+        {&AVPlayerItemDidPlayToEndTimeNotification_,
-+         "AVPlayerItemDidPlayToEndTimeNotification"},
-+        {&AVPlayerItemFailedToPlayToEndTimeNotification_,
-+         "AVPlayerItemFailedToPlayToEndTimeNotification"},
-         {&AVCaptureDeviceWasConnectedNotification_,
-          "AVCaptureDeviceWasConnectedNotification"},
-         {&AVCaptureDeviceWasDisconnectedNotification_,
-@@ -66,19 +70,27 @@ class AVFoundationInternal {
-         {&AVCaptureSessionDidStopRunningNotification_,
-          "AVCaptureSessionDidStopRunningNotification"},
-         {&AVCaptureSessionErrorKey_, "AVCaptureSessionErrorKey"},
-+        {&AVFormatIDKey_, "AVFormatIDKey"},
-+        {&AVChannelLayoutKey_, "AVChannelLayoutKey"},
-         {&AVVideoScalingModeKey_, "AVVideoScalingModeKey"},
-         {&AVVideoScalingModeResizeAspectFill_,
-          "AVVideoScalingModeResizeAspectFill"},
-     };
--    for (auto& av_string : av_strings) {
--      *av_string.loaded_string = *reinterpret_cast<NSString**>(
--          dlsym(library_handle_, av_string.symbol));
--      CHECK(*av_string.loaded_string) << dlerror();
-+    for (size_t i = 0; i < arraysize(av_strings); ++i) {
-+      *av_strings[i].loaded_string = *reinterpret_cast<NSString**>(
-+          dlsym(library_handle_, av_strings[i].symbol));
-+      DCHECK(*av_strings[i].loaded_string) << dlerror();
-     }
-   }
+@@ -19,6 +19,7 @@
+ // Forward declarations of AVFoundation.h strings.
+ // This is needed to avoid compile time warnings since currently
+ // |mac_deployment_target| is 10.6.
++extern NSString* const AVPlayerItemDidPlayToEndTimeNotification;
+ extern NSString* const AVCaptureDeviceWasConnectedNotification;
+ extern NSString* const AVCaptureDeviceWasDisconnectedNotification;
+ extern NSString* const AVMediaTypeVideo;
+@@ -44,6 +45,12 @@ class AVFoundationInternal {
  
    NSBundle* bundle() const { return bundle_; }
  
@@ -445,7 +531,7 @@ index 543be6ceef32dc23bd36a1cce9aee101d3003d3f..675001f418a57963164241cc09c586c1
    NSString* AVCaptureDeviceWasConnectedNotification() const {
      return AVCaptureDeviceWasConnectedNotification_;
    }
-@@ -97,6 +109,8 @@ class AVFoundationInternal {
+@@ -62,6 +69,8 @@ class AVFoundationInternal {
    NSString* AVCaptureSessionErrorKey() const {
      return AVCaptureSessionErrorKey_;
    }
@@ -454,24 +540,27 @@ index 543be6ceef32dc23bd36a1cce9aee101d3003d3f..675001f418a57963164241cc09c586c1
    NSString* AVVideoScalingModeKey() const { return AVVideoScalingModeKey_; }
    NSString* AVVideoScalingModeResizeAspectFill() const {
      return AVVideoScalingModeResizeAspectFill_;
-@@ -106,6 +120,8 @@ class AVFoundationInternal {
+@@ -71,6 +80,10 @@ class AVFoundationInternal {
    NSBundle* bundle_;
    void* library_handle_;
    // The following members are replicas of the respectives in AVFoundation.
-+  NSString* AVPlayerItemDidPlayToEndTimeNotification_;
-+  NSString* AVPlayerItemFailedToPlayToEndTimeNotification_;
-   NSString* AVCaptureDeviceWasConnectedNotification_;
-   NSString* AVCaptureDeviceWasDisconnectedNotification_;
-   NSString* AVMediaTypeVideo_;
-@@ -114,23 +130,14 @@ class AVFoundationInternal {
-   NSString* AVCaptureSessionRuntimeErrorNotification_;
-   NSString* AVCaptureSessionDidStopRunningNotification_;
-   NSString* AVCaptureSessionErrorKey_;
-+  NSString* AVFormatIDKey_;
-+  NSString* AVChannelLayoutKey_;
-   NSString* AVVideoScalingModeKey_;
-   NSString* AVVideoScalingModeResizeAspectFill_;
- 
++  NSString* AVPlayerItemDidPlayToEndTimeNotification_ =
++      ::AVPlayerItemDidPlayToEndTimeNotification;
++  NSString* AVPlayerItemFailedToPlayToEndTimeNotification_ =
++      ::AVPlayerItemFailedToPlayToEndTimeNotification;
+   NSString* AVCaptureDeviceWasConnectedNotification_ =
+       ::AVCaptureDeviceWasConnectedNotification;
+   NSString* AVCaptureDeviceWasDisconnectedNotification_ =
+@@ -83,6 +96,8 @@ class AVFoundationInternal {
+   NSString* AVCaptureSessionDidStopRunningNotification_ =
+       ::AVCaptureSessionDidStopRunningNotification;
+   NSString* AVCaptureSessionErrorKey_ = ::AVCaptureSessionErrorKey;
++  NSString* AVFormatIDKey_ = ::AVFormatIDKey;
++  NSString* AVChannelLayoutKey_ = ::AVChannelLayoutKey;
+   NSString* AVVideoScalingModeKey_ = ::AVVideoScalingModeKey;
+   NSString* AVVideoScalingModeResizeAspectFill_ =
+       ::AVVideoScalingModeResizeAspectFill;
+@@ -90,35 +105,25 @@ class AVFoundationInternal {
    DISALLOW_COPY_AND_ASSIGN(AVFoundationInternal);
  };
  
@@ -489,16 +578,10 @@ index 543be6ceef32dc23bd36a1cce9aee101d3003d3f..675001f418a57963164241cc09c586c1
  // This contains the logic of checking whether AVFoundation is supported.
  // It's called only once and the results are cached in a static bool.
  bool LoadAVFoundationInternal() {
-@@ -152,23 +159,23 @@ bool LoadAVFoundationInternal() {
-     LogCaptureApi(CAPTURE_API_QTKIT_DUE_TO_NO_FLAG);
-     return false;
-   }
 -  g_avfoundation_handle.Initialize(TlsCleanup);
 -  g_avfoundation_handle.Set(new AVFoundationInternal());
    const bool ret = [AVFoundationGlue::AVFoundationBundle() load];
-   LogCaptureApi(ret ? CAPTURE_API_AVFOUNDATION_LOADED_OK
-                     : CAPTURE_API_QTKIT_DUE_TO_AVFOUNDATION_LOAD_ERROR);
--
+   CHECK(ret);
    return ret;
  }
  
@@ -518,7 +601,7 @@ index 543be6ceef32dc23bd36a1cce9aee101d3003d3f..675001f418a57963164241cc09c586c1
  void AVFoundationGlue::InitializeAVFoundation() {
    TRACE_EVENT0("video", "AVFoundationGlue::InitializeAVFoundation");
    CHECK([NSThread isMainThread]);
-@@ -184,49 +191,57 @@ bool AVFoundationGlue::IsAVFoundationSupported() {
+@@ -129,49 +134,66 @@ void AVFoundationGlue::InitializeAVFoundation() {
  }
  
  NSBundle const* AVFoundationGlue::AVFoundationBundle() {
@@ -586,10 +669,19 @@ index 543be6ceef32dc23bd36a1cce9aee101d3003d3f..675001f418a57963164241cc09c586c1
  NSString* AVFoundationGlue::AVVideoScalingModeResizeAspectFill() {
 -  return GetAVFoundationInternal()->AVVideoScalingModeResizeAspectFill();
 +  return g_avfoundation_handle.Get().AVVideoScalingModeResizeAspectFill();
++}
++
++NSString* AVFoundationGlue::AVPlayerItemDidPlayToEndTimeNotification() {
++  return g_avfoundation_handle.Get().AVPlayerItemDidPlayToEndTimeNotification();
++}
++
++NSString* AVFoundationGlue::AVPlayerItemFailedToPlayToEndTimeNotification() {
++  return g_avfoundation_handle.Get().
++      AVPlayerItemFailedToPlayToEndTimeNotification();
  }
  
  Class AVFoundationGlue::AVCaptureSessionClass() {
-@@ -237,6 +252,63 @@ Class AVFoundationGlue::AVCaptureVideoDataOutputClass() {
+@@ -182,6 +204,55 @@ Class AVFoundationGlue::AVCaptureVideoDataOutputClass() {
    return [AVFoundationBundle() classNamed:@"AVCaptureVideoDataOutput"];
  }
  
@@ -642,18 +734,10 @@ index 543be6ceef32dc23bd36a1cce9aee101d3003d3f..675001f418a57963164241cc09c586c1
 +  return [AVFoundationBundle() classNamed:@"AVMutableAudioMixInputParameters"];
 +}
 +
-+NSString* AVFoundationGlue::AVPlayerItemDidPlayToEndTimeNotification() {
-+  return g_avfoundation_handle.Get().AVPlayerItemDidPlayToEndTimeNotification();
-+}
-+
-+NSString* AVFoundationGlue::AVPlayerItemFailedToPlayToEndTimeNotification() {
-+  return g_avfoundation_handle.Get().AVPlayerItemFailedToPlayToEndTimeNotification();
-+}
-+
  @implementation AVCaptureDeviceGlue
  
  + (NSArray*)devices {
-@@ -267,3 +339,125 @@ Class AVFoundationGlue::AVCaptureVideoDataOutputClass() {
+@@ -212,3 +283,125 @@ Class AVFoundationGlue::AVCaptureVideoDataOutputClass() {
  }
  
  @end  // @implementation AVCaptureDeviceInputGlue
@@ -1618,39 +1702,6 @@ index 63aad607e967425c72b0afa46cad816dc2565d2f..7569f71eb12ff493f15921a516c9fc0c
  namespace media {
  
  static void RunMediaFileChecker(const std::string& filename, bool expectation) {
-diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
-index a69808aa5744dac69bb5531d0706bb82fa37e44f..b5d474d193d4e835bd0dbac9536e0965bc9d5cd6 100644
---- a/media/base/media_switches.cc
-+++ b/media/base/media_switches.cc
-@@ -17,6 +17,13 @@ const char kVideoThreads[] = "video-threads";
- const char kEnableMediaSuspend[] = "enable-media-suspend";
- const char kDisableMediaSuspend[] = "disable-media-suspend";
- 
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+// Attempts to turn on hardware accelerated video decoding. Relevant when
-+// platform decoders are used.
-+const char kEnablePlatformAcceleratedVideoDecoding[] =
-+    "enable-platform-accelerated-video-decoding";
-+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+
- #if defined(OS_ANDROID)
- // Sets the MediaSource player that uses UI thread for frame processing.
- const char kDisableMediaThreadForMediaPlayback[] =
-diff --git a/media/base/media_switches.h b/media/base/media_switches.h
-index c7677eff0f4bc50d281a7f4a7d1a79049a3e1c74..5fd081c63ad5f467a87e9d3d142a139ba07db664 100644
---- a/media/base/media_switches.h
-+++ b/media/base/media_switches.h
-@@ -20,6 +20,10 @@ MEDIA_EXPORT extern const char kVideoThreads[];
- MEDIA_EXPORT extern const char kEnableMediaSuspend[];
- MEDIA_EXPORT extern const char kDisableMediaSuspend[];
- 
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+MEDIA_EXPORT extern const char kEnablePlatformAcceleratedVideoDecoding[];
-+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+
- #if defined(OS_ANDROID)
- MEDIA_EXPORT extern const char kDisableMediaThreadForMediaPlayback[];
- MEDIA_EXPORT extern const char kEnableMediaThreadForMediaPlayback[];
 diff --git a/media/base/mime_util.cc b/media/base/mime_util.cc
 index 6eba4fc70b70bf5485708538558659fc858612e7..c36cc5e5a329c3e7ed5113b9e7d236e15d03ed56 100644
 --- a/media/base/mime_util.cc
@@ -1702,7 +1753,7 @@ index 6a49eba2a6e0ea5dd55b80bfc0b1c5c117b6f1a3..c65dae5b19f5d8d7ea2bf8e38e41ff69
  // in the string |codecs_in|. For example, passed "aaa.b.c,dd.eee", if
  // |strip| == true |codecs_out| will contain {"aaa", "dd"}, if |strip| == false
 diff --git a/media/base/mime_util_internal.cc b/media/base/mime_util_internal.cc
-index 9cf8a5fc9c8cf1d687987d5bb6e8a49afb7c3523..2abf831c6dec82fda2e7638b8ad9aedbf28dbb1d 100644
+index 7a26254f54d24a6d034a40143222be3ed232835e..e95a1f4ea35b895e94810e943fbc7eaa559dd71f 100644
 --- a/media/base/mime_util_internal.cc
 +++ b/media/base/mime_util_internal.cc
 @@ -12,6 +12,9 @@
@@ -1715,11 +1766,12 @@ index 9cf8a5fc9c8cf1d687987d5bb6e8a49afb7c3523..2abf831c6dec82fda2e7638b8ad9aedb
  #if defined(OS_ANDROID)
  #include "base/android/build_info.h"
  #include "media/base/android/media_codec_util.h"
-@@ -317,8 +320,14 @@ SupportsType MimeUtil::AreSupportedCodecs(
+@@ -233,8 +236,15 @@ SupportsType MimeUtil::AreSupportedCodecs(
+ }
  
  void MimeUtil::InitializeMimeTypeMaps() {
- // Initialize the supported media types.
 -#if defined(USE_PROPRIETARY_CODECS)
++// Initialize the supported media types.
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
    allow_proprietary_codecs_ = true;
 +#elif defined(USE_PROPRIETARY_CODECS)
@@ -1732,7 +1784,7 @@ index 9cf8a5fc9c8cf1d687987d5bb6e8a49afb7c3523..2abf831c6dec82fda2e7638b8ad9aedb
  
    for (size_t i = 0; i < arraysize(kUnambiguousCodecStringMap); ++i) {
 diff --git a/media/base/mime_util_unittest.cc b/media/base/mime_util_unittest.cc
-index f41978837b3bec659757f64a99fbbfb1d67a821f..f295789f71f220f2945fc705171e1fb020ec08dc 100644
+index 4db5aa7c9f3e35df0833dc112966bbba6a3884a2..fe554ab1a4bb94860be1063569b78e3d9786557c 100644
 --- a/media/base/mime_util_unittest.cc
 +++ b/media/base/mime_util_unittest.cc
 @@ -17,6 +17,14 @@
@@ -2581,10 +2633,10 @@ index 0000000000000000000000000000000000000000..2df7add6c50ac6fa5414b36f284a4196
 +
 +#endif  // MEDIA_BASE_WIN_MF_UTIL_H_
 diff --git a/media/blink/buffered_data_source.cc b/media/blink/buffered_data_source.cc
-index 8dd6b900a6693d5bc077391905f8cbe19bd2aba9..570695bbb5ecab97d3844cbca4ac5232bee7b3b3 100644
+index 432655d079129a12591e0234e4e64bac13c6a244..011efd812c3d59f69c7d3109d58aba9fc366d527 100644
 --- a/media/blink/buffered_data_source.cc
 +++ b/media/blink/buffered_data_source.cc
-@@ -146,14 +146,12 @@ BufferedResourceLoader* BufferedDataSource::CreateResourceLoader(
+@@ -147,14 +147,12 @@ BufferedResourceLoader* BufferedDataSource::CreateResourceLoader(
        BufferedResourceLoader::kReadThenDefer :
        BufferedResourceLoader::kCapacityDefer;
  
@@ -2605,7 +2657,7 @@ index 8dd6b900a6693d5bc077391905f8cbe19bd2aba9..570695bbb5ecab97d3844cbca4ac5232
  }
  
  void BufferedDataSource::Initialize(const InitializeCB& init_cb) {
-@@ -233,6 +231,14 @@ void BufferedDataSource::MediaIsPlaying() {
+@@ -234,6 +232,14 @@ void BufferedDataSource::MediaIsPlaying() {
    UpdateDeferStrategy();
  }
  
@@ -2620,7 +2672,7 @@ index 8dd6b900a6693d5bc077391905f8cbe19bd2aba9..570695bbb5ecab97d3844cbca4ac5232
  /////////////////////////////////////////////////////////////////////////////
  // DataSource implementation.
  void BufferedDataSource::Stop() {
-@@ -396,6 +402,7 @@ void BufferedDataSource::StartCallback(
+@@ -409,6 +415,7 @@ void BufferedDataSource::StartCallback(
  
    if (success) {
      total_bytes_ = loader_->instance_size();
@@ -2819,11 +2871,11 @@ index 6cc1aa6765311fd7abb0808bf06fd62045fff2bd..f9cc8231505aae4f0f609fb55a78ddd4
  
    scoped_refptr<MediaLog> media_log_;
 diff --git a/media/blink/webmediaplayer_impl.cc b/media/blink/webmediaplayer_impl.cc
-index e5bd08d626a6075c9acd462c1920a3db827cc838..ac2cdc86e20ab6486a79f8aa8a615dd630f307d4 100644
+index 67ba20c7e535676abc4d82e0f2aabd16215b2f82..9706db23c215dc15ddc0f43a5c29c459d589705b 100644
 --- a/media/blink/webmediaplayer_impl.cc
 +++ b/media/blink/webmediaplayer_impl.cc
-@@ -59,6 +59,18 @@
- #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
+@@ -58,6 +58,18 @@
+ #include "third_party/WebKit/public/web/WebLocalFrame.h"
  #include "third_party/WebKit/public/web/WebView.h"
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
@@ -2841,7 +2893,7 @@ index e5bd08d626a6075c9acd462c1920a3db827cc838..ac2cdc86e20ab6486a79f8aa8a615dd6
  using blink::WebCanvas;
  using blink::WebMediaPlayer;
  using blink::WebRect;
-@@ -167,8 +179,14 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
+@@ -185,8 +197,14 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
        context_3d_cb_(params.context_3d_cb()),
        adjust_allocated_memory_cb_(params.adjust_allocated_memory_cb()),
        last_reported_memory_usage_(0),
@@ -2856,50 +2908,50 @@ index e5bd08d626a6075c9acd462c1920a3db827cc838..ac2cdc86e20ab6486a79f8aa8a615dd6
        url_index_(url_index),
        // Threaded compositing isn't enabled universally yet.
        compositor_task_runner_(
-@@ -303,6 +321,7 @@ void WebMediaPlayerImpl::DoLoad(LoadType load_type,
-   // we have enough data to support the primacy of the new media cache.
-   // See http://crbug.com/514719 for details.
-   // Otherwise it's a regular request which requires resolving the URL first.
+@@ -272,7 +290,7 @@ WebMediaPlayerImpl::~WebMediaPlayerImpl() {
+ 
+ void WebMediaPlayerImpl::load(LoadType load_type, const blink::WebURL& url,
+                               CORSMode cors_mode) {
+-  DVLOG(1) << __FUNCTION__ << "(" << load_type << ", " << url << ", "
++  DVLOG(1) << __FUNCTION__ << "(" << load_type << ", " << url.string().utf8() << ", "
+            << cors_mode << ")";
+   if (!defer_load_cb_.is_null()) {
+     defer_load_cb_.Run(base::Bind(
+@@ -344,6 +362,7 @@ void WebMediaPlayerImpl::DoLoad(LoadType load_type,
+     // we have enough data to support the primacy of the new media cache.
+     // See http://crbug.com/514719 for details.
+     // Otherwise it's a regular request which requires resolving the URL first.
 +#if !defined(USE_SYSTEM_PROPRIETARY_CODECS)
-   if (base::FeatureList::IsEnabled(kUseNewMediaCache)) {
-     // Remove this when MultiBufferDataSource becomes default.
-     LOG(WARNING) << "Using MultibufferDataSource";
-@@ -310,8 +329,11 @@ void WebMediaPlayerImpl::DoLoad(LoadType load_type,
-         url, static_cast<UrlData::CORSMode>(cors_mode), main_task_runner_,
-         url_index_, frame_, media_log_.get(), &buffered_data_source_host_,
-         base::Bind(&WebMediaPlayerImpl::NotifyDownloading, AsWeakPtr())));
--  } else {
--    data_source_.reset(new BufferedDataSource(
-+    data_source2_ = NULL;
-+  } else
+     if (base::FeatureList::IsEnabled(kUseNewMediaCache)) {
+       // Remove this when MultiBufferDataSource becomes default.
+       LOG(WARNING) << "Using MultibufferDataSource";
+@@ -351,8 +370,11 @@ void WebMediaPlayerImpl::DoLoad(LoadType load_type,
+           url, static_cast<UrlData::CORSMode>(cors_mode), main_task_runner_,
+           url_index_, frame_, media_log_.get(), &buffered_data_source_host_,
+           base::Bind(&WebMediaPlayerImpl::NotifyDownloading, AsWeakPtr())));
+-    } else {
+-      data_source_.reset(new BufferedDataSource(
++      data_source2_ = NULL;
++    } else
 +#endif // !USE_SYSTEM_PROPRIETARY_CODECS
-+  {
-+    data_source_.reset(data_source2_ = new BufferedDataSource(
-         url, static_cast<BufferedResourceLoader::CORSMode>(cors_mode),
-         main_task_runner_, frame_, media_log_.get(),
-         &buffered_data_source_host_,
-@@ -482,6 +504,11 @@ void WebMediaPlayerImpl::seek(double seconds) {
-   if (chunk_demuxer_)
-     chunk_demuxer_->StartWaitingForSeek(seek_time_);
++    {
++      data_source_.reset(data_source2_ = new BufferedDataSource(
+           url, static_cast<BufferedResourceLoader::CORSMode>(cors_mode),
+           main_task_runner_, frame_, media_log_.get(),
+           &buffered_data_source_host_,
+@@ -478,6 +500,11 @@ void WebMediaPlayerImpl::DoSeek(base::TimeDelta time, bool time_updated) {
+     paused_time_ = time;
+   pipeline_controller_.Seek(time, time_updated);
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  if (ipc_demuxer_)
-+    ipc_demuxer_->StartWaitingForSeek();
++    ipc_demuxer_->StartWaitingForSeek(seek_time_);
 +#endif
 +
-   pipeline_.Seek(seek_time_, BIND_TO_RENDER_LOOP1(
-                                  &WebMediaPlayerImpl::OnPipelineSeeked, true));
- }
-@@ -1287,7 +1314,7 @@ void WebMediaPlayerImpl::Resume() {
-     chunk_demuxer_->StartWaitingForSeek(seek_time_);
- 
-   resuming_ = true;
--  pipeline_.Resume(CreateRenderer(), seek_time_,
-+  pipeline_.Resume(CreateRenderer(false, false), seek_time_,
-                    BIND_TO_RENDER_LOOP1(&WebMediaPlayerImpl::OnPipelineSeeked,
-                                         time_changed));
- }
-@@ -1374,7 +1401,18 @@ void WebMediaPlayerImpl::DataSourceInitialized(bool success) {
+   // This needs to be called after Seek() so that if a resume is triggered, it
+   // is to the correct time.
+   UpdatePlayState();
+@@ -1194,7 +1221,18 @@ void WebMediaPlayerImpl::DataSourceInitialized(bool success) {
      return;
    }
  
@@ -2919,18 +2971,21 @@ index e5bd08d626a6075c9acd462c1920a3db827cc838..ac2cdc86e20ab6486a79f8aa8a615dd6
  }
  
  void WebMediaPlayerImpl::NotifyDownloading(bool is_downloading) {
-@@ -1418,7 +1456,9 @@ void WebMediaPlayerImpl::OnSurfaceRequested(
-   }
- }
- 
--scoped_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer() {
-+scoped_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer(
-+      bool use_platform_media_pipeline,
-+      bool platform_pipeline_enlarges_buffers_on_underflow) {
-   RequestSurfaceCB request_surface_cb;
+@@ -1243,10 +1281,23 @@ scoped_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer() {
  #if defined(OS_ANDROID)
    request_surface_cb =
-@@ -1426,7 +1466,9 @@ scoped_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer() {
+       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnSurfaceRequested);
++#endif
++  bool use_platform_media_pipeline = false;
++  bool platform_pipeline_enlarges_buffers_on_underflow = false;
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++  use_platform_media_pipeline = media::IPCDemuxer::CanPlayType(
++      content_type_, data_source2_ ? data_source2_->url() : GURL());
++
++  if (use_platform_media_pipeline &&
++      !IsPlatformMediaPipelineAvailable(PlatformMediaCheckType::BASIC)) {
++    use_platform_media_pipeline = false;
++  }
  #endif
    return renderer_factory_->CreateRenderer(
        media_task_runner_, worker_task_runner_, audio_source_provider_.get(),
@@ -2941,7 +2996,7 @@ index e5bd08d626a6075c9acd462c1920a3db827cc838..ac2cdc86e20ab6486a79f8aa8a615dd6
  }
  
  void WebMediaPlayerImpl::StartPipeline() {
-@@ -1436,10 +1478,60 @@ void WebMediaPlayerImpl::StartPipeline() {
+@@ -1256,10 +1307,60 @@ void WebMediaPlayerImpl::StartPipeline() {
        BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnEncryptedMediaInitData);
  
    // Figure out which demuxer to use.
@@ -3000,9 +3055,9 @@ index e5bd08d626a6075c9acd462c1920a3db827cc838..ac2cdc86e20ab6486a79f8aa8a615dd6
 +    } else {
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
  #if !defined(MEDIA_DISABLE_FFMPEG)
-     demuxer_.reset(new FFmpegDemuxer(media_task_runner_, data_source_.get(),
-                                      encrypted_media_init_data_cb, media_log_));
-@@ -1447,6 +1539,10 @@ void WebMediaPlayerImpl::StartPipeline() {
+     Demuxer::MediaTracksUpdatedCB media_tracks_updated_cb =
+         BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnFFmpegMediaTracksUpdated);
+@@ -1271,6 +1372,10 @@ void WebMediaPlayerImpl::StartPipeline() {
      OnPipelineError(PipelineStatus::DEMUXER_ERROR_COULD_NOT_OPEN);
      return;
  #endif
@@ -3013,21 +3068,7 @@ index e5bd08d626a6075c9acd462c1920a3db827cc838..ac2cdc86e20ab6486a79f8aa8a615dd6
    } else {
      DCHECK(!chunk_demuxer_);
      DCHECK(!data_source_);
-@@ -1462,7 +1558,12 @@ void WebMediaPlayerImpl::StartPipeline() {
- 
-   // TODO(sandersd): On Android, defer Start() if the tab is not visible.
-   pipeline_.Start(
--      demuxer_.get(), CreateRenderer(),
-+      demuxer_.get(), renderer_factory_->CreateRenderer(
-+                          media_task_runner_, worker_task_runner_,
-+                          audio_source_provider_.get(), compositor_,
-+                          RequestSurfaceCB(),
-+                          use_platform_media_pipeline,
-+                          platform_pipeline_enlarges_buffers_on_underflow),
-       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineEnded),
-       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineError),
-       BIND_TO_RENDER_LOOP1(&WebMediaPlayerImpl::OnPipelineSeeked, false),
-@@ -1545,6 +1646,22 @@ void WebMediaPlayerImpl::OnOpacityChanged(bool opaque) {
+@@ -1376,6 +1481,22 @@ void WebMediaPlayerImpl::OnOpacityChanged(bool opaque) {
      video_weblayer_->layer()->SetContentsOpaque(opaque_);
  }
  
@@ -3051,10 +3092,10 @@ index e5bd08d626a6075c9acd462c1920a3db827cc838..ac2cdc86e20ab6486a79f8aa8a615dd6
      VideoFrameCompositor* compositor,
      scoped_refptr<VideoFrame>* video_frame_out,
 diff --git a/media/blink/webmediaplayer_impl.h b/media/blink/webmediaplayer_impl.h
-index ec55ca11b4e94b196c49dec8e648339264ea67fb..0ed3a2d34f728063e16a969ee33b1bc56938f463 100644
+index f9c66f41adfef88bd5074e478f8e4a561ef2d8cf..7f61f0d76aec60c01ac62ba5cb76adefada8d87b 100644
 --- a/media/blink/webmediaplayer_impl.h
 +++ b/media/blink/webmediaplayer_impl.h
-@@ -41,6 +41,11 @@
+@@ -43,6 +43,11 @@
  #include "media/blink/webmediaplayer_cast_android.h"
  #endif
  
@@ -3064,9 +3105,9 @@ index ec55ca11b4e94b196c49dec8e648339264ea67fb..0ed3a2d34f728063e16a969ee33b1bc5
 +#endif
 +
  namespace blink {
- class WebGraphicsContext3D;
  class WebLocalFrame;
-@@ -61,6 +66,7 @@ namespace media {
+ class WebMediaPlayerClient;
+@@ -68,6 +73,7 @@ namespace media {
  class AudioHardwareConfig;
  class ChunkDemuxer;
  class GpuVideoAcceleratorFactories;
@@ -3074,18 +3115,7 @@ index ec55ca11b4e94b196c49dec8e648339264ea67fb..0ed3a2d34f728063e16a969ee33b1bc5
  class MediaLog;
  class UrlIndex;
  class VideoFrameCompositor;
-@@ -231,7 +237,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
-   void OnSurfaceRequested(const SurfaceCreatedCB& surface_created_cb);
- 
-   // Creates a Renderer via the |renderer_factory_|.
--  scoped_ptr<Renderer> CreateRenderer();
-+  scoped_ptr<Renderer> CreateRenderer(
-+      bool use_platform_media_pipeline,
-+      bool platform_pipeline_enlarges_buffers_on_underflow);
- 
-   // Finishes starting the pipeline due to a call to load().
-   void StartPipeline();
-@@ -253,6 +261,11 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -276,6 +282,11 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    // painted.
    void FrameReady(const scoped_refptr<VideoFrame>& frame);
  
@@ -3097,7 +3127,7 @@ index ec55ca11b4e94b196c49dec8e648339264ea67fb..0ed3a2d34f728063e16a969ee33b1bc5
    // Returns the current video frame from |compositor_|. Blocks until the
    // compositor can return the frame.
    scoped_refptr<VideoFrame> GetCurrentFrameFromCompositor();
-@@ -405,6 +418,16 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -442,6 +453,16 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    WebMediaPlayerParams::AdjustAllocatedMemoryCB adjust_allocated_memory_cb_;
    int64_t last_reported_memory_usage_;
  
@@ -3114,7 +3144,7 @@ index ec55ca11b4e94b196c49dec8e648339264ea67fb..0ed3a2d34f728063e16a969ee33b1bc5
    // Routes audio playback to either AudioRendererSink or WebAudio.
    scoped_refptr<WebAudioSourceProviderImpl> audio_source_provider_;
  
-@@ -419,6 +442,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -456,6 +477,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    scoped_ptr<BufferedDataSourceInterface> data_source_;
    scoped_ptr<Demuxer> demuxer_;
    ChunkDemuxer* chunk_demuxer_;
@@ -3122,7 +3152,7 @@ index ec55ca11b4e94b196c49dec8e648339264ea67fb..0ed3a2d34f728063e16a969ee33b1bc5
  
    BufferedDataSourceHostImpl buffered_data_source_host_;
    linked_ptr<UrlIndex> url_index_;
-@@ -432,6 +456,8 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -469,6 +491,8 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    // playback.
    scoped_ptr<cc_blink::WebLayerImpl> video_weblayer_;
  
@@ -3132,12 +3162,12 @@ index ec55ca11b4e94b196c49dec8e648339264ea67fb..0ed3a2d34f728063e16a969ee33b1bc5
  
    // Whether a CDM has been successfully attached.
 diff --git a/media/blink/webmediaplayer_params.cc b/media/blink/webmediaplayer_params.cc
-index 28915cd5d0c6c30afb75040a4ead4f4f8f0996ca..f985a00676b5b4ae9e16cfe0191bed5d04a4e678 100644
+index 9ad3ba2322920b15bb2597e6b07616f007f5e7a3..43d2e5702273b59437a90c23c80b263672d49cfa 100644
 --- a/media/blink/webmediaplayer_params.cc
 +++ b/media/blink/webmediaplayer_params.cc
 @@ -15,6 +15,9 @@ WebMediaPlayerParams::WebMediaPlayerParams(
      const DeferLoadCB& defer_load_cb,
-     const scoped_refptr<RestartableAudioRendererSink>& audio_renderer_sink,
+     const scoped_refptr<SwitchableAudioRendererSink>& audio_renderer_sink,
      const scoped_refptr<MediaLog>& media_log,
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +    const IPCMediaPipelineHost::Creator& ipc_media_pipeline_host_creator,
@@ -3156,7 +3186,7 @@ index 28915cd5d0c6c30afb75040a4ead4f4f8f0996ca..f985a00676b5b4ae9e16cfe0191bed5d
        worker_task_runner_(worker_task_runner),
        compositor_task_runner_(compositor_task_runner),
 diff --git a/media/blink/webmediaplayer_params.h b/media/blink/webmediaplayer_params.h
-index deb868fd418492fa7c8b9b4f735d7417fda76623..0b3d213ff4c2b703e0756f7254a6bb4927005250 100644
+index 40413010b508cd9a173c669a6f1849f11bcf3ceb..9e164e583a4d54cd06ca4eb0ef6ac476a70a7b28 100644
 --- a/media/blink/webmediaplayer_params.h
 +++ b/media/blink/webmediaplayer_params.h
 @@ -13,6 +13,10 @@
@@ -3172,7 +3202,7 @@ index deb868fd418492fa7c8b9b4f735d7417fda76623..0b3d213ff4c2b703e0756f7254a6bb49
  class TaskRunner;
 @@ -50,6 +54,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
        const DeferLoadCB& defer_load_cb,
-       const scoped_refptr<RestartableAudioRendererSink>& audio_renderer_sink,
+       const scoped_refptr<SwitchableAudioRendererSink>& audio_renderer_sink,
        const scoped_refptr<MediaLog>& media_log,
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +      const IPCMediaPipelineHost::Creator& ipc_media_pipeline_host_creator,
@@ -3195,7 +3225,7 @@ index deb868fd418492fa7c8b9b4f735d7417fda76623..0b3d213ff4c2b703e0756f7254a6bb49
    }
 @@ -103,6 +116,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
    DeferLoadCB defer_load_cb_;
-   scoped_refptr<RestartableAudioRendererSink> audio_renderer_sink_;
+   scoped_refptr<SwitchableAudioRendererSink> audio_renderer_sink_;
    scoped_refptr<MediaLog> media_log_;
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  IPCMediaPipelineHost::Creator ipc_media_pipeline_host_creator_;
@@ -4815,10 +4845,10 @@ index 0000000000000000000000000000000000000000..cd33cc234571c5f4d8a94844d5001be3
 +#endif  // MEDIA_FILTERS_AT_AAC_HELPER_H_
 diff --git a/media/filters/at_audio_decoder.cc b/media/filters/at_audio_decoder.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..8512f0909aed92be11317af772ded4dfe142e8fe
+index 0000000000000000000000000000000000000000..bddec8d43dc66103c77740192e66aba9ab9f92a8
 --- /dev/null
 +++ b/media/filters/at_audio_decoder.cc
-@@ -0,0 +1,434 @@
+@@ -0,0 +1,435 @@
 +// -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 +//
 +// Copyright (C) 2015 Opera Software ASA.  All rights reserved.
@@ -4839,6 +4869,7 @@ index 0000000000000000000000000000000000000000..8512f0909aed92be11317af772ded4df
 +#include "base/single_thread_task_runner.h"
 +#include "media/base/audio_buffer.h"
 +#include "media/base/audio_discard_helper.h"
++#include "media/base/demuxer_stream.h"
 +#include "media/base/mac/framework_type_conversions.h"
 +#include "media/base/pipeline_stats.h"
 +#include "media/base/platform_mime_util.h"
@@ -5081,8 +5112,8 @@ index 0000000000000000000000000000000000000000..8512f0909aed92be11317af772ded4df
 +                            const DecodeCB& decode_cb) {
 +  DCHECK(task_runner_->BelongsToCurrentThread());
 +
-+  const Status status =
-+      codec_helper_->ProcessBuffer(buffer) ? kOk : kDecodeError;
++  const media::DecodeStatus status =
++      codec_helper_->ProcessBuffer(buffer) ? media::DecodeStatus::OK : media::DecodeStatus::DECODE_ERROR;
 +
 +  task_runner_->PostTask(FROM_HERE, base::Bind(decode_cb, status));
 +}
@@ -5352,10 +5383,10 @@ index 0000000000000000000000000000000000000000..7a140a535df21f5aa8c57eb724c091c2
 +#endif  // MEDIA_FILTERS_AT_AUDIO_DECODER_H_
 diff --git a/media/filters/at_codec_helper.h b/media/filters/at_codec_helper.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..cd0d7eb8b73aeca0f560a3bf97a226ad683b9a89
+index 0000000000000000000000000000000000000000..6ee739edc24543d748efa465601bdafe317d80ce
 --- /dev/null
 +++ b/media/filters/at_codec_helper.h
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,59 @@
 +// -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 +//
 +// Copyright (C) 2015 Opera Software ASA.  All rights reserved.
@@ -5366,6 +5397,8 @@ index 0000000000000000000000000000000000000000..cd0d7eb8b73aeca0f560a3bf97a226ad
 +#define MEDIA_FILTERS_AT_CODEC_HELPER_H_
 +
 +#include "base/callback.h"
++#include "base/memory/free_deleter.h"
++#include "base/memory/scoped_ptr.h"
 +
 +struct AudioChannelLayout;
 +struct AudioStreamBasicDescription;
@@ -5505,12 +5538,12 @@ index 0000000000000000000000000000000000000000..ec53da7e22ee7dae7a3e5e3646814ced
 +
 +#endif  // MEDIA_FILTERS_AT_MP3_HELPER_H_
 diff --git a/media/filters/audio_decoder_unittest.cc b/media/filters/audio_decoder_unittest.cc
-index 9eae8fa851c8fa7eea37dc9380302270de52b2e1..12ee68e3c8c422e0b3b381d6207216d1377117cc 100644
+index ec19b80f40d4b148274bf12ffcaae105b74226dd..62edaae8633a3d513b1e74d9bf3efba0ea208fdd 100644
 --- a/media/filters/audio_decoder_unittest.cc
 +++ b/media/filters/audio_decoder_unittest.cc
-@@ -32,6 +32,12 @@
- #include "media/filters/opus_audio_decoder.h"
- #include "testing/gtest/include/gtest/gtest.h"
+@@ -2,6 +2,12 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
  
 +// USE_SYSTEM_PROPRIETARY_CODECS requires a different test setup, see
 +// PlatformMediaPipelineIntegrationTest.
@@ -5518,9 +5551,9 @@ index 9eae8fa851c8fa7eea37dc9380302270de52b2e1..12ee68e3c8c422e0b3b381d6207216d1
 +#undef USE_PROPRIETARY_CODECS
 +#endif  // !defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +
- namespace media {
+ #include <stddef.h>
+ #include <stdint.h>
  
- // The number of packets to read and then decode from each file.
 diff --git a/media/filters/audio_file_reader.cc b/media/filters/audio_file_reader.cc
 index 978f3b7c09712d7e00e2807580a2831fd2f7ce11..160615dc8cc28d229e042443793324e3079af292 100644
 --- a/media/filters/audio_file_reader.cc
@@ -5642,10 +5675,10 @@ index a560379f0d4cfc6c9289e4e85f3aa9486679e84c..bd09751f91daa69c04acb05b6a32c8d0
    scoped_ptr<AudioFileReader> reader_;
 diff --git a/media/filters/core_audio_demuxer.cc b/media/filters/core_audio_demuxer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..d2888eae89704eb63ddf0d9b928de66d38319ee1
+index 0000000000000000000000000000000000000000..94e8824f00a29458a4886bd85de8360273beeecf
 --- /dev/null
 +++ b/media/filters/core_audio_demuxer.cc
-@@ -0,0 +1,311 @@
+@@ -0,0 +1,317 @@
 +// -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 +//
 +// Copyright (C) 2014 Opera Software ASA.  All rights reserved.
@@ -5717,6 +5750,12 @@ index 0000000000000000000000000000000000000000..d2888eae89704eb63ddf0d9b928de66d
 +CoreAudioDemuxerStream* CoreAudioDemuxer::CreateAudioDemuxerStream() {
 +  return new CoreAudioDemuxerStream(
 +      this, input_format_info_, bit_rate_, CoreAudioDemuxerStream::AUDIO);
++}
++
++void CoreAudioDemuxer::StartWaitingForSeek(base::TimeDelta seek_time) {
++}
++
++void CoreAudioDemuxer::CancelPendingSeek(base::TimeDelta seek_time) {
 +}
 +
 +void CoreAudioDemuxer::Seek(base::TimeDelta time,
@@ -5959,10 +5998,10 @@ index 0000000000000000000000000000000000000000..d2888eae89704eb63ddf0d9b928de66d
 +}  // namespace media
 diff --git a/media/filters/core_audio_demuxer.h b/media/filters/core_audio_demuxer.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..0d232cbe8c3c0f1c09acc198a156deab06d1465a
+index 0000000000000000000000000000000000000000..e9b299088d3b223cb07243a70f6899877a2db06e
 --- /dev/null
 +++ b/media/filters/core_audio_demuxer.h
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,99 @@
 +// -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 +//
 +// Copyright (C) 2014 Opera Software ASA.  All rights reserved.
@@ -6014,6 +6053,9 @@ index 0000000000000000000000000000000000000000..0d232cbe8c3c0f1c09acc198a156deab
 +
 +  static bool IsSupported(const std::string& content_type, const GURL& url);
 +
++  void StartWaitingForSeek(base::TimeDelta seek_time) override;
++  void CancelPendingSeek(base::TimeDelta seek_time) override;
++
 + private:
 +  // Creates and configures DemuxerStream with Audio stream if it is possible.
 +  CoreAudioDemuxerStream* CreateAudioDemuxerStream();
@@ -6061,10 +6103,10 @@ index 0000000000000000000000000000000000000000..0d232cbe8c3c0f1c09acc198a156deab
 +#endif  // MEDIA_FILTERS_CORE_AUDIO_DEMUXER_H_
 diff --git a/media/filters/core_audio_demuxer_stream.cc b/media/filters/core_audio_demuxer_stream.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..31ee84c687db28ba71f9fd7cace06668c78a55e5
+index 0000000000000000000000000000000000000000..7e2bf1578b182a99f690f3ba17dd240259c80a41
 --- /dev/null
 +++ b/media/filters/core_audio_demuxer_stream.cc
-@@ -0,0 +1,435 @@
+@@ -0,0 +1,436 @@
 +// -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 +//
 +// Copyright (C) 2014 Opera Software ASA.  All rights reserved.
@@ -6079,6 +6121,7 @@ index 0000000000000000000000000000000000000000..31ee84c687db28ba71f9fd7cace06668
 +#include "base/logging.h"
 +#include "base/mac/mac_util.h"
 +#include "media/base/decoder_buffer.h"
++#include "media/base/media_util.h"
 +#include "media/base/video_decoder_config.h"
 +#include "media/filters/core_audio_demuxer.h"
 +
@@ -6241,7 +6284,7 @@ index 0000000000000000000000000000000000000000..31ee84c687db28ba71f9fd7cace06668
 +                           channel_layout,
 +                           input_format_.mSampleRate,
 +                           extra_data,
-+                           false,
++                           Unencrypted(),
 +                           base::TimeDelta(),
 +                           0);
 +}
@@ -6502,10 +6545,10 @@ index 0000000000000000000000000000000000000000..31ee84c687db28ba71f9fd7cace06668
 +}  // namespace media
 diff --git a/media/filters/core_audio_demuxer_stream.h b/media/filters/core_audio_demuxer_stream.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..6380ffed1f42697b5fe9a24714d4c036c05a6887
+index 0000000000000000000000000000000000000000..cd319fea240a356a10dd2989774c72d0e1857f3d
 --- /dev/null
 +++ b/media/filters/core_audio_demuxer_stream.h
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,95 @@
 +// -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 +//
 +// Copyright (C) 2014 Opera Software ASA.  All rights reserved.
@@ -6519,6 +6562,7 @@ index 0000000000000000000000000000000000000000..6380ffed1f42697b5fe9a24714d4c036
 +
 +#include <vector>
 +
++#include "base/memory/scoped_ptr.h"
 +#include "media/base/audio_decoder_config.h"
 +#include "media/base/demuxer_stream.h"
 +#include "media/base/mac/scoped_audio_queue_ref.h"
@@ -6601,7 +6645,7 @@ index 0000000000000000000000000000000000000000..6380ffed1f42697b5fe9a24714d4c036
 +
 +#endif  // MEDIA_FILTERS_CORE_AUDIO_DEMUXER_STREAM_H_
 diff --git a/media/filters/decoder_stream.cc b/media/filters/decoder_stream.cc
-index 4b03587253fa06cccd378d527ddf8f1de8e7ff5a..2aac27c6f23fdf45468621a6956c75238f8323b4 100644
+index 19ae054d64e7ab73d786a44d5050bca508ca7390..9dd62293c63889abfce90584ccf9323944393bc1 100644
 --- a/media/filters/decoder_stream.cc
 +++ b/media/filters/decoder_stream.cc
 @@ -22,6 +22,10 @@
@@ -6657,10 +6701,10 @@ index 4b03587253fa06cccd378d527ddf8f1de8e7ff5a..2aac27c6f23fdf45468621a6956c7523
      if (state_ == STATE_INITIALIZING) {
        state_ = STATE_UNINITIALIZED;
 diff --git a/media/filters/ffmpeg_demuxer_unittest.cc b/media/filters/ffmpeg_demuxer_unittest.cc
-index a0611e9b5cfea3d247ffcdd22cff004d52e3e850..c02829bf7d69037f0339a18c27b3a6a1b1055864 100644
+index 01f57a11286e375a3954d1768331154796951195..1d79e28f4639331f0f58f216c7f6d293ee45500e 100644
 --- a/media/filters/ffmpeg_demuxer_unittest.cc
 +++ b/media/filters/ffmpeg_demuxer_unittest.cc
-@@ -27,6 +27,12 @@
+@@ -28,6 +28,12 @@
  #include "media/media_features.h"
  #include "testing/gtest/include/gtest/gtest.h"
  
@@ -6674,7 +6718,7 @@ index a0611e9b5cfea3d247ffcdd22cff004d52e3e850..c02829bf7d69037f0339a18c27b3a6a1
  using ::testing::DoAll;
  using ::testing::Exactly;
 diff --git a/media/filters/gpu_video_decoder.cc b/media/filters/gpu_video_decoder.cc
-index 260bfaabb3e6777e42f6d3a823589101190ae587..2b9906e9780b6c25ba74d25ddf6e226acb613fae 100644
+index 84f70b4ca5d148ee54e09d49a32ced952b9593a8..69fe13212ff03ead51c091bb5094cafe59a2f973 100644
 --- a/media/filters/gpu_video_decoder.cc
 +++ b/media/filters/gpu_video_decoder.cc
 @@ -27,6 +27,10 @@
@@ -6688,7 +6732,7 @@ index 260bfaabb3e6777e42f6d3a823589101190ae587..2b9906e9780b6c25ba74d25ddf6e226a
  namespace media {
  
  const char GpuVideoDecoder::kDecoderName[] = "GpuVideoDecoder";
-@@ -142,6 +146,10 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
+@@ -157,6 +161,10 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
    DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
    DCHECK(config.IsValidConfig());
  
@@ -6699,7 +6743,7 @@ index 260bfaabb3e6777e42f6d3a823589101190ae587..2b9906e9780b6c25ba74d25ddf6e226a
    InitCB bound_init_cb =
        base::Bind(&ReportGpuVideoDecoderInitializeStatusToUMAAndRunCB,
                   BindToCurrentLoop(init_cb));
-@@ -196,6 +204,9 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
+@@ -223,6 +231,9 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
    vda_ = factories_->CreateVideoDecodeAccelerator();
    if (!vda_) {
      DVLOG(1) << "Failed to create a VDA.";
@@ -6709,7 +6753,7 @@ index 260bfaabb3e6777e42f6d3a823589101190ae587..2b9906e9780b6c25ba74d25ddf6e226a
      bound_init_cb.Run(false);
      return;
    }
-@@ -229,6 +240,9 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
+@@ -256,6 +267,9 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
    // If we don't have to wait for a surface complete initialization with a null
    // surface.
    CompleteInitialization(cdm_id, SurfaceManager::kNoSurfaceID);
@@ -7156,10 +7200,10 @@ index 0000000000000000000000000000000000000000..8f1486162537453cda590e60156686b2
 +#endif  // MEDIA_FILTERS_IPC_AUDIO_DECODER_H_
 diff --git a/media/filters/ipc_demuxer.cc b/media/filters/ipc_demuxer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..90a5224ec7c12171a96b14baa5b1b81aed747060
+index 0000000000000000000000000000000000000000..0a3bfdb304361f2f0411a5e566ffd3c1582272de
 --- /dev/null
 +++ b/media/filters/ipc_demuxer.cc
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,239 @@
 +// -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 +//
 +// Copyright (C) 2013 Opera Software ASA.  All rights reserved.
@@ -7269,9 +7313,12 @@ index 0000000000000000000000000000000000000000..90a5224ec7c12171a96b14baa5b1b81a
 +                 status_cb));
 +}
 +
-+void IPCDemuxer::StartWaitingForSeek() {
++void IPCDemuxer::StartWaitingForSeek(base::TimeDelta seek_time) {
 +  if (!stopping_)
 +    ipc_media_pipeline_host_->StartWaitingForSeek();
++}
++
++void IPCDemuxer::CancelPendingSeek(base::TimeDelta seek_time) {
 +}
 +
 +void IPCDemuxer::Seek(base::TimeDelta time, const PipelineStatusCB& status_cb) {
@@ -7398,10 +7445,10 @@ index 0000000000000000000000000000000000000000..90a5224ec7c12171a96b14baa5b1b81a
 +}  // namespace media
 diff --git a/media/filters/ipc_demuxer.h b/media/filters/ipc_demuxer.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..8c07f686ed796c2370ed5120c583940936cc24dd
+index 0000000000000000000000000000000000000000..8cd189f0bd24c490db2d35688d49ca29761487d4
 --- /dev/null
 +++ b/media/filters/ipc_demuxer.h
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,106 @@
 +// -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 +//
 +// Copyright (C) 2014 Opera Software ASA.  All rights reserved.
@@ -7471,7 +7518,8 @@ index 0000000000000000000000000000000000000000..8c07f686ed796c2370ed5120c5839409
 +  // become ready to handle the seek request quickly.
 +  //
 +  // This function can be called on any thread.
-+  void StartWaitingForSeek();
++  void StartWaitingForSeek(base::TimeDelta seek_time) override;
++  void CancelPendingSeek(base::TimeDelta seek_time) override;
 +
 + private:
 +  // Called when demuxer initiazlizes.
@@ -7509,7 +7557,7 @@ index 0000000000000000000000000000000000000000..8c07f686ed796c2370ed5120c5839409
 +#endif  // MEDIA_FILTERS_IPC_DEMUXER_H_
 diff --git a/media/filters/ipc_demuxer_stream.cc b/media/filters/ipc_demuxer_stream.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c668eacfbc37c20b47f6391a9e765735e3d4483c
+index 0000000000000000000000000000000000000000..34f3991f5e8d9d9dfdffdbd8fffa67e08895e373
 --- /dev/null
 +++ b/media/filters/ipc_demuxer_stream.cc
 @@ -0,0 +1,156 @@
@@ -7593,7 +7641,7 @@ index 0000000000000000000000000000000000000000..c668eacfbc37c20b47f6391a9e765735
 +  audio_config.Initialize(
 +      kCodecPCM, platform_audio_config.format,
 +      GuessChannelLayout(platform_audio_config.channel_count),
-+      platform_audio_config.samples_per_second, EmptyExtraData(), false,
++      platform_audio_config.samples_per_second, EmptyExtraData(), Unencrypted(),
 +      base::TimeDelta(), 0);
 +
 +  return audio_config;
@@ -7619,7 +7667,7 @@ index 0000000000000000000000000000000000000000..c668eacfbc37c20b47f6391a9e765735
 +          reinterpret_cast<const uint8_t*>(&platform_video_config.planes),
 +          reinterpret_cast<const uint8_t*>(&platform_video_config.planes)
 +              + sizeof(platform_video_config.planes)),
-+      false);
++      Unencrypted());
 +
 +  return video_config;
 +}
@@ -7908,7 +7956,7 @@ index 0000000000000000000000000000000000000000..c19febb7cee373c0c869c2e5e6cf8574
 +#endif  // MEDIA_FILTERS_PASS_THROUGH_AUDIO_DECODER_H_
 diff --git a/media/filters/pass_through_decoder_impl.cc b/media/filters/pass_through_decoder_impl.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..938fb830d7a198693cd1cc04e0527dc0eabb715a
+index 0000000000000000000000000000000000000000..ba4c2106d0f0f4ab0c0edd7c0dc201a077d1174d
 --- /dev/null
 +++ b/media/filters/pass_through_decoder_impl.cc
 @@ -0,0 +1,190 @@
@@ -8019,7 +8067,7 @@ index 0000000000000000000000000000000000000000..938fb830d7a198693cd1cc04e0527dc0
 +  DCHECK(task_runner_->BelongsToCurrentThread());
 +  DCHECK(IsValidConfig(config_));
 +
-+  typename DecoderType::Status status = DecoderType::kOk;
++  typename media::DecodeStatus status = media::DecodeStatus::OK;
 +
 +  if (!buffer->end_of_stream()) {
 +    scoped_refptr<OutputType> output;
@@ -8031,7 +8079,7 @@ index 0000000000000000000000000000000000000000..938fb830d7a198693cd1cc04e0527dc0
 +    if (output)
 +      task_runner_->PostTask(FROM_HERE, base::Bind(output_cb_, output));
 +    else
-+      status = DecoderType::kDecodeError;
++      status = media::DecodeStatus::DECODE_ERROR;
 +  }
 +
 +  task_runner_->PostTask(FROM_HERE, base::Bind(decode_cb, status));
@@ -8811,10 +8859,10 @@ index 0000000000000000000000000000000000000000..e4ada666ea944ac2e2a5efb67c6c642d
 +}  // namespace media
 diff --git a/media/filters/protocol_sniffer.h b/media/filters/protocol_sniffer.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..a3f63d1e7e5fbdd72f8958407c3bb81237ef20fd
+index 0000000000000000000000000000000000000000..6db09d9de1e1219778c93f607b9c41e46d05a263
 --- /dev/null
 +++ b/media/filters/protocol_sniffer.h
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,51 @@
 +// -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
 +//
 +// Copyright (C) 2014 Opera Software ASA.  All rights reserved.
@@ -8827,6 +8875,7 @@ index 0000000000000000000000000000000000000000..a3f63d1e7e5fbdd72f8958407c3bb812
 +#include <string>
 +
 +#include "base/callback.h"
++#include "base/memory/scoped_ptr.h"
 +#include "base/memory/weak_ptr.h"
 +#include "base/threading/thread_checker.h"
 +#include "media/base/media_export.h"
@@ -8866,7 +8915,7 @@ index 0000000000000000000000000000000000000000..a3f63d1e7e5fbdd72f8958407c3bb812
 +
 +#endif  // MEDIA_FILTERS_PROTOCOL_SNIFFER_H_
 diff --git a/media/filters/stream_parser_factory.cc b/media/filters/stream_parser_factory.cc
-index a566b15d3d36576914897dd9edc6a1edbd9c37d9..84900e8597a2776d107d4e312b484968fcbfe036 100644
+index 693e651882d6be9a8cdcff79941202977bb24e04..851babfda0a6543c66c05324adccb2818cb9643d 100644
 --- a/media/filters/stream_parser_factory.cc
 +++ b/media/filters/stream_parser_factory.cc
 @@ -26,6 +26,10 @@
@@ -8899,7 +8948,7 @@ index a566b15d3d36576914897dd9edc6a1edbd9c37d9..84900e8597a2776d107d4e312b484968
          audio_codecs->push_back(codec_info->tag);
        return true;
 @@ -357,6 +372,12 @@ static bool VerifyCodec(
-           !media::IsUnifiedMediaPipelineEnabledForMse()) {
+           !media::IsUnifiedMediaPipelineEnabled()) {
          return false;
        }
 +#endif
@@ -9027,7 +9076,7 @@ index 0000000000000000000000000000000000000000..e96264658fb8d34f8c60923232173bfd
 +#endif  // MEDIA_FILTERS_WMF_AUDIO_DECODER_H_
 diff --git a/media/filters/wmf_decoder_impl.cc b/media/filters/wmf_decoder_impl.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..a28f59f1809e07b8d71b2ab444b73f16df5c7df9
+index 0000000000000000000000000000000000000000..7c2f7b52b278639c037bf200ad69a91a9a9eae3d
 --- /dev/null
 +++ b/media/filters/wmf_decoder_impl.cc
 @@ -0,0 +1,841 @@
@@ -9171,7 +9220,7 @@ index 0000000000000000000000000000000000000000..a28f59f1809e07b8d71b2ab444b73f16
 +    task_runner_->PostTask(
 +        FROM_HERE,
 +        base::Bind(decode_cb,
-+                   drained_ok ? DecoderType::kOk : DecoderType::kDecodeError));
++                   drained_ok ? media::DecodeStatus::OK : media::DecodeStatus::DECODE_ERROR));
 +    return;
 +  }
 +  DVLOG(5) << __FUNCTION__ << "(" << buffer->timestamp() << ")";
@@ -9180,15 +9229,15 @@ index 0000000000000000000000000000000000000000..a28f59f1809e07b8d71b2ab444b73f16
 +  DCHECK_NE(MF_E_NOTACCEPTING, hr)
 +      << "The transform is neither producing output "
 +         "nor accepting input? This must not happen, see ProcessOutputLoop()";
-+  typename DecoderType::Status status = SUCCEEDED(hr) && ProcessOutputLoop()
-+                                            ? DecoderType::kOk
-+                                            : DecoderType::kDecodeError;
++  typename media::DecodeStatus status = SUCCEEDED(hr) && ProcessOutputLoop()
++                                            ? media::DecodeStatus::OK
++                                            : media::DecodeStatus::DECODE_ERROR;
 +
-+  if (status == DecoderType::kOk &&
++  if (status == media::DecodeStatus::OK &&
 +      buffer->splice_timestamp() != kNoTimestamp()) {
 +    DVLOG(1) << "Splice detected, must drain the decoder";
 +    if (!Drain())
-+      status = DecoderType::kDecodeError;
++      status = media::DecodeStatus::DECODE_ERROR;
 +  }
 +
 +  task_runner_->PostTask(FROM_HERE, base::Bind(decode_cb, status));
@@ -10105,10 +10154,10 @@ index 0000000000000000000000000000000000000000..22d03b802f5a02c16a4ee7461b39e8a4
 +
 +#endif  // MEDIA_FILTERS_WMF_VIDEO_DECODER_H_
 diff --git a/media/formats/mp4/aac.cc b/media/formats/mp4/aac.cc
-index e391b4dfafdc1b5a5e4364cf37a9b4a643e121ad..c69a0e0209e974aa3d443c971591d63bbd67ad67 100644
+index 93dbe6702613e64f96befa69e0fc0378f09249de..b89eadcb5525d87726358449bb3575d7fd17b244 100644
 --- a/media/formats/mp4/aac.cc
 +++ b/media/formats/mp4/aac.cc
-@@ -27,7 +27,7 @@ AAC::~AAC() {
+@@ -29,7 +29,7 @@ AAC::~AAC() {
  
  bool AAC::Parse(const std::vector<uint8_t>& data,
                  const scoped_refptr<MediaLog>& media_log) {
@@ -10117,7 +10166,7 @@ index e391b4dfafdc1b5a5e4364cf37a9b4a643e121ad..c69a0e0209e974aa3d443c971591d63b
    codec_specific_data_ = data;
  #endif
    if (data.empty())
-@@ -156,6 +156,12 @@ bool AAC::Parse(const std::vector<uint8_t>& data,
+@@ -158,6 +158,12 @@ bool AAC::Parse(const std::vector<uint8_t>& data,
    return true;
  }
  
@@ -10131,10 +10180,10 @@ index e391b4dfafdc1b5a5e4364cf37a9b4a643e121ad..c69a0e0209e974aa3d443c971591d63b
    if (extension_frequency_ > 0)
      return extension_frequency_;
 diff --git a/media/formats/mp4/aac.h b/media/formats/mp4/aac.h
-index 4f607ff2b6cdb5db072faaddc1986fa9a2b14823..4845b16c6397919ca5cc6a0c06bf51ceef605646 100644
+index ac694cd99bac40d40ad4db5860066831005f728a..5a97098dec7d1c05546c8a880dbe19e9da5409ac 100644
 --- a/media/formats/mp4/aac.h
 +++ b/media/formats/mp4/aac.h
-@@ -36,6 +36,13 @@ class MEDIA_EXPORT AAC {
+@@ -37,6 +37,13 @@ class MEDIA_EXPORT AAC {
    bool Parse(const std::vector<uint8_t>& data,
               const scoped_refptr<MediaLog>& media_log);
  
@@ -10148,7 +10197,7 @@ index 4f607ff2b6cdb5db072faaddc1986fa9a2b14823..4845b16c6397919ca5cc6a0c06bf51ce
    // Gets the output sample rate for the AAC stream.
    // |sbr_in_mimetype| should be set to true if the SBR mode is
    // signalled in the mimetype. (ie mp4a.40.5 in the codecs parameter).
-@@ -56,7 +63,7 @@ class MEDIA_EXPORT AAC {
+@@ -57,7 +64,7 @@ class MEDIA_EXPORT AAC {
    // unchanged.
    bool ConvertEsdsToADTS(std::vector<uint8_t>* buffer) const;
  
@@ -10157,7 +10206,7 @@ index 4f607ff2b6cdb5db072faaddc1986fa9a2b14823..4845b16c6397919ca5cc6a0c06bf51ce
    // Returns the codec specific data needed by android MediaCodec.
    std::vector<uint8_t> codec_specific_data() const {
      return codec_specific_data_;
-@@ -74,7 +81,7 @@ class MEDIA_EXPORT AAC {
+@@ -75,7 +82,7 @@ class MEDIA_EXPORT AAC {
    uint8_t frequency_index_;
    uint8_t channel_config_;
  
@@ -10167,10 +10216,10 @@ index 4f607ff2b6cdb5db072faaddc1986fa9a2b14823..4845b16c6397919ca5cc6a0c06bf51ce
    std::vector<uint8_t> codec_specific_data_;
  #endif
 diff --git a/media/formats/mp4/box_definitions.cc b/media/formats/mp4/box_definitions.cc
-index a792c90d9ba8e27ef17724bdb5f717966c9470be..519a9cd64ef18cd676da769f335d1b19f39e11da 100644
+index b7f181534c91d275b731a823f2f1d11ddbdbea1d..d3ea14c0fdb871e8dfbc8221c617577c33b58f47 100644
 --- a/media/formats/mp4/box_definitions.cc
 +++ b/media/formats/mp4/box_definitions.cc
-@@ -566,7 +566,6 @@ FourCC ElementaryStreamDescriptor::BoxType() const {
+@@ -687,7 +687,6 @@ FourCC ElementaryStreamDescriptor::BoxType() const {
  }
  
  bool ElementaryStreamDescriptor::Parse(BoxReader* reader) {
@@ -10179,10 +10228,10 @@ index a792c90d9ba8e27ef17724bdb5f717966c9470be..519a9cd64ef18cd676da769f335d1b19
  
    RCHECK(reader->ReadFullBoxHeader());
 diff --git a/media/formats/mp4/box_definitions.h b/media/formats/mp4/box_definitions.h
-index e6a62bbace4fc666bd0a5ad081b2c33d45035495..db59088b2aba7924f96a9211e191c287fcc8afc7 100644
+index 01138801bea9d590af1327fe37527646fb0c8fce..ffbb33b1bfeb06df1b3602f07d03ae3a04544bc6 100644
 --- a/media/formats/mp4/box_definitions.h
 +++ b/media/formats/mp4/box_definitions.h
-@@ -223,6 +223,7 @@ struct MEDIA_EXPORT ElementaryStreamDescriptor : Box {
+@@ -255,6 +255,7 @@ struct MEDIA_EXPORT ElementaryStreamDescriptor : Box {
  
    uint8_t object_type;
    AAC aac;
@@ -10191,10 +10240,10 @@ index e6a62bbace4fc666bd0a5ad081b2c33d45035495..db59088b2aba7924f96a9211e191c287
  
  struct MEDIA_EXPORT AudioSampleEntry : Box {
 diff --git a/media/formats/mp4/mp4_stream_parser.cc b/media/formats/mp4/mp4_stream_parser.cc
-index 7becdf941019ffca0378baf9e08a9702957f35cc..37130c602b4658a66064f66855e1daa3e0e13e83 100644
+index 49acc874863e6a0720061535600b5f271e3e9ed3..5f204d8df7b77b2449016f8fce916e74f626b2ae 100644
 --- a/media/formats/mp4/mp4_stream_parser.cc
 +++ b/media/formats/mp4/mp4_stream_parser.cc
-@@ -260,6 +260,7 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
+@@ -271,6 +271,7 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
        AudioCodec codec = kUnknownAudioCodec;
        ChannelLayout channel_layout = CHANNEL_LAYOUT_NONE;
        int sample_per_second = 0;
@@ -10202,7 +10251,7 @@ index 7becdf941019ffca0378baf9e08a9702957f35cc..37130c602b4658a66064f66855e1daa3
        std::vector<uint8_t> extra_data;
        // Check if it is MPEG4 AAC defined in ISO 14496 Part 3 or
        // supported MPEG2 AAC varients.
-@@ -267,8 +268,11 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
+@@ -278,8 +279,11 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
          codec = kCodecAAC;
          channel_layout = aac.GetChannelLayout(has_sbr_);
          sample_per_second = aac.GetOutputSamplesPerSecond(has_sbr_);
@@ -10214,19 +10263,19 @@ index 7becdf941019ffca0378baf9e08a9702957f35cc..37130c602b4658a66064f66855e1daa3
  #endif
  #if BUILDFLAG(ENABLE_AC3_EAC3_AUDIO_DEMUXING)
        } else if (audio_type == kAC3) {
-@@ -304,6 +308,7 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
-       audio_config.Initialize(codec, sample_format, channel_layout,
-                               sample_per_second, extra_data,
-                               is_audio_track_encrypted_, base::TimeDelta(), 0);
+@@ -316,6 +320,7 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
+           codec, sample_format, channel_layout, sample_per_second, extra_data,
+           is_audio_track_encrypted_ ? AesCtrEncryptionScheme() : Unencrypted(),
+           base::TimeDelta(), 0);
 +      audio_config.set_input_samples_per_second(input_samples_per_second);
        has_audio_ = true;
        audio_track_id_ = track->header.track_id;
-     }
+       media_tracks->AddAudioTrack(
 diff --git a/media/media.gyp b/media/media.gyp
-index 329f0c7940694c0c2afc0067acc701fee471e612..981b34c2c43f66bb386791918912fb2ce16af168 100644
+index 9752856db3f3595808adb6ea21ba420f920aa901..23fa7fcc22fd4864e0f6b06adbb888240ea18c0d 100644
 --- a/media/media.gyp
 +++ b/media/media.gyp
-@@ -681,6 +681,73 @@
+@@ -696,6 +696,73 @@
              'filters/vpx_video_decoder.h',
            ],
          }],
@@ -10300,7 +10349,7 @@ index 329f0c7940694c0c2afc0067acc701fee471e612..981b34c2c43f66bb386791918912fb2c
          ['OS=="android"', {
            'dependencies': [
              'capture_java',
-@@ -865,6 +932,7 @@
+@@ -827,6 +894,7 @@
              '<!@(<(pkg-config) --cflags libpulse)',
            ],
            'defines': [
@@ -10308,15 +10357,7 @@ index 329f0c7940694c0c2afc0067acc701fee471e612..981b34c2c43f66bb386791918912fb2c
              'USE_PULSEAUDIO',
            ],
            'conditions': [
-@@ -953,6 +1021,7 @@
-             'libraries': [
-               '$(SDKROOT)/System/Library/Frameworks/AudioToolbox.framework',
-               '$(SDKROOT)/System/Library/Frameworks/AudioUnit.framework',
-+              '$(SDKROOT)/System/Library/Frameworks/AVFoundation.framework',
-               '$(SDKROOT)/System/Library/Frameworks/CoreAudio.framework',
-               '$(SDKROOT)/System/Library/Frameworks/CoreVideo.framework',
-               '$(SDKROOT)/System/Library/Frameworks/OpenGL.framework',
-@@ -1616,6 +1685,13 @@
+@@ -1577,6 +1645,13 @@
          'video/mock_video_decode_accelerator.cc',
          'video/mock_video_decode_accelerator.h',
        ],
@@ -10331,7 +10372,7 @@ index 329f0c7940694c0c2afc0067acc701fee471e612..981b34c2c43f66bb386791918912fb2c
      {
        # Minimal target for NaCl and other renderer side media clients which
 diff --git a/media/media_cdm.gypi b/media/media_cdm.gypi
-index a6857f55938c64765b6cdc4d43b01f530958a1a2..1769e51b9b712930d7b89249746fcf3d431c9c66 100644
+index 5efcb3bd91c20094aca79b99d27c881121af696f..93e610ae5a5e3d74963d01ad35a9a0636826d859 100644
 --- a/media/media_cdm.gypi
 +++ b/media/media_cdm.gypi
 @@ -99,7 +99,7 @@
@@ -10344,7 +10385,7 @@ index a6857f55938c64765b6cdc4d43b01f530958a1a2..1769e51b9b712930d7b89249746fcf3d
              'extra_variable_files_arguments':
                [ '-f', 'cdm/ppapi/external_clear_key/BRANDING' ],
 diff --git a/media/renderers/audio_renderer_impl.h b/media/renderers/audio_renderer_impl.h
-index 6a672414d2f33cc0ec6c33ef7e6690fd1dbd13ec..41b54049ac12d1bbb29163d37ba8800dfbf76442 100644
+index 0b2d4009bd9a679cbb993d7ecd700c61cacd5ec1..a4450f6eb844dfb0e35847b475300fed4bb45b60 100644
 --- a/media/renderers/audio_renderer_impl.h
 +++ b/media/renderers/audio_renderer_impl.h
 @@ -92,6 +92,12 @@ class MEDIA_EXPORT AudioRendererImpl
@@ -10369,7 +10410,7 @@ index 6a672414d2f33cc0ec6c33ef7e6690fd1dbd13ec..41b54049ac12d1bbb29163d37ba8800d
    // Simple state tracking variable.
    State state_;
 diff --git a/media/renderers/default_renderer_factory.cc b/media/renderers/default_renderer_factory.cc
-index 88fd15789c27ab84cfe9c350a09bca74753072ef..a88fbd8db4694d867befe016f638fc101e69fc24 100644
+index e09f90eb84ef4363702ee06f2908d4f88846f555..214a62e32e66d2db33e77213208d690861b27f99 100644
 --- a/media/renderers/default_renderer_factory.cc
 +++ b/media/renderers/default_renderer_factory.cc
 @@ -29,6 +29,20 @@
@@ -10424,9 +10465,9 @@ index 88fd15789c27ab84cfe9c350a09bca74753072ef..a88fbd8db4694d867befe016f638fc10
 +  }
 +#endif
  
-   if (decoder_factory_)
-     decoder_factory_->CreateAudioDecoders(&audio_decoders);
-@@ -65,7 +94,8 @@ ScopedVector<AudioDecoder> DefaultRendererFactory::CreateAudioDecoders(
+   // Use an external decoder only if we cannot otherwise decode in the
+   // renderer.
+@@ -67,7 +96,8 @@ ScopedVector<AudioDecoder> DefaultRendererFactory::CreateAudioDecoders(
  ScopedVector<VideoDecoder> DefaultRendererFactory::CreateVideoDecoders(
      const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
      const RequestSurfaceCB& request_surface_cb,
@@ -10436,7 +10477,7 @@ index 88fd15789c27ab84cfe9c350a09bca74753072ef..a88fbd8db4694d867befe016f638fc10
    // Create our video decoders and renderer.
    ScopedVector<VideoDecoder> video_decoders;
  
-@@ -75,10 +105,29 @@ ScopedVector<VideoDecoder> DefaultRendererFactory::CreateVideoDecoders(
+@@ -82,10 +112,29 @@ ScopedVector<VideoDecoder> DefaultRendererFactory::CreateVideoDecoders(
    DCHECK(!gpu_factories ||
           (gpu_factories->GetTaskRunner() == media_task_runner.get()));
  
@@ -10466,18 +10507,17 @@ index 88fd15789c27ab84cfe9c350a09bca74753072ef..a88fbd8db4694d867befe016f638fc10
  #if !defined(MEDIA_DISABLE_LIBVPX)
    video_decoders.push_back(new VpxVideoDecoder());
  #endif
-@@ -87,6 +136,10 @@ ScopedVector<VideoDecoder> DefaultRendererFactory::CreateVideoDecoders(
+@@ -94,6 +143,9 @@ ScopedVector<VideoDecoder> DefaultRendererFactory::CreateVideoDecoders(
    video_decoders.push_back(new FFmpegVideoDecoder());
  #endif
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  }
 +#endif
-+
-   if (decoder_factory_)
-     decoder_factory_->CreateVideoDecoders(&video_decoders);
+   return video_decoders;
+ }
  
-@@ -98,12 +151,15 @@ scoped_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
+@@ -102,12 +154,15 @@ scoped_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
      const scoped_refptr<base::TaskRunner>& worker_task_runner,
      AudioRendererSink* audio_renderer_sink,
      VideoRendererSink* video_renderer_sink,
@@ -10495,7 +10535,7 @@ index 88fd15789c27ab84cfe9c350a09bca74753072ef..a88fbd8db4694d867befe016f638fc10
                              audio_hardware_config_, media_log_));
  
    GpuVideoAcceleratorFactories* gpu_factories = nullptr;
-@@ -112,7 +168,8 @@ scoped_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
+@@ -116,7 +171,8 @@ scoped_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
  
    scoped_ptr<VideoRenderer> video_renderer(new VideoRendererImpl(
        media_task_runner, worker_task_runner, video_renderer_sink,
@@ -20744,10 +20784,10 @@ literal 0
 HcmV?d00001
 
 diff --git a/media/test/pipeline_integration_test.cc b/media/test/pipeline_integration_test.cc
-index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c5c0e5663 100644
+index ea8cd6e8c0c97eefdad2279f2c2917ed69362621..27a1095da00cd790d238f745c21e231999beaaf5 100644
 --- a/media/test/pipeline_integration_test.cc
 +++ b/media/test/pipeline_integration_test.cc
-@@ -80,12 +80,20 @@
+@@ -81,12 +81,20 @@
  #define MAYBE_CLOCKLESS(test) test
  #endif
  
@@ -20768,7 +20808,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  namespace media {
  
  const char kSourceId[] = "SourceId";
-@@ -96,12 +104,16 @@ const char kAudioOnlyWebM[] = "video/webm; codecs=\"vorbis\"";
+@@ -97,12 +105,16 @@ const char kAudioOnlyWebM[] = "video/webm; codecs=\"vorbis\"";
  const char kOpusAudioOnlyWebM[] = "video/webm; codecs=\"opus\"";
  const char kVideoOnlyWebM[] = "video/webm; codecs=\"vp8\"";
  #if defined(USE_PROPRIETARY_CODECS)
@@ -20785,7 +20825,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  #endif  // defined(USE_PROPRIETARY_CODECS)
  
  // Key used to encrypt test files.
-@@ -146,9 +158,11 @@ static const char kOpusEndTrimmingHash_3[] =
+@@ -147,9 +159,11 @@ static const char kOpusEndTrimmingHash_3[] =
  #endif  // !defined(MOJO_RENDERER)
  
  #if defined(USE_PROPRIETARY_CODECS)
@@ -20797,7 +20837,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  const int k1280IsoAVC3FileDurationMs = 2736;
  #endif  // defined(USE_PROPRIETARY_CODECS)
  
-@@ -480,7 +494,8 @@ class MockMediaSource {
+@@ -481,7 +495,8 @@ class MockMediaSource {
    MockMediaSource(const std::string& filename,
                    const std::string& mimetype,
                    size_t initial_append_size)
@@ -20807,7 +20847,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
          initial_append_size_(initial_append_size),
          mimetype_(mimetype),
          chunk_demuxer_(new ChunkDemuxer(
-@@ -501,6 +516,8 @@ class MockMediaSource {
+@@ -502,6 +517,8 @@ class MockMediaSource {
  
    virtual ~MockMediaSource() {}
  
@@ -20816,7 +20856,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
    scoped_ptr<Demuxer> GetDemuxer() { return std::move(owned_chunk_demuxer_); }
  
    void set_encrypted_media_init_data_cb(
-@@ -640,6 +657,7 @@ class MockMediaSource {
+@@ -643,6 +660,7 @@ class MockMediaSource {
  
   private:
    scoped_refptr<DecoderBuffer> file_data_;
@@ -20824,7 +20864,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
    size_t current_position_;
    size_t initial_append_size_;
    std::string mimetype_;
-@@ -690,6 +708,10 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
+@@ -693,6 +711,10 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
      hashing_enabled_ = test_type & kHashed;
      clockless_playback_ = test_type & kClockless;
  
@@ -20832,10 +20872,10 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
 +    EnableMockVDA();
 +#endif
 +
-     EXPECT_CALL(*source, InitSegmentReceived()).Times(AtLeast(1));
+     EXPECT_CALL(*source, InitSegmentReceived(_)).Times(AtLeast(1));
      EXPECT_CALL(*this, OnMetadata(_))
          .Times(AtMost(1))
-@@ -704,7 +726,7 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
+@@ -707,7 +729,7 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
  
      demuxer_ = source->GetDemuxer();
      pipeline_->Start(
@@ -20844,7 +20884,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
          base::Bind(&PipelineIntegrationTest::OnEnded, base::Unretained(this)),
          base::Bind(&PipelineIntegrationTest::OnError, base::Unretained(this)),
          base::Bind(&PipelineIntegrationTest::OnStatusCallback,
-@@ -724,6 +746,10 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
+@@ -727,6 +749,10 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
  
    void StartPipelineWithEncryptedMedia(MockMediaSource* source,
                                         FakeEncryptedMedia* encrypted_media) {
@@ -20852,10 +20892,10 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
 +    EnableMockVDA();
 +#endif
 +
-     EXPECT_CALL(*source, InitSegmentReceived()).Times(AtLeast(1));
+     EXPECT_CALL(*source, InitSegmentReceived(_)).Times(AtLeast(1));
      EXPECT_CALL(*this, OnMetadata(_))
          .Times(AtMost(1))
-@@ -745,7 +771,7 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
+@@ -748,7 +774,7 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
                                   base::Unretained(this)));
  
      pipeline_->Start(
@@ -20864,7 +20904,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
          base::Bind(&PipelineIntegrationTest::OnEnded, base::Unretained(this)),
          base::Bind(&PipelineIntegrationTest::OnError, base::Unretained(this)),
          base::Bind(&PipelineIntegrationTest::OnStatusCallback,
-@@ -863,6 +889,7 @@ TEST_P(BasicMSEPlaybackTest, PlayToEnd) {
+@@ -866,6 +892,7 @@ TEST_P(BasicMSEPlaybackTest, PlayToEnd) {
  }
  
  #if defined(USE_PROPRIETARY_CODECS)
@@ -20872,7 +20912,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  
  const PlaybackTestData kADTSTests[] = {
      {"bear-audio-main-aac.aac", 0, 2724},
-@@ -888,6 +915,7 @@ INSTANTIATE_TEST_CASE_P(PropritaryCodecs,
+@@ -891,6 +918,7 @@ INSTANTIATE_TEST_CASE_P(PropritaryCodecs,
                          BasicMSEPlaybackTest,
                          testing::ValuesIn(kMediaSourceADTSTests));
  
@@ -20880,7 +20920,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  #endif  // defined(USE_PROPRIETARY_CODECS)
  
  TEST_F(PipelineIntegrationTest, BasicPlayback) {
-@@ -1102,6 +1130,25 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource_VP9_WebM) {
+@@ -1105,6 +1133,25 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource_VP9_WebM) {
    Stop();
  }
  
@@ -20906,16 +20946,16 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource_VP8A_WebM) {
    MockMediaSource source("bear-vp8a.webm", kVideoOnlyWebM, kAppendWholeFile);
    StartPipelineWithMediaSource(&source);
-@@ -1329,7 +1376,7 @@ TEST_F(PipelineIntegrationTest,
+@@ -1332,7 +1379,7 @@ TEST_F(PipelineIntegrationTest,
    source.Shutdown();
  }
  
 -#if defined(USE_PROPRIETARY_CODECS)
-+#if !defined(OS_LINUX) && defined(USE_PROPRIETARY_CODECS)
++#if defined(USE_PROPRIETARY_CODECS) && defined(USE_SYSTEM_PROPRIETARY_CODECS)
  
  TEST_F(PipelineIntegrationTest, BasicPlaybackHi10P) {
    ASSERT_EQ(PIPELINE_OK, Start("bear-320x180-hi10p.mp4", kClockless));
-@@ -1339,6 +1386,8 @@ TEST_F(PipelineIntegrationTest, BasicPlaybackHi10P) {
+@@ -1342,6 +1389,8 @@ TEST_F(PipelineIntegrationTest, BasicPlaybackHi10P) {
    ASSERT_TRUE(WaitUntilOnEnded());
  }
  
@@ -20924,7 +20964,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  TEST_F(PipelineIntegrationTest, MediaSource_ADTS) {
    MockMediaSource source("sfx.adts", kADTS, kAppendWholeFile);
    StartPipelineWithMediaSource(&source);
-@@ -1380,10 +1429,20 @@ TEST_F(PipelineIntegrationTest, MediaSource_ADTS_TimestampOffset) {
+@@ -1383,10 +1432,20 @@ TEST_F(PipelineIntegrationTest, MediaSource_ADTS_TimestampOffset) {
  
    EXPECT_TRUE(WaitUntilOnEnded());
  
@@ -20945,7 +20985,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_MP3) {
    ASSERT_EQ(PIPELINE_OK, Start("sfx.mp3", kHashed));
  
-@@ -1394,8 +1453,10 @@ TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_MP3) {
+@@ -1397,8 +1456,10 @@ TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_MP3) {
    // Verify codec delay and preroll are stripped.
    EXPECT_HASH_EQ("1.30,2.72,4.56,5.08,3.74,2.03,", GetAudioHash());
  }
@@ -20956,7 +20996,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  class Mp3FastSeekParams {
   public:
    Mp3FastSeekParams(const char* filename, const char* hash)
-@@ -1466,8 +1527,12 @@ INSTANTIATE_TEST_CASE_P(
+@@ -1469,8 +1530,12 @@ INSTANTIATE_TEST_CASE_P(
      Mp3FastSeekIntegrationTest,
      ::testing::Values(Mp3FastSeekParams("bear-audio-10s-VBR-no-TOC.mp3",
                                          "-0.22,0.80,1.19,0.73,-0.31,-1.12,")));
@@ -20969,7 +21009,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  TEST_F(PipelineIntegrationTest, MediaSource_MP3) {
    MockMediaSource source("sfx.mp3", kMP3, kAppendWholeFile);
    StartPipelineWithMediaSource(&source, kHashed);
-@@ -1482,8 +1547,59 @@ TEST_F(PipelineIntegrationTest, MediaSource_MP3) {
+@@ -1485,9 +1550,60 @@ TEST_F(PipelineIntegrationTest, MediaSource_MP3) {
    EXPECT_TRUE(WaitUntilOnEnded());
  
    // Verify that codec delay was stripped.
@@ -20980,8 +21020,8 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
 +#else
    EXPECT_HASH_EQ("1.01,2.71,4.18,4.32,3.04,1.12,", GetAudioHash());
 +#endif
-+}
-+
+ }
+ 
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +// This file triggers a different sequence of "provide data", "output buffers"
 +// events in ATAudioDecoder.
@@ -21024,12 +21064,13 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
 +  Seek(seek_time);
 +
 +  EXPECT_TRUE(WaitUntilOnEnded());
- }
++}
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
- 
++
  TEST_F(PipelineIntegrationTest, MediaSource_MP3_TimestampOffset) {
    MockMediaSource source("sfx.mp3", kMP3, kAppendWholeFile);
-@@ -1512,6 +1628,7 @@ TEST_F(PipelineIntegrationTest, MediaSource_MP3_TimestampOffset) {
+   StartPipelineWithMediaSource(&source);
+@@ -1515,6 +1631,7 @@ TEST_F(PipelineIntegrationTest, MediaSource_MP3_TimestampOffset) {
  
    EXPECT_TRUE(WaitUntilOnEnded());
  }
@@ -21037,7 +21078,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  
  TEST_F(PipelineIntegrationTest, MediaSource_MP3_Icecast) {
    MockMediaSource source("icy_sfx.mp3", kMP3, kAppendWholeFile);
-@@ -1547,6 +1664,36 @@ TEST_F(PipelineIntegrationTest, MediaSource_ConfigChange_MP4) {
+@@ -1550,6 +1667,36 @@ TEST_F(PipelineIntegrationTest, MediaSource_ConfigChange_MP4) {
    Stop();
  }
  
@@ -21074,7 +21115,7 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  TEST_F(PipelineIntegrationTest,
         MAYBE_EME(MediaSource_ConfigChange_Encrypted_MP4_CENC_VideoOnly)) {
    MockMediaSource source("bear-640x360-v_frag-cenc.mp4", kMP4Video,
-@@ -1662,12 +1809,15 @@ TEST_F(PipelineIntegrationTest,
+@@ -1665,12 +1812,15 @@ TEST_F(PipelineIntegrationTest,
    source.Shutdown();
  }
  
@@ -21090,16 +21131,16 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  #endif  // defined(USE_PROPRIETARY_CODECS)
  
  TEST_F(PipelineIntegrationTest, BasicPlayback_16x9AspectRatio) {
-@@ -1724,7 +1874,7 @@ TEST_F(PipelineIntegrationTest,
+@@ -1727,7 +1877,7 @@ TEST_F(PipelineIntegrationTest,
    Stop();
  }
  
 -#if defined(USE_PROPRIETARY_CODECS)
-+#if !defined(OS_LINUX) && defined(USE_PROPRIETARY_CODECS)
++#if defined(USE_PROPRIETARY_CODECS) && defined(USE_SYSTEM_PROPRIETARY_CODECS)
  TEST_F(PipelineIntegrationTest,
         MAYBE_EME(EncryptedPlayback_MP4_CENC_VideoOnly)) {
    MockMediaSource source("bear-1280x720-v_frag-cenc.mp4", kMP4Video,
-@@ -1846,6 +1996,7 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource_VideoOnly_MP4_AVC3) {
+@@ -1866,6 +2016,7 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource_VideoOnly_MP4_AVC3) {
  }
  
  #endif  // defined(USE_PROPRIETARY_CODECS)
@@ -21107,28 +21148,28 @@ index fe7b8914d473998d5a3d282039b07e64963696d6..5e54ab0f898ad7aeb2a11ae7065bd92c
  
  TEST_F(PipelineIntegrationTest, SeekWhilePaused) {
    ASSERT_EQ(PIPELINE_OK, Start("bear-320x240.webm"));
-@@ -1921,7 +2072,10 @@ TEST_F(PipelineIntegrationTest, SuspendWhilePlaying) {
+@@ -1941,7 +2092,9 @@ TEST_F(PipelineIntegrationTest, SuspendWhilePlaying) {
    ASSERT_TRUE(WaitUntilOnEnded());
  }
  
 -#if defined(USE_PROPRIETARY_CODECS)
-+#if !defined(OS_LINUX) && defined(USE_PROPRIETARY_CODECS)
 +// USE_SYSTEM_PROPRIETARY_CODECS requires a different test setup for non-MSE
 +// tests, see PlatformMediaPipelineIntegrationTest.
-+#if !defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#if 0
  TEST_F(PipelineIntegrationTest, Rotated_Metadata_0) {
    ASSERT_EQ(PIPELINE_OK, Start("bear_rotate_0.mp4"));
    ASSERT_EQ(VIDEO_ROTATION_0, metadata_.video_rotation);
-@@ -1941,6 +2095,7 @@ TEST_F(PipelineIntegrationTest, Rotated_Metadata_270) {
+@@ -1961,7 +2114,7 @@ TEST_F(PipelineIntegrationTest, Rotated_Metadata_270) {
    ASSERT_EQ(PIPELINE_OK, Start("bear_rotate_270.mp4"));
    ASSERT_EQ(VIDEO_ROTATION_270, metadata_.video_rotation);
  }
+-#endif  // defined(USE_PROPRIETARY_CODECS)
 +#endif  // !defined(USE_SYSTEM_PROPRIETARY_CODECS)
- #endif  // defined(USE_PROPRIETARY_CODECS)
  
  // Verify audio decoder & renderer can handle aborted demuxer reads.
+ TEST_F(PipelineIntegrationTest, ChunkDemuxerAbortRead_AudioOnly) {
 diff --git a/media/test/pipeline_integration_test_base.cc b/media/test/pipeline_integration_test_base.cc
-index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79ae2c8e60 100644
+index 17647ba7ad07dd725c6998ae55f1864f348b398b..f1c99b838a88b40b6462a926475f2bc61e041f7e 100644
 --- a/media/test/pipeline_integration_test_base.cc
 +++ b/media/test/pipeline_integration_test_base.cc
 @@ -7,6 +7,7 @@
@@ -21139,7 +21180,7 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
  #include "base/memory/scoped_vector.h"
  #include "media/base/cdm_context.h"
  #include "media/base/media_log.h"
-@@ -25,6 +26,26 @@
+@@ -27,6 +28,26 @@
  #include "media/filters/vpx_video_decoder.h"
  #endif
  
@@ -21166,7 +21207,7 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
  using ::testing::_;
  using ::testing::AnyNumber;
  using ::testing::AtLeast;
-@@ -38,6 +59,152 @@ namespace media {
+@@ -40,6 +61,152 @@ namespace media {
  const char kNullVideoHash[] = "d41d8cd98f00b204e9800998ecf8427e";
  const char kNullAudioHash[] = "0.00,0.00,0.00,0.00,0.00,0.00,";
  
@@ -21245,7 +21286,7 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
 +
 +    client_ = client;
 +    client_->ProvidePictureBuffers(
-+        kNumPictureBuffers, gfx::Size(kMaxPictureWidth, kMaxPictureHeight),
++        kNumPictureBuffers, 1, gfx::Size(kMaxPictureWidth, kMaxPictureHeight),
 +        GL_TEXTURE_RECTANGLE_ARB);
 +    return true;
 +  }
@@ -21319,7 +21360,7 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
  PipelineIntegrationTestBase::PipelineIntegrationTestBase()
      : hashing_enabled_(false),
        clockless_playback_(false),
-@@ -46,6 +213,12 @@ PipelineIntegrationTestBase::PipelineIntegrationTestBase()
+@@ -48,6 +215,12 @@ PipelineIntegrationTestBase::PipelineIntegrationTestBase()
        pipeline_status_(PIPELINE_OK),
        last_video_frame_format_(PIXEL_FORMAT_UNKNOWN),
        last_video_frame_color_space_(COLOR_SPACE_UNSPECIFIED),
@@ -21332,24 +21373,16 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
        hardware_config_(AudioParameters(), AudioParameters()) {
    base::MD5Init(&md5_context_);
  }
-@@ -110,6 +283,7 @@ PipelineStatus PipelineIntegrationTestBase::Start(const std::string& filename) {
- 
- PipelineStatus PipelineIntegrationTestBase::Start(const std::string& filename,
-                                                   CdmContext* cdm_context) {
-+  filename_ = filename;
-   EXPECT_CALL(*this, OnMetadata(_))
-       .Times(AtMost(1))
-       .WillRepeatedly(SaveArg<0>(&metadata_));
-@@ -131,7 +305,7 @@ PipelineStatus PipelineIntegrationTestBase::Start(const std::string& filename,
+@@ -141,7 +314,7 @@ PipelineStatus PipelineIntegrationTestBase::StartInternal(
    EXPECT_CALL(*this, OnWaitingForDecryptionKey()).Times(0);
  
    pipeline_->Start(
 -      demuxer_.get(), CreateRenderer(),
-+      demuxer_.get(), CreateRenderer(GetTestDataFilePath(filename)),
++      demuxer_.get(), CreateRenderer(GetTestDataFilePath(filename_)),
        base::Bind(&PipelineIntegrationTestBase::OnEnded, base::Unretained(this)),
        base::Bind(&PipelineIntegrationTestBase::OnError, base::Unretained(this)),
        base::Bind(&PipelineIntegrationTestBase::OnStatusCallback,
-@@ -184,9 +358,14 @@ bool PipelineIntegrationTestBase::Suspend() {
+@@ -219,9 +392,14 @@ bool PipelineIntegrationTestBase::Suspend() {
  bool PipelineIntegrationTestBase::Resume(base::TimeDelta seek_time) {
    ended_ = false;
  
@@ -21365,7 +21398,7 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
                      base::Bind(&PipelineIntegrationTestBase::OnSeeked,
                                 base::Unretained(this), seek_time));
    message_loop_.Run();
-@@ -247,8 +426,57 @@ void PipelineIntegrationTestBase::CreateDemuxer(const std::string& filename) {
+@@ -286,8 +464,57 @@ void PipelineIntegrationTestBase::CreateDemuxer(
  #endif
  }
  
@@ -21424,7 +21457,7 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
  #if !defined(MEDIA_DISABLE_LIBVPX)
    video_decoders.push_back(new VpxVideoDecoder());
  #endif  // !defined(MEDIA_DISABLE_LIBVPX)
-@@ -276,8 +504,6 @@ scoped_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
+@@ -315,8 +542,6 @@ scoped_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
      clockless_audio_sink_ = new ClocklessAudioSink();
    }
  
@@ -21433,7 +21466,7 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
  #if !defined(MEDIA_DISABLE_FFMPEG)
    audio_decoders.push_back(
        new FFmpegAudioDecoder(message_loop_.task_runner(), new MediaLog()));
-@@ -289,6 +515,10 @@ scoped_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
+@@ -328,6 +553,10 @@ scoped_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
    if (!hashing_enabled_) {
      AudioParameters out_params(AudioParameters::AUDIO_PCM_LOW_LATENCY,
                                 CHANNEL_LAYOUT_STEREO, 44100, 16, 512);
@@ -21444,7 +21477,7 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
      hardware_config_.UpdateOutputConfig(out_params);
    }
  
-@@ -355,4 +585,14 @@ base::TimeTicks DummyTickClock::NowTicks() {
+@@ -394,4 +623,14 @@ base::TimeTicks DummyTickClock::NowTicks() {
    return now_;
  }
  
@@ -21460,7 +21493,7 @@ index 11da971031b7d1cc701d2bd7496c0f0601eacd33..64a2256dab65332c1b6b0cf9ee6d8f79
 +
  }  // namespace media
 diff --git a/media/test/pipeline_integration_test_base.h b/media/test/pipeline_integration_test_base.h
-index 915346b9518611ab856f626492d9cac249d9bb95..720d9a12a1cc63aba345200e7a174a9cc2cd5c6a 100644
+index 82304897309b18d6eb7a710357793f0e3cefdebb..aeb24d70afc51c1fcc2ac789aea35ebe710e561e 100644
 --- a/media/test/pipeline_integration_test_base.h
 +++ b/media/test/pipeline_integration_test_base.h
 @@ -7,6 +7,7 @@
@@ -21479,8 +21512,8 @@ index 915346b9518611ab856f626492d9cac249d9bb95..720d9a12a1cc63aba345200e7a174a9c
  
  // Empty MD5 hash string.  Used to verify empty video tracks.
  extern const char kNullVideoHash[];
-@@ -103,6 +105,8 @@ class PipelineIntegrationTestBase {
-   base::TimeDelta GetAudioTime();
+@@ -116,6 +118,8 @@ class PipelineIntegrationTestBase {
+   }
  
   protected:
 +  class DecodingMockVDA;
@@ -21488,7 +21521,7 @@ index 915346b9518611ab856f626492d9cac249d9bb95..720d9a12a1cc63aba345200e7a174a9c
    base::MessageLoop message_loop_;
    base::MD5Context md5_context_;
    bool hashing_enabled_;
-@@ -119,8 +123,15 @@ class PipelineIntegrationTestBase {
+@@ -132,8 +136,15 @@ class PipelineIntegrationTestBase {
    VideoPixelFormat last_video_frame_format_;
    ColorSpace last_video_frame_color_space_;
    DummyTickClock dummy_clock_;
@@ -21502,14 +21535,14 @@ index 915346b9518611ab856f626492d9cac249d9bb95..720d9a12a1cc63aba345200e7a174a9c
    PipelineMetadata metadata_;
 +  std::string filename_;
  
-   void OnSeeked(base::TimeDelta seek_time, PipelineStatus status);
-   void OnStatusCallback(PipelineStatus status);
-@@ -136,13 +147,18 @@ class PipelineIntegrationTestBase {
+   PipelineStatus StartInternal(scoped_ptr<DataSource> data_source,
+                                CdmContext* cdm_context,
+@@ -155,13 +166,18 @@ class PipelineIntegrationTestBase {
    void QuitAfterCurrentTimeTask(const base::TimeDelta& quit_time);
  
    // Creates Demuxer and sets |demuxer_|.
--  void CreateDemuxer(const std::string& filename);
-+  virtual void CreateDemuxer(const std::string& filename);
+-  void CreateDemuxer(scoped_ptr<DataSource> data_source);
++  virtual void CreateDemuxer(scoped_ptr<DataSource> data_source);
  
    // Creates and returns a Renderer.
 -  virtual scoped_ptr<Renderer> CreateRenderer();
