@@ -1,3 +1,3891 @@
+diff --git a/native_client/src/trusted/validator_arm/testdata/test_vector_stores.out b/native_client/src/trusted/validator_arm/testdata/test_vector_stores.out
+new file mode 100644
+index 0000000000000000000000000000000000000000..31368d5397ad4ed48e17bea0c2819bcb3daa542e
+--- /dev/null
++++ b/native_client/src/trusted/validator_arm/testdata/test_vector_stores.out
+@@ -0,0 +1,5 @@
++   20000: Load/store base r0 is not properly masked.
++   2001c: Updating sp without masking in following instruction.
++   20028: Updating sp without masking in following instruction.
++   2002c: Updating sp without masking in following instruction.
++Invalid.
+diff --git a/native_client/src/trusted/validator_arm/validation-report.py b/native_client/src/trusted/validator_arm/validation-report.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..ca9e5e0db0fd6ef31ff1190d49c038b136310528
+--- /dev/null
++++ b/native_client/src/trusted/validator_arm/validation-report.py
+@@ -0,0 +1,95 @@
++#!/usr/bin/python
++#
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++#
++
++
++import sys
++import textwrap
++from subprocess import Popen, PIPE
++
++_OBJDUMP = 'arm-linux-gnueabi-objdump'
++
++def _objdump(binary, vaddr, ctx_before, ctx_after):
++    args = [
++        _OBJDUMP,
++        '-d',
++        '-G',
++        binary,
++        '--start-address=0x%08X' % (vaddr - (4 * ctx_before)),
++        '--stop-address=0x%08X' % (vaddr + 4 + (4 * ctx_after))]
++    highlight = ctx_before
++    lines = 0
++    for line in Popen(args, stdout=PIPE).stdout.read().split('\n'):
++        if line.startswith(' '):
++            if highlight == 0:
++                print '--> ', line
++            else:
++                print '    ', line
++            highlight -= 1
++            lines += 1
++    if not lines:
++        print '    (not found)'
++
++def _problem_info(code):
++    return {
++        'kProblemUnsafe': ['Instruction is unsafe', 0, 0],
++        'kProblemBranchSplitsPattern': ['The destination of this branch is '
++            'part of an instruction sequence that must be executed in full, '
++            'or is inline data',
++            0, 0],
++        'kProblemPatternCrossesBundle': ['This instruction is part of a '
++            'sequence that must execute in full, but it spans a bundle edge '
++            '-- so an indirect branch may target it',
++            1, 1],
++        'kProblemBranchInvalidDest': ['This branch targets a location that is '
++            'outside of the application\'s executable code, and is not a valid '
++            'trampoline entry point', 0, 0],
++        'kProblemUnsafeLoadStore': ['This store instruction is not preceded by '
++            'a valid address mask instruction', 1, 0],
++        'kProblemUnsafeBranch': ['This indirect branch instruction is not '
++            'preceded by a valid address mask instruction', 1, 0],
++        'kProblemUnsafeDataWrite': ['This instruction affects a register that '
++            'must contain a valid data-region address, but is not followed by '
++            'a valid address mask instruction', 0, 1],
++        'kProblemReadOnlyRegister': ['This instruction changes the contents of '
++            'a read-only register', 0, 0],
++        'kProblemMisalignedCall': ['This linking branch instruction is not in '
++            'the last slot of its bundle, so when its LR result is masked, the '
++            'caller will not return to the next instruction', 0, 0],
++    }[code]
++
++def _safety_msg(val):
++    return {
++        0: 'UNKNOWN',  # Should not appear
++        1: 'is undefined',
++        2: 'has unpredictable effects',
++        3: 'is deprecated',
++        4: 'is forbidden',
++        5: 'uses forbidden operands',
++    }[val]
++
++def _explain_problem(binary, vaddr, safety, code, ref_vaddr):
++    msg, ctx_before, ctx_after = _problem_info(code)
++    if safety == 6:
++        msg = "At %08X: %s:" % (vaddr, msg)
++    else:
++        msg = ("At %08X: %s (%s):"
++            % (vaddr, msg, _safety_msg(safety)))
++    print '\n'.join(textwrap.wrap(msg, 70, subsequent_indent='  '))
++    _objdump(binary, vaddr, ctx_before, ctx_after)
++    if ref_vaddr:
++        print "Destination address %08X:" % ref_vaddr
++        _objdump(binary, ref_vaddr, 1, 1)
++
++def _parse_report(line):
++    vaddr_hex, safety, code, ref_vaddr_hex = line.split()
++    return (int(vaddr_hex, 16), int(safety), code, int(ref_vaddr_hex, 16))
++
++
++for line in sys.stdin:
++    if line.startswith('ncval: '):
++      line = line[7:].strip()
++      _explain_problem(sys.argv[1], *_parse_report(line))
+diff --git a/native_client/src/trusted/validator_arm/validator.cc b/native_client/src/trusted/validator_arm/validator.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..0d94947e65447a8ba38b403f0474a67bedc1c771
+--- /dev/null
++++ b/native_client/src/trusted/validator_arm/validator.cc
+@@ -0,0 +1,450 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <climits>
++#include <cstdarg>
++
++#include "native_client/src/trusted/service_runtime/nacl_config.h"
++#include "native_client/src/trusted/validator_arm/model.h"
++#include "native_client/src/trusted/validator_arm/validator.h"
++#include "native_client/src/include/nacl_macros.h"
++#include "native_client/src/include/portability_bits.h"
++#include "native_client/src/shared/platform/nacl_log.h"
++
++using nacl_arm_dec::Instruction;
++using nacl_arm_dec::ClassDecoder;
++using nacl_arm_dec::Register;
++using nacl_arm_dec::RegisterList;
++
++using std::vector;
++
++namespace nacl_arm_val {
++
++/*********************************************************
++ *
++ * Implementation of SfiValidator itself.
++ *
++ *********************************************************/
++
++// See ARM ARM A8.3 Conditional execution.
++//
++// Flags are:
++//    N - Negative condition code flag.
++//    Z - Zero condition code flag.
++//    C - Carry condition code flag.
++//    V - Overflow condition code flag.
++const bool SfiValidator::
++condition_implies[nacl_arm_dec::Instruction::kConditionSize + 1]
++                 [nacl_arm_dec::Instruction::kConditionSize + 1] = {
++# if defined(T) || defined(_)
++#   error Macros already defined.
++# endif
++# define T true
++# define _ false
++  //                       EQ NE CS CC MI PL VS VC HI LS GE LT GT LE AL UN
++  /* EQ => Z==1        */ { T, _, _, _, _, _, _, _, _, T, _, _, _, _, T, T },
++  /* NE => Z==0        */ { _, T, _, _, _, _, _, _, _, _, _, _, _, _, T, T },
++  /* CS => C==1        */ { _, _, T, _, _, _, _, _, _, _, _, _, _, _, T, T },
++  /* CC => C==0        */ { _, _, _, T, _, _, _, _, _, T, _, _, _, _, T, T },
++  /* MI => N==1        */ { _, _, _, _, T, _, _, _, _, _, _, _, _, _, T, T },
++  /* PL => N==0        */ { _, _, _, _, _, T, _, _, _, _, _, _, _, _, T, T },
++  /* VS => V==1        */ { _, _, _, _, _, _, T, _, _, _, _, _, _, _, T, T },
++  /* VC => V==0        */ { _, _, _, _, _, _, _, T, _, _, _, _, _, _, T, T },
++  /* HI => C==1 & Z==0 */ { _, T, T, _, _, _, _, _, T, _, _, _, _, _, T, T },
++  /* LS => C==0 | Z==1 */ { _, _, _, _, _, _, _, _, _, T, _, _, _, _, T, T },
++  /* GE => N==V        */ { _, _, _, _, _, _, _, _, _, _, T, _, _, _, T, T },
++  /* LT => N!=V        */ { _, _, _, _, _, _, _, _, _, _, _, T, _, _, T, T },
++  /* GT => Z==0 & N==V */ { _, T, _, _, _, _, _, _, _, _, T, _, T, _, T, T },
++  /* LE => Z==1 & N!=V */ { T, _, _, _, _, _, _, _, _, T, _, T, _, T, T, T },
++  /* AL => Any         */ { _, _, _, _, _, _, _, _, _, _, _, _, _, _, T, T },
++  /* UN => Any         */ { _, _, _, _, _, _, _, _, _, _, _, _, _, _, T, T },
++# undef _
++# undef T
++};
++
++SfiValidator::SfiValidator(uint32_t bytes_per_bundle,
++                           uint32_t code_region_bytes,
++                           uint32_t data_region_bytes,
++                           RegisterList read_only_registers,
++                           RegisterList data_address_registers,
++                           const NaClCPUFeaturesArm *cpu_features)
++    : cpu_features_(),
++      bytes_per_bundle_(bytes_per_bundle),
++      code_region_bytes_(code_region_bytes),
++      data_region_bytes_(data_region_bytes),
++      read_only_registers_(read_only_registers),
++      data_address_registers_(data_address_registers),
++      decode_state_(),
++      construction_failed_(false),
++      is_position_independent_(true) {
++  NaClCopyCPUFeaturesArm(&cpu_features_, cpu_features);
++  // Make sure we can construct sane masks with the values.
++  if ((nacl::PopCount(bytes_per_bundle_) != 1) ||
++      (nacl::PopCount(code_region_bytes_) != 1) ||
++      (nacl::PopCount(data_region_bytes_) != 1) ||
++      (bytes_per_bundle_ < 4) ||
++      (code_region_bytes_ < 4) ||
++      (data_region_bytes_ < 4) ||
++      (code_region_bytes_ < bytes_per_bundle_)) {
++    construction_failed_ = true;
++  }
++}
++
++SfiValidator::SfiValidator(const SfiValidator& v)
++    : cpu_features_(),
++      bytes_per_bundle_(v.bytes_per_bundle_),
++      code_region_bytes_(v.code_region_bytes_),
++      data_region_bytes_(v.data_region_bytes_),
++      read_only_registers_(v.read_only_registers_),
++      data_address_registers_(v.data_address_registers_),
++      decode_state_(),
++      construction_failed_(v.construction_failed_),
++      is_position_independent_(v.is_position_independent_) {
++  NaClCopyCPUFeaturesArm(&cpu_features_, v.CpuFeatures());
++}
++
++SfiValidator& SfiValidator::operator=(const SfiValidator& v) {
++  NaClCopyCPUFeaturesArm(&cpu_features_, v.CpuFeatures());
++  bytes_per_bundle_ = v.bytes_per_bundle_;
++  code_region_bytes_ = v.code_region_bytes_;
++  data_region_bytes_ = v.data_region_bytes_;
++  read_only_registers_.Copy(v.read_only_registers_);
++  data_address_registers_.Copy(v.data_address_registers_);
++  construction_failed_ = v.construction_failed_;
++  is_position_independent_ = v.is_position_independent_;
++  return *this;
++}
++
++nacl_arm_dec::ViolationSet SfiValidator::
++find_violations(const vector<CodeSegment>& segments,
++                ProblemSink* out) {
++  if (ConstructionFailed(out))
++    return nacl_arm_dec::ViolationBit(nacl_arm_dec::OTHER_VIOLATION);
++
++  uint32_t base = segments[0].begin_addr();
++  uint32_t size = segments.back().end_addr() - base;
++  AddressSet branches(base, size);
++  AddressSet critical(base, size);
++
++  nacl_arm_dec::ViolationSet found_violations = nacl_arm_dec::kNoViolations;
++
++  for (vector<CodeSegment>::const_iterator it = segments.begin();
++      it != segments.end(); ++it) {
++    nacl_arm_dec::ViolationSet segment_violations =
++        validate_fallthrough(*it, out, &branches, &critical);
++    found_violations =
++        nacl_arm_dec::ViolationUnion(found_violations, segment_violations);
++    if (segment_violations && (out == NULL)) return found_violations;
++  }
++
++  return
++      nacl_arm_dec::ViolationUnion(
++          found_violations,
++          validate_branches(segments, branches, critical, out));
++}
++
++bool SfiValidator::ValidateSegmentPair(const CodeSegment& old_code,
++                                       const CodeSegment& new_code,
++                                       ProblemSink* out) {
++  // This code verifies that the new code is just like the old code,
++  // except a few (acceptable) literal constants have been replaced
++  // in the new code segment. Hence, checking of safety etc. is not
++  // necessary. We assume that this was done on the old code, and
++  // does not need to be done again.
++  if (ConstructionFailed(out))
++    return false;
++
++  if ((old_code.begin_addr() != new_code.begin_addr()) ||
++      (old_code.end_addr() != new_code.end_addr())) {
++    return false;
++  }
++
++  bool complete_success = true;
++  bool current_bundle_is_literal_pool = false;
++
++  // The following loop expects the first address to be
++  // bundle-aligned. This invariant is checked in the validator's C
++  // interface and it therefore not checked again.
++  NACL_COMPILE_TIME_ASSERT((nacl_arm_dec::kArm32InstSize / CHAR_BIT) == 4);
++  for (uint32_t va = old_code.begin_addr();
++       va != old_code.end_addr();
++       va += nacl_arm_dec::kArm32InstSize / CHAR_BIT) {
++    Instruction old_insn = old_code[va];
++    Instruction new_insn = new_code[va];
++
++    // Keep track of literal pools: it's valid to replace any value in them.
++    // Literal pools should still be at the same place in the old and new code.
++    if (is_bundle_head(va)) {
++      const ClassDecoder& old_decoder = decode_state_.decode(old_insn);
++      current_bundle_is_literal_pool =
++          (old_decoder.is_literal_pool_head(old_insn) &&
++           new_insn.Equals(old_insn));
++    }
++
++    // Accept any change inside a literal pool.
++    if (current_bundle_is_literal_pool)
++      continue;
++
++    // See if the instruction has changed in the new version. If not,
++    // there is nothing to check, and we can skip to the next
++    // instruction.
++    if (new_insn.Equals(old_insn))
++      continue;
++
++    // Decode instructions and get corresponding decoders.
++    const ClassDecoder& old_decoder = decode_state_.decode(old_insn);
++    const ClassDecoder& new_decoder = decode_state_.decode(new_insn);
++
++    // Convert the instructions into their sentinel form (i.e.
++    // convert immediate values to zero if applicable).
++    Instruction old_sentinel(
++        old_decoder.dynamic_code_replacement_sentinel(old_insn));
++    Instruction new_sentinel(
++        new_decoder.dynamic_code_replacement_sentinel(new_insn));
++
++    // Report problem if the sentinels differ, and reject the replacement.
++    if (!new_sentinel.Equals(old_sentinel)) {
++      if (out == NULL) return false;
++      out->ReportProblemDiagnostic(nacl_arm_dec::OTHER_VIOLATION,
++                                   va,
++                                   "Sentinels at %08" NACL_PRIx32 " differ.",
++                                   va);
++      complete_success = false;
++    }
++  }
++
++  return complete_success;
++}
++
++bool SfiValidator::CopyCode(const CodeSegment& source_code,
++                            CodeSegment* dest_code,
++                            NaClCopyInstructionFunc copy_func,
++                            ProblemSink* out) {
++  if (ConstructionFailed(out))
++    return false;
++
++  vector<CodeSegment> segments;
++  segments.push_back(source_code);
++  if (!validate(segments, out))
++      return false;
++
++  // As on ARM all instructions are 4 bytes in size and aligned
++  // we don't have to check instruction boundary invariant.
++  for (uintptr_t va = source_code.begin_addr();
++       va != source_code.end_addr();
++       va += nacl_arm_dec::kArm32InstSize / CHAR_BIT) {
++    intptr_t offset = va - source_code.begin_addr();
++    // TODO(olonho): this const cast is a bit ugly, but we
++    // need to write to dest segment.
++    copy_func(const_cast<uint8_t*>(dest_code->base()) + offset,
++              const_cast<uint8_t*>(source_code.base()) + offset,
++              nacl_arm_dec::kArm32InstSize / CHAR_BIT);
++  }
++
++  return true;
++}
++
++bool SfiValidator::ConstructionFailed(ProblemSink* out) {
++  if (construction_failed_ && (out != NULL)) {
++    uint32_t invalid_addr = ~(uint32_t)0;
++    out->ReportProblemDiagnostic(nacl_arm_dec::OTHER_VIOLATION,
++                                 invalid_addr,
++                                 "Construction of validator failed!");
++  }
++  return construction_failed_;
++}
++
++nacl_arm_dec::ViolationSet SfiValidator::validate_fallthrough(
++    const CodeSegment& segment,
++    ProblemSink* out,
++    AddressSet* branches,
++    AddressSet* critical) {
++  nacl_arm_dec::ViolationSet found_violations = nacl_arm_dec::kNoViolations;
++
++  // Initialize the previous instruction so it always fails validation.
++  DecodedInstruction pred(
++      0,  // Virtual address 0, which will be in a different bundle;
++      Instruction(nacl_arm_dec::kFailValidation),
++      decode_state_.fictitious_decoder());
++
++  // Validate each instruction.
++  uint32_t va = segment.begin_addr();
++  while (va < segment.end_addr()) {
++    const ClassDecoder& decoder = decode_state_.decode(segment[va]);
++    DecodedInstruction inst(va, segment[va], decoder);
++    // Note: get_violations is expecting the address of the next instruction
++    // to be validated as its last argument. This address can be updated by
++    // by that routine (as with constant pool heads). Hence, rather than
++    // updating va at the end of the loop, we update it here and pass it
++    // through to get_violations.
++    va += 4;
++    nacl_arm_dec::ViolationSet violations =
++        decoder.get_violations(pred, inst, *this, branches, critical, &va);
++    if (violations) {
++      found_violations =
++          nacl_arm_dec::ViolationUnion(found_violations, violations);
++      if (out == NULL) return found_violations;
++      decoder.generate_diagnostics(violations, pred, inst, *this, out);
++    }
++    pred.Copy(inst);
++  }
++
++  // Validate the last instruction, paired with a nop.
++  const Instruction nop(nacl_arm_dec::kNop);
++  const ClassDecoder& nop_decoder = decode_state_.decode(nop);
++  DecodedInstruction one_past_end(va, nop, nop_decoder);
++  // Note: Like above, we update va to point to the instruction after the nop,
++  // so that it meets the requirements of get_violations.
++  va += 4;
++  nacl_arm_dec::ViolationSet violations =
++      nop_decoder.get_violations(pred, one_past_end, *this,
++                                 branches, critical, &va);
++  if (violations) {
++    found_violations =
++        nacl_arm_dec::ViolationUnion(found_violations, violations);
++    if (out == NULL) return found_violations;
++    nop_decoder.generate_diagnostics(violations, pred, one_past_end,
++                                     *this, out);
++  }
++
++  return found_violations;
++}
++
++static bool address_contained(uint32_t va, const vector<CodeSegment>& segs) {
++  for (vector<CodeSegment>::const_iterator it = segs.begin(); it != segs.end();
++      ++it) {
++    if (it->contains_address(va)) return true;
++  }
++  return false;
++}
++
++nacl_arm_dec::ViolationSet SfiValidator::validate_branches(
++    const vector<CodeSegment>& segments,
++    const AddressSet& branches,
++    const AddressSet& critical,
++    ProblemSink* out) {
++  nacl_arm_dec::ViolationSet found_violations = nacl_arm_dec::kNoViolations;
++
++  vector<CodeSegment>::const_iterator seg_it = segments.begin();
++
++  if (segments.size() > 1) {
++    // If there are multiple segments, their relative positioning matters.
++    is_position_independent_ = false;
++  }
++
++  for (AddressSet::Iterator it = branches.begin(); it != branches.end(); ++it) {
++    uint32_t va = *it;
++
++    // Invariant: all addresses in branches are covered by some segment;
++    // segments are in sorted order.
++    while (!seg_it->contains_address(va)) {
++      ++seg_it;
++    }
++
++    const CodeSegment &segment = *seg_it;
++
++    DecodedInstruction inst(va, segment[va],
++                            decode_state_.decode(segment[va]));
++
++    // We know it is_relative_branch(), so we can simply call:
++    uint32_t target_va = inst.branch_target();
++    if (address_contained(target_va, segments)) {
++      if (critical.contains(target_va)) {
++        found_violations =
++            nacl_arm_dec::ViolationUnion(
++                found_violations,
++                nacl_arm_dec::ViolationBit(
++                    nacl_arm_dec::BRANCH_SPLITS_PATTERN_VIOLATION));
++        if (out == NULL) return found_violations;
++        out->ReportProblemDiagnostic(
++            nacl_arm_dec::BRANCH_SPLITS_PATTERN_VIOLATION,
++            va,
++            "Instruction branches into middle of 2-instruction "
++            "pattern at %08" NACL_PRIx32 ".",
++            target_va);
++      }
++    } else {
++      // If the jump is outside the segment, absolute position matters.
++      is_position_independent_ = false;
++
++      if ((target_va & code_address_mask()) == 0) {
++        // Ensure that relative direct branches which don't go to known
++        // segments are to bundle-aligned targets, and that the branch
++        // doesn't escape from the sandbox. ARM relative direct branches
++        // have a +/-32MiB range, code at the edges of the sandbox could
++        // therefore potentially escape if left unchecked. This implies
++        // that validation is position-dependent, which matters for
++        // validation caching: code segments need to be mapped at the
++        // same addresses as the ones at which they were validated.
++        //
++        // We could make it a sandbox invariant that user code cannot be
++        // mapped within 32MiB of the sandbox's edges (and then only check
++        // bundle alignment with is_bundle_head(target_va)), but this may
++        // break some assumptions in user code.
++        //
++        // We could also track the furthest negative and positive relative
++        // direct branches seen per segment and record that
++        // information. This information would then allow validation
++        // caching to be mostly position independent, as long as code
++        // segments are mapped far enough from the sandbox's edges.
++        //
++        // Branches leaving the segment could be useful for dynamic code
++        // generation as well as to directly branch to the runtime's
++        // trampolines. The IRT curently doesn't do the latter because the
++        // compiler doesn't know that the trampolines will be in range of
++        // relative direct branch immediates. Indirect branches are
++        // instead used and the loader doesn't reoptimize the code.
++      } else {
++        found_violations =
++            nacl_arm_dec::ViolationUnion(
++                found_violations,
++                nacl_arm_dec::ViolationBit(
++                    nacl_arm_dec::BRANCH_OUT_OF_RANGE_VIOLATION));
++        if (out == NULL) return found_violations;
++        out->ReportProblemDiagnostic(
++            nacl_arm_dec::BRANCH_OUT_OF_RANGE_VIOLATION,
++            va,
++            "Instruction branches to invalid address %08" NACL_PRIx32 ".",
++            target_va);
++      }
++    }
++  }
++
++  return found_violations;
++}
++
++bool SfiValidator::is_valid_inst_boundary(const CodeSegment& code,
++                                          uint32_t addr) {
++  // Check addr is on an inst boundary.
++  if ((addr & 0x3) != 0)
++    return false;
++
++  CHECK(!ConstructionFailed(NULL));
++
++  uint32_t base = code.begin_addr();
++  uint32_t size = code.end_addr() - base;
++  AddressSet branches(base, size);
++  AddressSet critical(base, size);
++
++  uint32_t bundle_addr = addr & ~(bytes_per_bundle_ - 1);
++  uint32_t offset = bundle_addr - base;
++  uint32_t instr = reinterpret_cast<const uint32_t*>(
++      code.base() + offset)[0];
++
++  // Check if addr falls within a constant pool.
++  if (nacl_arm_dec::IsBreakPointAndConstantPoolHead(instr))
++    return false;
++
++  nacl_arm_dec::ViolationSet violations =
++        validate_fallthrough(code, NULL, &branches, &critical);
++
++  // Function should only be called after the code has already been validated.
++  CHECK(violations == nacl_arm_dec::kNoViolations);
++
++  return !critical.contains(addr);
++}
++
++}  // namespace nacl_arm_val
+diff --git a/native_client/src/trusted/validator_arm/validator.h b/native_client/src/trusted/validator_arm/validator.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f29cb9d80ee33435ec4f3724be4804842ef817a
+--- /dev/null
++++ b/native_client/src/trusted/validator_arm/validator.h
+@@ -0,0 +1,543 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_ARM_V2_VALIDATOR_H
++#define NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_ARM_V2_VALIDATOR_H
++
++/*
++ * The SFI validator, and some utility classes it uses.
++ */
++
++#include <limits>
++#include <stdlib.h>
++#include <vector>
++
++#include "native_client/src/include/nacl_compiler_annotations.h"
++#include "native_client/src/include/nacl_string.h"
++#include "native_client/src/include/portability.h"
++#include "native_client/src/shared/platform/nacl_check.h"
++#include "native_client/src/trusted/validator/ncvalidate.h"
++#include "native_client/src/trusted/validator_arm/address_set.h"
++#include "native_client/src/trusted/cpu_features/arch/arm/cpu_arm.h"
++#include "native_client/src/trusted/validator_arm/gen/arm32_decode.h"
++#include "native_client/src/trusted/validator_arm/inst_classes.h"
++#include "native_client/src/trusted/validator_arm/model.h"
++
++namespace nacl_arm_val {
++
++// Forward declarations of classes used by-reference in the validator, and
++// defined at the end of this file.
++class CodeSegment;
++class DecodedInstruction;
++class ProblemSink;
++
++// A simple model of an instruction bundle.  Bundles consist of one or more
++// instructions (two or more, in the useful case); the precise size is
++// controlled by the parameters passed into SfiValidator, below.
++class Bundle {
++ public:
++  Bundle(uint32_t virtual_base, uint32_t size_bytes)
++      : virtual_base_(virtual_base), size_(size_bytes) {}
++
++  uint32_t begin_addr() const { return virtual_base_; }
++  uint32_t end_addr() const { return virtual_base_ + size_; }
++
++  bool operator==(const Bundle& other) const {
++    // Note that all Bundles are currently assumed to be the same size.
++    return virtual_base_ == other.virtual_base_;
++  }
++
++ private:
++  uint32_t virtual_base_;
++  uint32_t size_;
++};
++
++// The SFI validator itself.  The validator is controlled by the following
++// inputs:
++//   bytes_per_bundle - the number of bytes in each bundle of instructions.
++//       Currently this tends to be 16, but we've evaluated alternatives.
++//       Must be a power of two.
++//   code_region_bytes - number of bytes in the code region, starting at address
++//       0 and including the trampolines, etc.  Must be a power of two.
++//   data_region_bits - number of bytes in the data region, starting at address
++//       0 and including the code region.  Must be a power of two.
++//   read_only_registers - registers that untrusted code must not alter (but may
++//       read). This currently applies to r9, where we store some thread state.
++//   data_address_registers - registers that must contain a valid data-region
++//       address at all times.  This currently applies to the stack pointer, but
++//       could be extended to include a frame pointer for C-like languages.
++//   cpu_features - the ARM CPU whose features should be considered during
++//       validation. This matters because some CPUs don't support some
++//       instructions, leak information or have erratas when others do not,
++//       yet we still want to emit performant code for the given target.
++//
++// The values of these inputs will typically be taken from the headers of
++// untrusted code -- either by the ABI version they indicate, or (perhaps in
++// the future) explicit indicators of what SFI model they follow.
++class SfiValidator {
++ public:
++  SfiValidator(uint32_t bytes_per_bundle,
++               uint32_t code_region_bytes,
++               uint32_t data_region_bytes,
++               nacl_arm_dec::RegisterList read_only_registers,
++               nacl_arm_dec::RegisterList data_address_registers,
++               const NaClCPUFeaturesArm *cpu_features);
++
++  explicit SfiValidator(const SfiValidator& v);
++
++  // The main validator entry point.  Validates the provided CodeSegments,
++  // which must be in sorted order, reporting any problems through the
++  // ProblemSink.
++  //
++  // Returns true iff no problems were found.
++  bool validate(const std::vector<CodeSegment>& segments, ProblemSink* out) {
++    return find_violations(segments, out) == nacl_arm_dec::kNoViolations;
++  }
++
++  // Returns true if validation did not depend on the code's base address.
++  bool is_position_independent() {
++    return is_position_independent_;
++  }
++
++  // Alternate validator entry point. Validates the provided
++  // CodeSegments, which must be in sorted order, reporting any
++  // problems through the ProblemSink.
++  //
++  // Returns the violation set of found violations. Note: if problem
++  // sink short ciruits the validation of all code (via method
++  // should_continue), this set may not contain all types of
++  // violations found. All that this method guarantees is if the code
++  // has validation violations, the returned set will be non-empty.
++  //
++  // Note: This version of validating is useful for testing, when one
++  // might want to know why the code did not validate.
++  nacl_arm_dec::ViolationSet find_violations(
++      const std::vector<CodeSegment>& segments, ProblemSink* out);
++
++  // Entry point for validation of dynamic code replacement. Allows
++  // micromodifications of dynamically generated code in form of
++  // constant updates for inline caches and similar VM techniques.
++  // Very minimal modifications allowed, essentially only immediate
++  // value update for MOV or ORR instruction.
++  // Returns true iff no problems were found.
++  bool ValidateSegmentPair(const CodeSegment& old_code,
++                           const CodeSegment& new_code,
++                           ProblemSink* out);
++
++  // Entry point for dynamic code creation. Copies code from
++  // source segment to destination, performing validation
++  // and accounting for need of safe handling of cases,
++  // where code being replaced is executed.
++  // Returns true iff no problems were found.
++  bool CopyCode(const CodeSegment& source_code,
++                CodeSegment* dest_code,
++                NaClCopyInstructionFunc copy_func,
++                ProblemSink* out);
++
++  // A 2-dimensional array, defined on the Condition of two
++  // instructions, defining when we can statically prove that the
++  // conditions of the first instruction implies the conditions of the
++  // second instruction.
++  //
++  // Note: The first index (i.e. row) corresponds to the condition of
++  // the first instruction, while the second index (i.e. column)
++  // corresponds to the condition of the second instruction.
++  //
++  // Note: The order the instructions execute is not important in
++  // this array. The context defines which instruction, of the
++  // instruction pair being compared, appears first.
++  //
++  // Note: The decoder should prevent UNCONDITIONAL (0b1111) from ever
++  // occurring, but we include entries for it out of paranoia, which also
++  // happens to make the table 16x16, which is easier to index into.
++  static const bool
++  condition_implies[nacl_arm_dec::Instruction::kConditionSize + 1]
++                   [nacl_arm_dec::Instruction::kConditionSize + 1];
++
++  // Checks whether the given Register always holds a valid data region address.
++  // This implies that the register is safe to use in unguarded stores.
++  bool is_data_address_register(nacl_arm_dec::Register r) const {
++    return data_address_registers_.Contains(r);
++  }
++
++  // Number of A32 instructions per bundle.
++  uint32_t InstructionsPerBundle() const {
++    return bytes_per_bundle_ / (nacl_arm_dec::kArm32InstSize / 8);
++  }
++
++  uint32_t code_address_mask() const {
++    return ~(code_region_bytes_ - 1) | (bytes_per_bundle_ - 1);
++  }
++  uint32_t data_address_mask() const {
++    return ~(data_region_bytes_ - 1);
++  }
++
++  nacl_arm_dec::RegisterList read_only_registers() const {
++    return read_only_registers_;
++  }
++  nacl_arm_dec::RegisterList data_address_registers() const {
++    return data_address_registers_;
++  }
++
++  const NaClCPUFeaturesArm *CpuFeatures() const {
++    return &cpu_features_;
++  }
++
++  bool conditional_memory_access_allowed_for_sfi() const {
++    return NaClGetCPUFeatureArm(CpuFeatures(),
++                                NaClCPUFeatureArm_CanUseTstMem) != 0;
++  }
++
++  // Utility function that applies the decoder of the validator.
++  const nacl_arm_dec::ClassDecoder& decode(
++      nacl_arm_dec::Instruction inst) const {
++    return decode_state_.decode(inst);
++  }
++
++  // Returns the Bundle containing a given address.
++  inline const Bundle bundle_for_address(uint32_t address) const;
++
++  // Returns true if both addresses are in the same bundle.
++  inline bool in_same_bundle(const DecodedInstruction& first,
++                             const DecodedInstruction& second) const;
++
++  // Checks that both instructions can be in the same bundle,
++  // add updates the critical set to include the second instruction,
++  // since it can't be safely jumped to. If the instruction crosses
++  // a bundle, a set with the given violation will be returned.
++  inline nacl_arm_dec::ViolationSet validate_instruction_pair_allowed(
++      const DecodedInstruction& first,
++      const DecodedInstruction& second,
++      AddressSet* critical,
++      nacl_arm_dec::Violation violation) const;
++
++  // Copy the given validator state.
++  SfiValidator& operator=(const SfiValidator& v);
++
++  // Returns true if address is the first address of a bundle.
++  bool is_bundle_head(uint32_t address) const {
++    return (address & (bytes_per_bundle_ - 1)) == 0;
++  }
++
++  // Returns true if address is on a valid inst boundary
++  // and is not within a pseudo instruction
++  bool is_valid_inst_boundary(const CodeSegment& code, uint32_t addr);
++
++ private:
++  // The SfiValidator constructor could have been given invalid values.
++  // Returns true the values were bad, and send the details to the ProblemSink.
++  // This method should be called from every public validation method.
++  bool ConstructionFailed(ProblemSink* out);
++
++  // Validates a straight-line execution of the code, applying patterns.  This
++  // is the first validation pass, which fills out the AddressSets for
++  // consumption by later analyses.
++  //   branches - gets filled in with the address of every direct branch.
++  //   critical - gets filled in with every address that isn't safe to jump to,
++  //       because it would split an otherwise-safe pseudo-op.
++  //
++  // Returns the violation set of found violations. Note: if problem
++  // sink short ciruits the validation of all code (via method
++  // should_continue), this set may not contain all types of
++  // violations found. All that this method guarantees is if the code
++  // has validation violations, the returned set will be non-empty.
++  nacl_arm_dec::ViolationSet validate_fallthrough(
++      const CodeSegment& segment, ProblemSink* out,
++      AddressSet* branches, AddressSet* critical);
++
++  // Validates all branches found by a previous pass, checking
++  // destinations.  Returns the violation set of found branch
++  // violations. Note: if problem sink short ciruits the validation of
++  // all code (via method should_continue), this set may not contain
++  // all types of violations found. All that this method guarantees is
++  // if the code has validation violations, the returned set will be
++  // non-empty.
++  nacl_arm_dec::ViolationSet validate_branches(
++      const std::vector<CodeSegment>& segments,
++      const AddressSet& branches, const AddressSet& critical,
++      ProblemSink* out);
++
++  NaClCPUFeaturesArm cpu_features_;
++  uint32_t bytes_per_bundle_;
++  uint32_t code_region_bytes_;
++  uint32_t data_region_bytes_;
++  // Registers which cannot be modified by untrusted code.
++  nacl_arm_dec::RegisterList read_only_registers_;
++  // Registers which must always contain a valid data region address.
++  nacl_arm_dec::RegisterList data_address_registers_;
++  // Defines the decoder parser to use.
++  const nacl_arm_dec::Arm32DecoderState decode_state_;
++  // True if construction failed and further validation should be prevented.
++  bool construction_failed_;
++  // True if validation did not depend on the code's base address.
++  bool is_position_independent_;
++};
++
++
++// A facade that combines an Instruction with its address and a ClassDecoder.
++// This makes the patterns substantially easier to write and read than managing
++// all three variables separately.
++//
++// ClassDecoders do all decoding on-demand, with no caching.  DecodedInstruction
++// has knowledge of the validator, and pairs a ClassDecoder with a constant
++// Instruction -- so it can cache commonly used values, and does.  Caching
++// safety and defs doubles validator performance.  Add other values only
++// under guidance of a profiler.
++class DecodedInstruction {
++ public:
++  DecodedInstruction(uint32_t vaddr, nacl_arm_dec::Instruction inst,
++                     const nacl_arm_dec::ClassDecoder& decoder)
++      // We eagerly compute both safety and defs here, because it turns out to
++      // be faster by 10% than doing either lazily and memoizing the result.
++      : vaddr_(vaddr),
++        inst_(inst),
++        decoder_(&decoder),
++        safety_(decoder.safety(inst_)),
++        defs_(decoder.defs(inst_))
++  {}
++
++  uint32_t addr() const { return vaddr_; }
++
++  // 'this' dominates 'other', where 'this' is the instruction
++  // immediately preceding 'other': if 'other' executes, we can guarantee
++  // that 'this' was executed as well.
++
++  // This is important if 'this' produces a sandboxed value that 'other'
++  // must consume.
++  //
++  // Note: If the conditions of the two instructions do
++  // not statically infer that the conditional execution is correct,
++  // we assume that it is not.
++  //
++  // Note that this function can't see the bundle size, so this result
++  // does not take it into account.  The SfiValidator reasons on this
++  // separately.
++  bool always_dominates(const DecodedInstruction& other) const {
++    nacl_arm_dec::Instruction::Condition cond1 = inst_.GetCondition();
++    nacl_arm_dec::Instruction::Condition cond2 = other.inst_.GetCondition();
++    return !defines(nacl_arm_dec::Register::Conditions()) &&
++        // TODO(jfb) Put back mixed-condition handling. See issue #3221.
++        //           SfiValidator::condition_implies[cond2][cond1];
++        ((cond1 == nacl_arm_dec::Instruction::AL) || (cond1 == cond2));
++  }
++
++  // 'this' post-dominates 'other', where 'other' is the instruction
++  // immediately preceding 'this': if 'other' executes, we can guarantee
++  // that 'this' is executed as well.
++  //
++  // This is important if 'other' produces an unsafe value that 'this'
++  // fixes before it can leak out.
++  //
++  // Note: if the conditions of the two
++  // instructions do not statically infer that the conditional
++  // execution is correct, we assume that it is not.
++  //
++  // Note that this function can't see the bundle size, so this result
++  // does not take it into account.  The SfiValidator reasons on this
++  // separately.
++  bool always_postdominates(const DecodedInstruction& other) const {
++    nacl_arm_dec::Instruction::Condition cond1 = other.inst_.GetCondition();
++    nacl_arm_dec::Instruction::Condition cond2 = inst_.GetCondition();
++    return !other.defines(nacl_arm_dec::Register::Conditions()) &&
++        // TODO(jfb) Put back mixed-condition handling. See issue #3221.
++        //           SfiValidator::condition_implies[cond1][cond2];
++        ((cond2 == nacl_arm_dec::Instruction::AL) || (cond1 == cond2));
++  }
++
++  // Checks that the execution of 'this' is conditional on the test result
++  // (specifically, the Z flag being set) from 'other' -- which must be
++  // adjacent for this simple check to be meaningful.
++  bool is_eq_conditional_on(const DecodedInstruction& other) const {
++    return inst_.GetCondition() == nacl_arm_dec::Instruction::EQ
++        && other.inst_.GetCondition() == nacl_arm_dec::Instruction::AL
++        && other.defines(nacl_arm_dec::Register::Conditions());
++  }
++
++  // The methods below mirror those on ClassDecoder, but are cached and cheap.
++  nacl_arm_dec::SafetyLevel safety() const { return safety_; }
++  nacl_arm_dec::RegisterList defs() const { return defs_; }
++
++  // The methods below pull values from ClassDecoder on demand.
++  bool is_relative_branch() const {
++    return decoder_->is_relative_branch(inst_);
++  }
++
++  const nacl_arm_dec::Register branch_target_register() const {
++    return decoder_->branch_target_register(inst_);
++  }
++
++  bool is_literal_pool_head() const {
++    return decoder_->is_literal_pool_head(inst_);
++  }
++
++  uint32_t branch_target() const {
++    // branch_target_offset takes care of adding 8 to the instruction's
++    // immediate: the ARM manual states that "PC reads as the address of
++    // the current instruction plus 8".
++    return vaddr_ + decoder_->branch_target_offset(inst_);
++  }
++
++  const nacl_arm_dec::Register base_address_register() const {
++    return decoder_->base_address_register(inst_);
++  }
++
++  bool is_literal_load() const {
++    return decoder_->is_literal_load(inst_);
++  }
++
++  bool clears_bits(uint32_t mask) const {
++    return decoder_->clears_bits(inst_, mask);
++  }
++
++  bool sets_Z_if_bits_clear(nacl_arm_dec::Register r, uint32_t mask) const {
++    return decoder_->sets_Z_if_bits_clear(inst_, r, mask);
++  }
++
++  bool base_address_register_writeback_small_immediate() const {
++    return decoder_->base_address_register_writeback_small_immediate(inst_);
++  }
++
++  bool is_load_thread_address_pointer() const {
++    return decoder_->is_load_thread_address_pointer(inst_);
++  }
++
++  // Some convenience methods, defined in terms of ClassDecoder:
++  bool defines(nacl_arm_dec::Register r) const {
++    return defs().Contains(r);
++  }
++
++  bool defines_any(nacl_arm_dec::RegisterList rl) const {
++    return defs().ContainsAny(rl);
++  }
++
++  bool defines_all(nacl_arm_dec::RegisterList rl) const {
++    return defs().ContainsAll(rl);
++  }
++
++  // Returns true if the instruction uses the given register.
++  bool uses(nacl_arm_dec::Register r) const {
++     return decoder_->uses(inst_).Contains(r);
++  }
++
++  const nacl_arm_dec::Instruction& inst() const {
++    return inst_;
++  }
++
++  DecodedInstruction& Copy(const DecodedInstruction& other) {
++    vaddr_ = other.vaddr_;
++    inst_.Copy(other.inst_);
++    decoder_ = other.decoder_;
++    safety_ = other.safety_;
++    defs_.Copy(other.defs_);
++    return *this;
++  }
++
++ private:
++  uint32_t vaddr_;
++  nacl_arm_dec::Instruction inst_;
++  const nacl_arm_dec::ClassDecoder* decoder_;
++
++  nacl_arm_dec::SafetyLevel safety_;
++  nacl_arm_dec::RegisterList defs_;
++
++  NACL_DISALLOW_COPY_AND_ASSIGN(DecodedInstruction);
++};
++
++// Describes a memory region that contains executable code.  Note that the code
++// need not live in its final location -- we pretend the code lives at the
++// provided start_addr, regardless of where the base pointer actually points.
++class CodeSegment {
++ public:
++  CodeSegment(const uint8_t* base, uint32_t start_addr, size_t size)
++      : base_(base),
++        start_addr_(start_addr),
++        size_(static_cast<uint32_t>(size)) {
++    CHECK(size <= std::numeric_limits<uint32_t>::max());
++    CHECK(start_addr <= std::numeric_limits<uint32_t>::max() - size_);
++  }
++
++  uint32_t begin_addr() const { return start_addr_; }
++  uint32_t end_addr() const { return start_addr_ + size_; }
++  uint32_t size() const { return size_; }
++  bool contains_address(uint32_t a) const {
++    return (a >= begin_addr()) && (a < end_addr());
++  }
++
++  const nacl_arm_dec::Instruction operator[](uint32_t address) const {
++    const uint8_t* element = &base_[address - start_addr_];
++    return nacl_arm_dec::Instruction(
++        *reinterpret_cast<const uint32_t *>(element));
++  }
++
++  bool operator<(const CodeSegment& other) const {
++    return start_addr_ < other.start_addr_;
++  }
++
++  const uint8_t* base() const {
++    return base_;
++  }
++
++ private:
++  const uint8_t* base_;
++  uint32_t start_addr_;
++  uint32_t size_;
++};
++
++// A class that consumes reports of validation problems.
++//
++// Default implementation to be used with sel_ldr. All methods are
++// just placeholders, so that code to generate diagnostics will link.
++// If you want to generate error messages, use derived class ProblemReporter
++// in problem_reporter.h
++class ProblemSink {
++ public:
++  ProblemSink() {}
++  virtual ~ProblemSink() {}
++
++  // Helper function for reporting generic error messages using a
++  // printf style. How the corresponding data is used is left to
++  // the derived class.
++  //
++  // Arguments are:
++  //    violation - The type of violation being reported.
++  //    vaddr - The address of the instruction associated with the violation.
++  //    format - The format string to print out the corresponding diagnostic
++  //             message.
++  //     ... - Arguments to use with the format.
++  virtual void ReportProblemDiagnostic(nacl_arm_dec::Violation violation,
++                                       uint32_t vaddr,
++                                       const char* format, ...)
++               // Note: format is the 4th argument because of implicit this.
++               ATTRIBUTE_FORMAT_PRINTF(4, 5) = 0;
++
++ private:
++  NACL_DISALLOW_COPY_AND_ASSIGN(ProblemSink);
++};
++
++const Bundle SfiValidator::bundle_for_address(uint32_t address) const {
++  uint32_t base = address & ~(bytes_per_bundle_ - 1);
++  return Bundle(base, bytes_per_bundle_);
++}
++
++bool SfiValidator::in_same_bundle(const DecodedInstruction& first,
++                                  const DecodedInstruction& second) const {
++  return bundle_for_address(first.addr()) == bundle_for_address(second.addr());
++}
++
++nacl_arm_dec::ViolationSet SfiValidator::validate_instruction_pair_allowed(
++    const DecodedInstruction& first,
++    const DecodedInstruction& second,
++    AddressSet* critical,
++    nacl_arm_dec::Violation violation) const {
++  if (!in_same_bundle(first, second))
++    return nacl_arm_dec::ViolationBit(violation);
++  critical->add(second.addr());
++  return nacl_arm_dec::kNoViolations;
++}
++
++}  // namespace nacl_arm_val
++
++#endif  // NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_ARM_V2_VALIDATOR_H
+diff --git a/native_client/src/trusted/validator_arm/validator_arm.gyp b/native_client/src/trusted/validator_arm/validator_arm.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..34755299b0eada520cafb28b7e002f856bc61284
+--- /dev/null
++++ b/native_client/src/trusted/validator_arm/validator_arm.gyp
+@@ -0,0 +1,73 @@
++# Copyright 2010, Google Inc.
++# Copyright 2009 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  # ----------------------------------------------------------------------
++  # Default settings
++  # ----------------------------------------------------------------------
++
++  'includes': [
++    '../../../build/common.gypi',
++  ],
++  # TODO(robertm): move these setting to some global config
++  'target_defaults': {
++    'cflags!': [
++      '-Wextra',
++      '-Wswitch-enum',
++      '-Wsign-compare'
++    ],
++    'xcode_settings': {
++      'WARNING_CFLAGS!': [
++        '-Wextra',
++        '-Wswitch-enum',
++        '-Wsign-compare'
++      ]
++  },
++  'include_dirs': ['<(SHARED_INTERMEDIATE_DIR)'],
++    # TODO(robertm): mmentovai does not think this is necessary
++    # When ncvalidate is a dependency, it needs to be a hard dependency
++    # because dependents may rely on ncvalidate to create header files below.
++    'hard_dependency': 1,
++    },
++  # ----------------------------------------------------------------------
++  # actual targets
++  # ----------------------------------------------------------------------
++  'targets': [
++    # ----------------------------------------------------------------------
++    {
++      'target_name': 'arm_validator_core',
++      'type': 'static_library',
++      'sources': [
++        'address_set.cc',
++        'inst_classes.cc',
++        'model.cc',
++        'arm_helpers.cc',
++        'validator.cc',
++        'gen/arm32_decode.cc',
++        'gen/arm32_decode_actuals_1.cc',
++        'gen/arm32_decode_actuals_2.cc'
++      ],
++      'dependencies': [
++        '<(DEPTH)/native_client/src/trusted/cpu_features/cpu_features.gyp:cpu_features'
++      ],
++    },
++    # ----------------------------------------------------------------------
++    {
++      'target_name': 'ncvalidate_arm_v2',
++      'type': 'static_library',
++      'sources': [ 'ncvalidate.cc' ],
++      'dependencies': [
++        'arm_validator_core',
++        '<(DEPTH)/native_client/src/trusted/validator/validator.gyp:validation_cache',
++      ],
++    },
++    # ----------------------------------------------------------------------
++    {
++      'target_name': 'arm_validator_reporters',
++      'type': 'static_library',
++      'sources': [ 'problem_reporter.cc' ],
++    },
++  ],
++}
+diff --git a/native_client/src/trusted/validator_arm/validator_huge_tests.cc b/native_client/src/trusted/validator_arm/validator_huge_tests.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..03d8c08f5c17c5854c6428b99b0c5e517f85bed9
+--- /dev/null
++++ b/native_client/src/trusted/validator_arm/validator_huge_tests.cc
+@@ -0,0 +1,314 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NACL_TRUSTED_BUT_NOT_TCB
++#error This file is not meant for use in the TCB
++#endif
++
++/*
++ * Huge unit tests for the ARM validator
++ *
++ * See validator_tests.cc for the short tests,
++ * and validator_tests.h for the testing infrastructure.
++ */
++
++#include "native_client/src/trusted/validator_arm/validator_tests.h"
++#include "native_client/src/trusted/validator_arm/arm_helpers.h"
++
++using nacl_val_arm_test::ProblemRecord;
++using nacl_val_arm_test::ProblemSpy;
++using nacl_val_arm_test::ValidatorTests;
++using nacl_val_arm_test::kDefaultBaseAddr;
++using nacl_val_arm_test::kCodeRegionSize;
++using nacl_val_arm_test::kDataRegionSize;
++using nacl_val_arm_test::kAbiReadOnlyRegisters;
++using nacl_val_arm_test::kAbiDataAddrRegisters;
++using nacl_val_arm_test::arm_inst;
++using nacl_arm_dec::ARMExpandImm;
++
++namespace {
++
++TEST_F(ValidatorTests, SupervisorCall) {
++  arm_inst svc = 0xEF000000;  // SVC #0
++  for (Instruction::Condition cond = Instruction::EQ;
++       cond < Instruction::AL;
++       cond = Instruction::Next(cond)) {
++    svc = ChangeCond(svc, cond);
++    for (uint32_t imm = 0; imm <= 0x00FFFFFF; ++imm) {
++      ProblemSpy spy;
++      svc = (svc & 0xFF000000) | imm;
++      EXPECT_FALSE(validate(&svc, 1, kDefaultBaseAddr, &spy))
++          << "SVC should never be allowed";
++    }
++  }
++}
++
++TEST_F(ValidatorTests, WholeA32InstructionSpaceTesting) {
++  // Go through all 2**32 ARM instruction encodings, and validate individual
++  // instruction's properties.
++
++  // TODO(jfb) We're currently only testing one possible code address
++  //           mask, and we're not checking whether the validator
++  //           restricts the values to the ones we should be testing.
++  const uint32_t code_address_mask = _validator->code_address_mask();
++  EXPECT_NE(code_address_mask, 0u);  // There should be some mask.
++
++  const uint32_t data_address_mask = _validator->data_address_mask();
++  EXPECT_NE(data_address_mask, 0u);  // There should be some mask.
++  EXPECT_EQ(nacl::PopCount(~data_address_mask + 1), 1);  // Power of 2.
++
++  const nacl_arm_dec::Arm32DecoderState decode_state;
++  uint32_t i = 0;
++  const uint32_t last_i = std::numeric_limits<uint32_t>::max();
++  do {
++    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&i);
++    CodeSegment segment(bytes, kDefaultBaseAddr, sizeof(arm_inst));
++    nacl_arm_val::DecodedInstruction inst(
++        kDefaultBaseAddr, segment[kDefaultBaseAddr],
++        decode_state.decode(segment[kDefaultBaseAddr]));
++
++    // Information obtained from the decoder itself.
++    bool defs_pc = inst.defs().Contains(nacl_arm_dec::Register::Pc());
++    bool uses_tp = inst.uses(nacl_arm_dec::Register::Tp());
++    bool is_may_be_safe = inst.safety() == nacl_arm_dec::MAY_BE_SAFE;
++    bool is_relative_branch = inst.is_relative_branch();
++    bool is_indirect_branch = !inst.branch_target_register()
++        .Equals(nacl_arm_dec::Register::None());
++    bool is_branch = is_relative_branch || is_indirect_branch;
++    uint32_t branch_target = inst.branch_target();
++    uint32_t branch_target_register = inst.branch_target_register().number();
++    bool is_literal_pool_head = inst.is_literal_pool_head();
++    uint32_t base_address_register = inst.base_address_register().number();
++    bool has_base_address_register = !inst.base_address_register()
++        .Equals(nacl_arm_dec::Register::None());
++    bool is_literal_load = inst.is_literal_load();
++    bool clears_code_bits = inst.clears_bits(code_address_mask);
++    bool clears_data_bits = inst.clears_bits(data_address_mask);
++    bool is_base_address_register_writeback_small_immediate =
++        inst.base_address_register_writeback_small_immediate();
++    uint32_t sets_Z_if_data_bits_clear_register_bitmask = 0;
++    for (int reg = 0; reg < 16; ++reg) {
++      // Check the property for every register value.
++      nacl_arm_dec::Register r(reg);
++      sets_Z_if_data_bits_clear_register_bitmask |=
++          ((int)inst.sets_Z_if_bits_clear(r, data_address_mask)) << reg;
++    }
++    bool is_load_thread_address_pointer = inst.is_load_thread_address_pointer();
++
++    // Information obtained independently of the decoder.
++    bool expect_unconditional = ((i & 0xF0000000) == 0xF0000000);
++    bool expect_b_or_bl = !expect_unconditional &&
++        // cccc 101L iiii iiii iiii iiii iiii iiii
++        ((i & 0x0E000000) == 0x0A000000);
++    bool expect_bx_or_blx = !expect_unconditional &&
++        // cccc 0001 0010 1111 1111 1111 00L1 mmmm
++        ((i & 0x0FFFFFD0) == 0x012FFF10);
++    uint32_t expected_branch_target = !expect_b_or_bl ?
++        kDefaultBaseAddr :
++        // imm32 = SignExtend(imm24:'00', 32);
++        // PC reads as the address of the current instruction plus 8.
++        (kDefaultBaseAddr + 8 + (((int32_t)i << 8) >> 6));
++    uint32_t expected_branch_target_register = expect_bx_or_blx ?
++        (i & 0xF) :  // When present, always Rm(3:0).
++        nacl_arm_dec::Register::kNone;
++    bool expect_literal_pool_head = (i == nacl_arm_dec::kLiteralPoolHead);
++    bool expect_load_store_or_unsafe = expect_unconditional ?
++        // Advanced SIMD element or structure load/store instructions.
++        // 1111 0100 xx0x xxxx xxxx xxxx xxxx xxxx
++        (((i & 0x0F100000) == 0x04000000) ||
++         // Memory hints, Advanced SIMD instructions, and miscellaneous
++         // instructions: preloads.
++         // PLD, PLDW, PLI: 1111 01xD UR01 nnnn 1111 xxxx xxxx xxxx
++         (((i & 0xFC30F000) == 0xF410F000))) :
++        (  // Conditional instructions:
++            // Synchronization primitives.
++            // cccc 0001 xxxx xxxx xxxx xxxx 1001 xxxx
++            ((i & 0x0F0000F0) == 0x01000090) ||
++            // Extra load/store instructions[, unprivileged].
++            // cccc 000x xxxx xxxx xxxx xxxx 1011 xxxx
++            // cccc 000x xxxx xxxx xxxx xxxx 11x1 xxxx
++            ((i & 0x0E0000F0) == 0x000000B0) ||
++            ((i & 0x0E0000D0) == 0x000000D0) ||
++            // Load/store word and unsigned bytes.
++            // cccc 01Ax xxxx xxxx xxxx xxxx xxxB xxxx
++            // With either A==0 or B==0.
++            ((i & 0x0E000000) == 0x04000000) ||
++            ((i & 0x0E000010) == 0x06000000) ||
++            // Branch, branch with link, and block data transfer.
++            // cccc 100x xxxx xxxx xxxx xxxx xxxx xxxx
++            ((i & 0x0E000000) == 0x08000000) ||
++            // Extension register load/store instructions.
++            // cccc 110x xxxx nnnn xxxx 101x xxxx xxxx
++            // Except opcode(24:20)=0010x, which is 64-bit transfers
++            // between ARM core and extension registers.
++            (((i & 0x0E000E00) == 0x0C000A00) &&
++             ((i & 0x01E00000) != 0x00400000)));
++    uint32_t expected_base_address_register = expect_load_store_or_unsafe ?
++        (i >> 16) & 0xF :  // When present, always Rn(19:16).
++        nacl_arm_dec::Register::kNone;
++    bool expect_literal_load_or_unsafe = expect_unconditional ?
++        // Memory hints, Advanced SIMD instructions, and miscellaneous
++        // instructions: literal preloads.
++        // PLD, PLDW, PLI: 1111 01xD UR01 1111 1111 xxxx xxxx xxxx
++        (((i & 0xFC3FF000) == 0xF41FF000)) :
++        (
++            // Extra load/store instructions.
++            // LDRH:  cccc 0001 U101 1111 tttt iiii 1011 iiii
++            // LDRSB: cccc 0001 U101 1111 tttt iiii 1101 iiii
++            // LDRSH: cccc 0001 U101 1111 tttt iiii 1111 iiii
++            (((i & 0x0F7F0090) == 0x015F0090) &&
++             ((i & 0x00000060) != 0x00000000)) ||
++            // LDRD:  cccc 0001 U100 1111 tttt iiii 1101 iiii
++            (((i & 0x0F7F00F0) == 0x014F00D0)) ||
++            // Load/store word and unsigned bytes.
++            // LDR:   cccc 0101 U001 1111 tttt iiii iiii iiii
++            // LDRB:  cccc 0101 U101 1111 tttt iiii iiii iiii
++            (((i & 0x0F3F0000) == 0x051F0000)) ||
++            // Extension register load/store instructions.
++            // VLDM:  cccc 1100 1x01 1111 xxxx 101x xxxx xxxx
++            // VLDM:  cccc 1100 1x11 1111 xxxx 101x xxxx xxxx
++            // VLDR:  cccc 1101 xx01 1111 xxxx 101x xxxx xxxx
++            // VLDM:  cccc 1101 0x11 1111 xxxx 101x xxxx xxxx
++            (((i & 0x0F9F0E00) == 0x0C9F0A00) ||
++             ((i & 0x0F3F0E00) == 0x0D1F0A00) ||
++             ((i & 0x0FBF0E00) == 0x0D3F0A00)));
++    bool expect_clears_code_bits_or_unsafe = !expect_unconditional &&
++        (  // BIC{S} Rd, Rn, #imm.
++            // cccc 0011 110S nnnn dddd iiii iiii iiii
++            ((i & 0x0FE00000) == 0x03C00000) &&
++            ((ARMExpandImm(i & 0xFFF) & code_address_mask) ==
++             code_address_mask));
++    bool expect_clears_data_bits_or_unsafe = !expect_unconditional &&
++        (  // BIC{S} Rd, Rn, #imm.
++            // cccc 0011 110S nnnn dddd iiii iiii iiii
++            ((i & 0x0FE00000) == 0x03C00000) &&
++            ((ARMExpandImm(i & 0xFFF) & data_address_mask) ==
++             data_address_mask));
++    uint32_t expect_sets_Z_if_data_bits_clear_register_bitmask =
++        !expect_unconditional &&
++        // TST Rn, #imm
++        // cccc 0011 0001 nnnn 0000 iiii iiii iiii
++        (((i & 0x0FF0F000) == 0x03100000) &&
++         ((ARMExpandImm(i & 0xFFF) & data_address_mask) ==
++          data_address_mask)) ?
++        (1 << ((i >> 16) & 0xF)) :  // Set bit corresponding to Rn.
++        0;
++    bool expect_base_address_register_writeback_small_immediate_or_unsafe =
++        (
++            !expect_unconditional &&
++            ((  // Extra load/store instructions. P==0 || W==1.
++                // STRH:  cccc 000P U1W0 nnnn tttt iiii 1011 iiii
++                // LDRH:  cccc 000P U1W1 nnnn tttt iiii 1011 iiii
++                // LDRD:  cccc 000P U1W0 nnnn tttt iiii 1101 iiii
++                // LDRSB: cccc 000P U1W1 nnnn tttt iiii 1101 iiii
++                // STRD:  cccc 000P U1W0 nnnn tttt iiii 1111 iiii
++                // LDRSH: cccc 000P U1W1 nnnn tttt iiii 1111 iiii
++                ((i & 0x0E400090) == 0x00400090) &&
++                ((i & 0x00000060) != 0x00000000) &&
++                (((i & 0x01000000) == 0x00000000) ||
++                 ((i & 0x00200000) == 0x00200000))) ||
++             (  // Load/store word and unsigned byte. P==0 || W==1.
++                 // STR:  cccc 010P U0W0 nnnn tttt iiii iiii iiii
++                 // LDR:  cccc 010P U0W1 nnnn tttt iiii iiii iiii
++                 // STRB: cccc 010P U1W0 nnnn tttt iiii iiii iiii
++                 // STRB: cccc 010P U1W1 nnnn tttt iiii iiii iiii
++                 ((i & 0x0E000000) == 0x04000000) &&
++                 (((i & 0x01000000) == 0x00000000) ||
++                  ((i & 0x00200000) == 0x00200000))) ||
++             (  // Branch, branch with link, and block data transfer.
++                 // All variants of LDM and STM Rn!.
++                 // cccc 100x xx1x nnnn iiii iiii iiii iiii
++                 ((i & 0x0E200000) == 0x08200000)) ||
++             (  // Extension register load/store instructions
++                 // All variants of VLDM and VSTM Rn!.
++                 // cccc 110P Ud1L nnnn dddd 101x iiii iiii
++                 ((i & 0x0E200E00) == 0x0C200A00)))) ||
++        // Advanced SIMD element or structure load/store instructions.
++        // All variants of VLD{1,2,3,4} and VST{1,2,3,4} [Rn]!.
++        // 1111 0100 SdL0 nnnn dddd xxxx xxxx 1101
++        ((i & 0xFF10000F) == 0xF400000D);
++    bool expect_is_load_thread_address_pointer =
++        !expect_unconditional &&
++        // LDR Rt, [Tp, #imm] with Tp=9, imm=0 or 4, P=1, U=1, W=0.
++        // cccc 010P U0W1 nnnn tttt iiii iiii iiii
++        ((i & 0x0FFF0FFB) == 0x05990000);
++
++    // Validate that every single method in DecodedInstruction returns the
++    // expected value.
++
++    // TODO(jfb) Validate safety.
++    // TODO(jfb) Validate defs.
++    // TODO(jfb) Validate dynamic code replacement.
++
++    // B and BL are relative branches, others aren't.
++    EXPECT_EQ(is_relative_branch, expect_b_or_bl);
++    // BX and BLX are indirect branches, others aren't.
++    EXPECT_EQ(is_indirect_branch, expect_bx_or_blx);
++    // B and BL's target is calculated properly.
++    EXPECT_EQ(branch_target, expected_branch_target);
++    // BX and BLX's target register is correct.
++    EXPECT_EQ(branch_target_register, expected_branch_target_register);
++    // Only BKPT #special_imm is a literal pool head.
++    EXPECT_EQ(is_literal_pool_head, expect_literal_pool_head);
++
++    if (is_may_be_safe) {
++      // TODO(jfb) The following tests aren't full negative test: some
++      //           instructions might be left out by being marked as
++      //           unsafe. We need to explicitly list all encodings that
++      //           are expected to be unsafe for load/store, and bit
++      //           clearing instructions.
++      //           Fixing this also requires Advanced SIMD support
++      //           in the decoder.
++
++      // The ARM load/stores instruction space is either unsafe (e.g. undefined,
++      // forbidden, ...), or is an actual load/store and has the right base
++      // address register. Other instructions (non-load/store) don't have a base
++      // address register.
++      EXPECT_EQ(has_base_address_register, expect_load_store_or_unsafe);
++      EXPECT_EQ(base_address_register, expected_base_address_register);
++      // Literal loads are properly decoded as such.
++      EXPECT_EQ(is_literal_load, expect_literal_load_or_unsafe);
++      // SFI data and code bit clearing is detected properly.
++      EXPECT_EQ(clears_code_bits, expect_clears_code_bits_or_unsafe);
++      EXPECT_EQ(clears_data_bits, expect_clears_data_bits_or_unsafe);
++      EXPECT_EQ(
++          is_base_address_register_writeback_small_immediate,
++          expect_base_address_register_writeback_small_immediate_or_unsafe);
++    }
++
++    EXPECT_EQ(sets_Z_if_data_bits_clear_register_bitmask,
++              expect_sets_Z_if_data_bits_clear_register_bitmask);
++    EXPECT_EQ(uses_tp && is_load_thread_address_pointer,
++              expect_is_load_thread_address_pointer);
++    // TODO(jfb) We can't check the following for now: an instruction using
++    //           TP isn't currently marked as unsafe. The check is instead
++    //           done when validating the full bundle.
++    // EXPECT_EQ(uses_tp && !is_load_thread_address_pointer, !is_may_be_safe);
++
++    // TODO(jfb) Validate defines.
++    // TODO(jfb) Validate defines_any.
++    // TODO(jfb) Validate defines_all.
++
++    EXPECT_EQ(inst.inst().Bits(), i);
++
++    // Validate that DecodedInstruction returns values that are consistent
++    // with ARM rules as well as with NaCl's SFI rules.
++
++    // Only branches and instructions that clear the SFI code bits
++    // can write to PC.
++    EXPECT_FALSE(defs_pc && is_may_be_safe && !is_branch && !clears_code_bits);
++    // All branches must implicitly define PC.
++    EXPECT_FALSE(is_branch && !defs_pc);
++  } while (i++ != last_i);
++}
++
++}  // anonymous namespace
++
++// Test driver function.
++int main(int argc, char *argv[]) {
++  testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}
+diff --git a/native_client/src/trusted/validator_arm/validator_small_tests.cc b/native_client/src/trusted/validator_arm/validator_small_tests.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..d99d876395e610a27ff03c91cc5ce55ab7c9a689
+--- /dev/null
++++ b/native_client/src/trusted/validator_arm/validator_small_tests.cc
+@@ -0,0 +1,1603 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NACL_TRUSTED_BUT_NOT_TCB
++#error This file is not meant for use in the TCB
++#endif
++
++/*
++ * Small unit tests for the ARM validator
++ *
++ * Also see validator_large_tests.cc,
++ * and validator_tests.h for the testing infrastructure.
++ */
++
++#include "native_client/src/trusted/validator_arm/validator_tests.h"
++
++using nacl_val_arm_test::ProblemRecord;
++using nacl_val_arm_test::ProblemSpy;
++using nacl_val_arm_test::ValidatorTests;
++using nacl_val_arm_test::kDefaultBaseAddr;
++using nacl_val_arm_test::kBytesPerBundle;
++using nacl_val_arm_test::kCodeRegionSize;
++using nacl_val_arm_test::kDataRegionSize;
++using nacl_val_arm_test::kAbiReadOnlyRegisters;
++using nacl_val_arm_test::kAbiDataAddrRegisters;
++using nacl_val_arm_test::arm_inst;
++using nacl_arm_dec::kArm32InstSize;
++using nacl_arm_dec::kNop;
++using nacl_arm_dec::kLiteralPoolHead;
++using nacl_arm_dec::kFailValidation;
++using nacl_arm_dec::Instruction;
++using nacl_arm_dec::ClassDecoder;
++
++namespace {
++
++const arm_inst kSvc0 = 0xEF000000;  // SVC #0
++
++// Holds instruction and message to print if there is an issue when it
++// is tested.
++struct AnnotatedInstruction {
++  arm_inst inst;
++  const char *about;
++};
++
++arm_inst ChangeInstCond(Instruction inst, Instruction::Condition cond) {
++  return ValidatorTests::ChangeCond(inst.Bits(), cond);
++}
++
++// Tests if a list of instructions generate the same dynamic code
++// replacement sentinel.
++void test_if_dynamic_code_replacement_sentinels_match(
++    const ValidatorTests* tester,
++    const AnnotatedInstruction* insts,
++    size_t num_insts,
++    arm_inst expected_sentinel) {
++  const Instruction expected_inst(expected_sentinel);
++
++  // Try each instruction.
++  for (size_t i = 0; i < num_insts; i++) {
++    Instruction test_inst(insts[i].inst);
++
++    // Try each possible condition (conditions shouldn't affect this virtual).
++    for (Instruction::Condition cond = Instruction::EQ;
++         cond < Instruction::UNCONDITIONAL;
++         cond = Instruction::Next(cond)) {
++      Instruction test(ChangeInstCond(test_inst, cond));
++      Instruction expected(ChangeInstCond(expected_inst, cond));
++
++      const ClassDecoder& decoder = tester->decode(test);
++      Instruction sentinel(decoder.dynamic_code_replacement_sentinel(test));
++      EXPECT_TRUE(expected.Equals(sentinel)) <<
++        std::hex << test.Bits() << "->" <<
++          std::hex << sentinel.Bits() << " != " <<
++          std::hex << expected.Bits() << ": " << insts[i].about;
++    }
++  }
++}
++
++// Tests if a list of instructions generate the same dynamic code replacement
++// sentinel.
++void test_if_dynamic_code_replacement_sentinels_unchanged(
++    const ValidatorTests* tester,
++    const AnnotatedInstruction* insts,
++    size_t num_insts) {
++  // Try each instruction.
++  for (size_t i = 0; i < num_insts; i++) {
++    Instruction test_inst(insts[i].inst);
++
++    // Try each possible condition (conditions shouldn't affect this virtual).
++    for (Instruction::Condition cond = Instruction::EQ;
++         cond < Instruction::UNCONDITIONAL;
++         cond = Instruction::Next(cond)) {
++      Instruction test(ChangeInstCond(test_inst, cond));
++      const ClassDecoder& decoder = tester->decode(test);
++      Instruction sentinel(decoder.dynamic_code_replacement_sentinel(test));
++      EXPECT_TRUE(test.Equals(sentinel)) <<
++          std::hex << test.Bits() << "->" <<
++          std::hex << sentinel.Bits() << ": " << insts[i].about;
++    }
++  }
++}
++
++// Test that the old code can be replaced by the new code.
++void TestDynamicCodeReplacement(
++    SfiValidator *validator,
++    bool expected_result,
++    const vector<arm_inst>& old_code,
++    const vector<arm_inst>& new_code,
++    const char *msg) {
++  EXPECT_EQ(old_code.size(), new_code.size());
++
++  size_t size = old_code.size() * kArm32InstSize / CHAR_BIT;
++  CodeSegment new_segment((uint8_t *) &new_code[0], kDefaultBaseAddr, size);
++  CodeSegment old_segment((uint8_t *) &old_code[0], kDefaultBaseAddr, size);
++
++  EXPECT_EQ(expected_result,
++            validator->ValidateSegmentPair(old_segment, new_segment, NULL)) <<
++      "Code replacement expected different validation result for " << msg;
++}
++
++// Verify that there is enough room in ViolationSet to include all
++// elements in enum Violation.
++TEST_F(ValidatorTests, ViolationsFitInViolationSet) {
++  EXPECT_LT(static_cast<size_t>(nacl_arm_dec::OTHER_VIOLATION),
++            sizeof(nacl_arm_dec::ViolationSet) * CHAR_BIT);
++}
++
++TEST_F(ValidatorTests, NopBundle) {
++  vector<arm_inst> code(_validator->InstructionsPerBundle(), kNop);
++  validation_should_pass(&code[0], code.size(), kDefaultBaseAddr,
++                         "NOP bundle");
++}
++
++/*
++ * Primitive tests checking various constructor properties.  Any of these
++ * failing would be a very bad sign indeed.
++ */
++
++TEST_F(ValidatorTests, RecognizesDataAddressRegisters) {
++  // Note that the logic below needs to be kept in sync with the definition
++  // of kAbiDataAddrRegisters at the top of this file.
++  //
++  // This test is pretty trivial -- we can exercise the data_address_register
++  // functionality more deeply with pattern tests below.
++  for (int i = 0; i < 16; i++) {
++    Register r(i);
++    if (r.Equals(nacl_arm_dec::Register::Sp())) {
++      EXPECT_TRUE(_validator->is_data_address_register(r))
++          << "Stack pointer must be a data address register.";
++    } else {
++      EXPECT_FALSE(_validator->is_data_address_register(r))
++          << "Only the stack pointer must be a data address register.";
++    }
++  }
++}
++
++TEST_F(ValidatorTests, GeneratesCorrectMasksFromSizes) {
++  EXPECT_EQ(0xC0000000, _validator->data_address_mask());
++  EXPECT_EQ(0xE000000F, _validator->code_address_mask());
++
++  // Reinitialize the validator to test a different bundle size.
++  SfiValidator *new_validator = new SfiValidator(32,
++                                                 kCodeRegionSize,
++                                                 kDataRegionSize,
++                                                 kAbiReadOnlyRegisters,
++                                                 kAbiDataAddrRegisters,
++                                                 _validator->CpuFeatures());
++  delete _validator;
++  _validator = new_validator;
++
++  EXPECT_EQ(0xC0000000, _validator->data_address_mask())
++      << "Changes in bundle size should not affect the data mask.";
++  EXPECT_EQ(0xE000001F, _validator->code_address_mask())
++      << "Changes in bundle size must affect the code mask.";
++}
++
++// Code validation tests
++
++TEST_F(ValidatorTests, DirectBranchTargetCalculation) {
++  const nacl_arm_dec::Arm32DecoderState decode_state;
++  // Try decoding PC-relative branches from interesting PCs.
++  uint32_t start_addrs[] = { 0x00000000, 0x00010000, 0x00020000, 0x06789abc,
++                             0x12345678, 0x3fffffff, 0xdeadbeef, 0xff000000, };
++  for (size_t a = 0; a < NACL_ARRAY_SIZE(start_addrs); ++a) {
++    uint32_t start_addr = start_addrs[a];
++    // All PC-relative branches supported by NaCl.
++    arm_inst insts[] = {
++      0xea000000,  // B PC+8+0
++      0xeb000000,  // BL PC+8+0
++    };
++    for (arm_inst* inst = insts;
++         inst < insts + NACL_ARRAY_SIZE(insts);
++         ++inst) {
++      for (Instruction::Condition cond = Instruction::EQ;
++           cond <= Instruction::AL;
++           cond = Instruction::Next(cond)) {
++        *inst = ChangeCond(*inst, cond);
++        for (int32_t imm = -2050; imm < 2050; ++imm) {
++          // For all PC-relative branches that NaCl supports:
++          //   imm24(23:0);
++          //   imm32 = SignExtend(imm24:'00', 32);
++          //   targetAddress = Align(PC,4) + imm32;
++          // Where:
++          //   The PC value of an instruction is its address plus 8 for an
++          //   ARM instruction. The Align(PC, 4) value of an instruction is
++          //   its PC value ANDed with 0xFFFFFFFC to force it to be
++          //   word-aligned. There is no difference between the PC and
++          //   Align(PC, 4) values for an ARM instruction.
++          *inst = (*inst & 0xff000000) | ((imm >> 2) & 0x00ffffff);
++          const uint8_t *bytes = reinterpret_cast<const uint8_t *>(inst);
++          CodeSegment segment(bytes, start_addr, sizeof(arm_inst));
++          nacl_arm_val::DecodedInstruction inst(start_addr, segment[start_addr],
++                                                decode_state.decode(
++                                                    segment[start_addr]));
++          EXPECT_TRUE(inst.is_relative_branch());
++          EXPECT_EQ(start_addr + 8 + (imm & 0xfffffffc), inst.branch_target());
++        }
++      }
++    }
++  }
++}
++
++// Here are examples of every form of safe store permitted in a Native Client
++// program.  These stores have common properties:
++//  1. The high nibble is 0, to allow tests to write an arbitrary predicate.
++//  2. They address memory only through r1 (assumed to be the first register
++//     in the about text).
++//  3. They do not do anything dumb, like try to alter SP or PC.
++static const AnnotatedInstruction examples_of_safe_stores[] = {
++  // Single-register stores
++  { 0x05810000, "str r0, [r1]: simple no-displacement store" },
++  { 0x05810123, "str r0, [r1, #0x123]: positive displacement" },
++  { 0x05010123, "str r0, [r1, #-0x123]: negative displacement" },
++  { 0x05A10123, "str r0, [r1, #0x123]!: positive disp + writeback" },
++  { 0x05210123, "str r0, [r1, #-0x123]!: negative disp + writeback" },
++  { 0x04810123, "str r0, [r1], #0x123: positive post-indexing" },
++  { 0x04010123, "str r0, [r1], #-0x123: negative post-indexing" },
++  { 0x06810002, "str r0, [r1], r2: positive register post-indexing" },
++  { 0x06010002, "str r0, [r1], -r2: negative register post-indexing" },
++
++  // Two-register store
++  { 0x01C120F0, "strd r2, r3, [r1]: basic 64-bit store" },
++  { 0x01C124F2, "strd r2, r3, [r1, #42]: positive disp 64-bit store" },
++  { 0x014124F2, "strd r2, r3, [r1, #-42]: negative disp 64-bit store" },
++  { 0x01E124F2, "strd r2, r3, [r1, #42]!: positive disp 64-bit store + wb" },
++  { 0x016124F2, "strd r2, r3, [r1, #-42]!: negative disp 64-bit store + wb" },
++  { 0x00C124F2, "strd r2, r3, [r1], #42: post-inc 64-bit store" },
++  { 0x004124F2, "strd r2, r3, [r1], #-42: post-dec 64-bit store" },
++
++  // Store-exclusive
++  { 0x01810F92, "strex r0, r2, [r1]: store exclusive" },
++
++  // Store-multiple
++  // Note: It is illegal to store r9 (NaCl constraint), so it must
++  // be ommitted from the register sets.
++  { 0x0881FDFF, "stm r1, { r0-r8, r10-r15 }: store multiple, no writeback" },
++  // Note: can't store registers whose number is less than Rt when there is
++  //       writeback. E.g. stm r1! { r0-r15 } is unknown.
++  { 0x08A1FDFE, "stm r1!, { r1-r8, r10-r15 }: store multiple, writeback" },
++  { 0x08A1FDFC, "stm r1!, { r2-r8, r10-r15 }: store multiple, writeback" },
++
++  // Stores from the floating point / vector register file
++  // These all compile to STC instructions.
++  { 0x0D810B00, "vstr d0, [r1]: direct vector store" },
++  { 0x0D810B99, "vstr d0, [r1, #0x99]: positive displacement vector store" },
++  { 0x0D010B99, "vstr d0, [r1, #-0x99]: negative displacement vector store" },
++  { 0x0C810B10, "vstmia r1, { d0-d7 }: no writeback" },
++  { 0x0CA10B10, "vstmia r1!, { d0-d7 }: writeback" },
++};
++
++// Note: We assume that r3 is used for the operand, if it isn't the same
++// as the destination (i.e. r1).
++static const AnnotatedInstruction examples_of_safe_masks[] = {
++  { 0x03C11103, "bic r1, r1, #0xC0000000: simple in-place mask (form 1)" },
++  { 0x03C114C0, "bic r1, r1, #0xC0000000: simple in-place mask (form 2)" },
++  { 0x03C314C0, "bic r1, r3, #0xC0000000: mask with register move" },
++  { 0x03C114FF, "bic r1, r1, #0xFF000000: overzealous but correct mask" },
++};
++
++TEST_F(ValidatorTests, SafeMaskedStores) {
++  // Produces many examples of masked stores using the safe store table (above)
++  // and the list of possible masking instructions (below).
++  //
++  // Each mask instruction must leave a valid (data) address in r1.
++  for (unsigned p = 0; p < 15; p++) {
++    // Conditionally executed instructions have a top nibble of 0..14.
++    // 15 is an escape sequence used to fit in additional encodings.
++    arm_inst predicate = p << 28;
++
++    for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_masks); m++) {
++      for (unsigned s = 0; s < NACL_ARRAY_SIZE(examples_of_safe_stores); s++) {
++        ostringstream message;
++        message << examples_of_safe_masks[m].about
++                << ", "
++                << examples_of_safe_stores[s].about
++                << " (predicate #" << p << ")";
++        arm_inst program[] = {
++          examples_of_safe_masks[m].inst | predicate,
++          examples_of_safe_stores[s].inst | predicate,
++        };
++        validation_should_pass2(program,
++                                2,
++                                kDefaultBaseAddr,
++                                message.str());
++      }
++    }
++  }
++}
++
++static const AnnotatedInstruction examples_of_safe_unconditional_stores[] = {
++  // Vector stores
++  { 0xF481A5AF, "vst2.16 {d10[2],d12[2]}, [r1]: simple vector store" },
++  { 0xF401A64F, "vst1.16 {d10-d12}, [r1]: larger vector store" },
++  { 0xF4010711, "vst1.8 {d0}, [r1, :64], r1: register post-increment" },
++};
++
++TEST_F(ValidatorTests, SafeUnconditionalMaskedStores) {
++  // Produces many examples of unconditional masked stores using the safe
++  // unconditional store table (above) and the list of possible masking
++  // instructions (below).
++  //
++  // Each mask instruction must leave a valid (data) address in r1.
++
++  for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_masks); m++) {
++    for (unsigned s = 0;
++         s < NACL_ARRAY_SIZE(examples_of_safe_unconditional_stores);
++         s++) {
++      ostringstream message;
++      message << examples_of_safe_masks[m].about
++              << ", "
++              << examples_of_safe_unconditional_stores[s].about;
++      arm_inst program[] = {
++        ValidatorTests::ChangeCond(examples_of_safe_masks[m].inst,
++                                   Instruction::AL),
++        examples_of_safe_unconditional_stores[s].inst,
++      };
++      validation_should_pass2(program,
++                              2,
++                              kDefaultBaseAddr,
++                              message.str());
++    }
++  }
++}
++
++TEST_F(ValidatorTests, SafeConditionalStores) {
++  // Produces many examples of conditional stores using the safe store table
++  // (above) and the list of possible conditional guards (below).
++  //
++  // Each conditional guard must set the Z flag iff r1 contains a valid address.
++  static const AnnotatedInstruction guards[] = {
++    { 0x03110103, "tst r1, #0xC0000000: precise guard, GCC encoding" },
++    { 0x031104C0, "tst r1, #0xC0000000: precise guard, alternative encoding" },
++    { 0x031101C3, "tst r1, #0xF0000000: overzealous (but correct) guard" },
++  };
++
++  // Reinitialize the validator to test both allowing and disallowing
++  // conditional memory accesses.
++  for (int allow_cond = 0; allow_cond <= 1; ++allow_cond) {
++    NaClCPUFeaturesArm cpu_features;
++    NaClCopyCPUFeaturesArm(&cpu_features, _validator->CpuFeatures());
++    NaClSetCPUFeatureArm(&cpu_features, NaClCPUFeatureArm_CanUseTstMem,
++                         allow_cond);
++    delete _validator;
++    _validator = new SfiValidator(kBytesPerBundle,
++                                  kCodeRegionSize,
++                                  kDataRegionSize,
++                                  kAbiReadOnlyRegisters,
++                                  kAbiDataAddrRegisters,
++                                  &cpu_features);
++
++    // Currently we only support *unconditional* conditional stores.
++    // Meaning the guard is unconditional and the store is if-equal.
++    //   e.g.: tst.al rbase, #mask
++    //         str.eq rval, [rbase]
++    for (Instruction::Condition guard_cond = Instruction::EQ;
++         guard_cond <= Instruction::AL;
++         guard_cond = Instruction::Next(guard_cond)) {
++      for (Instruction::Condition store_cond = Instruction::EQ;
++           store_cond <= Instruction::AL;
++           store_cond = Instruction::Next(store_cond)) {
++        for (size_t guard = 0;
++             guard < NACL_ARRAY_SIZE(guards);
++             guard++) {
++          arm_inst guard_inst = guards[guard].inst;
++          for (int use_same_base = 0; use_same_base <= 1; ++use_same_base) {
++            // Alternate between using the same rbase for tst and str.
++            // TODO(jfb) This is hackish, and should be better handled
++            //           throughout these tests. AnnotatedInstruction is
++            //           probably the right place for this.
++            unsigned base = use_same_base ? 1 : 2;  // Rn is now r1 or r2.
++            guard_inst &= 0xFFF0FFFF;  // Rn is at (19:16).
++            guard_inst |= base << 16;
++            for (size_t store = 0;
++                 store < NACL_ARRAY_SIZE(examples_of_safe_stores);
++                 store++) {
++              arm_inst store_inst = examples_of_safe_stores[store].inst;
++              ostringstream message;
++              message << guards[guard].about << " with condition "
++                      << Instruction::ToString(guard_cond)
++                      << (use_same_base ?
++                          " and same base registers," :
++                          " and different base registers,")
++                      << " followed by "
++                      << examples_of_safe_stores[store].about
++                      << " with condition "
++                      << Instruction::ToString(store_cond);
++              arm_inst program[] = {
++                ValidatorTests::ChangeCond(guard_inst, guard_cond),
++                ValidatorTests::ChangeCond(store_inst, store_cond),
++              };
++              if (allow_cond &&
++                  use_same_base &&
++                  (guard_cond == Instruction::AL) &&
++                  (store_cond == Instruction::EQ)) {
++                validation_should_pass2(program,
++                                        2,
++                                        kDefaultBaseAddr,
++                                        message.str());
++              } else {
++                validation_should_fail(program,
++                                       2,
++                                       kDefaultBaseAddr,
++                                       message.str());
++              }
++            }
++          }
++        }
++      }
++    }
++  }
++}
++
++static const AnnotatedInstruction examples_of_invalid_masks[] = {
++  { 0x01A01003, "mov r1, r3: not even a mask" },
++  { 0x03C31000, "bic r1, r3, #0: doesn't mask anything" },
++  { 0x03C31102, "bic r1, r3, #0x80000000: doesn't mask enough bits" },
++  { 0x03C311C1, "bic r1, r3, #0x70000000: masks the wrong bits" },
++};
++
++TEST_F(ValidatorTests, InvalidMasksOnSafeStores) {
++  for (unsigned p = 0; p < 15; p++) {
++    // Conditionally executed instructions have a top nibble of 0..14.
++    // 15 is an escape sequence used to fit in additional encodings.
++    arm_inst predicate = p << 28;
++
++    for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_invalid_masks); m++) {
++      for (unsigned s = 0; s < NACL_ARRAY_SIZE(examples_of_safe_stores); s++) {
++        ostringstream message;
++        message << examples_of_invalid_masks[m].about
++                << ", "
++                << examples_of_safe_stores[s].about
++                << " (predicate #" << p << ")";
++        arm_inst program[] = {
++          examples_of_invalid_masks[m].inst | predicate,
++          examples_of_safe_stores[s].inst | predicate,
++        };
++
++        ProblemSpy spy;
++        validation_should_fail(program,
++                               NACL_ARRAY_SIZE(program),
++                               kDefaultBaseAddr,
++                               message.str(),
++                               &spy);
++        vector<ProblemRecord> problems = spy.get_problems();
++
++        // EXPECT/continue rather than ASSERT so that we run the other cases.
++        EXPECT_EQ(1U, problems.size());
++        if (problems.size() != 1) continue;
++
++        ProblemRecord first = problems[0];
++        EXPECT_EQ(kDefaultBaseAddr + 4, first.vaddr())
++            << "Problem report must point to the store: "
++            << message.str();
++        EXPECT_FALSE(nacl_arm_dec::IsSafetyViolation(first.violation()))
++            << "Store should not be unsafe even though the mask is bogys:"
++            << message.str();
++        EXPECT_EQ(nacl_arm_dec::LOADSTORE_VIOLATION, first.violation())
++            << message.str();
++      }
++    }
++  }
++}
++
++TEST_F(ValidatorTests, InvalidGuardsOnSafeStores) {
++  static const AnnotatedInstruction invalid_guards[] = {
++    { 0x03110100, "tst r1, #0: always sets Z" },
++    { 0x03110102, "tst r1, #0x80000000: doesn't test enough bits" },
++    { 0x031101C1, "tst r1, #0x70000000: doesn't test the right bits" },
++    { 0x01A01003, "mov r1, r3: not even a test" },
++    { 0x03310103, "teq r1, #0xC0000000: does the inverse of what we want" },
++    { 0x03510103, "cmp r1, #0xC0000000: does the inverse of what we want" },
++  };
++
++  // We don't currently support conditional versions of the conditional guard.
++  //
++  // TODO(cbiffle): verify this in the test
++  static const arm_inst guard_predicate = 0xE0000000;  // unconditional
++  static const arm_inst store_predicate = 0x00000000;  // if-equal
++
++  for (unsigned m = 0; m < NACL_ARRAY_SIZE(invalid_guards); m++) {
++    for (unsigned s = 0; s < NACL_ARRAY_SIZE(examples_of_safe_stores); s++) {
++      ostringstream message;
++      message << invalid_guards[m].about
++              << ", "
++              << examples_of_safe_stores[s].about;
++      arm_inst program[] = {
++        invalid_guards[m].inst | guard_predicate,
++        examples_of_safe_stores[s].inst | store_predicate,
++      };
++
++      ProblemSpy spy;
++      validation_should_fail(program,
++                             NACL_ARRAY_SIZE(program),
++                             kDefaultBaseAddr,
++                             message.str(),
++                             &spy);
++      vector<ProblemRecord> problems = spy.get_problems();
++
++      // EXPECT/continue rather than ASSERT so that we run the other cases.
++      EXPECT_EQ(1U, problems.size());
++      if (problems.size() != 1) continue;
++
++      ProblemRecord first = problems[0];
++      EXPECT_EQ(kDefaultBaseAddr + 4, first.vaddr())
++          << "Problem report must point to the store: "
++          << message.str();
++      EXPECT_FALSE(nacl_arm_dec::IsSafetyViolation(first.violation()))
++          << "Store should not be unsafe even though guard is bogus:"
++          << message;
++      EXPECT_EQ(nacl_arm_dec::LOADSTORE_VIOLATION, first.violation())
++          << message;
++    }
++  }
++}
++
++TEST_F(ValidatorTests, ValidMasksOnUnsafeStores) {
++  static const AnnotatedInstruction invalid_stores[] = {
++    { 0x07810002, "str r0, [r1, r2]: register-plus-register addressing" },
++    { 0x07010002, "str r0, [r1, -r2]: register-minus-register addressing" },
++    { 0x07810182, "str r0, [r1, r2, LSL #3]: complicated addressing 1" },
++    { 0x07018482, "str r0, [r1, -r2, ASR #16]: complicated addressing 2" },
++  };
++
++  for (unsigned p = 0; p < 15; p++) {
++    // Conditionally executed instructions have a top nibble of 0..14.
++    // 15 is an escape sequence used to fit in additional encodings.
++    arm_inst predicate = p << 28;
++
++    for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_masks); m++) {
++      for (unsigned s = 0; s < NACL_ARRAY_SIZE(invalid_stores); s++) {
++        ostringstream message;
++        message << examples_of_safe_masks[m].about
++                << ", "
++                << invalid_stores[s].about
++                << " (predicate #" << p << ")";
++        arm_inst program[] = {
++          examples_of_safe_masks[m].inst | predicate,
++          invalid_stores[s].inst | predicate,
++        };
++
++        ProblemSpy spy;
++        validation_should_fail(program,
++                               NACL_ARRAY_SIZE(program),
++                               kDefaultBaseAddr,
++                               message.str(),
++                               &spy);
++        vector<ProblemRecord> problems = spy.get_problems();
++
++        // EXPECT/continue rather than ASSERT so that we run the other cases.
++        EXPECT_EQ(1U, problems.size());
++        if (problems.size() != 1) continue;
++
++        ProblemRecord first = problems[0];
++        EXPECT_EQ(kDefaultBaseAddr + 4, first.vaddr())
++            << "Problem report must point to the store: "
++            << message.str();
++        EXPECT_TRUE(nacl_arm_dec::IsSafetyViolation(first.violation()));
++      }
++    }
++  }
++}
++
++TEST_F(ValidatorTests, ScaryUndefinedInstructions) {
++  // These instructions are undefined today (ARMv7-A) but may become defined
++  // tomorrow.  We ban them since we can't reason about their side effects.
++  static const AnnotatedInstruction undefined_insts[] = {
++    { 0xE05DEA9D, "An undefined instruction in the multiply space" },
++  };
++  for (unsigned i = 0; i < NACL_ARRAY_SIZE(undefined_insts); i++) {
++    arm_inst program[] = { undefined_insts[i].inst };
++
++    ProblemSpy spy;
++    validation_should_fail(program,
++                           NACL_ARRAY_SIZE(program),
++                           kDefaultBaseAddr,
++                           undefined_insts[i].about,
++                           &spy);
++    vector<ProblemRecord> problems = spy.get_problems();
++
++    // EXPECT/continue rather than ASSERT so that we run the other cases.
++    EXPECT_EQ(1U, problems.size());
++    if (problems.size() != 1) continue;
++
++    ProblemRecord first = problems[0];
++    EXPECT_EQ(kDefaultBaseAddr, first.vaddr())
++        << "Problem report must point to the only instruction: "
++        << undefined_insts[i].about;
++    EXPECT_TRUE(nacl_arm_dec::IsSafetyViolation(first.violation()))
++        << "Instruction must be flagged by the decoder as unsafe:"
++        << undefined_insts[i].about;
++    EXPECT_EQ(nacl_arm_dec::UNDEFINED_VIOLATION, first.violation())
++        << "Instruction must be flagged as UNDEFINED:"
++        << undefined_insts[i].about;
++  }
++}
++
++TEST_F(ValidatorTests, PcRelativeFirstInst) {
++  // Note: This tests the fix for issue 2771.
++  static const arm_inst pcrel_boundary_tests[] = {
++    0xe59f0000,  // ldr     r0, [pc, #0]
++    kNop,
++    kNop,
++    kNop,
++  };
++  validation_should_pass(pcrel_boundary_tests,
++                         NACL_ARRAY_SIZE(pcrel_boundary_tests),
++                         kDefaultBaseAddr,
++                         "pc relative first instruction in first bundle");
++}
++
++TEST_F(ValidatorTests, PcRelativeFirst2ndBundle) {
++  // Note: This tests the fix for issue 2771.
++  static const arm_inst pcrel_boundary_tests[] = {
++    kNop,
++    kNop,
++    kNop,
++    kNop,
++    0xe59f0000,  // ldr     r0, [pc, #0]
++  };
++  validation_should_pass(pcrel_boundary_tests,
++                         NACL_ARRAY_SIZE(pcrel_boundary_tests),
++                         kDefaultBaseAddr,
++                         "pc relative first instruction in 2nd bundle");
++}
++
++TEST_F(ValidatorTests, SafeConditionalBicLdrTest) {
++  // Test if we fixed bug with conditional Bic Loads (issue 2769).
++  static const arm_inst bic_ldr_safe_test[] = {
++    0x03c22103,  // biceq   r2, r2, #-1073741824    ; 0xc0000000
++    0x01920f9f,  // ldrexeq r0, [r2]
++  };
++  validation_should_pass(bic_ldr_safe_test,
++                         NACL_ARRAY_SIZE(bic_ldr_safe_test),
++                         kDefaultBaseAddr,
++                         "Safe conditional bic ldr test");
++}
++
++TEST_F(ValidatorTests, ConditionalBicsLdrTest) {
++  // Test if we fail because Bic updates the flags register, making
++  // the conditional Bic load incorrect (issue 2769).
++  static const arm_inst bics_ldr_unsafe_test[] = {
++    0x03d22103,  // bicseq  r2, r2, #-1073741824    ; 0xc0000000
++    0x01920f9f,  // ldrexeq r0, [r2]
++  };
++
++  ProblemSpy spy;
++  validation_should_fail(bics_ldr_unsafe_test,
++                         NACL_ARRAY_SIZE(bics_ldr_unsafe_test),
++                         kDefaultBaseAddr,
++                         "Conditional bics ldr test",
++                         &spy);
++  vector<ProblemRecord> problems = spy.get_problems();
++
++  EXPECT_EQ(1U, problems.size());
++  if (problems.size() == 0) return;
++
++  ProblemRecord problem = problems[0];
++  EXPECT_EQ(kDefaultBaseAddr + 4, problem.vaddr())
++      << "Problem report should point to the ldr instruction.";
++  EXPECT_FALSE(nacl_arm_dec::IsSafetyViolation(problem.violation()));
++  EXPECT_EQ(nacl_arm_dec::LOADSTORE_VIOLATION, problem.violation());
++}
++
++TEST_F(ValidatorTests, DifferentConditionsBicLdrTest) {
++  // Test if we fail because the Bic and Ldr instructions have
++  // different conditional flags.
++  static const arm_inst bic_ldr_diff_conds[] = {
++    0x03c22103,  // biceq   r2, r2, #-1073741824    ; 0xc0000000
++    0xc1920f9f,  // ldrexgt r0, [r2]
++  };
++
++  ProblemSpy spy;
++  validation_should_fail(bic_ldr_diff_conds,
++                         NACL_ARRAY_SIZE(bic_ldr_diff_conds),
++                         kDefaultBaseAddr,
++                         "Different conditions bic ldr test",
++                         &spy);
++  vector<ProblemRecord> problems = spy.get_problems();
++
++  EXPECT_EQ(1U, problems.size());
++  if (problems.size() == 0) return;
++
++  ProblemRecord problem = problems[0];
++  EXPECT_EQ(kDefaultBaseAddr + 4, problem.vaddr())
++      << "Problem report should point to the ldr instruction.";
++  EXPECT_FALSE(nacl_arm_dec::IsSafetyViolation(problem.violation()));
++  EXPECT_EQ(nacl_arm_dec::LOADSTORE_VIOLATION, problem.violation());
++}
++
++TEST_F(ValidatorTests, BfcLdrInst) {
++  static const arm_inst bfc_inst[] = {
++    0xe7df2f1f,  // bfc r2, #30, #2
++    0xe1920f9f,  // ldrex r0, [r2]
++  };
++  validation_should_fail(bfc_inst,
++                         NACL_ARRAY_SIZE(bfc_inst),
++                         kDefaultBaseAddr,
++                         "Bfc Ldr instruction mask has a mask that's "
++                         "technically safe, but we disallow it out of "
++                         "paranoia");
++}
++
++TEST_F(ValidatorTests, BfcLdrInstMaskTooBigTest) {
++  static const arm_inst bfc_inst[] = {
++    0xe7df2e9f,  // bfc r2, #29, #3
++    0xe1920f9f,  // ldrex r0, [r2]
++  };
++  validation_should_fail(bfc_inst,
++                         NACL_ARRAY_SIZE(bfc_inst),
++                         kDefaultBaseAddr,
++                         "Bfc Ldr instruction mask has a mask that's "
++                         "technically safe (even too wide!), but we "
++                         "disallow it out of paranoia");
++}
++
++TEST_F(ValidatorTests, BfcLdrInstMaskWrongPlaceTest) {
++  static const arm_inst bfc_inst[] = {
++    0xe7da2c9f,  // bfc r2, #25, #2
++    0xe1920f9f,  // ldrex r0, [r2]
++  };
++  validation_should_fail(bfc_inst,
++                         NACL_ARRAY_SIZE(bfc_inst),
++                         kDefaultBaseAddr,
++                         "Bfc Ldr instruction mask has a mask that's "
++                         "not safe, and anyways we disallow it out of "
++                         "paranoia");
++}
++
++// Test effects of virtual dynamic_code_replacement_sentinel on the movw
++// instruction.
++TEST_F(ValidatorTests, DynamicCodeReplacementSentinelMovw) {
++  // Test cases where the sentinel changes for movw.
++  const AnnotatedInstruction inst[] = {
++    {0xe30a3aaa, "movw    r3, #43690      ; 0xaaaa"},
++    {0xe3053555, "movw    r3, #21845      ; 0x5555"},
++  };
++
++  // Test cases where the sentinel doesn't change for movw.
++  test_if_dynamic_code_replacement_sentinels_match(
++      static_cast<const ValidatorTests*>(this),
++      inst, NACL_ARRAY_SIZE(inst), 0xe3003000);
++  const AnnotatedInstruction unchanged[] = {
++    // If already the sentinel, nothing changes.
++    {0xe3003000, "movw    r3, #0          ; 0x0000"},
++    // Note: These instructions may not validate for other reasons,
++    // but we are only testing the virtual
++    // dynamic_code_replacement_sentinel, and that it doesn't
++    // apply changes when the register is in {r9, sp, lr, pc}.
++    {0xe3059555, "movw    r9, #21845      ; 0x5555"},
++    {0xe305d555, "movw    sp, #21845      ; 0x5555"},
++    {0xe305e555, "movw    lr, #21845      ; 0x5555"},
++    {0xe305f555, "movw    pc, #21845      ; 0x5555"},
++  };
++  test_if_dynamic_code_replacement_sentinels_unchanged(
++      static_cast<const ValidatorTests*>(this),
++      unchanged, NACL_ARRAY_SIZE(unchanged));
++}
++
++// Test effects of virtual dynamic_code_replacement_sentinel on the movt
++// instruction.
++TEST_F(ValidatorTests, DynamicCodeReplacementSentinelMovt) {
++  // Test cases where the sentinel changes for movt.
++  const AnnotatedInstruction inst[] = {
++    {0xe34a5aaa, "movt    r5, #43690      ; 0xaaaa"},
++    {0xe3455555, "movt    r5, #21845      ; 0x5555"},
++  };
++  test_if_dynamic_code_replacement_sentinels_match(
++      static_cast<const ValidatorTests*>(this),
++      inst, NACL_ARRAY_SIZE(inst), 0xe3405000);
++
++  // Test cases where the sentinel doesn't change for movt.
++  const AnnotatedInstruction unchanged[] = {
++    // If already the sentinel, nothing changes.
++    {0xe3405000, "movt    r5, #0          ; 0x0000"},
++    // Note: These instructions may not validate for other reasons,
++    // but we are only testing the virtual
++    // dynamic_code_replacement_sentinel, and that it doesn't
++    // apply changes when the register is in {r9, sp, lr, pc}.
++    {0xe3459555, "movt    r9, #21845      ; 0x5555"},
++    {0xe345d555, "movt    sp, #21845      ; 0x5555"},
++    {0xe345e555, "movt    lr, #21845      ; 0x5555"},
++    {0xe345f555, "movt    pc, #21845      ; 0x5555"},
++  };
++  test_if_dynamic_code_replacement_sentinels_unchanged(
++      static_cast<const ValidatorTests*>(this),
++      unchanged, NACL_ARRAY_SIZE(unchanged));
++}
++
++// Test effects of virtual dynamic_code_replacement_sentinel on the orr
++// instruction.
++TEST_F(ValidatorTests, DynamicCodeReplacementSentinelOrr) {
++  // Test cases where the sentinel changes for orr.
++  const AnnotatedInstruction orr[] = {
++    {0xe38454aa, "orr     r5, r4, #-1442840576    ; 0xaa000000"},
++    {0xe38458aa, "orr     r5, r4, #11141120       ; 0xaa0000"},
++    {0xe3845caa, "orr     r5, r4, #43520  ; 0xaa00"},
++    {0xe38450aa, "orr     r5, r4, #170    ; 0xaa"},
++    {0xe3845455, "orr     r5, r4, #1426063360     ; 0x55000000"},
++    {0xe3845855, "orr     r5, r4, #5570560        ; 0x550000"},
++    {0xe3845c55, "orr     r5, r4, #21760  ; 0x5500"},
++    {0xe3845055, "orr     r5, r4, #85     ; 0x55"},
++  };
++  test_if_dynamic_code_replacement_sentinels_match(
++      static_cast<const ValidatorTests*>(this),
++      orr, NACL_ARRAY_SIZE(orr), 0xe3845000);
++  const AnnotatedInstruction orrs[] = {
++    {0xe39454aa, "orrs    r5, r4, #-1442840576    ; 0xaa000000"},
++    {0xe39458aa, "orrs    r5, r4, #11141120       ; 0xaa0000"},
++    {0xe3945caa, "orrs    r5, r4, #43520  ; 0xaa00"},
++    {0xe39450aa, "orrs    r5, r4, #170    ; 0xaa"},
++    {0xe3945455, "orrs    r5, r4, #1426063360     ; 0x55000000"},
++    {0xe3945855, "orrs    r5, r4, #5570560        ; 0x550000"},
++    {0xe3945c55, "orrs    r5, r4, #21760  ; 0x5500"},
++    {0xe3945055, "orrs    r5, r4, #85     ; 0x55"},
++  };
++  test_if_dynamic_code_replacement_sentinels_match(
++      static_cast<const ValidatorTests*>(this),
++      orrs, NACL_ARRAY_SIZE(orrs), 0xe3945000);
++
++  // Test cases where the sentinel doesn't change for orr.
++  const AnnotatedInstruction unchanged[] = {
++    // Note: These instructions may not validate for other reasons,
++    // but we are only testing the virtual
++    // dynamic_code_replacement_sentinel, and that it doesn't
++    // apply changes when the register is in {r9, sp, lr, pc}.
++    {0xe3849055, "orr     r9, r4, #85     ; 0x55"},
++    {0xe384d055, "orr     sp, r4, #85     ; 0x55"},
++    {0xe384e055, "orr     lr, r4, #85     ; 0x55"},
++    {0xe384f055, "orr     pc, r4, #85     ; 0x55"},
++    {0xe3949055, "orrs    r9, r4, #85     ; 0x55"},
++    {0xe394d055, "orrs    sp, r4, #85     ; 0x55"},
++    {0xe394e055, "orrs    lr, r4, #85     ; 0x55"},
++    {0xe394f055, "orrs    pc, r4, #85     ; 0x55"},
++  };
++  test_if_dynamic_code_replacement_sentinels_unchanged(
++      static_cast<const ValidatorTests*>(this),
++      unchanged, NACL_ARRAY_SIZE(unchanged));
++}
++
++// Test effects of virtual dynamic_code_replacement_sentinel on the mvn
++// instruction.
++TEST_F(ValidatorTests, DynamicCodeReplacementSentinelMvn) {
++  // Test cases where the sentinel changes for mvn.
++  const AnnotatedInstruction mvn[] = {
++    {0xe3e064aa, "mvn     r6, #-1442840576        ; 0xaa000000"},
++    {0xe3e068aa, "mvn     r6, #11141120   ; 0xaa0000"},
++    {0xe3e06caa, "mvn     r6, #43520      ; 0xaa00"},
++    {0xe3e060aa, "mvn     r6, #170        ; 0xaa"},
++    {0xe3e06455, "mvn     r6, #1426063360 ; 0x55000000"},
++    {0xe3e06855, "mvn     r6, #5570560    ; 0x550000"},
++    {0xe3e06c55, "mvn     r6, #21760      ; 0x5500"},
++    {0xe3e06055, "mvn     r6, #85 ; 0x55"},
++  };
++  test_if_dynamic_code_replacement_sentinels_match(
++      static_cast<const ValidatorTests*>(this),
++      mvn, NACL_ARRAY_SIZE(mvn), 0xe3e06000);
++  const AnnotatedInstruction mvns[] = {
++    {0xe3f064aa, "mvns    r6, #-1442840576        ; 0xaa000000"},
++    {0xe3f068aa, "mvns    r6, #11141120   ; 0xaa0000"},
++    {0xe3f06caa, "mvns    r6, #43520      ; 0xaa00"},
++    {0xe3f060aa, "mvns    r6, #170        ; 0xaa"},
++    {0xe3f06455, "mvns    r6, #1426063360 ; 0x55000000"},
++    {0xe3f06855, "mvns    r6, #5570560    ; 0x550000"},
++    {0xe3f06c55, "mvns    r6, #21760      ; 0x5500"},
++    {0xe3f06055, "mvns    r6, #85 ; 0x55"},
++  };
++  test_if_dynamic_code_replacement_sentinels_match(
++      static_cast<const ValidatorTests*>(this),
++      mvns, NACL_ARRAY_SIZE(mvns), 0xe3f06000);
++
++  // Test cases where the sentinel doesn't change for orr.
++  const AnnotatedInstruction unchanged[] = {
++    // Note: These instructions may not validate for other reasons,
++    // but we are only testing the virtual
++    // dynamic_code_replacement_sentinel, and that it doesn't
++    // apply changes when the register is in {r9, sp, lr, pc}.
++    {0xe3e09055, "mvn     r9, #85 ; 0x55"},
++    {0xe3e0d055, "mvn     sp, #85 ; 0x55"},
++    {0xe3e0e055, "mvn     lr, #85 ; 0x55"},
++    {0xe3e0f055, "mvn     pc, #85 ; 0x55"},
++    {0xe3f09055, "mvns    r9, #85 ; 0x55"},
++    {0xe3f0d055, "mvns    sp, #85 ; 0x55"},
++    {0xe3f0e055, "mvns    lr, #85 ; 0x55"},
++    {0xe3f0f055, "mvns    pc, #85 ; 0x55"},
++  };
++  test_if_dynamic_code_replacement_sentinels_unchanged(
++      static_cast<const ValidatorTests*>(this),
++      unchanged, NACL_ARRAY_SIZE(unchanged));
++}
++
++// Test other instructions for which dynamic code replacement can't be applied.
++TEST_F(ValidatorTests, DynamicCodeReplacementSentinelOther) {
++  test_if_dynamic_code_replacement_sentinels_unchanged(
++      static_cast<const ValidatorTests*>(this),
++      examples_of_safe_stores, NACL_ARRAY_SIZE(examples_of_safe_stores));
++  test_if_dynamic_code_replacement_sentinels_unchanged(
++      static_cast<const ValidatorTests*>(this),
++      examples_of_safe_masks, NACL_ARRAY_SIZE(examples_of_safe_masks));
++}
++
++TEST_F(ValidatorTests, DynamicCodeReplacementLiteralPool) {
++  // Start with an evil-looking value, and replace with another evil-looking
++  // value. It should work because these are all data in two consecutive
++  // literal pools, not actual instructions.
++  vector<arm_inst>::size_type bundle_size(_validator->InstructionsPerBundle());
++  vector<arm_inst>::size_type size(bundle_size * 2);
++  vector<arm_inst> old_code(size, kSvc0);
++  vector<arm_inst> new_code(size, kFailValidation);
++  old_code[0] = new_code[0] =
++      old_code[bundle_size] = new_code[bundle_size] =
++      kLiteralPoolHead;
++  TestDynamicCodeReplacement(
++      _validator, true, old_code, new_code,
++      "literal pool data change");
++
++  // Change the new code so that its first bundle is still a literal
++  // pool but its second isn't. This should now fail validation because
++  // the data is now executable code.
++  new_code[bundle_size] = kNop;
++  TestDynamicCodeReplacement(
++      _validator, false, old_code, new_code,
++      "literal pool becoming non-literal pool");
++
++  // Change the old code so that its second bundle also isn't a literal
++  // pool. This should also fail, not because the code is dangerous
++  // (which it is, but that's checked separately), but because the old
++  // instructions can't be substituted for the new.
++  old_code[bundle_size] = kNop;
++  TestDynamicCodeReplacement(
++      _validator, false, old_code, new_code,
++      "literal pool followed by non-literal pool with invalid replacement");
++
++  // Change the new code's second bundle to a literal pool, which it
++  // wasn't in the old. This should also fail because we don't allow the
++  // user to dynamically create literal pools where none existed before.
++  new_code[bundle_size] = kLiteralPoolHead;
++  TestDynamicCodeReplacement(
++      _validator, false, old_code, new_code,
++      "non-literal pool becoming literal pool");
++}
++
++struct AlwaysDominatesTestInfo {
++  arm_inst inst[2];
++  const char* name[2];
++  bool first_inst_can_set_flags;
++};
++TEST_F(ValidatorTests, AlwaysDominatesTest) {
++  // Test always_dominates, with all conditional combinations of:
++  AlwaysDominatesTestInfo test[] = {
++    { {
++        // BIC (potentially setting flags) followed by a branch.
++        0xe3cee2fe,  // bic[s]CC lr, lr, #-536870897     ; 0xe000000f
++        0xe12fff1e,  // bxCC lr
++      }, { "bic", "bx" }, true },
++  };
++
++  for (AlwaysDominatesTestInfo* t = &test[0];
++       t != &test[NACL_ARRAY_SIZE(test)];
++       ++t) {
++    for (int s = 0; s < (t->first_inst_can_set_flags ? 2 : 1); ++s) {
++      if (t->first_inst_can_set_flags) {
++        t->inst[0] = SetSBit(t->inst[0], s);
++      }
++
++      Instruction::Condition cond[2];
++      for (cond[0] = Instruction::EQ;
++           cond[0] <= Instruction::AL;
++           cond[0] = Instruction::Next(cond[0])) {
++        for (cond[1] = Instruction::EQ;
++             cond[1] <= Instruction::AL;
++             cond[1] = Instruction::Next(cond[1])) {
++          t->inst[0] = ChangeCond(t->inst[0], cond[0]);
++          t->inst[1] = ChangeCond(t->inst[1], cond[1]);
++
++          std::string name0(std::string(t->name[0]) + (s ? "s" : "") +
++                            Instruction::ToString(cond[0]));
++          std::string name1(std::string(t->name[1]) +
++                            Instruction::ToString(cond[1]));
++          ostringstream message;
++          message << name0 <<
++              " (0x" << std::hex << std::setfill('0') << std::setw(8) <<
++              static_cast<uint32_t>(t->inst[0]) <<
++              std::resetiosflags(std::ios_base::showbase) << ") "
++              "with a correct mask, followed by " << name1 <<
++              " (0x" << std::hex << std::setfill('0') << std::setw(8) <<
++              static_cast<uint32_t>(t->inst[1]) <<
++              std::resetiosflags(std::ios_base::showbase) << "): ";
++
++          if (s) {
++            validation_should_fail(t->inst, NACL_ARRAY_SIZE(t->inst),
++                                   kDefaultBaseAddr,
++                                   message.str() + name0 + " sets flags "
++                                   "when it's only supposed to enforce SFI on "
++                                   "the subsequent " + name1 + ", we "
++                                   "could allow this but it makes the "
++                                   "validator's code more complex and it's "
++                                   "harder to reason about back-to-back "
++                                   "conditional instructions with "
++                                   "intervening flag setting (especially with "
++                                   "ARM's partial NZCV flag setting).");
++          } else if (cond[0] == Instruction::AL) {
++            validation_should_pass(t->inst, NACL_ARRAY_SIZE(t->inst),
++                                   kDefaultBaseAddr,
++                                   message.str() + "an unconditional " +
++                                   name0 + " always dominates the "
++                                   "subsequent " + name1 +
++                                   " instruction.");
++          } else if (cond[1] == Instruction::AL) {
++            EXPECT_NE(cond[0], Instruction::AL);
++            validation_should_fail(t->inst, NACL_ARRAY_SIZE(t->inst),
++                                   kDefaultBaseAddr,
++                                   message.str() + name0 + " is "
++                                   "conditional, but the subsequent " +
++                                   name1 + " isn't.");
++          } else if ((cond[1] == cond[0]) ||
++                     // TODO(jfb) Put back mixed-condition handling.
++                     //           See issue #3221.
++                     /*
++                   (cond[1] == Instruction::EQ && cond[0] == Instruction::LS) ||
++                   (cond[1] == Instruction::CC && cond[0] == Instruction::LS) ||
++                   (cond[1] == Instruction::HI && cond[0] == Instruction::NE) ||
++                   (cond[1] == Instruction::HI && cond[0] == Instruction::CS) ||
++                   (cond[1] == Instruction::GT && cond[0] == Instruction::NE) ||
++                   (cond[1] == Instruction::GT && cond[0] == Instruction::GE) ||
++                   (cond[1] == Instruction::LE && cond[0] == Instruction::EQ) ||
++                   (cond[1] == Instruction::LE && cond[0] == Instruction::LS) ||
++                   (cond[1] == Instruction::LE && cond[0] == Instruction::LT) */
++                     false) {
++            validation_should_pass(t->inst, NACL_ARRAY_SIZE(t->inst),
++                                   kDefaultBaseAddr,
++                                   message.str() + name1 + "'s "
++                                   "condition being true necessarily implies "
++                                   "that " + name0 + "'s condition was "
++                                   "also true.");
++          } else {
++            validation_should_fail(t->inst, NACL_ARRAY_SIZE(t->inst),
++                                   kDefaultBaseAddr,
++                                   message.str() + name1 + "'s condition "
++                                   "being true doesn't necessarily imply "
++                                   "that " + name0 + "'s condition was "
++                                   "also true, err on the side of caution and "
++                                   "disallow.");
++          }
++        }
++      }
++    }
++  }
++}
++
++TEST_F(ValidatorTests, UnmaskedSpUpdate) {
++  vector<arm_inst> code(_validator->InstructionsPerBundle(), kNop);
++  for (vector<arm_inst>::size_type i = 0; i < code.size(); ++i) {
++    std::fill(code.begin(), code.end(), kNop);
++    code[i] = 0xE1A0D000;  // MOV SP, R0
++    validation_should_fail(&code[0], code.size(), kDefaultBaseAddr,
++                           "unmasked SP update");
++  }
++}
++
++TEST_F(ValidatorTests, MaskedSpUpdate) {
++  vector<arm_inst> code(_validator->InstructionsPerBundle() * 2, kNop);
++  for (vector<arm_inst>::size_type i = 0; i < code.size() - 1; ++i) {
++    std::fill(code.begin(), code.end(), kNop);
++    code[i] = 0xE1A0D000;      // MOV SP, R0
++    code[i + 1] = 0xE3CDD2FF;  // BIC SP, SP, #-268435441 ; 0xf000000f
++    if (i == _validator->InstructionsPerBundle() - 1) {
++      validation_should_fail(&code[0], code.size(), kDefaultBaseAddr,
++                             "masked SP update straddling a bundle boundary"
++                             " (this is technically safe, but we simplify the "
++                             "validator by disallowing instruction pairs that "
++                             "straddle a bundle boundary)");
++    } else {
++      validation_should_pass(&code[0], code.size(), kDefaultBaseAddr,
++                             "masked SP update");
++    }
++  }
++}
++
++TEST_F(ValidatorTests, AddConstToSpTest) {
++  // Show that we can add a constant to the stack pointer is fine,
++  // so long as we follow it with a mask instruction.
++  static const arm_inst sp_inst[] = {
++    0xe28dd00c,  // add sp, sp, #12
++    0xe3cdd2ff,  // bic     sp, sp, #-268435441     ; 0xf000000f
++  };
++  validation_should_pass(sp_inst,
++                         NACL_ARRAY_SIZE(sp_inst),
++                         kDefaultBaseAddr,
++                         "Add constant (12) to sp, then mask with bic");
++}
++
++TEST_F(ValidatorTests, BicSpFirstInstTest) {
++  // Show that if we bit clear SP as the first instruction, it is ok.
++  static const arm_inst bic_inst[] = {
++    0xe3cdd2ff,  // bic     sp, sp, #-268435441     ; 0xf000000f
++  };
++  validation_should_pass(bic_inst,
++                         NACL_ARRAY_SIZE(bic_inst),
++                         kDefaultBaseAddr,
++                         "Bit clear sp as first instruction.");
++}
++
++TEST_F(ValidatorTests, BicSpSecondInstTest) {
++  // Show that if we bit clear SP as the second instruction, and
++  // the first doesn't update SP, we are ok.
++  static const arm_inst bic_inst[] = {
++    kNop,
++    0xe3cdd2ff,  // bic     sp, sp, #-268435441     ; 0xf000000f
++  };
++  validation_should_pass(bic_inst,
++                         NACL_ARRAY_SIZE(bic_inst),
++                         kDefaultBaseAddr,
++                         "Bit clear sp as second instruction.");
++}
++
++TEST_F(ValidatorTests, AddConstToSpBicTestDoesFollows) {
++  // Run test where we conditionally add a constant to a stack pointer,
++  // followed by a mask.
++  // Note: Implicitly tests always_postdominates.
++  for (int cond = Instruction::EQ; cond < Instruction::AL; ++cond) {
++    arm_inst inst[] = {
++      0x028dd00c,  // addeq sp, sp, #12
++      0xe3cdd2ff,  // bic sp, sp, #-268435441     ; 0xf000000f
++    };
++    inst[0] = ChangeCond(inst[0], static_cast<Instruction::Condition>(cond));
++    validation_should_pass(inst,
++                           NACL_ARRAY_SIZE(inst),
++                           kDefaultBaseAddr,
++                           "Add constant (12) to sp, then mask with bic, "
++                           "tests always_postdominates succeeds");
++  }
++}
++
++TEST_F(ValidatorTests, AddConstToSpBicTestDoesntFollows) {
++  // Run test where we add a constant to a stack pointer, followed
++  // by a conditional mask.
++  // Note: Implicitly tests always_postdominates.
++  for (int cond = Instruction::EQ; cond < Instruction::AL; ++cond) {
++    arm_inst inst[] = {
++      0xe28dd00c,  // add sp, sp, #12
++      0x03cdd2ff,  // biceq sp, sp, #-268435441   ; 0xf000000f
++    };
++    inst[1] = ChangeCond(inst[1], static_cast<Instruction::Condition>(cond));
++    validation_should_fail(inst,
++                           NACL_ARRAY_SIZE(inst),
++                           kDefaultBaseAddr,
++                           "Add constant (12) to sp, then mask with bic, "
++                           "tests always_postdominates fails");
++  }
++}
++
++TEST_F(ValidatorTests, CheckVectorLoadPcRelative) {
++  // Run test where we do a vector load using a pc relative address.
++  // Corresponds to issue 2906.
++  static const arm_inst load_inst[] = {
++    0xed9f0b04,  // vldr        d0, [pc, #16]
++  };
++  validation_should_pass(load_inst,
++                         NACL_ARRAY_SIZE(load_inst),
++                         kDefaultBaseAddr,
++                         "Load vector register using pc relative address");
++}
++
++TEST_F(ValidatorTests, CheckPushSpUnpredictable) {
++  // Run test to verify that "Push {sp}", encoding A2 on a8-248 of ARM manual,
++  // is unpredictable (i.e. unsafe).
++  all_cond_values_fail(0xe52dd004,  // push {sp}
++                       kDefaultBaseAddr,
++                       "push {sp} (A2 a8-248) should be unpredictable");
++}
++
++TEST_F(ValidatorTests, ConditionalBreakpoints) {
++  arm_inst bkpt = 0xE1200070;  // BKPT #0
++  arm_inst pool_head = kLiteralPoolHead;
++  for (Instruction::Condition cond = Instruction::EQ;
++       cond < Instruction::AL;
++       cond = Instruction::Next(cond)) {
++    bkpt = ChangeCond(bkpt, cond);
++    pool_head = ChangeCond(pool_head, cond);
++    EXPECT_FALSE(validate(&bkpt, 1, kDefaultBaseAddr))
++        << "conditional breakpoint should be unpredictable";
++    EXPECT_FALSE(validate(&pool_head, 1, kDefaultBaseAddr))
++        << "conditional literal pool head should be unpredictable";
++  }
++}
++
++TEST_F(ValidatorTests, CheckLoadStoreWritebackUnpredictable) {
++  // See issue #2816: compilers used to emit some unpredictable load/store
++  // instructions with writeback, and the validator accepted them for a while.
++  //
++  // Theses unpredictables have writeback and either Rn=Rt or Rn=Rt2.
++  //
++  // The instructions are all from A5.2.8 Extra Load/Store Instructions:
++  //   cccc 000P UaWa nnnn tttt xxxx 1bb1 xxxx
++  // With an exclusion for data-processing and miscellaneous as noted below.
++  //
++  // Nibbles 0 and 2 are either zeroes/Rm (register variants) or
++  // imm4H/imm4L (integer variant). Only test when they're all zero.
++  arm_inst templ = 0x00000090;
++  for (uint32_t op2 = 0; op2 <= 0x3; ++op2) {  // op2 is in inst(6:5).
++    for (uint32_t op1 = 0; op1 <= 0x1F; ++op1) {  // op1 is in inst(24:20).
++      if (!(op1 & 0x2))
++        continue;  // Only undefined with writeback.
++      if ((op2 == 0x0) ||
++          ((op1 & 0x13) == 0x03) ||
++          (((op1 & 0x13) == 0x02) && ((op2 & 0x2) == 0x0)))
++        continue;  // Not in A5.2.8: actually Data-processing and miscellaneous.
++      // Dual load/store encode Rt2 as Rt+1.
++      bool is_dual = ((op1 & 0x01) == 0x00) && ((op2 == 0x2) || (op2 == 0x3));
++      for (uint32_t n = 0; n < 15; ++n) {  // Ignore Rn=PC, it can't writeback.
++        uint32_t t = n;
++        arm_inst base = (templ | (op1 << 20) | (t << 12) | (op2 << 5));
++        arm_inst inst = base | (n << 16);  // Rn=Rt.
++        arm_inst inst_dual = base | ((n + 1) << 16);  // Rn=Rt2.
++        all_cond_values_fail(inst, kDefaultBaseAddr, "extra load/store "
++                             "with writeback and Rn==Rt should be "
++                             "unpredictable");
++        if (is_dual) {
++          all_cond_values_fail(inst_dual, kDefaultBaseAddr, "extra load/store "
++                               "with writeback and Rn==Rt2 should be "
++                               "unpredictable");
++        }
++      }
++    }
++  }
++}
++
++TEST_F(ValidatorTests, LiteralPoolHeadIsBreakpoint) {
++  EXPECT_EQ(kLiteralPoolHead & 0xFFF000F0, 0xE1200070)  // BKPT #0
++      << ("the literal pool head should be a breakpoint: "
++          "it needs to act as a roadblock");
++}
++
++TEST_F(ValidatorTests, Breakpoint) {
++  EXPECT_EQ(nacl_arm_dec::kBreakpoint & 0xFFF000F0,
++            0xE1200070)  // BKPT #0
++      << ("the breakpoint instruction should be a breakpoint: "
++          "it needs to trap");
++}
++
++TEST_F(ValidatorTests, HaltFill) {
++  EXPECT_EQ(nacl_arm_dec::kHaltFill & 0xFFF000F0,
++            0xE7F000F0)  // UDF #0
++      << ("the halt fill instruction should be UDF: "
++          "it needs to trap");
++}
++
++TEST_F(ValidatorTests, AbortNow) {
++  EXPECT_EQ(nacl_arm_dec::kAbortNow & 0xFFF000F0,
++            0xE7F000F0)  // UDF #0
++      << ("the abort now instruction should be UDF: "
++          "it needs to trap");
++}
++
++TEST_F(ValidatorTests, FailValidation) {
++  EXPECT_EQ(kFailValidation & 0xFFF000F0, 0xE7F000F0)  // UDF #0
++      << ("the fail validation instruction should be UDF: "
++          "it needs to trap");
++}
++
++TEST_F(ValidatorTests, UDFAndBKPTValidateAsExpected) {
++  for (uint32_t i = 0; i < 0xFFFF; ++i) {
++    arm_inst bkpt_inst = 0xE1200070 | ((i & 0xFFF0) << 4) | (i & 0xF);
++    arm_inst udf_inst  = 0xE7F000F0 | ((i & 0xFFF0) << 4) | (i & 0xF);
++    EXPECT_EQ(validate(&bkpt_inst, 1, kDefaultBaseAddr),
++              ((bkpt_inst == kLiteralPoolHead) ||
++               (bkpt_inst == nacl_arm_dec::kBreakpoint)));
++    EXPECT_EQ(validate(&udf_inst, 1, kDefaultBaseAddr),
++              ((udf_inst == nacl_arm_dec::kHaltFill) ||
++               (udf_inst == nacl_arm_dec::kAbortNow)));
++    // Tautological note: kFailValidation should fail validation.
++  }
++}
++
++TEST_F(ValidatorTests, LiteralPoolHeadInstruction) {
++  // Make sure that literal pools are handled properly: they should be preceded
++  // by a special breakpoint instruction at the start of the bundle, and can
++  // then contain any bits that would otherwise look malicious.
++  // Each literal pool bundle has to start with such a literal pool head.
++  vector<arm_inst> literal_pool(_validator->InstructionsPerBundle(), kSvc0);
++  literal_pool[0] = 0xE1200070;  // BKPT #0
++  // Try out all BKPT encodings, and make sure only one of them works.
++  for (uint32_t imm16 = 0; imm16 <= 0xFFFF; ++imm16) {
++    literal_pool[0] = (literal_pool[0] & 0xFFF000F0) |
++        (imm16 & 0xF) |
++        ((imm16 & 0xFFF0) << 8);
++    if (literal_pool[0] == kLiteralPoolHead) {
++      validation_should_pass(&literal_pool.front(),
++                             literal_pool.size(),
++                             kDefaultBaseAddr,
++                             "valid literal pool: "
++                             "starts with special BKPT");
++    } else {
++      validation_should_fail(&literal_pool.front(),
++                             literal_pool.size(),
++                             kDefaultBaseAddr,
++                             "invalid literal pool: "
++                             "starts with just a regular BKPT");
++    }
++  }
++}
++
++TEST_F(ValidatorTests, LiteralPoolHeadPosition) {
++  // Literal pools should only work when the head instruction is indeed at
++  // the head.
++  vector<arm_inst> literal_pool(_validator->InstructionsPerBundle());
++  for (size_t pos = 0; pos < literal_pool.size(); ++pos) {
++    std::fill(literal_pool.begin(), literal_pool.end(), kSvc0);
++    if (pos != literal_pool.size() - 1) {
++      // We do one iteration without a literal pool head at all.
++      literal_pool[pos] = kLiteralPoolHead;
++    }
++    if (pos == 0) {
++      validation_should_pass(&literal_pool.front(),
++                             literal_pool.size(),
++                             kDefaultBaseAddr,
++                             "valid literal pool: "
++                             "starts with special head instruction");
++    } else {
++      validation_should_fail(&literal_pool.front(),
++                             literal_pool.size(),
++                             kDefaultBaseAddr,
++                             "invalid literal pool: "
++                             "doesn't start with special  head instruction");
++    }
++  }
++}
++
++TEST_F(ValidatorTests, LiteralPoolBig) {
++  // Literal pools should be a single bundle wide, each must be preceded by
++  // a pool head.
++  vector<arm_inst> literal_pools(2 * _validator->InstructionsPerBundle());
++  for (size_t pos = 0; pos < literal_pools.size(); ++pos) {
++    std::fill(literal_pools.begin(), literal_pools.end(), kSvc0);
++    literal_pools[pos] = kLiteralPoolHead;
++    validation_should_fail(&literal_pools.front(),
++                           literal_pools.size(),
++                           kDefaultBaseAddr,
++                           "invalid literal pool: two pools, one head");
++  }
++}
++
++TEST_F(ValidatorTests, LiteralPoolBranch) {
++  // Branching to a literal pool should only work at the head.
++  // Construct a code region with a bundle of code, then a bundle-wide
++  // literal pool, then another bundle of code.
++  // Add a branch from different code locations, pointing at different
++  // parts of the code. Pointing in the literal pool should fail, except
++  // when pointing at the head.
++  // Note that we don't actually put anything malicious in the literal pool,
++  // and we still shouldn't be able to jump in the middle of it.
++  const size_t bundle_pos = _validator->InstructionsPerBundle();
++  vector<arm_inst> code(3 * bundle_pos);
++  for (size_t b_pos = 0; b_pos < code.size(); ++b_pos) {
++    if ((bundle_pos <= b_pos) && (b_pos < bundle_pos * 2)) {
++      // Don't try putting the branch in the middle of the literal pool.
++      continue;
++    }
++    std::fill(code.begin(), code.end(), kNop);
++    code[bundle_pos] = kLiteralPoolHead;
++    for (size_t b_target = 0; b_target < code.size(); ++b_target) {
++      // PC reads as current instruction address plus 8 (e.g. two instructions
++      // ahead of b_pos).
++      // imm24 is encoded with the bottom two bits zeroed out, which we
++      // implicitly do by working with instructions instead of bytes.
++      uint32_t imm24 = (b_target - b_pos - 2) & 0x00FFFFFF;
++      code[b_pos] = 0xEA000000 | imm24;  // B #imm
++      bool target_in_pool = (bundle_pos < b_target) &&
++          (b_target < bundle_pos * 2);  // Excluding head.
++      if (target_in_pool) {
++        validation_should_fail(&code.front(),
++                               code.size(),
++                               kDefaultBaseAddr,
++                               "branch inside a literal pool");
++      } else {
++        validation_should_pass(&code.front(),
++                               code.size(),
++                               kDefaultBaseAddr,
++                               "branch around or at head of a literal pool");
++      }
++    }
++  }
++}
++
++TEST_F(ValidatorTests, Preloads) {
++  // Preloads leak information on some ARM CPUs and are therefore treated
++  // similar to no-destination loads. They come in three flavors:
++  // - PLD{W} [<Rn>, #+/-<imm12>] simply needs to mask Rn.
++  // - PLD <label> doesn't need masking: its immediate is limited to 12 bits.
++  // - PLD{W} [<Rn>,+/-<Rm>{, <shift>}] is disallowed.
++  // The same applies for PLI, which has analogous variants.
++
++  // PLD{W} [<Rn>, #+/-<imm12>] as well as PLI.
++  // PLD{W}: 1111 0101 UR01 nnnn 1111 iiii iiii iiii
++  // PLI:    1111 0100 U101 nnnn 1111 iiii iiii iiii
++  for (uint32_t is_pld = 0; is_pld <= 1; ++is_pld) {
++    for (uint32_t r = is_pld ? 0 : 1; r <= 1; ++r) {
++      for (uint32_t u = 0; u <= 1; ++u) {
++        uint32_t rn = 0x1;  // TODO(jfb) The BIC patterns only test Rn==R1.
++        for (uint32_t imm12 = 0; imm12 <= 0xFFF; ++imm12) {
++          arm_inst pl_inst = 0xF410F000 |
++              (is_pld << 24) | (u << 23) | (r << 22) | (rn << 16) | imm12;
++          validation_should_fail(&pl_inst, 1, kDefaultBaseAddr,
++                                 "unmasked preloads");
++          for (size_t m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_masks);
++               ++m) {
++            arm_inst program[] = {
++              ChangeCond(examples_of_safe_masks[m].inst,
++                         Instruction::AL),
++              pl_inst,
++            };
++            validation_should_pass(program, NACL_ARRAY_SIZE(program),
++                                   kDefaultBaseAddr,
++                                   "masked preload with safe mask");
++          }
++          for (size_t m = 0; m < NACL_ARRAY_SIZE(examples_of_invalid_masks);
++               ++m) {
++            arm_inst program[] = {
++              ChangeCond(examples_of_invalid_masks[m].inst,
++                         Instruction::AL),
++              pl_inst,
++            };
++            validation_should_fail(program, NACL_ARRAY_SIZE(program),
++                                   kDefaultBaseAddr,
++                                   "masked preload with invalid mask");
++          }
++        }
++      }
++    }
++  }
++
++  // PLD <label> as well as PLI.
++  // PLD: 1111 0101 U101 1111 1111 iiii iiii iiii
++  // PLI: 1111 0100 U101 1111 1111 iiii iiii iiii
++  for (uint32_t is_pld = 0; is_pld <= 1; ++is_pld) {
++    for (uint32_t u = 0; u <= 1; ++u) {
++      for (uint32_t imm12 = 0; imm12 <= 0xFFF; ++imm12) {
++        arm_inst pl_inst = 0xF45FF000 |
++            (is_pld << 24) | (u << 23) | imm12;
++        validation_should_pass(&pl_inst, 1, kDefaultBaseAddr,
++                               "unmasked literal preloads");
++      }
++    }
++  }
++
++  // PLD{W} [<Rn>, +/-Rm{, shift}] as well as PLI.
++  // PLD{W}: 1111 0111 UR01 nnnn 1111 iiii itt0 mmmm
++  // PLI:    1111 0110 U101 nnnn 1111 iiii itt0 mmmm
++  for (uint32_t is_pld = 0; is_pld <= 1; ++is_pld) {
++    for (uint32_t r = is_pld ? 0 : 1; r <= 1; ++r) {
++      for (uint32_t u = 0; u <= 1; ++u) {
++        for (uint32_t t = 0; t <= 3; ++t) {
++          for (uint32_t rm = 0; rm <= 0xF; ++rm) {
++            uint32_t rn = 0x1;  // TODO(jfb) The BIC patterns only test Rn==R1.
++            for (uint32_t imm5 = 0; imm5 <= 0x1F; ++imm5) {
++              arm_inst pl_inst = 0xF610F000 |
++                  (is_pld << 24) | (u << 23) | (r << 22) | (rn << 16) |
++                  (imm5 << 7) | (t << 5) | rm;
++              validation_should_fail(&pl_inst, 1, kDefaultBaseAddr,
++                                     "unmasked register-register preloads");
++              for (size_t m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_masks);
++                   ++m) {
++                arm_inst program[] = {
++                  ChangeCond(examples_of_safe_masks[m].inst,
++                             Instruction::AL),
++                  pl_inst,
++                };
++                validation_should_fail(program, NACL_ARRAY_SIZE(program),
++                                       kDefaultBaseAddr,
++                                       "masked register-register preload "
++                                       "with safe mask");
++              }
++              for (size_t m = 0; m < NACL_ARRAY_SIZE(examples_of_invalid_masks);
++                   ++m) {
++                arm_inst program[] = {
++                  ChangeCond(examples_of_invalid_masks[m].inst,
++                             Instruction::AL),
++                  pl_inst,
++                };
++                validation_should_fail(program, NACL_ARRAY_SIZE(program),
++                                       kDefaultBaseAddr,
++                                       "masked register-register preload "
++                                       "with invalid mask");
++              }
++            }
++          }
++        }
++      }
++    }
++  }
++}
++
++TEST_F(ValidatorTests, LoadThreadLocalPtr) {
++  // Verify that we recognize valid load thread local pointer instructions.
++  static const AnnotatedInstruction loadr9_insts[] = {
++    {0xe5990000,  "ldr<c> r0, [r9]"},
++    {0xe5990004,  "ldr<c> r0, [r9, #4]"},
++  };
++
++  // Try each load instruction
++  for (size_t i = 0; i < NACL_ARRAY_SIZE(loadr9_insts); ++i) {
++    Instruction test_base(loadr9_insts[i].inst);
++
++    // Try each possible condition.
++    for (Instruction::Condition cond = Instruction::EQ;
++         cond < Instruction::UNCONDITIONAL;
++         cond = Instruction::Next(cond)) {
++      Instruction test_cond(ChangeInstCond(test_base, cond));
++
++      // Try each register to assign (i.e. replace r0).
++      for (uint32_t r = 0; r < 16; ++r) {
++        Register reg(r);
++        Instruction test(test_cond);
++        test.SetBits(15, 12, r);  // I.e. set Rt(15:12) to r;
++
++        // Generate string describing instruction being tested.
++        ostringstream message;
++        string msg(loadr9_insts[i].about);
++        const char* r0 = "r0";
++        msg.replace(msg.find(r0), strlen(r0), reg.ToString());
++        const char* cc = "<c>";
++        msg.replace(msg.find(cc), strlen(cc), Instruction::ToString(cond));
++        message << "Test '" << msg << "'";
++
++        // Test the generated instruction.
++        arm_inst insts[1] = { test.Bits() };
++        if (IsValidSingleInstructionDestinationRegister(reg)) {
++          validation_should_pass(insts, NACL_ARRAY_SIZE(insts),
++                                 kDefaultBaseAddr, message.str());
++        } else {
++          validation_should_fail(insts, NACL_ARRAY_SIZE(insts),
++                                 kDefaultBaseAddr, message.str());
++        }
++      }
++    }
++  }
++}
++
++TEST_F(ValidatorTests, UseR9) {
++  // Verify that we report about illegal uses of thread local pointer.
++  static const AnnotatedInstruction use_r9_insts[] = {
++    {0xe0892009, "add r2, r9, r9"},
++    { 0x03C99103, "bic r9, r9, #0xC0000000: simple in-place mask (form 1)" },
++    { 0x03C91103, "bic r1, r9, #0xC0000000: mask with register move (form 1)" },
++    { 0x03C19103, "bic r9, r1, #0xC0000000: mask with register move (form 1)" },
++    { 0x03C994C0, "bic r9, r9, #0xC0000000: simple in-place mask (form 2)" },
++    { 0x03C914C0, "bic r1, r9, #0xC0000000: mask with register move (form 2)" },
++    { 0x03C394C0, "bic r9, r3, #0xC0000000: mask with register move (form 2)" },
++    { 0x03C994FF, "bic r9, r9, #0xFF000000: overzealous but correct mask" },
++    {0xe7df9f1f, "bfc   r9, #30, #2"},
++    // TODO(karl): Add load/store examples, when implemented, like:
++    //    STR r9, [rt]; MOV rd, r9; MOV sd, r9
++  };
++
++  // Try each test instruction.
++  for (size_t i = 0; i < NACL_ARRAY_SIZE(use_r9_insts); ++i) {
++    Instruction test(use_r9_insts[i].inst);
++
++    // Try each possible condition.
++    for (Instruction::Condition cond = Instruction::EQ;
++         cond < Instruction::UNCONDITIONAL;
++         cond = Instruction::Next(cond)) {
++      Instruction test_cond(ChangeInstCond(test, cond));
++
++      ostringstream message;
++      message << "Test use of r9 with cond=" << Instruction::ToString(cond)
++              << ": " << use_r9_insts[i].about;
++      validation_should_fail(&use_r9_insts[i].inst, 1, kDefaultBaseAddr,
++                             message.str());
++    }
++  }
++}
++
++};  // anonymous namespace
++
++// Test driver function.
++int main(int argc, char *argv[]) {
++  testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}
+diff --git a/native_client/src/trusted/validator_arm/validator_tests.cc b/native_client/src/trusted/validator_arm/validator_tests.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..d3af981988095ca127a0a9b555b23a76c176873a
+--- /dev/null
++++ b/native_client/src/trusted/validator_arm/validator_tests.cc
+@@ -0,0 +1,204 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "native_client/src/trusted/validator_arm/validator_tests.h"
++
++namespace nacl_val_arm_test {
++
++void ProblemSpy::ReportProblemMessage(Violation violation,
++                                      uint32_t vaddr,
++                                      const char* message) {
++  ProblemRecord prob(violation, vaddr, message);
++  problems_.push_back(prob);
++}
++
++ValidatorTests::ValidatorTests()
++    : _validator(NULL),
++      _is_valid_single_instruction_destination_register() {
++  _is_valid_single_instruction_destination_register.
++      Add(Register::Tp()).Add(Register::Sp()).Add(Register::Pc());
++}
++
++const nacl_arm_dec::ClassDecoder& ValidatorTests::decode(
++    nacl_arm_dec::Instruction inst) const {
++  return _validator->decode(inst);
++}
++
++bool ValidatorTests::validate(const arm_inst *pattern,
++                              size_t inst_count,
++                              uint32_t start_addr,
++                              ProblemSink *sink) {
++  // We think in instructions; CodeSegment thinks in bytes.
++  const uint8_t *bytes = reinterpret_cast<const uint8_t *>(pattern);
++  CodeSegment segment(bytes, start_addr, inst_count * sizeof(arm_inst));
++
++  vector<CodeSegment> segments;
++  segments.push_back(segment);
++
++  return _validator->validate(segments, sink);
++}
++
++ViolationSet ValidatorTests::find_violations(
++    const arm_inst *pattern,
++    size_t inst_count,
++    uint32_t start_addr,
++    ProblemSink *sink) {
++  // We think in instructions; CodeSegment thinks in bytes.
++  const uint8_t *bytes = reinterpret_cast<const uint8_t *>(pattern);
++  CodeSegment segment(bytes, start_addr, inst_count * sizeof(arm_inst));
++
++  vector<CodeSegment> segments;
++  segments.push_back(segment);
++
++  return _validator->find_violations(segments, sink);
++}
++
++void ValidatorTests::validation_should_pass(const arm_inst *pattern,
++                                            size_t inst_count,
++                                            uint32_t base_addr,
++                                            const string &msg) {
++  ProblemSpy spy;
++  bool validation_result = validate(pattern, inst_count, base_addr, &spy);
++
++  std::string errors;
++  vector<ProblemRecord> &problems = spy.get_problems();
++  for (vector<ProblemRecord>::const_iterator it = problems.begin();
++       it != problems.end();
++       ++it) {
++    if (it != problems.begin()) {
++      errors += "\n";
++    }
++    errors += std::string("\t") + it->message();
++  }
++
++  ASSERT_TRUE(validation_result) << msg << " should pass at " << base_addr <<
++      ":\n" << errors;
++}
++
++void ValidatorTests::validation_should_pass2(const arm_inst *pattern,
++                                             size_t inst_count,
++                                             uint32_t base_addr,
++                                             const string &msg) {
++  // A couple sanity checks for correct usage.
++  ASSERT_EQ(2U, inst_count)
++      << "This routine only supports 2-instruction patterns.";
++  ASSERT_TRUE(
++      _validator->bundle_for_address(base_addr).begin_addr() == base_addr)
++      << "base_addr parameter must be bundle-aligned";
++
++  // Try error case where second instruction occurs as first instruction.
++  arm_inst second_as_program[] = {
++    pattern[1]
++  };
++  ostringstream bad_first_message;
++  bad_first_message << msg << ": without first instruction";
++  validation_should_fail(second_as_program,
++                         NACL_ARRAY_SIZE(second_as_program),
++                         base_addr,
++                         bad_first_message.str());
++
++  // Try the legitimate (non-overlapping) variations:
++  uint32_t last_addr = base_addr + (kBytesPerBundle - 4);
++  for (uint32_t addr = base_addr; addr < last_addr; addr += 4) {
++    validation_should_pass(pattern, inst_count, addr, msg);
++  }
++
++  // Make sure it fails over bundle boundaries.
++  ProblemSpy spy;
++  ViolationSet violations = find_violations(
++      pattern, inst_count, last_addr, &spy);
++
++  EXPECT_NE(violations, kNoViolations)
++      << msg << " should fail at overlapping address " << last_addr;
++  EXPECT_TRUE(nacl_arm_dec::ContainsCrossesBundleViolation(violations))
++      << msg << " should contain crosses bundle violation";
++
++  vector<ProblemRecord> &problems = spy.get_problems();
++  ASSERT_EQ(1U, problems.size())
++      << msg << " should have 1 problem at overlapping address " << last_addr;
++
++  ProblemRecord first = problems[0];
++
++  if (first.violation() !=
++      nacl_arm_dec::DATA_REGISTER_UPDATE_CROSSES_BUNDLE_VIOLATION) {
++    last_addr += 4;
++  }
++  EXPECT_EQ(last_addr, first.vaddr())
++      << "Problem in valid but mis-aligned pseudo-instruction ("
++      << msg
++      << ") must be reported at end of bundle";
++  EXPECT_FALSE(nacl_arm_dec::IsSafetyViolation(first.violation()))
++      << "Just crossing a bundle should not make a safe instruction unsafe: "
++      << msg;
++
++  // Be sure that we get one of the crosses bundle error messages.
++  EXPECT_TRUE(nacl_arm_dec::IsCrossesBundleViolation(first.violation()));
++}
++
++ViolationSet ValidatorTests::validation_should_fail(
++    const arm_inst *pattern,
++    size_t inst_count,
++    uint32_t base_addr,
++    const string &msg,
++    ProblemSpy* spy) {
++  // TODO(cbiffle): test at various overlapping and non-overlapping addresses,
++  // like above.  Not that this is a spectacularly likely failure case, but
++  // it's worth exercising.
++  ViolationSet violations =
++      find_violations(pattern, inst_count, base_addr, spy);
++  EXPECT_NE(violations, kNoViolations) << "Expected to fail: " << msg;
++
++  if (spy != NULL) {
++    // There should be at least one problem.
++    vector<ProblemRecord> &problems = spy->get_problems();
++    EXPECT_LT(static_cast<size_t>(0), problems.size());
++
++    // Violations found in problems should match violations returned by
++    // find_violations.
++    ViolationSet problem_violations = kNoViolations;
++    for (vector<ProblemRecord>::iterator iter = problems.begin();
++         iter != problems.end();
++         ++iter) {
++      problem_violations = nacl_arm_dec::ViolationUnion(
++          problem_violations,
++          nacl_arm_dec::ViolationBit(iter->violation()));
++    }
++    EXPECT_EQ(violations, problem_violations)
++        << "Violation differences: " << msg;
++  }
++
++  // The rest of the checking is done in the caller.
++  return violations;
++}
++
++void ValidatorTests::all_cond_values_pass(const arm_inst prototype,
++                                          uint32_t base_addr,
++                                          const string &msg) {
++  arm_inst test_inst = prototype;
++  for (Instruction::Condition cond = Instruction::EQ;
++       cond < Instruction::UNCONDITIONAL;
++       cond = Instruction::Next(cond)) {
++    test_inst = ChangeCond(test_inst, cond);
++    EXPECT_TRUE(validate(&test_inst, 1, base_addr))
++        << "Fails on cond " << Instruction::ToString(cond) << ": " << msg;
++  }
++}
++
++void ValidatorTests::all_cond_values_fail(const arm_inst prototype,
++                                          uint32_t base_addr,
++                                          const string &msg) {
++  arm_inst test_inst = prototype;
++  for (Instruction::Condition cond = Instruction::EQ;
++       cond < Instruction::UNCONDITIONAL;
++       cond = Instruction::Next(cond)) {
++    test_inst = ChangeCond(test_inst, cond);
++    EXPECT_FALSE(validate(&test_inst, 1, base_addr))
++      << std::hex << test_inst
++        << ": Passes on cond " << Instruction::ToString(cond) << ": " << msg;
++  }
++}
++
++}  // namespace nacl_val_arm_test
+diff --git a/native_client/src/trusted/validator_arm/validator_tests.h b/native_client/src/trusted/validator_arm/validator_tests.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f1d9c68cead31baf5fd5dee46840eb8c3cadc6f
+--- /dev/null
++++ b/native_client/src/trusted/validator_arm/validator_tests.h
+@@ -0,0 +1,256 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_ARM_VALIDATOR_TESTS_H_
++#define NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_ARM_VALIDATOR_TESTS_H_
++
++#ifndef NACL_TRUSTED_BUT_NOT_TCB
++#error This file is not meant for use in the TCB
++#endif
++
++/*
++ * Unit tests for the ARM validator
++ *
++ * These tests use the google-test framework (gtest for short) to exercise the
++ * ARM validator.  The tests currently fall into two rough categories:
++ *  1. Simple method-level tests that exercise the validator's primitive
++ *     capabilities, and
++ *  2. Instruction pattern tests that run the entire validator.
++ *
++ * All instruction pattern tests use hand-assembled machine code fragments,
++ * embedded as byte arrays.  This is somewhat ugly, but deliberate: it isolates
++ * these tests from gas, which may be buggy or not installed.  It also lets us
++ * hand-craft malicious bit patterns that gas may refuse to produce.
++ *
++ * To write a new instruction pattern, or make sense of an existing one, use the
++ * ARMv7-A ARM (available online).  Instructions in this file are written as
++ * 32-bit integers so the hex encoding matches the docs.
++ *
++ * Also see validator_tests.cc and validator_large_tests.cc
++ */
++
++#include <algorithm>
++#include <climits>
++#include <limits>
++#include <string>
++#include <sstream>
++#include <vector>
++
++#include "gtest/gtest.h"
++#include "native_client/src/include/nacl_macros.h"
++#include "native_client/src/include/portability_bits.h"
++
++#include "native_client/src/trusted/validator_arm/problem_reporter.h"
++#include "native_client/src/trusted/validator_arm/validator.h"
++
++using std::vector;
++using std::string;
++using std::ostringstream;
++
++using nacl_arm_dec::kNoViolations;
++using nacl_arm_dec::Instruction;
++using nacl_arm_dec::Register;
++using nacl_arm_dec::RegisterList;
++using nacl_arm_dec::Violation;
++using nacl_arm_dec::ViolationSet;
++
++using nacl_arm_val::SfiValidator;
++using nacl_arm_val::CodeSegment;
++using nacl_arm_val::ProblemReporter;
++using nacl_arm_val::ProblemSink;
++
++namespace nacl_val_arm_test {
++
++#ifdef __BIG_ENDIAN__
++#error This test will only succeed on a little-endian machine.  Sorry.
++#endif
++
++// Since ARM instructions are always little-endian, on a little-endian machine
++// we can represent them as ints.  This makes things somewhat easier to read
++// below.
++typedef uint32_t arm_inst;
++
++// This is where untrusted code starts.  Most tests use this.
++static const uint32_t kDefaultBaseAddr = 0x20000;
++
++/*
++ * We use these parameters to initialize the validator, below.  They are
++ * somewhat different from the parameters used in real NaCl systems, to test
++ * degrees of validator freedom that we don't currently exercise in prod.
++ */
++// Number of bytes in each bundle.  Theoretically can also be 32 - not tested.
++static const uint32_t kBytesPerBundle = 16;
++// Limit code to 512MiB.
++static const uint32_t kCodeRegionSize = 0x20000000;
++// Limit data to 1GiB.
++static const uint32_t kDataRegionSize = 0x40000000;
++// Untrusted code must not write to the thread pointer.
++static const RegisterList kAbiReadOnlyRegisters(Register::Tp());
++// The stack pointer can be used for "free" loads and stores.
++static const RegisterList kAbiDataAddrRegisters(nacl_arm_dec::Register::Sp());
++// By default don't support TST+LDR/TST+STR, only allow it in tests that
++// explicitly have them.
++static const bool kAllowCondMemSfi = false;
++
++// Simply records the arguments given to ReportProblem, below.
++class ProblemRecord {
++ public:
++  ProblemRecord(Violation violation,
++                uint32_t vaddr,
++                const std::string& message)
++      : violation_(violation), vaddr_(vaddr), message_(message) {}
++
++  ProblemRecord(const ProblemRecord& r)
++      : violation_(r.violation_), vaddr_(r.vaddr_), message_(r.message_) {}
++
++  ~ProblemRecord() {}
++
++  ProblemRecord& operator=(const ProblemRecord& r) {
++    violation_ = r.violation_;
++    vaddr_ = r.vaddr_;
++    message_ = r.message_;
++    return *this;
++  }
++
++  uint32_t vaddr() const { return vaddr_; }
++  Violation violation() const { return violation_; }
++  std::string message() const { return message_; }
++
++ private:
++  Violation violation_;
++  uint32_t vaddr_;
++  std::string message_;
++};
++
++// A ProblemSink that records all calls (implementation of the Spy pattern)
++class ProblemSpy : public ProblemReporter {
++ public:
++  // Returns the list of found problems.
++  vector<ProblemRecord> &get_problems() { return problems_; }
++
++ protected:
++  virtual void ReportProblemMessage(Violation violation,
++                                    uint32_t vaddr,
++                                    const char* message);
++
++ private:
++  static const vector<ProblemRecord>::size_type max_problems = 5000;
++  vector<ProblemRecord> problems_;
++};
++
++// Coordinates the fixture objects used by test cases below.
++class ValidatorTests : public ::testing::Test {
++ public:
++  // Utility method to decode an instruction.
++  const nacl_arm_dec::ClassDecoder& decode(
++      nacl_arm_dec::Instruction inst) const;
++
++  // Returns the given instruction, after modifying the instruction condition
++  // to the given value.
++  static arm_inst ChangeCond(arm_inst inst, Instruction::Condition c) {
++    return (inst & 0x0fffffff) | (static_cast<arm_inst>(c) << 28);
++  }
++
++ protected:
++  ValidatorTests();
++
++  virtual ~ValidatorTests() {
++    EXPECT_EQ(_validator, (SfiValidator *) NULL);
++  }
++
++  virtual void SetUp() {
++    EXPECT_EQ(_validator, (SfiValidator *) NULL);
++
++    NaClCPUFeaturesArm cpu_features;
++    NaClClearCPUFeaturesArm(&cpu_features);
++    NaClSetCPUFeatureArm(&cpu_features, NaClCPUFeatureArm_CanUseTstMem,
++                         kAllowCondMemSfi);
++
++    _validator = new SfiValidator(kBytesPerBundle,
++                                  kCodeRegionSize,
++                                  kDataRegionSize,
++                                  kAbiReadOnlyRegisters,
++                                  kAbiDataAddrRegisters,
++                                  &cpu_features);
++  }
++
++  virtual void  TearDown() {
++    EXPECT_NE(_validator, (SfiValidator *) NULL);
++    delete _validator;
++    _validator = NULL;
++  }
++
++  // Utility method for validating a sequence of bytes.
++  bool validate(const arm_inst *pattern,
++                size_t inst_count,
++                uint32_t start_addr,
++                ProblemSink *sink = NULL);
++
++  // Utility method for validating a sequence of bytes.
++  ViolationSet find_violations(const arm_inst *pattern,
++                               size_t inst_count,
++                               uint32_t start_addr,
++                               ProblemSink *sink = NULL);
++
++  // Tests an arbitrary-size instruction fragment that is expected to pass.
++  // Does not modulate or rewrite the pattern in any way.
++  void validation_should_pass(const arm_inst *pattern,
++                              size_t inst_count,
++                              uint32_t base_addr,
++                              const string &msg);
++
++  // Tests a two-instruction pattern that's expected to pass, at each possible
++  // bundle alignment. This also tries the pattern across bundle boundaries,
++  // and makes sure it fails.
++  void validation_should_pass2(const arm_inst *pattern,
++                               size_t inst_count,
++                               uint32_t base_addr,
++                               const string &msg);
++
++  // Tests a pattern that is forbidden in the SFI model.
++  //
++  // Note that the 'msg1' and 'msg2' parameters are merely concatentated in the
++  // output.
++  ViolationSet validation_should_fail(const arm_inst *pattern,
++                                      size_t inst_count,
++                                      uint32_t base_addr,
++                                      const string &msg,
++                                      ProblemSpy* spy = NULL);
++
++  // Tests an instruction with all possible conditions (i.e. all except 1111),
++  // verifying all cases are safe.
++  void all_cond_values_pass(const arm_inst prototype,
++                            uint32_t base_addr,
++                            const string &msg);
++
++  // Tests an instruction with all possible conditions (i.e. all except 1111),
++  // verifying all cases are unsafe.
++  void all_cond_values_fail(const arm_inst prototype,
++                            uint32_t base_addr,
++                            const string &msg);
++
++  // Returns the given instruction, after modifying its S bit (bit 20) to
++  // the given value.
++  static arm_inst SetSBit(arm_inst inst, bool s) {
++    return (inst & 0xffefffff) | (static_cast<arm_inst>(s) << 20);
++  }
++
++  // Returns true if the given register is not in {Tp, Sp, Pc}. That is,
++  // not one of the registers requiring either: a 2-instruction sequence
++  // to update (Sp and Pc); or should not be updated at all (Tp).
++  bool IsValidSingleInstructionDestinationRegister(Register r) const {
++    return !_is_valid_single_instruction_destination_register.Contains(r);
++  }
++
++  SfiValidator *_validator;
++
++ private:
++  RegisterList _is_valid_single_instruction_destination_register;
++};
++
++}  // namespace nacl_val_arm_test
++
++#endif  // NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_ARM_VALIDATOR_TESTS_H_
+diff --git a/native_client/src/trusted/validator_mips/address_set.cc b/native_client/src/trusted/validator_mips/address_set.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..5a141fdf615d5b1cb5bfcd81e985a8bbdb5ab050
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/address_set.cc
+@@ -0,0 +1,115 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "native_client/src/trusted/validator_mips/address_set.h"
++#include <assert.h>
++#include <stdio.h>
++#include <string.h>
++
++namespace nacl_mips_val {
++
++#if !defined(NDEBUG)
++static const int kInstrAlignment = 4;
++#endif
++static const int kInstrSize = 4;
++static const int kWordSize = 32;
++static const int kInstrPerWord = 4 * kWordSize;
++
++#define UP_ALLIGN(x) (kInstrSize * ((x + kInstrSize - 1) / kInstrSize))
++
++AddressSet::AddressSet(uint32_t base, uint32_t size)
++    : base_(base), size_(size), end_(base + UP_ALLIGN(size) - kInstrSize),
++      bits_(new uint32_t[(end_ - base_) / kInstrPerWord + 1]) {
++  assert(((base % kInstrAlignment) == 0) && (size > 0));
++  memset(bits_, 0, sizeof(uint32_t) * ((end_ - base_) / kInstrPerWord + 1));
++}
++
++AddressSet::~AddressSet() {
++  delete[] bits_;
++}
++
++void AddressSet::Add(uint32_t address) {
++  if ((address - base_) < size_) {
++    uint32_t word_address = (address - base_) / sizeof(uint32_t);
++    bits_[word_address / kWordSize] |= 1 << (word_address % kWordSize);
++  }
++}
++
++bool AddressSet::Contains(uint32_t address) const {
++  if ((address - base_) < size_) {
++    uint32_t word_address = (address - base_) / sizeof(uint32_t);
++
++    return bits_[word_address / kWordSize] & (1 << (word_address % kWordSize));
++  } else {
++    return false;
++  }
++}
++
++AddressSet::Iterator AddressSet::Begin() const {
++  return Iterator(*this, 0, 0);
++}
++
++AddressSet::Iterator AddressSet::End() const {
++  uint32_t end_index = (end_ - base_) / kInstrPerWord;
++  uint32_t end_shift = ((end_ - base_) / kInstrSize) % kWordSize;
++  return Iterator(*this, end_index, end_shift);
++}
++
++AddressSet::Iterator::Iterator(const AddressSet &parent,
++                               uint32_t index,
++                               uint32_t shift)
++    : parent_(parent), index_(index), shift_(shift) {
++  Advance();
++}
++
++AddressSet::Iterator &AddressSet::Iterator::Next() {
++  shift_++;   // Skip the current bit, if any, and
++  Advance();  // seek to the next 1 bit.
++  return *this;
++}
++
++bool AddressSet::Iterator::Equals(const AddressSet::Iterator &other) const {
++  return index_ == other.index_ && shift_ == other.shift_;
++}
++
++uint32_t AddressSet::Iterator::GetAddress() const {
++  return parent_.base_ + kInstrSize * ((index_ * kWordSize) + shift_);
++}
++
++void AddressSet::Iterator::Advance() {
++  uint32_t max_index = (parent_.size_ / kInstrPerWord) + 1;
++
++  for (; index_ < max_index; index_++) {
++    uint32_t word = (shift_ > 31) ? 0 : parent_.bits_[index_] >> shift_;
++    while (word) {
++      if (word & 1) return;
++
++      // A meager optimization for sparse words. Check if the first 16 slots are
++      // empty, and if they are, skip them. Repeat the same check for 8 slots.
++      // Otherwise, we will check bit by bit, to reach the next valid one.
++      if (!(word & 0xFFFF)) {
++        word >>= 16;
++        shift_ += 16;
++      } else if (!(word & 0xFF)) {
++        word >>= 8;
++        shift_ += 8;
++      } else {
++        word >>= 1;
++        shift_++;
++      }
++    }
++    shift_ = 0;
++  }
++
++  // If we have moved too far, we should limit the address to
++  // the last valid address.
++  if (index_ == max_index) {
++    index_ = (parent_.end_ - parent_.base_) / kInstrPerWord;
++    shift_ = ((parent_.end_ - parent_.base_) / kInstrSize) % kWordSize;
++  }
++}
++
++}  // namespace nacl_mips_val
+diff --git a/native_client/src/trusted/validator_mips/address_set.h b/native_client/src/trusted/validator_mips/address_set.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..27df0e02c8f2a679c86c4bf73d280249036e7432
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/address_set.h
+@@ -0,0 +1,81 @@
++/*
++ * Copyright 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ * Copyright 2012, Google Inc.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_MIPS_ADDRESS_SET_H
++#define NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_MIPS_ADDRESS_SET_H
++
++#include <stdint.h>
++
++namespace nacl_mips_val {
++
++/*
++ * A set of word addresses, implemented as a dense bitset.
++ *
++ * An AddressSet has a base address and a size, in bytes, of the space to
++ * describe.  Describing N bytes costs N/32 bytes here, since we only record
++ * word addresses (4-byte alignment) and pack 8 per byte.
++ *
++ * Thus, an AddressSet covering the entire 256MB code region costs 8MB, plus
++ * a small constant overhead (~16 bytes).
++ */
++class AddressSet {
++ public:
++  /*
++   * Creates an AddressSet describing 'size' bytes starting at 'base'.
++   */
++  AddressSet(uint32_t base, uint32_t size);
++  ~AddressSet();
++
++  /*
++   * Adds an address to the set.
++   * - If the address is already in the set, nothing changes.
++   * - If the address is outside of this set's range (delimited by base and size
++   *   provided at construction), nothing changes.
++   * - If the address is not 4-byte aligned, the address of the 4-byte word
++   *   containing the address is added instead.
++   */
++  void Add(uint32_t address);
++
++  /*
++   * Checks whether the AddressSet contains an address.  If the address is not
++   * 4-byte aligned, the address of the 4-byte word containing the address is
++   * checked instead.
++   */
++  bool Contains(uint32_t address) const;
++
++  class Iterator {
++   public:
++    Iterator(const AddressSet &, uint32_t index, uint32_t shift);
++    Iterator& Next();
++    bool Equals(const Iterator &) const;
++    uint32_t GetAddress() const;
++
++   private:
++    void Advance();
++
++    const AddressSet &parent_;
++    uint32_t index_;
++    uint32_t shift_;
++  };
++
++  Iterator Begin() const;
++  Iterator End() const;
++
++ private:
++  const uint32_t base_;
++  const uint32_t size_;
++  const uint32_t end_;
++  uint32_t * const bits_;
++
++  // Disallow copies - we don't need them, and don't want to refcount bits_.
++  AddressSet(const AddressSet &);
++  AddressSet &operator=(const AddressSet &);
++};
++
++}  // namespace
++
++#endif  // NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_MIPS_ADDRESS_SET_H
+diff --git a/native_client/src/trusted/validator_mips/address_set_test.cc b/native_client/src/trusted/validator_mips/address_set_test.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..31748fbe98b4a8da69b1999c0010430f215c1813
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/address_set_test.cc
+@@ -0,0 +1,77 @@
++/*
++ * Copyright 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ * Copyright 2012, Google Inc.
++ */
++
++/*
++ * A simple test for AddressSet.
++ */
++
++#include <vector>
++#include <string>
++#include <sstream>
++#include <stdio.h>
++#include <stdlib.h>
++
++#include "gtest/gtest.h"
++#include "native_client/src/include/nacl_macros.h"
++#include "native_client/src/include/portability.h"
++#include "native_client/src/trusted/validator_mips/address_set.h"
++
++using nacl_mips_val::AddressSet;
++
++
++class AddressTests : public ::testing::Test {
++};
++
++TEST_F(AddressTests, TestMutation) {
++  uint32_t base = 0x1234;
++  uint32_t size = 0x1000;
++  AddressSet as(base, size);
++
++  as.Add(0x1200);  // Becomes a no-op.
++  as.Add(base + (31 * 4));  // Added.
++  as.Add(0x1240);  // Added.
++  as.Add(0x1230);  // No-op.
++  as.Add(base + size);  // No-op.
++  as.Add(0x1235);  // Added as 1234.
++  as.Add(0x1238);  // Added.
++  as.Add(0x2000);  // Added.
++  as.Add(base + size + 100);  // No-op.
++  as.Add(0x1400);  // Added.
++
++  // Successful additions in ascending order:
++  uint32_t expected[] = { 0x1234, 0x1238, 0x1240, base+(31*4), 0x1400, 0x2000 };
++  for (uint32_t i = 0; i < NACL_ARRAY_SIZE(expected); i++) {
++     EXPECT_TRUE(as.Contains(expected[i])) << "Set should contain "
++                                           << std::hex << expected[i]
++                                           << ", does not.";
++  }
++
++  uint32_t x = 0;
++  for (AddressSet::Iterator it = as.Begin(); !it.Equals(as.End());
++       it.Next(), ++x) {
++    EXPECT_EQ(it.GetAddress(), expected[x]) << "At " << x
++                                            << "\n Expected: " << std::hex
++                                            << expected[x]
++                                            << "\n Actual: " << std::hex
++                                            << it.GetAddress();
++  }
++  EXPECT_EQ(x, NACL_ARRAY_SIZE(expected)) << "Expected iterator to step"
++                                          << NACL_ARRAY_SIZE(expected)
++                                          << " times \n" << "Actual: " << x;
++
++  // Unsuccessful additions:
++  uint32_t unexpected[] = { 0x1200, 0x1230, base+size, base+size+100 };
++  for (uint32_t i = 0; i < NACL_ARRAY_SIZE(unexpected); i++) {
++    EXPECT_FALSE(as.Contains(unexpected[i])) << "Set should not contain "
++                                           << std::hex << unexpected[i];
++  }
++}
++
++int main(int argc, char *argv[]) {
++  testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}
 diff --git a/native_client/src/trusted/validator_mips/build.scons b/native_client/src/trusted/validator_mips/build.scons
 new file mode 100755
 index 0000000000000000000000000000000000000000..108951574daf1f76d4c8942c426ed6f1e30cff43
@@ -4521,10 +8409,10 @@ index 0000000000000000000000000000000000000000..f8dee4631351ee0f3b9a8742370b48b1
 +}
 diff --git a/native_client/src/trusted/validator_mips/ncvalidate.cc b/native_client/src/trusted/validator_mips/ncvalidate.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..f17e8c3340ce82273e4e659f1bfff03335e00b0c
+index 0000000000000000000000000000000000000000..f47a24f5b1fe7f6723123b4b0f8a24a56aa47f3b
 --- /dev/null
 +++ b/native_client/src/trusted/validator_mips/ncvalidate.cc
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,249 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -4754,7 +8642,6 @@ index 0000000000000000000000000000000000000000..f17e8c3340ce82273e4e659f1bfff033
 +  sizeof(NaClCPUFeaturesMips),
 +  NaClSetAllCPUFeaturesMips,
 +  NaClGetCurrentCPUFeaturesMips,
-+  NaClFixCPUFeaturesMips,
 +  IsOnInstBoundaryMips,
 +};
 +
@@ -11259,10 +15146,10 @@ index 0000000000000000000000000000000000000000..2b647bb1f17346096ff44d4f148aa0e8
 +  return tasks
 diff --git a/native_client/src/trusted/validator_ragel/dfa_validate_32.c b/native_client/src/trusted/validator_ragel/dfa_validate_32.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..9e049e8af1a9a67d0cd16b5c3bb907f61eb981a4
+index 0000000000000000000000000000000000000000..021e2d4d8253c1b2d4d415645bbe1a319aa421cd
 --- /dev/null
 +++ b/native_client/src/trusted/validator_ragel/dfa_validate_32.c
-@@ -0,0 +1,378 @@
+@@ -0,0 +1,377 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -11634,7 +15521,6 @@ index 0000000000000000000000000000000000000000..9e049e8af1a9a67d0cd16b5c3bb907f6
 +  sizeof(NaClCPUFeaturesX86),
 +  NaClSetAllCPUFeaturesX86,
 +  NaClGetCurrentCPUFeaturesX86,
-+  NaClFixCPUFeaturesX86,
 +  IsOnInstBoundary_x86_32,
 +};
 +
@@ -11643,10 +15529,10 @@ index 0000000000000000000000000000000000000000..9e049e8af1a9a67d0cd16b5c3bb907f6
 +}
 diff --git a/native_client/src/trusted/validator_ragel/dfa_validate_64.c b/native_client/src/trusted/validator_ragel/dfa_validate_64.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..fc2406e382eab23201bab3b6bc2af1664c3c6a89
+index 0000000000000000000000000000000000000000..2a3ffe7246eb22bc362769dcc2e7a1bc0fa62038
 --- /dev/null
 +++ b/native_client/src/trusted/validator_ragel/dfa_validate_64.c
-@@ -0,0 +1,318 @@
+@@ -0,0 +1,317 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -11958,7 +15844,6 @@ index 0000000000000000000000000000000000000000..fc2406e382eab23201bab3b6bc2af166
 +  sizeof(NaClCPUFeaturesX86),
 +  NaClSetAllCPUFeaturesX86,
 +  NaClGetCurrentCPUFeaturesX86,
-+  NaClFixCPUFeaturesX86,
 +  IsOnInstBoundary_x86_64,
 +};
 +
@@ -122613,10 +126498,10 @@ index 0000000000000000000000000000000000000000..76d44f9d04fe837dfded4b05c951746f
 +#endif
 diff --git a/native_client/src/untrusted/minidump_generator/minidump_generator.cc b/native_client/src/untrusted/minidump_generator/minidump_generator.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..20cc4c114e7b9421693577a9277daf683e6f0c44
+index 0000000000000000000000000000000000000000..aae8624478176c9f7e6bc6b853e9396def3fa73b
 --- /dev/null
 +++ b/native_client/src/untrusted/minidump_generator/minidump_generator.cc
-@@ -0,0 +1,745 @@
+@@ -0,0 +1,749 @@
 +/*
 + * Copyright (c) 2013 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -122921,7 +126806,9 @@ index 0000000000000000000000000000000000000000..20cc4c114e7b9421693577a9277daf68
 +}
 +
 +static bool GetStackEnd(void **stack_end) {
-+#if defined(__GLIBC__)
++#if defined(_NEWLIB_VERSION)
++  return pthread_get_stack_end_np(pthread_self(), stack_end) == 0;
++#else
 +  void *stack_base;
 +  size_t stack_size;
 +  pthread_attr_t attr;
@@ -122931,6 +126818,7 @@ index 0000000000000000000000000000000000000000..20cc4c114e7b9421693577a9277daf68
 +    pthread_attr_destroy(&attr);
 +    return true;
 +  }
++#if defined(__GLIBC__)
 +  // pthread_getattr_np() currently fails on the initial thread.  As a
 +  // workaround, if we reach here, assume we are on the initial thread
 +  // and get the initial thread's stack end as recorded by glibc.
@@ -122938,7 +126826,8 @@ index 0000000000000000000000000000000000000000..20cc4c114e7b9421693577a9277daf68
 +  *stack_end = __libc_stack_end;
 +  return true;
 +#else
-+  return pthread_get_stack_end_np(pthread_self(), stack_end) == 0;
++  return false;
++#endif
 +#endif
 +}
 +
@@ -128018,10 +131907,10 @@ index 0000000000000000000000000000000000000000..035a46bb74426d8057cf34a42d68c8c5
 +}
 diff --git a/native_client/src/untrusted/nacl/start.c b/native_client/src/untrusted/nacl/start.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..b4abde5d07a8658d282bd279e7651789c5b6d6f0
+index 0000000000000000000000000000000000000000..1b921e3730ed58e15f49ed4c849d096cf913a973
 --- /dev/null
 +++ b/native_client/src/untrusted/nacl/start.c
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,70 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -128045,8 +131934,6 @@ index 0000000000000000000000000000000000000000..b4abde5d07a8658d282bd279e7651789
 + * link time it is used in favour of 'main' as the program entry point.
 + */
 +int __nacl_main(int argc, char **argv, char **envp) __attribute__((weak));
-+
-+int main(int argc, char **argv, char **envp);
 +
 +void *__nacl_initial_thread_stack_end;
 +
@@ -128096,10 +131983,10 @@ index 0000000000000000000000000000000000000000..b4abde5d07a8658d282bd279e7651789
 +}
 diff --git a/native_client/src/untrusted/nacl/start.h b/native_client/src/untrusted/nacl/start.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..c7fa223e31f68d43cb36f17a49b27c0a97ec4c4b
+index 0000000000000000000000000000000000000000..b8b5a02bcd4fd1ed84b7beb521144350040e6f05
 --- /dev/null
 +++ b/native_client/src/untrusted/nacl/start.h
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,14 @@
 +/*
 + * Copyright (c) 2013 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -128108,6 +131995,8 @@ index 0000000000000000000000000000000000000000..c7fa223e31f68d43cb36f17a49b27c0a
 +
 +#ifndef NATIVE_CLIENT_SRC_UNTRUSTED_NACL_START_H_
 +#define NATIVE_CLIENT_SRC_UNTRUSTED_NACL_START_H_ 1
++
++int main(int argc, char **argv, char **envp);
 +
 +extern void *__nacl_initial_thread_stack_end;
 +
@@ -128238,278 +132127,4 @@ index 0000000000000000000000000000000000000000..fb59e505f5b5f03a71578819a8602ed6
 +int bind(int sockfd, const struct sockaddr *addr, unsigned int addrlen) {
 +  errno = ENOSYS;
 +  return -1;
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/chown.c b/native_client/src/untrusted/nacl/stubs/chown.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..a09553b199b607247d662de3d037d8bd02bb9d40
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/chown.c
-@@ -0,0 +1,19 @@
-+/*
-+ * Copyright 2010 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+/*
-+ * Stub routine for `chown' for porting support.
-+ */
-+
-+#include <sys/types.h>
-+#include <unistd.h>
-+#include <errno.h>
-+
-+int chown(const char *path, uid_t owner, gid_t group) {
-+  errno = ENOSYS;
-+  return -1;
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/closelog.c b/native_client/src/untrusted/nacl/stubs/closelog.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..9bdbbc64b7b32096a7b065374be0b8b9b42841e6
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/closelog.c
-@@ -0,0 +1,14 @@
-+/*
-+ * Copyright 2014 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * Stub routine for `closelog' for porting support.
-+ */
-+
-+#include <errno.h>
-+
-+void closelog(void) {
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/connect.c b/native_client/src/untrusted/nacl/stubs/connect.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..dd7f45d4ec3a9561adcdf301376b89e062a04c53
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/connect.c
-@@ -0,0 +1,18 @@
-+/*
-+ * Copyright 2014 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * Stub routine for `connect' for porting support.
-+ */
-+
-+#include <errno.h>
-+
-+struct sockaddr;
-+
-+int connect(int sockfd, const struct sockaddr *addr, unsigned int addrlen) {
-+  errno = ENOSYS;
-+  return -1;
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/endgrent.c b/native_client/src/untrusted/nacl/stubs/endgrent.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..d1a27c12c9ed595f11e9e1465a0fce068eddf431
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/endgrent.c
-@@ -0,0 +1,15 @@
-+/*
-+ * Copyright 2014 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * Stub routine for `endgrent' for porting support.
-+ */
-+
-+#include <errno.h>
-+#include <grp.h>
-+
-+void endgrent() {
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/endmntent.c b/native_client/src/untrusted/nacl/stubs/endmntent.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..e7aab7e4271f9006bd60c6ef82499061df14dbe6
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/endmntent.c
-@@ -0,0 +1,17 @@
-+/*
-+ * Copyright 2014 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * Stub routine for `endmntent' for porting support.
-+ */
-+
-+#include <errno.h>
-+#include <stdio.h>
-+
-+int endmntent(FILE *fp) {
-+  errno = ENOSYS;
-+  return -1;
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/endpwent.c b/native_client/src/untrusted/nacl/stubs/endpwent.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..185506bf1f4216dc4c87b4884da9b6fb561dabd9
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/endpwent.c
-@@ -0,0 +1,18 @@
-+/*
-+ * Copyright 2010 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+/*
-+ * Stub routine for `endpwent' for porting support.
-+ */
-+
-+#include <sys/types.h>
-+#include <pwd.h>
-+#include <errno.h>
-+
-+void endpwent(void) {
-+  errno = ENOSYS;
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/environ.c b/native_client/src/untrusted/nacl/stubs/environ.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..c3d1e8b03ef14f0a827701e2b72573589462574d
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/environ.c
-@@ -0,0 +1,13 @@
-+/*
-+ * Copyright 2010 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+/*
-+ * Stub empty environment for porting support.
-+ */
-+
-+static char *__env[1] = { 0 };
-+char **environ = __env;
-diff --git a/native_client/src/untrusted/nacl/stubs/execvpe.c b/native_client/src/untrusted/nacl/stubs/execvpe.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..809d027cfc900f1efda54ae0d93da21a129586f7
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/execvpe.c
-@@ -0,0 +1,17 @@
-+/*
-+ * Copyright 2014 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * Stub routine for `execvpe' for porting support.
-+ */
-+
-+#include <errno.h>
-+#include <unistd.h>
-+
-+int execvpe(const char *file, char *const argv[], char *const envp[]) {
-+  errno = ENOSYS;
-+  return -1;
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/fchown.c b/native_client/src/untrusted/nacl/stubs/fchown.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..4befad05924f215befe4e3ccc0c222a7ecbad41c
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/fchown.c
-@@ -0,0 +1,19 @@
-+/*
-+ * Copyright 2010 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+/*
-+ * Stub routine for `fchown' for porting support.
-+ */
-+
-+#include <sys/types.h>
-+#include <unistd.h>
-+#include <errno.h>
-+
-+int fchown(int fd, uid_t owner, gid_t group) {
-+  errno = ENOSYS;
-+  return -1;
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/fcntl.c b/native_client/src/untrusted/nacl/stubs/fcntl.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..101394148909ca2271de33cbe4ef73491dd712f7
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/fcntl.c
-@@ -0,0 +1,19 @@
-+/*
-+ * Copyright 2010 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+/*
-+ * Stub routine for `fcntl' for porting support.
-+ */
-+
-+#include <unistd.h>
-+#include <fcntl.h>
-+#include <errno.h>
-+
-+int fcntl(int fd, int cmd, ...) {
-+  errno = ENOSYS;
-+  return -1;
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/fork.c b/native_client/src/untrusted/nacl/stubs/fork.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..666174ae0df7c48b451cafb8aad8fedabd0615c6
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/fork.c
-@@ -0,0 +1,19 @@
-+/*
-+ * Copyright 2010 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+/*
-+ * Stub routine for `fork' for porting support.
-+ */
-+
-+#include <sys/types.h>
-+#include <unistd.h>
-+#include <errno.h>
-+
-+pid_t fork(void) {
-+  errno = ENOSYS;
-+  return -1;
-+}
-diff --git a/native_client/src/untrusted/nacl/stubs/freeaddrinfo.c b/native_client/src/untrusted/nacl/stubs/freeaddrinfo.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..3bc6cfadd03935361685fb1a49b4a1d2185d1223
---- /dev/null
-+++ b/native_client/src/untrusted/nacl/stubs/freeaddrinfo.c
-@@ -0,0 +1,14 @@
-+/*
-+ * Copyright 2014 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * Stub routine for `freeaddrinfo' for porting support.
-+ */
-+
-+struct addrinfo;
-+
-+void freeaddrinfo(struct addrinfo *res) {
 +}

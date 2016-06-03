@@ -1,3 +1,1386 @@
+diff --git a/native_client/tools/synthesize_code.py b/native_client/tools/synthesize_code.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..eca4817c74a5def3ea3587676f35f9d6b6d3c898
+--- /dev/null
++++ b/native_client/tools/synthesize_code.py
+@@ -0,0 +1,55 @@
++#!/usr/bin/python
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++
++"""This tool synthesizes a very large C program based on a single
++integer argument passed on the command line.
++"""
++import sys
++
++# The genareted code alternated between these operators
++OPERATORS = ["+", "-", "*", "/"]
++# number of function calls made by each function
++# A fairly high number here will disuade the inliner from doing anything
++# because function bodies will be large and the number of callers will be large.
++NUM_CALLS = 100
++
++def EmitProlog(n, out):
++  out.write("/* n == %d */\n" % n)
++
++  for i in range(n):
++    out.write("int func_%d(int x);\n" % i)
++
++def EmitFunctions(n, out):
++  for i in range(n):
++    out.write("\n")
++    out.write("int func_%d(int x) {\n" % i)
++    out.write("  int result = %d;\n" % i)
++    op = OPERATORS[i % len(OPERATORS)]
++    fun_indices = [(i + x) % n for x in range(1, NUM_CALLS + 1)]
++    for f in fun_indices:
++      out.write("  if (result != %d) result %s= func_%d(result);\n" %
++                (f, op, f))
++    out.write("  return result;\n")
++    out.write("}\n")
++
++def EmitMain(n, out):
++  out.write("\n")
++  # Note, use of argc is intended to thwart optimization
++  out.write("int main(int argc, char* argv[]) { return func_0(argc); }\n")
++
++def main(argv):
++  if len(argv) != 2:
++    print "Expecting integer parameter"
++    return 1
++  n = int(argv[1])
++  out = sys.stdout
++  out.write("/* This code was generated using %s */\n" % repr(argv))
++  EmitProlog(n, out)
++  EmitFunctions(n, out)
++  EmitMain(n, out)
++
++if __name__ == '__main__':
++  sys.exit(main(sys.argv))
+diff --git a/native_client/tools/syscall_stats.py b/native_client/tools/syscall_stats.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..6455fe28e79ce8362b1d7d0e28ce4b993f0b9e40
+--- /dev/null
++++ b/native_client/tools/syscall_stats.py
+@@ -0,0 +1,244 @@
++#!/usr/bin/python
++# Copyright 2008 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++
++
++"""
++Filter service runtime logging output and compute system call statistics.
++
++To use this script, define the BENCHMARK symbol to be zero (default)
++in nacl_syscall_hook.c.  Next, run the service runtime with NACLLOG
++set to an output file name.  When the run is complete, run this script
++with that file as input.
++
++"""
++
++import math
++import re
++import sys
++
++
++class Stats:
++  """
++  Compute basic statistics.
++  """
++  def __init__(self):
++    self._sum_x = 0.0
++    self._sum_x_squared = 0.0
++    self._n = 0
++
++  def Enter(self, val):
++    """Enter a new value.
++
++    Args:
++      val: the new (floating point) value
++    """
++    self._sum_x += val
++    self._sum_x_squared += val * val
++    self._n += 1
++
++  def Mean(self):
++    """Returns the mean of entered values.
++    """
++    return self._sum_x / self._n
++
++  def Variance(self):
++    """Returns the variance of entered values.
++    """
++    mean = self.Mean()
++    return self._sum_x_squared / self._n - mean * mean
++
++  def Stddev(self):
++    """Returns the standard deviation of entered values.
++    """
++    return math.sqrt(self.Variance())
++
++  def NumEntries(self):
++    """Returns the number of data points entered.
++    """
++    return self._n
++
++
++class PeakStats:
++  """Compute min and max for a data set.  While far less efficient
++  than using a reduce, this class makes streaming data handling
++  easier.
++  """
++
++  def __init__(self):
++    self._min = 1L << 64
++    self._max = -1
++
++  def Enter(self, val):
++    """Enter a new datum.
++
++    Args:
++      val: the new datum to be entered.
++    """
++    if val > self._max:
++      self._max = val
++    if val < self._min:
++      self._min = val
++
++  def Max(self):
++    """Returns the maximum value found so far.
++    """
++    return self._max
++
++  def Min(self):
++    """Returns the minimum value found so far.
++    """
++    return self._min
++
++
++class WindowedRate:
++
++  """Class for computing statistics on events based on counting the
++  number of occurrences in a time interval.  Statistcs on these
++  bucketed counts are then available.
++
++  """
++  def __init__(self, duration):
++    self._t_start = -1
++    self._t_duration = duration
++    self._t_end = -1
++    self._event_count = 0
++    self._rate_stats = Stats()
++    self._peak_stats = PeakStats()
++
++  def Enter(self, t):
++    """Enter in a new event that occurred at time t.
++
++    Args:
++      t: the time at which an event occurred.
++    """
++    if self._t_start == -1:
++      self._t_start = t
++      self._t_end = t + self._t_duration
++      return
++    # [ t_start, t_start + duration )
++    if t < self._t_end:
++      self._event_count += 1
++      return
++    self.Compute()
++    self._event_count = 1
++    next_end = self._t_end
++    while next_end < t:
++      next_end += self._t_duration
++    self._t_end = next_end
++    self._t_start = next_end - self._t_duration
++
++  def Compute(self):
++    """Finalize the last bucket.
++
++    """
++    self._rate_stats.Enter(self._event_count)
++    self._peak_stats.Enter(self._event_count)
++    self._event_count = 0
++
++  def RateStats(self):
++    """Returns the event rate statistics object.
++
++    """
++    return self._rate_stats
++
++  def PeakStats(self):
++    """Returns the peak event rate statistics object.
++
++    """
++    return self._peak_stats
++
++
++class TimestampParser:
++  """
++  A class to parse timestamp strings.  This is needed because there is
++  implicit state: the timestamp string is HH:MM:SS.fract and may cross
++  a 24 hour boundary -- we do not log the date since that would make
++  the log file much larger and generally it is not needed (implicit in
++  file modification time) -- so we convert to a numeric representation
++  that is relative to an arbitrary epoch start, and the state enables
++  us to correctly handle midnight.
++
++  This code assumes that the timestamps are monotonically
++  non-decreasing.
++
++  """
++  def __init__(self):
++    self._min_time = -1
++
++  def Convert(self, timestamp):
++    """Converts a timestamp string into a numeric timestamp value.
++
++    Args:
++      timestamp: A timestamp string in HH:MM:SS.fraction format.
++
++    Returns:
++      a numeric timestamp (arbitrary epoch)
++    """
++    (hh, mm, ss) = map(float,timestamp.split(':'))
++    t = ((hh * 60) + mm) * 60 + ss
++    if self._min_time == -1:
++      self._min_time = t
++    while t < self._min_time:
++      t += 24 * 60 * 60
++    self._min_time = t
++    return t
++
++
++def ReadFileHandle(fh, duration):
++  """Reads log data from the provided file handle, and compute and
++  print various statistics on the system call rate based on the log
++  data.
++
++  """
++  # log format "[pid:timestamp] msg" where the timestamp is
++  log_re = re.compile(r'\[[0-9,]+:([:.0-9]+)\] system call [0-9]+')
++  parser = TimestampParser()
++  inter_stats = Stats()
++  rate_stats = Stats()
++  windowed = WindowedRate(duration)
++  prev_time = -1
++  start_time = 0
++  for line in fh:  # generator
++    m = log_re.search(line)
++    if m is not None:
++      timestamp = m.group(1)
++      t = parser.Convert(timestamp)
++
++      windowed.Enter(t)
++
++      if prev_time != -1:
++        elapsed = t - prev_time
++        inter_stats.Enter(elapsed)
++        rate_stats.Enter(1.0/elapsed)
++      else:
++        start_time = t
++      prev_time = t
++
++  print '\nInter-syscall time'
++  print 'Mean:   %g' % inter_stats.Mean()
++  print 'Stddev: %g' % inter_stats.Stddev()
++  print '\nInstantaneous Syscall Rate (unweighted!)'
++  print 'Mean :  %g' % rate_stats.Mean()
++  print 'Stddev: %g' % rate_stats.Stddev()
++  print '\nAvg Syscall Rate: %g' % (rate_stats.NumEntries()
++                                    / (prev_time - start_time))
++
++  print '\nSyscalls in %f interval' % duration
++  print 'Mean:   %g' % windowed.RateStats().Mean()
++  print 'Stddev: %g' % windowed.RateStats().Stddev()
++  print 'Min:    %g' % windowed.PeakStats().Min()
++  print 'Max:    %g' % windowed.PeakStats().Max()
++
++
++def main(argv):
++  if len(argv) > 1:
++    print >>sys.stderr, 'no arguments expected\n'
++    return 1
++  ReadFileHandle(sys.stdin, 0.010)
++  return 0
++
++if __name__ == '__main__':
++  sys.exit(main(sys.argv))
+diff --git a/native_client/tools/sysinfo.py b/native_client/tools/sysinfo.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..00d1c7e7bd1e939cc05db42658f396ba48c33764
+--- /dev/null
++++ b/native_client/tools/sysinfo.py
+@@ -0,0 +1,160 @@
++#!/usr/bin/python
++# Copyright (c) 2011 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++
++"""Simple system info tool for bug reports, etc.
++
++"""
++
++
++
++# More info at:
++#
++# http://code.activestate.com/recipes/511491/
++# http://www.koders.com/python/fidB436B8043AA994C550C0961247DACC3E04E84734.aspx?s=config
++# http://developer.apple.com/documentation/Darwin/Reference/ManPages/man8/sysctl.8.html
++
++# imports
++import os
++import sys
++import time
++
++
++VERBOSE = 0
++
++
++def Banner(text):
++  print '=' * 70
++  print text
++  print '=' * 70
++  # quick hack to keep banner in sync with os.system output
++  sys.stdout.flush()
++
++
++def InfoLinux():
++  Banner('OS:')
++  os.system('uname -a')
++
++  Banner('CPU:')
++  if VERBOSE:
++    os.system('cat /proc/cpuinfo')
++  else:
++    os.system("egrep 'name|MHz|stepping' /proc/cpuinfo")
++
++  Banner('RAM:')
++  if VERBOSE:
++    os.system('cat /proc/meminfo')
++  else:
++    os.system('cat /proc/meminfo | egrep Mem')
++
++  Banner('LOAD:')
++  os.system('cat /proc/loadavg')
++
++  Banner('UPTIME:')
++  os.system('cat /proc/uptime')
++
++
++def InfoDarwin():
++  Banner('OS:')
++  os.system('sysctl kern | egrep "kern\.os|version"')
++
++  Banner('CPU:')
++  os.system('sysctl hw.machine')
++  os.system('sysctl hw.model')
++  os.system('sysctl hw.ncpu')
++  if VERBOSE:
++    os.system("sysctl hw")
++  else:
++    os.system("sysctl hw | egrep 'cpu'")
++
++  Banner('RAM:')
++  if VERBOSE:
++    os.system("sysctl hw")
++  else:
++    os.system("sysctl hw | egrep 'mem'")
++
++  Banner('LOAD:')
++  print 'TBD'
++
++  Banner('UPTIME:')
++  os.system('sysctl kern | egrep "kern\.boottime"')
++
++
++def InfoWin32():
++  import _winreg
++
++  def GetRegistryOS( value):
++    db = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE,
++                         'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion')
++
++    return _winreg.QueryValueEx(db, value)[0]
++
++  Banner('OS:')
++  for key in ['ProductName',
++              'CSDVersion',
++              'CurrentBuildNumber']:
++    print  GetRegistryOS(key)
++
++  Banner('CPU:')
++  db = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE,
++                       'HARDWARE\\DESCRIPTION\\System\\CentralProcessor')
++  for n in range(0, 1000):
++     try:
++       cpu = _winreg.EnumKey(db, n)
++     except Exception:
++       break
++     print "\nProcessor :", cpu
++     db_cpu = _winreg.OpenKey(db, cpu)
++     for i in range(0, 1000):
++       try:
++         name, value, type =_winreg.EnumValue(db_cpu, i)
++       except Exception:
++         break
++       # skip binary data
++       if type == _winreg.REG_BINARY: continue
++       if type == _winreg.REG_FULL_RESOURCE_DESCRIPTOR: continue
++       print name, type, value
++
++  Banner('RAM:')
++  print 'TBD'
++  # TODO: this is currently broken since ctypes is not available
++
++  Banner('LOAD:')
++  print 'TBD'
++
++  Banner('UPTIME:')
++  print 'TBD'
++
++
++PLATFORM_INFO = {
++    'linux2': InfoLinux,
++    'linux3': InfoLinux,
++    'darwin': InfoDarwin,
++    'win32': InfoWin32,
++    }
++
++
++def main():
++  Banner('Python Info:')
++  print sys.platform
++  print sys.version
++
++  Banner('ENV:')
++  for e in ['PATH']:
++    print e, os.getenv(e)
++
++
++  if sys.platform in PLATFORM_INFO:
++    try:
++      PLATFORM_INFO[sys.platform]()
++    except Exception, err:
++      print 'ERRROR: processing sys info', str(err)
++  else:
++    print 'ERROR: unknwon platform', system.platform
++
++  return 0
++
++
++sys.exit(main())
+diff --git a/native_client/tools/test_lib.py b/native_client/tools/test_lib.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..bc96de2f31e04cce4d9c619816289c42b6e174b7
+--- /dev/null
++++ b/native_client/tools/test_lib.py
+@@ -0,0 +1,344 @@
++#!/usr/bin/python
++# Copyright (c) 2011 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Testing Library For Nacl.
++
++"""
++
++import atexit
++import difflib
++import os
++import re
++import shutil
++import signal
++import subprocess
++import sys
++import tempfile
++import threading
++
++sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
++import pynacl.platform
++
++
++# Windows does not fully implement os.times functionality.  If
++# _GetTimesPosix were used, the fields for CPU time used in user and
++# in kernel mode by the process will both be zero.  Instead, we must
++# use the ctypes module and access windll's kernel32 interface to
++# extract the CPU usage information.
++
++if sys.platform[:3] == 'win':
++  import ctypes
++
++
++class SubprocessCpuTimer:
++  """Timer used to measure user and kernel CPU time expended by a subprocess.
++
++  A new object of this class should be instantiated just before the
++  subprocess is created, and after the subprocess is finished and
++  waited for (via the wait method of the Popen object), the elapsed
++  time can be obtained by invoking the ElapsedCpuTime of the
++  SubprocessCpuTimer instance.
++
++  """
++
++  WIN32_PROCESS_TIMES_TICKS_PER_SECOND = 1.0e7
++
++  # use a class variable to avoid slicing at run-time
++  _use_proc_handle = sys.platform[:3] == 'win'
++
++
++  @staticmethod
++  def _GetTimePosix():
++    try:
++      t = os.times()
++    except OSError:
++      # This works around a bug in the calling conventions for the
++      # times() system call on Linux.  This syscall returns a number
++      # of clock ticks since an arbitrary time in the past, but if
++      # this happens to be between -4095 and -1, it is interpreted as
++      # an errno value, and we get an exception here.
++      # Returning 0 as a dummy value may result in ElapsedCpuTime()
++      # below returning a negative value.  This is OK for our use
++      # because a test that takes too long is likely to be caught
++      # elsewhere.
++      if sys.platform == "linux2":
++        return 0
++      raise
++    else:
++      return t[2] + t[3]
++
++
++  @staticmethod
++  def _GetTimeWindows(proc_handle):
++    if proc_handle is None:
++      return 0
++    creation_time = ctypes.c_ulonglong()
++    exit_time = ctypes.c_ulonglong()
++    kernel_time = ctypes.c_ulonglong()
++    user_time = ctypes.c_ulonglong()
++    rc = ctypes.windll.kernel32.GetProcessTimes(
++        int(proc_handle._handle),
++        ctypes.byref(creation_time),
++        ctypes.byref(exit_time),
++        ctypes.byref(kernel_time),
++        ctypes.byref(user_time))
++    if not rc:
++      print >>sys.stderr, 'Could not obtain process time'
++      return 0
++    return ((kernel_time.value + user_time.value)
++            / SubprocessCpuTimer.WIN32_PROCESS_TIMES_TICKS_PER_SECOND)
++
++
++  @staticmethod
++  def _GetTime(proc_handle):
++    if SubprocessCpuTimer._use_proc_handle:
++      return SubprocessCpuTimer._GetTimeWindows(proc_handle)
++    return SubprocessCpuTimer._GetTimePosix()
++
++
++  def __init__(self):
++    self._start_time = self._GetTime(None)
++
++
++  def ElapsedCpuTime(self, proc_handle):
++    return self._GetTime(proc_handle) - self._start_time
++
++def PopenBufSize():
++  return 1000 * 1000
++
++
++def CommunicateWithTimeout(proc, input_data=None, timeout=None):
++  if timeout == 0:
++    timeout = None
++
++  result = []
++  def Target():
++    result.append(list(proc.communicate(input_data)))
++
++  thread = threading.Thread(target=Target)
++  thread.start()
++  thread.join(timeout)
++  if thread.is_alive():
++    sys.stderr.write('\nAttempting to kill test due to timeout!\n')
++    # This will kill the process which should force communicate to return with
++    # any partial output.
++    pynacl.platform.KillSubprocessAndChildren(proc)
++    # Thus result should ALWAYS contain something after this join.
++    thread.join()
++    sys.stderr.write('\n\nKilled test due to timeout!\n')
++    # Also append to stderr.
++    result[0][1] += '\n\nKilled test due to timeout!\n'
++    returncode = -9
++  else:
++    returncode = proc.returncode
++  assert len(result) == 1
++  return tuple(result[0]) + (returncode,)
++
++
++def RunTestWithInput(cmd, input_data, timeout=None):
++  """Run a test where we only care about the return code."""
++  assert type(cmd) == list
++  failed = 0
++  timer = SubprocessCpuTimer()
++  p = None
++  try:
++    sys.stdout.flush() # Make sure stdout stays in sync on the bots.
++    if type(input_data) == str:
++      p = subprocess.Popen(cmd,
++                           bufsize=PopenBufSize(),
++                           stdin=subprocess.PIPE)
++      _, _, retcode = CommunicateWithTimeout(p, input_data, timeout=timeout)
++    else:
++      p = subprocess.Popen(cmd,
++                           bufsize=PopenBufSize(),
++                           stdin=input_data)
++      _, _, retcode = CommunicateWithTimeout(p, timeout=timeout)
++  except OSError:
++    print 'exception: ' + str(sys.exc_info()[1])
++    retcode = 0
++    failed = 1
++
++  if p is None:
++    return (0, 0, 1)
++  return (timer.ElapsedCpuTime(p), retcode, failed)
++
++
++def RunTestWithInputOutput(cmd, input_data, capture_stderr=True, timeout=None):
++  """Run a test where we also care about stdin/stdout/stderr.
++
++  NOTE: this function may have problems with arbitrarily
++        large input or output, especially on windows
++  NOTE: input_data can be either a string or or a file like object,
++        file like objects may be better for large input/output
++  """
++  assert type(cmd) == list
++  stdout = ''
++  stderr = ''
++  failed = 0
++
++  p = None
++  timer = SubprocessCpuTimer()
++  try:
++    # Python on windows does not include any notion of SIGPIPE.  On
++    # Linux and OSX, Python installs a signal handler for SIGPIPE that
++    # sets the handler to SIG_IGN so that syscalls return -1 with
++    # errno equal to EPIPE, and translates those to exceptions;
++    # unfortunately, the subprocess module fails to reset the handler
++    # for SIGPIPE to SIG_DFL, and the SIG_IGN behavior is inherited.
++    # subprocess.Popen's preexec_fn is apparently okay to use on
++    # Windows, as long as its value is None.
++
++    if hasattr(signal, 'SIGPIPE'):
++      no_pipe = lambda : signal.signal(signal.SIGPIPE, signal.SIG_DFL)
++    else:
++      no_pipe = None
++
++    # Only capture stderr if capture_stderr is true
++    p_stderr = subprocess.PIPE if capture_stderr else None
++
++    if type(input_data) == str:
++      p = subprocess.Popen(cmd,
++                           bufsize=PopenBufSize(),
++                           stdin=subprocess.PIPE,
++                           stderr=p_stderr,
++                           stdout=subprocess.PIPE,
++                           preexec_fn = no_pipe)
++      stdout, stderr, retcode = CommunicateWithTimeout(
++          p, input_data, timeout=timeout)
++    else:
++      # input_data is a file like object
++      p = subprocess.Popen(cmd,
++                           bufsize=PopenBufSize(),
++                           stdin=input_data,
++                           stderr=p_stderr,
++                           stdout=subprocess.PIPE,
++                           preexec_fn = no_pipe)
++      stdout, stderr, retcode = CommunicateWithTimeout(p, timeout=timeout)
++  except OSError, x:
++    if x.errno == 10:
++      print '@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
++      print 'ignoring exception', str(sys.exc_info()[1])
++      print 'return code NOT checked'
++      print 'this seems to be a windows issue'
++      print '@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
++      failed = 0
++      retcode = 0
++    else:
++      print 'exception: ' + str(sys.exc_info()[1])
++      retcode = 0
++      failed = 1
++  if p is None:
++    cpu_time_consumed = 0
++  else:
++    cpu_time_consumed = timer.ElapsedCpuTime(p)
++  return (cpu_time_consumed, retcode, failed, stdout, stderr)
++
++
++def DiffStringsIgnoringWhiteSpace(a, b):
++  a = a.splitlines()
++  b = b.splitlines()
++  # NOTE: the whitespace stuff seems to be broken in python
++  cruncher = difflib.SequenceMatcher(lambda x: x in ' \t\r', a, b)
++
++  for group in cruncher.get_grouped_opcodes():
++    eq = True
++    for tag, i1, i2, j1, j2 in group:
++      if tag != 'equal':
++        eq = False
++        break
++    if eq: continue
++    i1, i2, j1, j2 = group[0][1], group[-1][2], group[0][3], group[-1][4]
++    yield '@@ -%d,%d +%d,%d @@\n' % (i1+1, i2-i1, j1+1, j2-j1)
++
++    for tag, i1, i2, j1, j2 in group:
++      if tag == 'equal':
++        for line in a[i1:i2]:
++          yield ' [' + line + ']'
++        continue
++      if tag == 'replace' or tag == 'delete':
++        for line in a[i1:i2]:
++          yield '-[' + repr(line) + ']'
++      if tag == 'replace' or tag == 'insert':
++        for line in b[j1:j2]:
++          yield '+[' + repr(line) + ']'
++
++
++def RegexpFilterLines(regexp, inverse, group_only, lines):
++  """Apply regexp to filter lines of text, keeping only those lines
++  that match.
++
++  Any carriage return / newline sequence is turned into a newline.
++
++  Args:
++    regexp: A regular expression, only lines that match are kept
++    inverse: Only keep lines that do not match
++    group_only: replace matching lines with the regexp groups,
++                text outside the groups are omitted, useful for
++                eliminating file names that might change, etc).
++
++    lines: A string containing newline-separated lines of text
++
++  Return:
++    Filtered lines of text, newline separated.
++  """
++
++  result = []
++  nfa = re.compile(regexp)
++  for line in lines.split('\n'):
++    if line.endswith('\r'):
++      line = line[:-1]
++    mobj = nfa.search(line)
++    if mobj and inverse:
++      continue
++    if not mobj and not inverse:
++      continue
++
++    if group_only:
++      matched_strings = []
++      for s in mobj.groups():
++        if s is not None:
++          matched_strings.append(s)
++      result.append(''.join(matched_strings))
++    else:
++      result.append(line)
++
++  return '\n'.join(result)
++
++
++def MakeTempDir(env, **kwargs):
++  """Create a temporary directory and arrange to clean it up on exit.
++
++  Passes arguments through to tempfile.mkdtemp
++  """
++  temporary_dir = tempfile.mkdtemp(**kwargs)
++  def Cleanup():
++    try:
++      # Try to remove the dir but only if it exists. Some tests may clean up
++      # after themselves.
++      if os.path.exists(temporary_dir):
++        shutil.rmtree(temporary_dir)
++    except BaseException as e:
++      sys.stderr.write('Unable to delete dir %s on exit: %s\n' % (
++        temporary_dir, e))
++  atexit.register(Cleanup)
++  return temporary_dir
++
++def MakeTempFile(env, **kwargs):
++  """Create a temporary file and arrange to clean it up on exit.
++
++  Passes arguments through to tempfile.mkstemp
++  """
++  handle, path = tempfile.mkstemp(**kwargs)
++  def Cleanup():
++    try:
++      # Try to remove the file but only if it exists. Some tests may clean up
++      # after themselves.
++      if os.path.exists(path):
++        os.unlink(path)
++    except BaseException as e:
++      sys.stderr.write('Unable to delete file %s on exit: %s\n' % (
++        path, e))
++  atexit.register(Cleanup)
++  return handle, path
+diff --git a/native_client/tools/test_timing.py b/native_client/tools/test_timing.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..6a66e4ac926deb35dd579be7c25cd4c8923a6f01
+--- /dev/null
++++ b/native_client/tools/test_timing.py
+@@ -0,0 +1,86 @@
++#!/usr/bin/python2.4
++# Copyright 2008 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Program to parse hammer output and sort tests by how long they took to run.
++
++The output should be from the CommandTest in SConstruct.
++"""
++
++import getopt
++import re
++import sys
++
++
++class Analyzer(object):
++  """Basic run time analysis (sorting, so far)."""
++
++  def __init__(self):
++    self._data = []  # list of (time, test-name) tuples
++
++  def AddData(self, execution_time, test_name, mode):
++    self._data.append((execution_time, test_name, mode))
++
++  def Sort(self):
++    self._data.sort(None, lambda x: x[0], True)
++
++  def Top(self, n):
++    return self._data[:n]
++
++
++def TrimTestName(name):
++  s = '/scons-out/'
++  ix = name.find(s)
++  if ix < 0:
++    return name[ix + len(s):]
++  return name
++
++
++def Usage():
++  print >>sys.stderr, 'Usage: test_timing [-n top-n-to-print]'
++
++
++def main(argv):
++  top_n = 10
++
++  try:
++    optlist, argv = getopt.getopt(argv[1:], 'n:')
++  except getopt.error, e:
++    print >>sys.stderr, str(e)
++    Usage()
++    return 1
++
++  for opt, val in optlist:
++    if opt == '-n':
++      try:
++        top_n = int(val)
++      except ValueError:
++        print >>sys.stderr, 'test_timing: -n arg should be an integer'
++        Usage()
++        return 1
++
++  mode = 'Unknown'
++  mode_nfa = re.compile(r'^running.*scons-out/((opt|dbg)-linux)')
++  nfa = re.compile(r'^Test (.*) took ([.0-9]*) secs')
++  analyzer = Analyzer()
++
++  for line in sys.stdin:
++    mobj = mode_nfa.match(line)
++    if mobj is not None:
++      mode = mobj.group(1)
++      continue
++    mobj = nfa.match(line)
++    if mobj is not None:
++      analyzer.AddData(float(mobj.group(2)), mobj.group(1), mode)
++  analyzer.Sort()
++
++  print '%-12s %-9s %s' % ('Time', 'Mode', 'Test Name')
++  print '%-12s %-9s %s' % (12*'-', 9*'-', '---------')
++  for time, name, mode in analyzer.Top(top_n):
++    print '%12.8f %-9s %s' % (time, mode, TrimTestName(name))
++  return 0
++
++
++if __name__ == '__main__':
++  sys.exit(main(sys.argv))
+diff --git a/native_client/tools/time_check.py b/native_client/tools/time_check.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..94d44f1254f98237048109d8f941ccce2122f832
+--- /dev/null
++++ b/native_client/tools/time_check.py
+@@ -0,0 +1,71 @@
++#!/usr/bin/python
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import optparse
++import re
++import subprocess
++import sys
++import time
++
++def Main(argv):
++  parser = optparse.OptionParser()
++  parser.add_option('-s', '--time_slop', dest='time_slop', default=1.0,
++                    help=('how far outside of starting / ending time' +
++                          ' (as measured by python) can the output be'))
++  # the time slop should be small -- just enough to take care of all
++  # NTP adjustments.
++  parser.add_option('-S', '--show_output', dest='show_output',
++                    action='store_true', default=False,
++                    help='show wrapped program\'s output')
++  parser.add_option('-r', '--output_regex', dest='regex',
++                    default=r'(\d+\.\d*|\d*.\d+) seconds',
++                    help='regular expression for picking out time output')
++
++  options, args = parser.parse_args(argv)
++
++  fmt = '%15s: %20.6f\n'  # label: time_value output format to line things up
++
++  fp_num_re = re.compile(options.regex)
++  time_start = time.time()
++  sys.stdout.write(fmt % ('Error margin', options.time_slop))
++  sys.stdout.write(fmt % ('Start time' , time_start))
++
++  def OutputPredicate(output_stream):
++    # consume output_stream looking for output time value
++    time_output = None
++    for line in output_stream:
++      if options.show_output:
++        sys.stdout.write(line + '\n')
++      mobj = fp_num_re.search(line)
++      if time_output is None and mobj is not None:
++        time_output = float(mobj.group(1))
++        sys.stdout.write(fmt % ('Output time', time_output))
++    time_end = time.time()
++    sys.stdout.write(fmt % ('End time', time_end))
++    if time_output is None:
++      sys.stderr.write('time_check: No time output found.\n')
++      return False
++    return (time_start - options.time_slop <= time_output and
++            time_output <= time_end + options.time_slop)
++
++  p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
++  ok = OutputPredicate(p.stdout)
++  p.communicate()
++  if p.returncode != 0:
++    sys.stdout.write('Command failed with status %d: %r\n' %
++                     (p.returncode, args))
++    ok = False
++
++  if ok:
++    sys.stdout.write('OK\n')
++    sys.exit(0)
++  else:
++    sys.stdout.write('FAILED\n')
++    sys.exit(1)
++
++if __name__ == '__main__':
++  retval = Main(sys.argv[1:])
++  sys.stdout.write('\n\n')
++  sys.exit(retval)
+diff --git a/native_client/tools/toolchain-try.sh b/native_client/tools/toolchain-try.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..1e9593300bad30ac19a18797e3136a173695066d
+--- /dev/null
++++ b/native_client/tools/toolchain-try.sh
+@@ -0,0 +1,72 @@
++#!/bin/bash
++# A script to send toolchain edits in tools/SRC (in git) to toolchain trybots.
++
++# Copyright (c) 2011 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++cd "$(dirname "$0")"
++. REVISIONS
++
++repos='binutils gcc glibc linux-headers-for-nacl'
++
++trybots_glibc_only="\
++nacl-toolchain-precise64-glibc\
++"
++trybots_glibc="\
++nacl-toolchain-precise64-glibc,\
++nacl-toolchain-mac-glibc,\
++nacl-toolchain-win7-glibc\
++"
++
++tmp='.git-status$$'
++trap 'rm -f $tmp' 0 1 2 15
++{ git status --porcelain -uno > "$tmp" &&
++  [ -r "$tmp" ] && [ ! -s "$tmp" ]
++} || {
++  echo >&2 "$0: Start with a clean working directory"
++  exit 1
++}
++
++test_all=
++test_glibc=
++tryname=try
++for repo in $repos; do
++  revname="NACL_$(echo "$repo" | tr '[:lower:]-' '[:upper:]_')_COMMIT"
++  patch="toolchain-try.${repo}.patch"
++  (cd "SRC/$repo"; git diff "${!revname}..HEAD") > $patch
++  if [ $? -ne 0 ]; then
++    echo >&2 "$0: error: update SRC/$repo first"
++    exit 2
++  fi
++  if [ -s "$patch" ]; then
++    git add "$patch"
++    tryname="${tryname}-${repo}-$(cd "SRC/$repo";
++                                  git rev-list -n1 --abbrev-commit HEAD)"
++    case "$repo" in
++    glibc) test_glibc=yes ;;
++    *) test_glibc=yes
++       test_all=yes ;;
++    esac
++  else
++    rm -f "$patch"
++  fi
++done
++
++if [ -z "$test_all" -a -n "$test_glibc" ]; then
++  trybots="$trybots_glibc_only"
++else
++  trybots="$trybots_glibc"
++fi
++
++if ! git rev-parse origin/master >/dev/null; then
++  echo >&2 "$0: error: no origin/master branch"
++  exit 3
++fi
++
++(set -x
++ git checkout -b "$tryname" origin/master
++ git commit -m "toolchain trybot run: $tryname"
++
++ git try -b "$trybots"
++)
+diff --git a/native_client/tools/toolchain_tester/extra_flags_pnacl.txt b/native_client/tools/toolchain_tester/extra_flags_pnacl.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..218938295f7abfbe2e05c203561d3a589c3b5f5e
+--- /dev/null
++++ b/native_client/tools/toolchain_tester/extra_flags_pnacl.txt
+@@ -0,0 +1,51 @@
++# Copyright (c) 2013 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# File containing *extra* flags to specify for PNaCl on a given test.
++
++# The following tests use vectors, which PNaCl's ABI checker rejects.
++# 8-byte and 4-byte vectors are not supported in the stable ABI.
++20050316-1.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20050316-2.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20050316-3.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20050604-1.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20050607-1.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++simd-1.C,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++simd-4.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++simd-5.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++simd-6.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++
++# These tests use llvm.{frame,return}address, which PNaCl's ABI checker rejects.
++20010122-1.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20030323-1.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20030811-1.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++frame-address.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr17377.c,CFLAGS:--pnacl-disable-abi-check,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++
++# The following tests use inline assembly, though it happens to be in
++# a "portable" way, with an empty assembly string, e.g. asm("").
++20001009-2.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20020107-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20030222-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20050203-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20061031-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20071211-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20071220-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20071220-2.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++20080122-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++960312-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++990130-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr38533.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr40022.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr40657.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr41239.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr43385.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr43560.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr44852.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr45695.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr47925.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr49218.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr49390.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++pr50310.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
++strct-pack-1.c,CFLAGS:--pnacl-disable-abi-check,CFLAGS:-fgnu-inline-asm,FINALIZE_FLAGS:--no-finalize,TRANSLATE_FLAGS:--allow-llvm-bitcode-input
+diff --git a/native_client/tools/toolchain_tester/known_eh_failures_clang.txt b/native_client/tools/toolchain_tester/known_eh_failures_clang.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..137372571c3208092ab9314dc06a905e0c736141
+--- /dev/null
++++ b/native_client/tools/toolchain_tester/known_eh_failures_clang.txt
+@@ -0,0 +1,22 @@
++# compile failure, syntax error (this appears to tests a gcc  extension)
++# so not a biggy
++spec5.C
++# runtime failure: the problem here is that we are throwing an exception
++# during the contruction of an object on the stack, llvm does not seem
++# to call the destructor
++init-temp1.C
++
++# TODO(jfb) New failure with libc++, didn't fail with libstdc++. The
++# first copy construction doesn't see std::uncaught_exception as true,
++# all other test states are correct. The __cxa_* bookkeeping for
++# uncaughtExceptions seems different.
++uncaught1.C
++
++
++# ======================================================================
++# NOTE: the tests below fail on a regular gcc as well
++# ======================================================================
++# terminate called after throwing an instance of 'A'
++cast1.C
++# terminate called after throwing an instance of 'int'
++init-temp2.C
+diff --git a/native_client/tools/toolchain_tester/known_eh_failures_localgcc.txt b/native_client/tools/toolchain_tester/known_eh_failures_localgcc.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..005f8b5ef792c0408706181965f392e6924ed36f
+--- /dev/null
++++ b/native_client/tools/toolchain_tester/known_eh_failures_localgcc.txt
+@@ -0,0 +1,10 @@
++# internal compiler error
++cond5.C
++# runtime failure
++cast1.C
++# runtime failure
++cond4.C
++# runtime failure
++elide2.C
++# runtime failure
++init-temp2.C
+diff --git a/native_client/tools/toolchain_tester/known_eh_failures_naclgcc.txt b/native_client/tools/toolchain_tester/known_eh_failures_naclgcc.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..b4692b39763363ad9c5e9cc058ca82dd7d1217a5
+--- /dev/null
++++ b/native_client/tools/toolchain_tester/known_eh_failures_naclgcc.txt
+@@ -0,0 +1,15 @@
++# pthread related compiletime failures
++crossjump1.C
++# pthread related compiletime failures
++omit-frame-pointer.C
++# ======================================================================
++# NOTE: the tests below fail on a regular gcc as well
++# ======================================================================
++# runtime failure
++cast1.C
++# runtime failure
++cond4.C
++# runtime failure
++elide2.C
++# runtime failure
++init-temp2.C
+diff --git a/native_client/tools/toolchain_tester/known_eh_failures_pnacl.txt b/native_client/tools/toolchain_tester/known_eh_failures_pnacl.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..0dde6801971bbeec14b200cf273a1481327bb20a
+--- /dev/null
++++ b/native_client/tools/toolchain_tester/known_eh_failures_pnacl.txt
+@@ -0,0 +1,25 @@
++# compile failure, syntax error (this appears to tests a gcc  extension)
++# so not a biggy
++spec5.C
++# runtime failure: the problem here is that we are throwing an exception
++# during the contruction of an object on the stack, llvm does not seem
++# to call the destructor
++init-temp1.C
++
++# TODO(jfb) New failure with libc++, didn't fail with libstdc++. The
++# first copy construction doesn't see std::uncaught_exception as true,
++# all other test states are correct. The __cxa_* bookkeeping for
++# uncaughtExceptions seems different.
++uncaught1.C
++
++# simd-3.C causes an error in the ABI simplification passes because it
++# uses "volatile" on a vector type.
++simd-3.C
++
++# ======================================================================
++# NOTE: the tests below fail on a regular gcc as well
++# ======================================================================
++# terminate called after throwing an instance of 'A'
++cast1.C
++# terminate called after throwing an instance of 'int'
++init-temp2.C
+diff --git a/native_client/tools/toolchain_tester/known_failures_base.txt b/native_client/tools/toolchain_tester/known_failures_base.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..31760bb09f4ff010948cf0ca50d9a926852b715f
+--- /dev/null
++++ b/native_client/tools/toolchain_tester/known_failures_base.txt
+@@ -0,0 +1,8 @@
++# shmem and network header files
++20010724-1.c
++# vector ops
++vector-shift1.c
++# vector type
++vector-subscript-1.c
++# profiling (probably cannot work with newlib)
++eeprof-1.c
+diff --git a/native_client/tools/toolchain_tester/known_failures_clang.txt b/native_client/tools/toolchain_tester/known_failures_clang.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..247f468069369b28dddf697f27c4978d88412857
+--- /dev/null
++++ b/native_client/tools/toolchain_tester/known_failures_clang.txt
+@@ -0,0 +1,136 @@
++# Copyright (c) 2013 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# NOTE:
++# progress on eliminating failures here should be recorded via
++# http://code.google.com/p/nativeclient/issues/detail?id=2204
++
++# This first group of failures is common between pnacl and nacl-clang:
++
++# ======================================================================
++# failures in phase sel_ldr
++# ======================================================================
++# alloca() in C is currently not guaranteed to return an aligned
++# address with Clang/LLVM.
++# See: https://code.google.com/p/nativeclient/issues/detail?id=3795
++alloca-1.c
++# setjmp/longjmp TODO
++built-in-setjmp.c
++# ??? (funny shenanigans with bitfields)
++bitfld-5.c
++bitfld-3.c
++# local version of llabs overrides libc version
++20021127-1.c O0
++# bad shift of a 40-bit bitfield (assumes intermediate values are 40-bit)
++pr32244-1.c
++pr34971.c
++# Probably some kind of issue with NEON (started failing when we enabled it)
++#mul-subnormal-single-1.c arm,O0
++# This uses __builtin_return_address(1) and it segfaults because of an
++# uninit frame pointer (must force fp on?).
++20010122-1.c arm,O3
++20010122-1.c x86-64,O3
++# ======================================================================
++# failures in phase translate
++# ======================================================================
++# undef isinfl
++pr39228.c
++# undef signal
++20101011-1.c
++# undef __builtin_va_arg_pack
++va-arg-pack-1.c
++# DCE not performed at -O0 (wontfix?)
++medce-1.c O0
++fp-cmp-7.c O0
++# ======================================================================
++# failures in phase compile-bc
++# ======================================================================
++# unknown builtin __builtin_malloc (wontfix?)
++20071018-1.c
++20071120-1.c
++pr36765.c
++pr43008.c
++# ======================================================================
++# additional failures at -O3
++# ======================================================================
++# uses  __builtin_constant_p
++bcp-1.c O3
++# uses __builtin_constant_p
++builtin-constant.c O3
++# llvm does not know how to evaluate "(x<y) && (x>y)" and "(x==y) && (x!=y)"
++compare-fp-3.c O3
++# math functions not simplified the way the test expects
++20030125-1.c O3
++# some kind of misoptimization, or optimization not done that the test
++# expects. not sure why it wasn't caught before
++fprintf-chk-1.c O3
++printf-chk-1.c O3
++vprintf-chk-1.c O3
++vfprintf-chk-1.c O3
++# ======================================================================
++# wont fixes - misc reasons
++# ======================================================================
++# fields must have a constant size: 'variable length array in structure'
++# extension will never be supported
++20070919-1.c
++20020412-1.c
++20040308-1.c
++20040423-1.c
++20041218-2.c
++align-nest.c
++pr41935.c
++# mode attribute only supported for integer and float types
++20050107-1.c
++20050119-1.c
++20050119-2.c
++simd-1.c
++pr23135.c
++# asm - invalid output constraint =t (is apparently undocumented in gcc)
++990413-2.c arm
++# <scumbagsteve> implicit return type int
++# does not return a value </scumbagsteve> (error only in clang)
++920728-1.c
++# __builtin_nan result is not a compile-time constant
++builtin-nan-1.c
++# __builtin_apply and friends not supported by clang
++pr47237.c
++# This test has an integer overflow / undefined behavior:
++20031003-1.c
++# ======================================================================
++# wont fixes - nested functions
++# ======================================================================
++# nested function
++nest-align-1.c
++# nested function
++nest-stdar-1.c
++# nested function
++nestfunc-7.c
++# nested function
++pr22061-3.c
++# nested function
++pr22061-4.c
++# nested function
++20010209-1.c
++# nested function
++20010605-1.c
++# nested function
++20090219-1.c
++# nested function
++920612-2.c
++# nested function
++921017-1.c
++# nested function
++20030501-1.c
++# nested function
++20040520-1.c
++# nested function
++20061220-1.c
++
++
++# Failures specific to nacl-clang
++
++# Passing struct of floats as va_arg
++pr44575.c x86-64,O0
++# Bogus pointer to array of structs passed as argument
++921113-1.c arm,O0
 diff --git a/native_client/tools/toolchain_tester/known_failures_localgcc.txt b/native_client/tools/toolchain_tester/known_failures_localgcc.txt
 new file mode 100644
 index 0000000000000000000000000000000000000000..a3a4b79e078d0b5a6c6d165a06be862e5a1f8aa5
@@ -226,10 +1609,10 @@ index 0000000000000000000000000000000000000000..31339689811ffdc515436910fb31e7e5
 +pr44575.c
 diff --git a/native_client/tools/toolchain_tester/toolchain_config.py b/native_client/tools/toolchain_tester/toolchain_config.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..89fd8d432a03e9a381ab9f0ed90846de9a4ef27c
+index 0000000000000000000000000000000000000000..73a0928411b625ff263e90d93db34b09602818b5
 --- /dev/null
 +++ b/native_client/tools/toolchain_tester/toolchain_config.py
-@@ -0,0 +1,525 @@
+@@ -0,0 +1,553 @@
 +# Copyright (c) 2011 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -511,6 +1894,34 @@ index 0000000000000000000000000000000000000000..89fd8d432a03e9a381ab9f0ed90846de
 +    attributes=['arm', 'O0f', 'O0b'],
 +    is_flaky = True,
 +    TRANSLATE_FLAGS='-translate-fast')
++
++# Based on llvm_pnacl_arm_O0 with TRANSLATE_FLAGS+=--use-sz
++TOOLCHAIN_CONFIGS['llvm_pnacl_arm_O0_sz'] = ToolchainConfig(
++    base=TOOLCHAIN_CONFIGS['llvm_pnacl_arm_O0'],
++    desc='pnacl llvm with Subzero [arm32]',
++    attributes=['arm', 'O0f', 'O2b_sz'],
++    TRANSLATE_FLAGS = '--use-sz')
++
++# Based on llvm_pnacl_arm_O3 with TRANSLATE_FLAGS+=--use-sz
++TOOLCHAIN_CONFIGS['llvm_pnacl_arm_O3_sz'] = ToolchainConfig(
++    base=TOOLCHAIN_CONFIGS['llvm_pnacl_arm_O3'],
++    desc='pnacl llvm with Subzero [arm32]',
++    attributes=['arm', 'O3f', 'O2b_sz'],
++    TRANSLATE_FLAGS = '--use-sz')
++
++# Based on llvm_pnacl_arm_O3_O0 with TRANSLATE_FLAGS+=--use-sz
++TOOLCHAIN_CONFIGS['llvm_pnacl_arm_O3_O0_sz'] = ToolchainConfig(
++    base=TOOLCHAIN_CONFIGS['llvm_pnacl_arm_O3_O0'],
++    desc='pnacl llvm with Subzero -Om1 [arm32]',
++    attributes=['arm', 'O3f', 'O0b_sz'],
++    TRANSLATE_FLAGS = '-translate-fast --use-sz')
++
++# Based on llvm_pnacl_arm_O0_O0 with TRANSLATE_FLAGS+=--use-sz
++TOOLCHAIN_CONFIGS['llvm_pnacl_arm_O0_O0_sz'] = ToolchainConfig(
++    base=TOOLCHAIN_CONFIGS['llvm_pnacl_arm_O0_O0'],
++    desc='pnacl llvm with Subzero -Om1 [arm32]',
++    attributes=['arm', 'O0f', 'O0b_sz'],
++    TRANSLATE_FLAGS = '-translate-fast --use-sz')
 +
 +######################################################################
 +# PNACL + SEL_LDR [X8632]
@@ -1115,7 +2526,7 @@ index 0000000000000000000000000000000000000000..261ac17affbf9e4dadd682c1c7a44c80
 +  sys.exit(main(sys.argv))
 diff --git a/native_client/tools/toolchain_tester/torture_test.py b/native_client/tools/toolchain_tester/torture_test.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..621a0536a157389b4dc648b60fe46042e82c90c7
+index 0000000000000000000000000000000000000000..4beafb168d091971493c896fdda81a25d4dec69b
 --- /dev/null
 +++ b/native_client/tools/toolchain_tester/torture_test.py
 @@ -0,0 +1,140 @@
@@ -1208,7 +2619,7 @@ index 0000000000000000000000000000000000000000..621a0536a157389b4dc648b60fe46042
 +  if compiler == 'pnacl':
 +    # O3_O0 is clang -O3 followed by pnacl-translate -O0
 +    optmodes = ['O0', 'O3', 'O0_O0', 'O3_O0']
-+    if platform in ('x86-32', 'x86-64'):
++    if platform in ('arm', 'x86-32', 'x86-64'):
 +      # Add some extra Subzero configurations.
 +      optmodes.extend(['O3_sz', 'O3_O0_sz'])
 +      # TODO(stichnot): Consider pruning some configurations if the tests run
@@ -3061,10 +4472,10 @@ index 0000000000000000000000000000000000000000..d07411dbdf439fedc9f8ea83b74d0e58
 +if __name__ == '__main__':
 +  sys.exit(main(sys.argv))
 diff --git a/ppapi/shared_impl/media_stream_buffer_manager_unittest.cc b/ppapi/shared_impl/media_stream_buffer_manager_unittest.cc
-index 4bb250a2c66e39a2a35e6acd7773b246361c258f..32c90f2b1bec60a8dfeaff8ed4c4f9f12a6771c2 100644
+index 97cf90a17b42db364b10bfd7ca2cddda5661d8c8..9e988ae40d4336203d75736951532998fb2a7a04 100644
 --- a/ppapi/shared_impl/media_stream_buffer_manager_unittest.cc
 +++ b/ppapi/shared_impl/media_stream_buffer_manager_unittest.cc
-@@ -88,6 +88,8 @@ TEST(MediaStreamBufferManager, General) {
+@@ -87,6 +87,8 @@ TEST(MediaStreamBufferManager, General) {
      EXPECT_EQ(NULL, manager.GetBufferPointer(-1));
      EXPECT_EQ(NULL, manager.GetBufferPointer(kNumberOfBuffers));
  
@@ -3073,7 +4484,7 @@ index 4bb250a2c66e39a2a35e6acd7773b246361c258f..32c90f2b1bec60a8dfeaff8ed4c4f9f1
      // Test crash for passing invalid index to EnqueueBuffer().
      // String arguments aren't passed to CHECK() in official builds.
  #if defined(OFFICIAL_BUILD) && defined(NDEBUG)
-@@ -97,6 +99,7 @@ TEST(MediaStreamBufferManager, General) {
+@@ -96,6 +98,7 @@ TEST(MediaStreamBufferManager, General) {
      EXPECT_DEATH(manager.EnqueueBuffer(-1), ".*Check failed: index >= 0.*");
      EXPECT_DEATH(manager.EnqueueBuffer(kNumberOfBuffers),
                   ".*Check failed: index < number_of_buffers_.*");
@@ -3142,10 +4553,10 @@ index d8b93a5f7322fa33f0f63d3939e71a66fe59f800..0157cd0f9eea5fc4dae1849b36934560
  const char kEventsSubkeyName[]         = "Events";
  const char kStatefulEventsSubkeyName[] = "StatefulEvents";
 diff --git a/sandbox/linux/suid/client/setuid_sandbox_host.cc b/sandbox/linux/suid/client/setuid_sandbox_host.cc
-index 24ef4b399baa1b132e3809a14fb091788ae9d148..4337dbfadc6804089200a6f42e938319c1200001 100644
+index 278f1d2b42e46d9aecd9327e435166e5184bcfa7..ef5822cebfa0225eab2ae6269e3d357c07f8bd60 100644
 --- a/sandbox/linux/suid/client/setuid_sandbox_host.cc
 +++ b/sandbox/linux/suid/client/setuid_sandbox_host.cc
-@@ -125,7 +125,7 @@ base::FilePath SetuidSandboxHost::GetSandboxBinaryPath() {
+@@ -126,7 +126,7 @@ base::FilePath SetuidSandboxHost::GetSandboxBinaryPath() {
    base::FilePath sandbox_binary;
    base::FilePath exe_dir;
    if (PathService::Get(base::DIR_EXE, &exe_dir)) {
@@ -80382,6 +81793,19 @@ index 47a204bef5bb6228c96ad53d8d05263ea8a8f9ad..45bc7e0ef39c5a9ad48ea5e63718aa78
  }
  
  message TabNavigation {
+diff --git a/sync/sync.gyp b/sync/sync.gyp
+index e6725824064862538dc83632d158c5355114ab1a..5bbf013131e9d9620b562e79f7591bef8e5833d0 100644
+--- a/sync/sync.gyp
++++ b/sync/sync.gyp
+@@ -329,7 +329,7 @@
+         'internal_api/public/simple_metadata_change_list.h',
+         'internal_api/public/sync_auth_provider.h',
+         'internal_api/public/sync_context.h',
+-        'internal_api/public/sync_context_proxy.h',
++        #'internal_api/public/sync_context_proxy.h',
+         'internal_api/public/sync_encryption_handler.cc',
+         'internal_api/public/sync_encryption_handler.h',
+         'internal_api/public/sync_manager.cc',
 diff --git a/testing/gmock/CHANGES b/testing/gmock/CHANGES
 new file mode 100644
 index 0000000000000000000000000000000000000000..d6f2f760e3424715262ec14f318e1df9dac909bf
@@ -198533,7 +199957,7 @@ index 0000000000000000000000000000000000000000..0452a63d0c6c79c642682a3fd55f7317
 +	rootObject = 0867D690FE84028FC02AAC07 /* Project object */;
 +}
 diff --git a/testing/variations/fieldtrial_testing_config_linux.json b/testing/variations/fieldtrial_testing_config_linux.json
-index 681ed81f18d0a00a213587fc4c1db30b57878f2f..07731d51fc7861ad30d3388f7406a909a1d6c078 100644
+index 43de8b21f1d4b03f9ab9582d8939e6ad63991984..6071aca894bc8a245d72713ec762ab824ca17a82 100644
 --- a/testing/variations/fieldtrial_testing_config_linux.json
 +++ b/testing/variations/fieldtrial_testing_config_linux.json
 @@ -63,7 +63,7 @@
@@ -198546,7 +199970,7 @@ index 681ed81f18d0a00a213587fc4c1db30b57878f2f..07731d51fc7861ad30d3388f7406a909
      ],
      "InstanceID": [
 diff --git a/testing/variations/fieldtrial_testing_config_mac.json b/testing/variations/fieldtrial_testing_config_mac.json
-index 72e6e6c3631c2b9f362a7eb762bec91429c12b55..69fa9833b861735e8a1c7e7f3b583e98161fb18a 100644
+index bf7f987809e9caa45e7d8214d2a473969c972601..27af6208ba0327a3d81834ba9048294177a84f1a 100644
 --- a/testing/variations/fieldtrial_testing_config_mac.json
 +++ b/testing/variations/fieldtrial_testing_config_mac.json
 @@ -64,7 +64,7 @@
@@ -198559,10 +199983,10 @@ index 72e6e6c3631c2b9f362a7eb762bec91429c12b55..69fa9833b861735e8a1c7e7f3b583e98
      ],
      "ExtensionDeveloperModeWarning": [
 diff --git a/testing/variations/fieldtrial_testing_config_win.json b/testing/variations/fieldtrial_testing_config_win.json
-index 6f069b0f349274220d65c35134ad542f453c040c..add65053e1b35a0d0528429995b8968ed5761a8a 100644
+index 25aadf13aecffbc48e56be369549e66bbe9f6cea..3e89eb406e9980bfc782bcf6ede9fb1b6dd85d8c 100644
 --- a/testing/variations/fieldtrial_testing_config_win.json
 +++ b/testing/variations/fieldtrial_testing_config_win.json
-@@ -79,7 +79,7 @@
+@@ -84,7 +84,7 @@
      ],
      "ExtensionActionRedesign": [
          {
@@ -198571,51 +199995,6 @@ index 6f069b0f349274220d65c35134ad542f453c040c..add65053e1b35a0d0528429995b8968e
          }
      ],
      "ExtensionContentVerification": [
-diff --git a/win8/delegate_execute/chrome_util.cc b/win8/delegate_execute/chrome_util.cc
-index 0a4e17797cd4bc6efe2e7b8e3b811d07e795b3a0..6348b8ed8bc3d08a1a246742527df649754e3ca7 100644
---- a/win8/delegate_execute/chrome_util.cc
-+++ b/win8/delegate_execute/chrome_util.cc
-@@ -41,7 +41,7 @@ namespace {
- // TODO(grt): These constants live in installer_util.  Consider moving them
- // into common_constants to allow for reuse.
- const base::FilePath::CharType kNewChromeExe[] =
--    FILE_PATH_LITERAL("new_chrome.exe");
-+    FILE_PATH_LITERAL("new_vivaldi.exe");
- const wchar_t kRenameCommandValue[] = L"cmd";
- const wchar_t kRegPathChromeClientBase[] =
-     L"Software\\Google\\Update\\Clients\\";
-diff --git a/win8/delegate_execute/delegate_execute.gyp b/win8/delegate_execute/delegate_execute.gyp
-index b863dc56974db5edd7ca178bfbd321ba9242258f..48839da086a5dbfca318f029e82d9939b66d0c24 100644
---- a/win8/delegate_execute/delegate_execute.gyp
-+++ b/win8/delegate_execute/delegate_execute.gyp
-@@ -15,11 +15,11 @@
-       'target_name': 'delegate_execute_version_resources',
-       'type': 'none',
-       'conditions': [
--        ['branding == "Chrome"', {
-+        ['branding == "vivaldi"', {
-           'variables': {
--             'branding_path': '../../chrome/app/theme/google_chrome/BRANDING',
-+             'branding_path': '<(VIVALDI)/app/resources/theme/vivaldi/BRANDING',
-           },
--        }, { # else branding!="Chrome"
-+        }, { # else branding!="vivaldi"
-           'variables': {
-              'branding_path': '../../chrome/app/theme/chromium/BRANDING',
-           },
-diff --git a/win8/metro_driver/metro_driver.gyp b/win8/metro_driver/metro_driver.gyp
-index 663990a6d0c44a243df9fd3b127a198ae1f0f393..3a029b19a562bbd854c01bf66928c5e74adc9510 100644
---- a/win8/metro_driver/metro_driver.gyp
-+++ b/win8/metro_driver/metro_driver.gyp
-@@ -34,7 +34,7 @@
-           'type': 'none',
-           'variables': {
-             'output_dir': 'metro_driver',
--            'branding_path': '../../chrome/app/theme/<(branding_path_component)/BRANDING',
-+            'branding_path': '<(VIVALDI)/app/resources/theme/vivaldi/BRANDING',
-             'template_input_path': '../../chrome/app/chrome_version.rc.version',
-           },
-           'sources': [
 diff --git a/win8/resources/chrome.VisualElementsManifest.xml b/win8/resources/chrome.VisualElementsManifest.xml
 index 640ef97c785869ec446dd3144bf08cbea20e4fcd..5eafa57aa0e2a89ee755928b624194c5c6c21ae4 100644
 --- a/win8/resources/chrome.VisualElementsManifest.xml
