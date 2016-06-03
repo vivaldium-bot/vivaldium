@@ -1,0 +1,4832 @@
+diff --git a/v8/tools/testrunner/network/network_execution.py b/v8/tools/testrunner/network/network_execution.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c842aba579c4ddb16d8be20091b7292c9bb7d230
+--- /dev/null
++++ b/v8/tools/testrunner/network/network_execution.py
+@@ -0,0 +1,254 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++import os
++import socket
++import subprocess
++import threading
++import time
++
++from . import distro
++from ..local import execution
++from ..local import perfdata
++from ..objects import peer
++from ..objects import workpacket
++from ..server import compression
++from ..server import constants
++from ..server import local_handler
++from ..server import signatures
++
++
++def GetPeers():
++  data = local_handler.LocalQuery([constants.REQUEST_PEERS])
++  if not data: return []
++  return [ peer.Peer.Unpack(p) for p in data ]
++
++
++class NetworkedRunner(execution.Runner):
++  def __init__(self, suites, progress_indicator, context, peers, workspace):
++    self.suites = suites
++    datapath = os.path.join("out", "testrunner_data")
++    # TODO(machenbach): These fields should exist now in the superclass.
++    # But there is no super constructor call. Check if this is a problem.
++    self.perf_data_manager = perfdata.PerfDataManager(datapath)
++    self.perfdata = self.perf_data_manager.GetStore(context.arch, context.mode)
++    for s in suites:
++      for t in s.tests:
++        t.duration = self.perfdata.FetchPerfData(t) or 1.0
++    self._CommonInit(suites, progress_indicator, context)
++    self.tests = []  # Only used if we need to fall back to local execution.
++    self.tests_lock = threading.Lock()
++    self.peers = peers
++    self.pubkey_fingerprint = None  # Fetched later.
++    self.base_rev = subprocess.check_output(
++        "cd %s; git log -1 --format=%%H --grep=git-svn-id" % workspace,
++        shell=True).strip()
++    self.base_svn_rev = subprocess.check_output(
++        "cd %s; git log -1 %s"          # Get commit description.
++        " | grep -e '^\s*git-svn-id:'"  # Extract "git-svn-id" line.
++        " | awk '{print $2}'"           # Extract "repository@revision" part.
++        " | sed -e 's/.*@//'" %         # Strip away "repository@".
++        (workspace, self.base_rev), shell=True).strip()
++    self.patch = subprocess.check_output(
++        "cd %s; git diff %s" % (workspace, self.base_rev), shell=True)
++    self.binaries = {}
++    self.initialization_lock = threading.Lock()
++    self.initialization_lock.acquire()  # Released when init is done.
++    self._OpenLocalConnection()
++    self.local_receiver_thread = threading.Thread(
++        target=self._ListenLocalConnection)
++    self.local_receiver_thread.daemon = True
++    self.local_receiver_thread.start()
++    self.initialization_lock.acquire()
++    self.initialization_lock.release()
++
++  def _OpenLocalConnection(self):
++    self.local_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++    code = self.local_socket.connect_ex(("localhost", constants.CLIENT_PORT))
++    if code != 0:
++      raise RuntimeError("Failed to connect to local server")
++    compression.Send([constants.REQUEST_PUBKEY_FINGERPRINT], self.local_socket)
++
++  def _ListenLocalConnection(self):
++    release_lock_countdown = 1  # Pubkey.
++    self.local_receiver = compression.Receiver(self.local_socket)
++    while not self.local_receiver.IsDone():
++      data = self.local_receiver.Current()
++      if data[0] == constants.REQUEST_PUBKEY_FINGERPRINT:
++        pubkey = data[1]
++        if not pubkey: raise RuntimeError("Received empty public key")
++        self.pubkey_fingerprint = pubkey
++        release_lock_countdown -= 1
++      if release_lock_countdown == 0:
++        self.initialization_lock.release()
++        release_lock_countdown -= 1  # Prevent repeated triggering.
++      self.local_receiver.Advance()
++
++  def Run(self, jobs):
++    self.indicator.Starting()
++    need_libv8 = False
++    for s in self.suites:
++      shell = s.shell()
++      if shell not in self.binaries:
++        path = os.path.join(self.context.shell_dir, shell)
++        # Check if this is a shared library build.
++        try:
++          ldd = subprocess.check_output("ldd %s | grep libv8\\.so" % (path),
++                                        shell=True)
++          ldd = ldd.strip().split(" ")
++          assert ldd[0] == "libv8.so"
++          assert ldd[1] == "=>"
++          need_libv8 = True
++          binary_needs_libv8 = True
++          libv8 = signatures.ReadFileAndSignature(ldd[2])
++        except:
++          binary_needs_libv8 = False
++        binary = signatures.ReadFileAndSignature(path)
++        if binary[0] is None:
++          print("Error: Failed to create signature.")
++          assert binary[1] != 0
++          return binary[1]
++        binary.append(binary_needs_libv8)
++        self.binaries[shell] = binary
++    if need_libv8:
++      self.binaries["libv8.so"] = libv8
++    distro.Assign(self.suites, self.peers)
++    # Spawn one thread for each peer.
++    threads = []
++    for p in self.peers:
++      thread = threading.Thread(target=self._TalkToPeer, args=[p])
++      threads.append(thread)
++      thread.start()
++    try:
++      for thread in threads:
++        # Use a timeout so that signals (Ctrl+C) will be processed.
++        thread.join(timeout=10000000)
++      self._AnalyzePeerRuntimes()
++    except KeyboardInterrupt:
++      self.terminate = True
++      raise
++    except Exception, _e:
++      # If there's an exception we schedule an interruption for any
++      # remaining threads...
++      self.terminate = True
++      # ...and then reraise the exception to bail out.
++      raise
++    compression.Send(constants.END_OF_STREAM, self.local_socket)
++    self.local_socket.close()
++    if self.tests:
++      self._RunInternal(jobs)
++    self.indicator.Done()
++    return not self.failed
++
++  def _TalkToPeer(self, peer):
++    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++    sock.settimeout(self.context.timeout + 10)
++    code = sock.connect_ex((peer.address, constants.PEER_PORT))
++    if code == 0:
++      try:
++        peer.runtime = None
++        start_time = time.time()
++        packet = workpacket.WorkPacket(peer=peer, context=self.context,
++                                       base_revision=self.base_svn_rev,
++                                       patch=self.patch,
++                                       pubkey=self.pubkey_fingerprint)
++        data, test_map = packet.Pack(self.binaries)
++        compression.Send(data, sock)
++        compression.Send(constants.END_OF_STREAM, sock)
++        rec = compression.Receiver(sock)
++        while not rec.IsDone() and not self.terminate:
++          data_list = rec.Current()
++          for data in data_list:
++            test_id = data[0]
++            if test_id < 0:
++              # The peer is reporting an error.
++              with self.lock:
++                print("\nPeer %s reports error: %s" % (peer.address, data[1]))
++              continue
++            test = test_map.pop(test_id)
++            test.MergeResult(data)
++            try:
++              self.perfdata.UpdatePerfData(test)
++            except Exception, e:
++              print("UpdatePerfData exception: %s" % e)
++              pass  # Just keep working.
++            with self.lock:
++              perf_key = self.perfdata.GetKey(test)
++              compression.Send(
++                  [constants.INFORM_DURATION, perf_key, test.duration,
++                   self.context.arch, self.context.mode],
++                  self.local_socket)
++              self.indicator.AboutToRun(test)
++              has_unexpected_output = test.suite.HasUnexpectedOutput(test)
++              if has_unexpected_output:
++                self.failed.append(test)
++                if test.output.HasCrashed():
++                  self.crashed += 1
++              else:
++                self.succeeded += 1
++              self.remaining -= 1
++              self.indicator.HasRun(test, has_unexpected_output)
++          rec.Advance()
++        peer.runtime = time.time() - start_time
++      except KeyboardInterrupt:
++        sock.close()
++        raise
++      except Exception, e:
++        print("Got exception: %s" % e)
++        pass  # Fall back to local execution.
++    else:
++      compression.Send([constants.UNRESPONSIVE_PEER, peer.address],
++                       self.local_socket)
++    sock.close()
++    if len(test_map) > 0:
++      # Some tests have not received any results. Run them locally.
++      print("\nNo results for %d tests, running them locally." % len(test_map))
++      self._EnqueueLocally(test_map)
++
++  def _EnqueueLocally(self, test_map):
++    with self.tests_lock:
++      for test in test_map:
++        self.tests.append(test_map[test])
++
++  def _AnalyzePeerRuntimes(self):
++    total_runtime = 0.0
++    total_work = 0.0
++    for p in self.peers:
++      if p.runtime is None:
++        return
++      total_runtime += p.runtime
++      total_work += p.assigned_work
++    for p in self.peers:
++      p.assigned_work /= total_work
++      p.runtime /= total_runtime
++      perf_correction = p.assigned_work / p.runtime
++      old_perf = p.relative_performance
++      p.relative_performance = (old_perf + perf_correction) / 2.0
++      compression.Send([constants.UPDATE_PERF, p.address,
++                        p.relative_performance],
++                       self.local_socket)
+diff --git a/v8/tools/testrunner/objects/__init__.py b/v8/tools/testrunner/objects/__init__.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..202a262709c95ba356e9e1ef6aa2f5256690a24a
+--- /dev/null
++++ b/v8/tools/testrunner/objects/__init__.py
+@@ -0,0 +1,26 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+diff --git a/v8/tools/testrunner/objects/context.py b/v8/tools/testrunner/objects/context.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6bcbfb67aa4d64612a3afccf1a9ef45fa119804a
+--- /dev/null
++++ b/v8/tools/testrunner/objects/context.py
+@@ -0,0 +1,66 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++class Context():
++  def __init__(self, arch, mode, shell_dir, mode_flags, verbose, timeout,
++               isolates, command_prefix, extra_flags, noi18n, random_seed,
++               no_sorting, rerun_failures_count, rerun_failures_max,
++               predictable, no_harness, use_perf_data, sancov_dir):
++    self.arch = arch
++    self.mode = mode
++    self.shell_dir = shell_dir
++    self.mode_flags = mode_flags
++    self.verbose = verbose
++    self.timeout = timeout
++    self.isolates = isolates
++    self.command_prefix = command_prefix
++    self.extra_flags = extra_flags
++    self.noi18n = noi18n
++    self.random_seed = random_seed
++    self.no_sorting = no_sorting
++    self.rerun_failures_count = rerun_failures_count
++    self.rerun_failures_max = rerun_failures_max
++    self.predictable = predictable
++    self.no_harness = no_harness
++    self.use_perf_data = use_perf_data
++    self.sancov_dir = sancov_dir
++
++  def Pack(self):
++    return [self.arch, self.mode, self.mode_flags, self.timeout, self.isolates,
++            self.command_prefix, self.extra_flags, self.noi18n,
++            self.random_seed, self.no_sorting, self.rerun_failures_count,
++            self.rerun_failures_max, self.predictable, self.no_harness,
++            self.use_perf_data, self.sancov_dir]
++
++  @staticmethod
++  def Unpack(packed):
++    # For the order of the fields, refer to Pack() above.
++    return Context(packed[0], packed[1], None, packed[2], False,
++                   packed[3], packed[4], packed[5], packed[6], packed[7],
++                   packed[8], packed[9], packed[10], packed[11], packed[12],
++                   packed[13], packed[14], packed[15])
+diff --git a/v8/tools/testrunner/objects/output.py b/v8/tools/testrunner/objects/output.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b4bb01f797ab5ef534ad6ef326fc4a129e354581
+--- /dev/null
++++ b/v8/tools/testrunner/objects/output.py
+@@ -0,0 +1,61 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++import signal
++
++from ..local import utils
++
++class Output(object):
++
++  def __init__(self, exit_code, timed_out, stdout, stderr, pid):
++    self.exit_code = exit_code
++    self.timed_out = timed_out
++    self.stdout = stdout
++    self.stderr = stderr
++    self.pid = pid
++
++  def HasCrashed(self):
++    if utils.IsWindows():
++      return 0x80000000 & self.exit_code and not (0x3FFFFF00 & self.exit_code)
++    else:
++      # Timed out tests will have exit_code -signal.SIGTERM.
++      if self.timed_out:
++        return False
++      return (self.exit_code < 0 and
++              self.exit_code != -signal.SIGABRT)
++
++  def HasTimedOut(self):
++    return self.timed_out
++
++  def Pack(self):
++    return [self.exit_code, self.timed_out, self.stdout, self.stderr, self.pid]
++
++  @staticmethod
++  def Unpack(packed):
++    # For the order of the fields, refer to Pack() above.
++    return Output(packed[0], packed[1], packed[2], packed[3], packed[4])
+diff --git a/v8/tools/testrunner/objects/peer.py b/v8/tools/testrunner/objects/peer.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..18a6bec7a8af0678797c02552901dbe3b29c03a4
+--- /dev/null
++++ b/v8/tools/testrunner/objects/peer.py
+@@ -0,0 +1,80 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++class Peer(object):
++  def __init__(self, address, jobs, rel_perf, pubkey):
++    self.address = address  # string: IP address
++    self.jobs = jobs  # integer: number of CPUs
++    self.relative_performance = rel_perf
++    self.pubkey = pubkey # string: pubkey's fingerprint
++    self.shells = set()  # set of strings
++    self.needed_work = 0
++    self.assigned_work = 0
++    self.tests = []  # list of TestCase objects
++    self.trusting_me = False  # This peer trusts my public key.
++    self.trusted = False  # I trust this peer's public key.
++
++  def __str__(self):
++    return ("Peer at %s, jobs: %d, performance: %.2f, trust I/O: %s/%s" %
++            (self.address, self.jobs, self.relative_performance,
++             self.trusting_me, self.trusted))
++
++  def AddTests(self, shell):
++    """Adds tests from |shell| to this peer.
++
++    Stops when self.needed_work reaches zero, or when all of shell's tests
++    are assigned."""
++    assert self.needed_work > 0
++    if shell.shell not in self.shells:
++      self.shells.add(shell.shell)
++    while len(shell.tests) > 0 and self.needed_work > 0:
++      t = shell.tests.pop()
++      self.needed_work -= t.duration
++      self.assigned_work += t.duration
++      shell.total_duration -= t.duration
++      self.tests.append(t)
++
++  def ForceAddOneTest(self, test, shell):
++    """Forcibly adds another test to this peer, disregarding needed_work."""
++    if shell.shell not in self.shells:
++      self.shells.add(shell.shell)
++    self.needed_work -= test.duration
++    self.assigned_work += test.duration
++    shell.total_duration -= test.duration
++    self.tests.append(test)
++
++
++  def Pack(self):
++    """Creates a JSON serializable representation of this Peer."""
++    return [self.address, self.jobs, self.relative_performance]
++
++  @staticmethod
++  def Unpack(packed):
++    """Creates a Peer object built from a packed representation."""
++    pubkey_dummy = ""  # Callers of this don't care (only the server does).
++    return Peer(packed[0], packed[1], packed[2], pubkey_dummy)
+diff --git a/v8/tools/testrunner/objects/testcase.py b/v8/tools/testrunner/objects/testcase.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..113c624a35d66d43cdc88e49058c7af7b30bb5bd
+--- /dev/null
++++ b/v8/tools/testrunner/objects/testcase.py
+@@ -0,0 +1,110 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++from . import output
++
++class TestCase(object):
++  def __init__(self, suite, path, variant='default', flags=None,
++               override_shell=None):
++    self.suite = suite        # TestSuite object
++    self.path = path          # string, e.g. 'div-mod', 'test-api/foo'
++    self.flags = flags or []  # list of strings, flags specific to this test
++    self.variant = variant    # name of the used testing variant
++    self.override_shell = override_shell
++    self.outcomes = set([])
++    self.output = None
++    self.id = None  # int, used to map result back to TestCase instance
++    self.duration = None  # assigned during execution
++    self.run = 1  # The nth time this test is executed.
++
++  def CopyAddingFlags(self, variant, flags):
++    copy = TestCase(self.suite, self.path, variant, self.flags + flags,
++                    self.override_shell)
++    copy.outcomes = self.outcomes
++    return copy
++
++  def PackTask(self):
++    """
++    Extracts those parts of this object that are required to run the test
++    and returns them as a JSON serializable object.
++    """
++    assert self.id is not None
++    return [self.suitename(), self.path, self.variant, self.flags,
++            self.override_shell, list(self.outcomes or []),
++            self.id]
++
++  @staticmethod
++  def UnpackTask(task):
++    """Creates a new TestCase object based on packed task data."""
++    # For the order of the fields, refer to PackTask() above.
++    test = TestCase(str(task[0]), task[1], task[2], task[3], task[4])
++    test.outcomes = set(task[5])
++    test.id = task[6]
++    test.run = 1
++    return test
++
++  def SetSuiteObject(self, suites):
++    self.suite = suites[self.suite]
++
++  def PackResult(self):
++    """Serializes the output of the TestCase after it has run."""
++    self.suite.StripOutputForTransmit(self)
++    return [self.id, self.output.Pack(), self.duration]
++
++  def MergeResult(self, result):
++    """Applies the contents of a Result to this object."""
++    assert result[0] == self.id
++    self.output = output.Output.Unpack(result[1])
++    self.duration = result[2]
++
++  def suitename(self):
++    return self.suite.name
++
++  def GetLabel(self):
++    return self.suitename() + "/" + self.suite.CommonTestName(self)
++
++  def shell(self):
++    if self.override_shell:
++      return self.override_shell
++    return self.suite.shell()
++
++  def __getstate__(self):
++    """Representation to pickle test cases.
++
++    The original suite won't be sent beyond process boundaries. Instead
++    send the name only and retrieve a process-local suite later.
++    """
++    return dict(self.__dict__, suite=self.suite.name)
++
++  def __cmp__(self, other):
++    # Make sure that test cases are sorted correctly if sorted without
++    # key function. But using a key function is preferred for speed.
++    return cmp(
++        (self.suite.name, self.path, self.flags),
++        (other.suite.name, other.path, other.flags),
++    )
+diff --git a/v8/tools/testrunner/objects/workpacket.py b/v8/tools/testrunner/objects/workpacket.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d07efe76ec5aa8983a15e76d4653a163db7c8765
+--- /dev/null
++++ b/v8/tools/testrunner/objects/workpacket.py
+@@ -0,0 +1,90 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++from . import context
++from . import testcase
++
++class WorkPacket(object):
++  def __init__(self, peer=None, context=None, tests=None, binaries=None,
++               base_revision=None, patch=None, pubkey=None):
++    self.peer = peer
++    self.context = context
++    self.tests = tests
++    self.binaries = binaries
++    self.base_revision = base_revision
++    self.patch = patch
++    self.pubkey_fingerprint = pubkey
++
++  def Pack(self, binaries_dict):
++    """
++    Creates a JSON serializable object containing the data of this
++    work packet.
++    """
++    need_libv8 = False
++    binaries = []
++    for shell in self.peer.shells:
++      prefetched_binary = binaries_dict[shell]
++      binaries.append({"name": shell,
++                       "blob": prefetched_binary[0],
++                       "sign": prefetched_binary[1]})
++      if prefetched_binary[2]:
++        need_libv8 = True
++    if need_libv8:
++      libv8 = binaries_dict["libv8.so"]
++      binaries.append({"name": "libv8.so",
++                       "blob": libv8[0],
++                       "sign": libv8[1]})
++    tests = []
++    test_map = {}
++    for t in self.peer.tests:
++      test_map[t.id] = t
++      tests.append(t.PackTask())
++    result = {
++      "binaries": binaries,
++      "pubkey": self.pubkey_fingerprint,
++      "context": self.context.Pack(),
++      "base_revision": self.base_revision,
++      "patch": self.patch,
++      "tests": tests
++    }
++    return result, test_map
++
++  @staticmethod
++  def Unpack(packed):
++    """
++    Creates a WorkPacket object from the given packed representation.
++    """
++    binaries = packed["binaries"]
++    pubkey_fingerprint = packed["pubkey"]
++    ctx = context.Context.Unpack(packed["context"])
++    base_revision = packed["base_revision"]
++    patch = packed["patch"]
++    tests = [ testcase.TestCase.UnpackTask(t) for t in packed["tests"] ]
++    return WorkPacket(context=ctx, tests=tests, binaries=binaries,
++                      base_revision=base_revision, patch=patch,
++                      pubkey=pubkey_fingerprint)
+diff --git a/v8/tools/testrunner/server/__init__.py b/v8/tools/testrunner/server/__init__.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..202a262709c95ba356e9e1ef6aa2f5256690a24a
+--- /dev/null
++++ b/v8/tools/testrunner/server/__init__.py
+@@ -0,0 +1,26 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+diff --git a/v8/tools/testrunner/server/compression.py b/v8/tools/testrunner/server/compression.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5ed4159766ddbbb4a8f581759f2d98ae6728067
+--- /dev/null
++++ b/v8/tools/testrunner/server/compression.py
+@@ -0,0 +1,111 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++import cStringIO as StringIO
++try:
++  import ujson as json
++except ImportError:
++  import json
++import os
++import struct
++import zlib
++
++from . import constants
++
++def Send(obj, sock):
++  """
++  Sends a JSON encodable object over the specified socket (zlib-compressed).
++  """
++  obj = json.dumps(obj)
++  compression_level = 2  # 1 = fastest, 9 = best compression
++  compressed = zlib.compress(obj, compression_level)
++  payload = struct.pack('>i', len(compressed)) + compressed
++  sock.sendall(payload)
++
++
++class Receiver(object):
++  def __init__(self, sock):
++    self.sock = sock
++    self.data = StringIO.StringIO()
++    self.datalength = 0
++    self._next = self._GetNext()
++
++  def IsDone(self):
++    return self._next == None
++
++  def Current(self):
++    return self._next
++
++  def Advance(self):
++    try:
++      self._next = self._GetNext()
++    except:
++      raise
++
++  def _GetNext(self):
++    try:
++      while self.datalength < constants.SIZE_T:
++        try:
++          chunk = self.sock.recv(8192)
++        except:
++          raise
++        if not chunk: return None
++        self._AppendData(chunk)
++      size = self._PopData(constants.SIZE_T)
++      size = struct.unpack(">i", size)[0]
++      while self.datalength < size:
++        try:
++          chunk = self.sock.recv(8192)
++        except:
++          raise
++        if not chunk: return None
++        self._AppendData(chunk)
++      result = self._PopData(size)
++      result = zlib.decompress(result)
++      result = json.loads(result)
++      if result == constants.END_OF_STREAM:
++        return None
++      return result
++    except:
++      raise
++
++  def _AppendData(self, new):
++    self.data.seek(0, os.SEEK_END)
++    self.data.write(new)
++    self.datalength += len(new)
++
++  def _PopData(self, length):
++    self.data.seek(0)
++    chunk = self.data.read(length)
++    remaining = self.data.read()
++    self.data.close()
++    self.data = StringIO.StringIO()
++    self.data.write(remaining)
++    assert self.datalength - length == len(remaining)
++    self.datalength = len(remaining)
++    return chunk
+diff --git a/v8/tools/testrunner/server/constants.py b/v8/tools/testrunner/server/constants.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..5aefcbad0d3043970ae2cfe8a08e93ff6c585a2b
+--- /dev/null
++++ b/v8/tools/testrunner/server/constants.py
+@@ -0,0 +1,51 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++CLIENT_PORT = 9991  # Port for the local client to connect to.
++PEER_PORT = 9992  # Port for peers on the network to connect to.
++PRESENCE_PORT = 9993  # Port for presence daemon.
++STATUS_PORT = 9994  # Port for network requests not related to workpackets.
++
++END_OF_STREAM = "end of dtest stream"  # Marker for end of network requests.
++SIZE_T = 4  # Number of bytes used for network request size header.
++
++# Messages understood by the local request handler.
++ADD_TRUSTED = "add trusted"
++INFORM_DURATION = "inform about duration"
++REQUEST_PEERS = "get peers"
++UNRESPONSIVE_PEER = "unresponsive peer"
++REQUEST_PUBKEY_FINGERPRINT = "get pubkey fingerprint"
++REQUEST_STATUS = "get status"
++UPDATE_PERF = "update performance"
++
++# Messages understood by the status request handler.
++LIST_TRUSTED_PUBKEYS = "list trusted pubkeys"
++GET_SIGNED_PUBKEY = "pass on signed pubkey"
++NOTIFY_NEW_TRUSTED = "new trusted peer"
++TRUST_YOU_NOW = "trust you now"
++DO_YOU_TRUST = "do you trust"
+diff --git a/v8/tools/testrunner/server/daemon.py b/v8/tools/testrunner/server/daemon.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..baa66fbea91be0af914934e5aed56686938078fd
+--- /dev/null
++++ b/v8/tools/testrunner/server/daemon.py
+@@ -0,0 +1,147 @@
++#!/usr/bin/env python
++
++# This code has been written by Sander Marechal and published at:
++# http://www.jejik.com/articles/2007/02/a_simple_unix_linux_daemon_in_python/
++# where the author has placed it in the public domain (see comment #6 at
++# http://www.jejik.com/articles/2007/02/a_simple_unix_linux_daemon_in_python/#c6
++# ).
++# Some minor modifications have been made by the V8 authors. The work remains
++# in the public domain.
++
++import atexit
++import os
++from signal import SIGTERM
++from signal import SIGINT
++import sys
++import time
++
++
++class Daemon(object):
++  """
++  A generic daemon class.
++
++  Usage: subclass the Daemon class and override the run() method
++  """
++  def __init__(self, pidfile, stdin='/dev/null',
++               stdout='/dev/null', stderr='/dev/null'):
++    self.stdin = stdin
++    self.stdout = stdout
++    self.stderr = stderr
++    self.pidfile = pidfile
++
++  def daemonize(self):
++    """
++    do the UNIX double-fork magic, see Stevens' "Advanced
++    Programming in the UNIX Environment" for details (ISBN 0201563177)
++    http://www.erlenstar.demon.co.uk/unix/faq_2.html#SEC16
++    """
++    try:
++      pid = os.fork()
++      if pid > 0:
++        # exit first parent
++        sys.exit(0)
++    except OSError, e:
++      sys.stderr.write("fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
++      sys.exit(1)
++
++    # decouple from parent environment
++    os.chdir("/")
++    os.setsid()
++    os.umask(0)
++
++    # do second fork
++    try:
++      pid = os.fork()
++      if pid > 0:
++        # exit from second parent
++        sys.exit(0)
++    except OSError, e:
++      sys.stderr.write("fork #2 failed: %d (%s)\n" % (e.errno, e.strerror))
++      sys.exit(1)
++
++    # redirect standard file descriptors
++    sys.stdout.flush()
++    sys.stderr.flush()
++    si = file(self.stdin, 'r')
++    so = file(self.stdout, 'a+')
++    se = file(self.stderr, 'a+', 0)
++    # TODO: (debug) re-enable this!
++    #os.dup2(si.fileno(), sys.stdin.fileno())
++    #os.dup2(so.fileno(), sys.stdout.fileno())
++    #os.dup2(se.fileno(), sys.stderr.fileno())
++
++    # write pidfile
++    atexit.register(self.delpid)
++    pid = str(os.getpid())
++    file(self.pidfile, 'w+').write("%s\n" % pid)
++
++  def delpid(self):
++    os.remove(self.pidfile)
++
++  def start(self):
++    """
++    Start the daemon
++    """
++    # Check for a pidfile to see if the daemon already runs
++    try:
++      pf = file(self.pidfile, 'r')
++      pid = int(pf.read().strip())
++      pf.close()
++    except IOError:
++      pid = None
++
++    if pid:
++      message = "pidfile %s already exist. Daemon already running?\n"
++      sys.stderr.write(message % self.pidfile)
++      sys.exit(1)
++
++    # Start the daemon
++    self.daemonize()
++    self.run()
++
++  def stop(self):
++    """
++    Stop the daemon
++    """
++    # Get the pid from the pidfile
++    try:
++      pf = file(self.pidfile, 'r')
++      pid = int(pf.read().strip())
++      pf.close()
++    except IOError:
++      pid = None
++
++    if not pid:
++      message = "pidfile %s does not exist. Daemon not running?\n"
++      sys.stderr.write(message % self.pidfile)
++      return # not an error in a restart
++
++    # Try killing the daemon process
++    try:
++      # Give the process a one-second chance to exit gracefully.
++      os.kill(pid, SIGINT)
++      time.sleep(1)
++      while 1:
++        os.kill(pid, SIGTERM)
++        time.sleep(0.1)
++    except OSError, err:
++      err = str(err)
++      if err.find("No such process") > 0:
++        if os.path.exists(self.pidfile):
++          os.remove(self.pidfile)
++      else:
++        print str(err)
++        sys.exit(1)
++
++  def restart(self):
++    """
++    Restart the daemon
++    """
++    self.stop()
++    self.start()
++
++  def run(self):
++    """
++    You should override this method when you subclass Daemon. It will be
++    called after the process has been daemonized by start() or restart().
++    """
+diff --git a/v8/tools/testrunner/server/local_handler.py b/v8/tools/testrunner/server/local_handler.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3b3ac495d0c4caf007ea6804b1578b2d84ae4125
+--- /dev/null
++++ b/v8/tools/testrunner/server/local_handler.py
+@@ -0,0 +1,119 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++import socket
++import SocketServer
++import StringIO
++
++from . import compression
++from . import constants
++
++
++def LocalQuery(query):
++  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++  code = sock.connect_ex(("localhost", constants.CLIENT_PORT))
++  if code != 0: return None
++  compression.Send(query, sock)
++  compression.Send(constants.END_OF_STREAM, sock)
++  rec = compression.Receiver(sock)
++  data = None
++  while not rec.IsDone():
++    data = rec.Current()
++    assert data[0] == query[0]
++    data = data[1]
++    rec.Advance()
++  sock.close()
++  return data
++
++
++class LocalHandler(SocketServer.BaseRequestHandler):
++  def handle(self):
++    rec = compression.Receiver(self.request)
++    while not rec.IsDone():
++      data = rec.Current()
++      action = data[0]
++
++      if action == constants.REQUEST_PEERS:
++        with self.server.daemon.peer_list_lock:
++          response = [ p.Pack() for p in self.server.daemon.peers
++                       if p.trusting_me ]
++        compression.Send([action, response], self.request)
++
++      elif action == constants.UNRESPONSIVE_PEER:
++        self.server.daemon.DeletePeer(data[1])
++
++      elif action == constants.REQUEST_PUBKEY_FINGERPRINT:
++        compression.Send([action, self.server.daemon.pubkey_fingerprint],
++                         self.request)
++
++      elif action == constants.REQUEST_STATUS:
++        compression.Send([action, self._GetStatusMessage()], self.request)
++
++      elif action == constants.ADD_TRUSTED:
++        fingerprint = self.server.daemon.CopyToTrusted(data[1])
++        compression.Send([action, fingerprint], self.request)
++
++      elif action == constants.INFORM_DURATION:
++        test_key = data[1]
++        test_duration = data[2]
++        arch = data[3]
++        mode = data[4]
++        self.server.daemon.AddPerfData(test_key, test_duration, arch, mode)
++
++      elif action == constants.UPDATE_PERF:
++        address = data[1]
++        perf = data[2]
++        self.server.daemon.UpdatePeerPerformance(data[1], data[2])
++
++      rec.Advance()
++    compression.Send(constants.END_OF_STREAM, self.request)
++
++  def _GetStatusMessage(self):
++    sio = StringIO.StringIO()
++    sio.write("Peers:\n")
++    with self.server.daemon.peer_list_lock:
++      for p in self.server.daemon.peers:
++        sio.write("%s\n" % p)
++    sio.write("My own jobs: %d, relative performance: %.2f\n" %
++              (self.server.daemon.jobs, self.server.daemon.relative_perf))
++    # Low-priority TODO: Return more information. Ideas:
++    #   - currently running anything,
++    #   - time since last job,
++    #   - time since last repository fetch
++    #   - number of workpackets/testcases handled since startup
++    #   - slowest test(s)
++    result = sio.getvalue()
++    sio.close()
++    return result
++
++
++class LocalSocketServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
++  def __init__(self, daemon):
++    SocketServer.TCPServer.__init__(self, ("localhost", constants.CLIENT_PORT),
++                                    LocalHandler)
++    self.daemon = daemon
+diff --git a/v8/tools/testrunner/server/main.py b/v8/tools/testrunner/server/main.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..1000713ca93d4c79d98e9fa3d57abf7107dec62b
+--- /dev/null
++++ b/v8/tools/testrunner/server/main.py
+@@ -0,0 +1,245 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++import multiprocessing
++import os
++import shutil
++import subprocess
++import threading
++import time
++
++from . import daemon
++from . import local_handler
++from . import presence_handler
++from . import signatures
++from . import status_handler
++from . import work_handler
++from ..network import perfdata
++
++
++class Server(daemon.Daemon):
++
++  def __init__(self, pidfile, root, stdin="/dev/null",
++               stdout="/dev/null", stderr="/dev/null"):
++    super(Server, self).__init__(pidfile, stdin, stdout, stderr)
++    self.root = root
++    self.local_handler = None
++    self.local_handler_thread = None
++    self.work_handler = None
++    self.work_handler_thread = None
++    self.status_handler = None
++    self.status_handler_thread = None
++    self.presence_daemon = None
++    self.presence_daemon_thread = None
++    self.peers = []
++    self.jobs = multiprocessing.cpu_count()
++    self.peer_list_lock = threading.Lock()
++    self.perf_data_lock = None
++    self.presence_daemon_lock = None
++    self.datadir = os.path.join(self.root, "data")
++    pubkey_fingerprint_filename = os.path.join(self.datadir, "mypubkey")
++    with open(pubkey_fingerprint_filename) as f:
++      self.pubkey_fingerprint = f.read().strip()
++    self.relative_perf_filename = os.path.join(self.datadir, "myperf")
++    if os.path.exists(self.relative_perf_filename):
++      with open(self.relative_perf_filename) as f:
++        try:
++          self.relative_perf = float(f.read())
++        except:
++          self.relative_perf = 1.0
++    else:
++      self.relative_perf = 1.0
++
++  def run(self):
++    os.nice(20)
++    self.ip = presence_handler.GetOwnIP()
++    self.perf_data_manager = perfdata.PerfDataManager(self.datadir)
++    self.perf_data_lock = threading.Lock()
++
++    self.local_handler = local_handler.LocalSocketServer(self)
++    self.local_handler_thread = threading.Thread(
++        target=self.local_handler.serve_forever)
++    self.local_handler_thread.start()
++
++    self.work_handler = work_handler.WorkSocketServer(self)
++    self.work_handler_thread = threading.Thread(
++        target=self.work_handler.serve_forever)
++    self.work_handler_thread.start()
++
++    self.status_handler = status_handler.StatusSocketServer(self)
++    self.status_handler_thread = threading.Thread(
++        target=self.status_handler.serve_forever)
++    self.status_handler_thread.start()
++
++    self.presence_daemon = presence_handler.PresenceDaemon(self)
++    self.presence_daemon_thread = threading.Thread(
++        target=self.presence_daemon.serve_forever)
++    self.presence_daemon_thread.start()
++
++    self.presence_daemon.FindPeers()
++    time.sleep(0.5)  # Give those peers some time to reply.
++
++    with self.peer_list_lock:
++      for p in self.peers:
++        if p.address == self.ip: continue
++        status_handler.RequestTrustedPubkeys(p, self)
++
++    while True:
++      try:
++        self.PeriodicTasks()
++        time.sleep(60)
++      except Exception, e:
++        print("MAIN LOOP EXCEPTION: %s" % e)
++        self.Shutdown()
++        break
++      except KeyboardInterrupt:
++        self.Shutdown()
++        break
++
++  def Shutdown(self):
++    with open(self.relative_perf_filename, "w") as f:
++      f.write("%s" % self.relative_perf)
++    self.presence_daemon.shutdown()
++    self.presence_daemon.server_close()
++    self.local_handler.shutdown()
++    self.local_handler.server_close()
++    self.work_handler.shutdown()
++    self.work_handler.server_close()
++    self.status_handler.shutdown()
++    self.status_handler.server_close()
++
++  def PeriodicTasks(self):
++    # If we know peers we don't trust, see if someone else trusts them.
++    with self.peer_list_lock:
++      for p in self.peers:
++        if p.trusted: continue
++        if self.IsTrusted(p.pubkey):
++          p.trusted = True
++          status_handler.ITrustYouNow(p)
++          continue
++        for p2 in self.peers:
++          if not p2.trusted: continue
++          status_handler.TryTransitiveTrust(p2, p.pubkey, self)
++    # TODO: Ping for more peers waiting to be discovered.
++    # TODO: Update the checkout (if currently idle).
++
++  def AddPeer(self, peer):
++    with self.peer_list_lock:
++      for p in self.peers:
++        if p.address == peer.address:
++          return
++      self.peers.append(peer)
++    if peer.trusted:
++      status_handler.ITrustYouNow(peer)
++
++  def DeletePeer(self, peer_address):
++    with self.peer_list_lock:
++      for i in xrange(len(self.peers)):
++        if self.peers[i].address == peer_address:
++          del self.peers[i]
++          return
++
++  def MarkPeerAsTrusting(self, peer_address):
++    with self.peer_list_lock:
++      for p in self.peers:
++        if p.address == peer_address:
++          p.trusting_me = True
++          break
++
++  def UpdatePeerPerformance(self, peer_address, performance):
++    with self.peer_list_lock:
++      for p in self.peers:
++        if p.address == peer_address:
++          p.relative_performance = performance
++
++  def CopyToTrusted(self, pubkey_filename):
++    with open(pubkey_filename, "r") as f:
++      lines = f.readlines()
++      fingerprint = lines[-1].strip()
++    target_filename = self._PubkeyFilename(fingerprint)
++    shutil.copy(pubkey_filename, target_filename)
++    with self.peer_list_lock:
++      for peer in self.peers:
++        if peer.address == self.ip: continue
++        if peer.pubkey == fingerprint:
++          status_handler.ITrustYouNow(peer)
++        else:
++          result = self.SignTrusted(fingerprint)
++          status_handler.NotifyNewTrusted(peer, result)
++    return fingerprint
++
++  def _PubkeyFilename(self, pubkey_fingerprint):
++    return os.path.join(self.root, "trusted", "%s.pem" % pubkey_fingerprint)
++
++  def IsTrusted(self, pubkey_fingerprint):
++    return os.path.exists(self._PubkeyFilename(pubkey_fingerprint))
++
++  def ListTrusted(self):
++    path = os.path.join(self.root, "trusted")
++    if not os.path.exists(path): return []
++    return [ f[:-4] for f in os.listdir(path) if f.endswith(".pem") ]
++
++  def SignTrusted(self, pubkey_fingerprint):
++    if not self.IsTrusted(pubkey_fingerprint):
++      return []
++    filename = self._PubkeyFilename(pubkey_fingerprint)
++    result = signatures.ReadFileAndSignature(filename)  # Format: [key, sig].
++    return [pubkey_fingerprint, result[0], result[1], self.pubkey_fingerprint]
++
++  def AcceptNewTrusted(self, data):
++    # The format of |data| matches the return value of |SignTrusted()|.
++    if not data: return
++    fingerprint = data[0]
++    pubkey = data[1]
++    signature = data[2]
++    signer = data[3]
++    if not self.IsTrusted(signer):
++      return
++    if self.IsTrusted(fingerprint):
++      return  # Already trust this guy.
++    filename = self._PubkeyFilename(fingerprint)
++    signer_pubkeyfile = self._PubkeyFilename(signer)
++    if not signatures.VerifySignature(filename, pubkey, signature,
++                                      signer_pubkeyfile):
++      return
++    return  # Nothing more to do.
++
++  def AddPerfData(self, test_key, duration, arch, mode):
++    data_store = self.perf_data_manager.GetStore(arch, mode)
++    data_store.RawUpdatePerfData(str(test_key), duration)
++
++  def CompareOwnPerf(self, test, arch, mode):
++    data_store = self.perf_data_manager.GetStore(arch, mode)
++    observed = data_store.FetchPerfData(test)
++    if not observed: return
++    own_perf_estimate = observed / test.duration
++    with self.perf_data_lock:
++      kLearnRateLimiter = 9999
++      self.relative_perf *= kLearnRateLimiter
++      self.relative_perf += own_perf_estimate
++      self.relative_perf /= (kLearnRateLimiter + 1)
+diff --git a/v8/tools/testrunner/server/presence_handler.py b/v8/tools/testrunner/server/presence_handler.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..1dc2ef163ab5b364b38b7357216b4292a3af75e4
+--- /dev/null
++++ b/v8/tools/testrunner/server/presence_handler.py
+@@ -0,0 +1,120 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++import socket
++import SocketServer
++import threading
++try:
++  import ujson as json
++except:
++  import json
++
++from . import constants
++from ..objects import peer
++
++
++STARTUP_REQUEST = "V8 test peer starting up"
++STARTUP_RESPONSE = "Let's rock some tests!"
++EXIT_REQUEST = "V8 testing peer going down"
++
++
++def GetOwnIP():
++  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
++  s.connect(("8.8.8.8", 80))
++  ip = s.getsockname()[0]
++  s.close()
++  return ip
++
++
++class PresenceHandler(SocketServer.BaseRequestHandler):
++
++  def handle(self):
++    data = json.loads(self.request[0].strip())
++
++    if data[0] == STARTUP_REQUEST:
++      jobs = data[1]
++      relative_perf = data[2]
++      pubkey_fingerprint = data[3]
++      trusted = self.server.daemon.IsTrusted(pubkey_fingerprint)
++      response = [STARTUP_RESPONSE, self.server.daemon.jobs,
++                  self.server.daemon.relative_perf,
++                  self.server.daemon.pubkey_fingerprint, trusted]
++      response = json.dumps(response)
++      self.server.SendTo(self.client_address[0], response)
++      p = peer.Peer(self.client_address[0], jobs, relative_perf,
++                    pubkey_fingerprint)
++      p.trusted = trusted
++      self.server.daemon.AddPeer(p)
++
++    elif data[0] == STARTUP_RESPONSE:
++      jobs = data[1]
++      perf = data[2]
++      pubkey_fingerprint = data[3]
++      p = peer.Peer(self.client_address[0], jobs, perf, pubkey_fingerprint)
++      p.trusted = self.server.daemon.IsTrusted(pubkey_fingerprint)
++      p.trusting_me = data[4]
++      self.server.daemon.AddPeer(p)
++
++    elif data[0] == EXIT_REQUEST:
++      self.server.daemon.DeletePeer(self.client_address[0])
++      if self.client_address[0] == self.server.daemon.ip:
++        self.server.shutdown_lock.release()
++
++
++class PresenceDaemon(SocketServer.ThreadingMixIn, SocketServer.UDPServer):
++  def __init__(self, daemon):
++    self.daemon = daemon
++    address = (daemon.ip, constants.PRESENCE_PORT)
++    SocketServer.UDPServer.__init__(self, address, PresenceHandler)
++    self.shutdown_lock = threading.Lock()
++
++  def shutdown(self):
++    self.shutdown_lock.acquire()
++    self.SendToAll(json.dumps([EXIT_REQUEST]))
++    self.shutdown_lock.acquire()
++    self.shutdown_lock.release()
++    SocketServer.UDPServer.shutdown(self)
++
++  def SendTo(self, target, message):
++    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
++    sock.sendto(message, (target, constants.PRESENCE_PORT))
++    sock.close()
++
++  def SendToAll(self, message):
++    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
++    ip = self.daemon.ip.split(".")
++    for i in range(1, 254):
++      ip[-1] = str(i)
++      sock.sendto(message, (".".join(ip), constants.PRESENCE_PORT))
++    sock.close()
++
++  def FindPeers(self):
++    request = [STARTUP_REQUEST, self.daemon.jobs, self.daemon.relative_perf,
++               self.daemon.pubkey_fingerprint]
++    request = json.dumps(request)
++    self.SendToAll(request)
+diff --git a/v8/tools/testrunner/server/signatures.py b/v8/tools/testrunner/server/signatures.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..9957a18a267521323f7b8e3e8e1a41146239f674
+--- /dev/null
++++ b/v8/tools/testrunner/server/signatures.py
+@@ -0,0 +1,63 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++import base64
++import os
++import subprocess
++
++
++def ReadFileAndSignature(filename):
++  with open(filename, "rb") as f:
++    file_contents = base64.b64encode(f.read())
++  signature_file = filename + ".signature"
++  if (not os.path.exists(signature_file) or
++      os.path.getmtime(signature_file) < os.path.getmtime(filename)):
++    private_key = "~/.ssh/v8_dtest"
++    code = subprocess.call("openssl dgst -out %s -sign %s %s" %
++                           (signature_file, private_key, filename),
++                           shell=True)
++    if code != 0: return [None, code]
++  with open(signature_file) as f:
++    signature = base64.b64encode(f.read())
++  return [file_contents, signature]
++
++
++def VerifySignature(filename, file_contents, signature, pubkeyfile):
++  with open(filename, "wb") as f:
++    f.write(base64.b64decode(file_contents))
++  signature_file = filename + ".foreign_signature"
++  with open(signature_file, "wb") as f:
++    f.write(base64.b64decode(signature))
++  code = subprocess.call("openssl dgst -verify %s -signature %s %s" %
++                         (pubkeyfile, signature_file, filename),
++                         shell=True)
++  matched = (code == 0)
++  if not matched:
++    os.remove(signature_file)
++    os.remove(filename)
++  return matched
+diff --git a/v8/tools/testrunner/server/status_handler.py b/v8/tools/testrunner/server/status_handler.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3f2271dc697597a68791e7dbd7877012b5050f07
+--- /dev/null
++++ b/v8/tools/testrunner/server/status_handler.py
+@@ -0,0 +1,112 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++import socket
++import SocketServer
++
++from . import compression
++from . import constants
++
++
++def _StatusQuery(peer, query):
++  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++  code = sock.connect_ex((peer.address, constants.STATUS_PORT))
++  if code != 0:
++    # TODO(jkummerow): disconnect (after 3 failures?)
++    return
++  compression.Send(query, sock)
++  compression.Send(constants.END_OF_STREAM, sock)
++  rec = compression.Receiver(sock)
++  data = None
++  while not rec.IsDone():
++    data = rec.Current()
++    assert data[0] == query[0]
++    data = data[1]
++    rec.Advance()
++  sock.close()
++  return data
++
++
++def RequestTrustedPubkeys(peer, server):
++  pubkey_list = _StatusQuery(peer, [constants.LIST_TRUSTED_PUBKEYS])
++  for pubkey in pubkey_list:
++    if server.IsTrusted(pubkey): continue
++    result = _StatusQuery(peer, [constants.GET_SIGNED_PUBKEY, pubkey])
++    server.AcceptNewTrusted(result)
++
++
++def NotifyNewTrusted(peer, data):
++  _StatusQuery(peer, [constants.NOTIFY_NEW_TRUSTED] + data)
++
++
++def ITrustYouNow(peer):
++  _StatusQuery(peer, [constants.TRUST_YOU_NOW])
++
++
++def TryTransitiveTrust(peer, pubkey, server):
++  if _StatusQuery(peer, [constants.DO_YOU_TRUST, pubkey]):
++    result = _StatusQuery(peer, [constants.GET_SIGNED_PUBKEY, pubkey])
++    server.AcceptNewTrusted(result)
++
++
++class StatusHandler(SocketServer.BaseRequestHandler):
++  def handle(self):
++    rec = compression.Receiver(self.request)
++    while not rec.IsDone():
++      data = rec.Current()
++      action = data[0]
++
++      if action == constants.LIST_TRUSTED_PUBKEYS:
++        response = self.server.daemon.ListTrusted()
++        compression.Send([action, response], self.request)
++
++      elif action == constants.GET_SIGNED_PUBKEY:
++        response = self.server.daemon.SignTrusted(data[1])
++        compression.Send([action, response], self.request)
++
++      elif action == constants.NOTIFY_NEW_TRUSTED:
++        self.server.daemon.AcceptNewTrusted(data[1:])
++        pass  # No response.
++
++      elif action == constants.TRUST_YOU_NOW:
++        self.server.daemon.MarkPeerAsTrusting(self.client_address[0])
++        pass  # No response.
++
++      elif action == constants.DO_YOU_TRUST:
++        response = self.server.daemon.IsTrusted(data[1])
++        compression.Send([action, response], self.request)
++
++      rec.Advance()
++    compression.Send(constants.END_OF_STREAM, self.request)
++
++
++class StatusSocketServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
++  def __init__(self, daemon):
++    address = (daemon.ip, constants.STATUS_PORT)
++    SocketServer.TCPServer.__init__(self, address, StatusHandler)
++    self.daemon = daemon
+diff --git a/v8/tools/testrunner/server/work_handler.py b/v8/tools/testrunner/server/work_handler.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6bf7d43cf946bb523e6a2e2ac42d32475bddd150
+--- /dev/null
++++ b/v8/tools/testrunner/server/work_handler.py
+@@ -0,0 +1,150 @@
++# Copyright 2012 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++import os
++import SocketServer
++import stat
++import subprocess
++import threading
++
++from . import compression
++from . import constants
++from . import signatures
++from ..network import endpoint
++from ..objects import workpacket
++
++
++class WorkHandler(SocketServer.BaseRequestHandler):
++
++  def handle(self):
++    rec = compression.Receiver(self.request)
++    while not rec.IsDone():
++      data = rec.Current()
++      with self.server.job_lock:
++        self._WorkOnWorkPacket(data)
++      rec.Advance()
++
++  def _WorkOnWorkPacket(self, data):
++    server_root = self.server.daemon.root
++    v8_root = os.path.join(server_root, "v8")
++    os.chdir(v8_root)
++    packet = workpacket.WorkPacket.Unpack(data)
++    self.ctx = packet.context
++    self.ctx.shell_dir = os.path.join("out",
++                                      "%s.%s" % (self.ctx.arch, self.ctx.mode))
++    if not os.path.isdir(self.ctx.shell_dir):
++      os.makedirs(self.ctx.shell_dir)
++    for binary in packet.binaries:
++      if not self._UnpackBinary(binary, packet.pubkey_fingerprint):
++        return
++
++    if not self._CheckoutRevision(packet.base_revision):
++      return
++
++    if not self._ApplyPatch(packet.patch):
++      return
++
++    tests = packet.tests
++    endpoint.Execute(v8_root, self.ctx, tests, self.request, self.server.daemon)
++    self._SendResponse()
++
++  def _SendResponse(self, error_message=None):
++    try:
++      if error_message:
++        compression.Send([[-1, error_message]], self.request)
++      compression.Send(constants.END_OF_STREAM, self.request)
++      return
++    except Exception, e:
++      pass  # Peer is gone. There's nothing we can do.
++    # Clean up.
++    self._Call("git checkout -f")
++    self._Call("git clean -f -d")
++    self._Call("rm -rf %s" % self.ctx.shell_dir)
++
++  def _UnpackBinary(self, binary, pubkey_fingerprint):
++    binary_name = binary["name"]
++    if binary_name == "libv8.so":
++      libdir = os.path.join(self.ctx.shell_dir, "lib.target")
++      if not os.path.exists(libdir): os.makedirs(libdir)
++      target = os.path.join(libdir, binary_name)
++    else:
++      target = os.path.join(self.ctx.shell_dir, binary_name)
++    pubkeyfile = "../trusted/%s.pem" % pubkey_fingerprint
++    if not signatures.VerifySignature(target, binary["blob"],
++                                      binary["sign"], pubkeyfile):
++      self._SendResponse("Signature verification failed")
++      return False
++    os.chmod(target, stat.S_IRWXU)
++    return True
++
++  def _CheckoutRevision(self, base_svn_revision):
++    get_hash_cmd = (
++        "git log -1 --format=%%H --remotes --grep='^git-svn-id:.*@%s'" %
++        base_svn_revision)
++    try:
++      base_revision = subprocess.check_output(get_hash_cmd, shell=True)
++      if not base_revision: raise ValueError
++    except:
++      self._Call("git fetch")
++      try:
++        base_revision = subprocess.check_output(get_hash_cmd, shell=True)
++        if not base_revision: raise ValueError
++      except:
++        self._SendResponse("Base revision not found.")
++        return False
++    code = self._Call("git checkout -f %s" % base_revision)
++    if code != 0:
++      self._SendResponse("Error trying to check out base revision.")
++      return False
++    code = self._Call("git clean -f -d")
++    if code != 0:
++      self._SendResponse("Failed to reset checkout")
++      return False
++    return True
++
++  def _ApplyPatch(self, patch):
++    if not patch: return True  # Just skip if the patch is empty.
++    patchfilename = "_dtest_incoming_patch.patch"
++    with open(patchfilename, "w") as f:
++      f.write(patch)
++    code = self._Call("git apply %s" % patchfilename)
++    if code != 0:
++      self._SendResponse("Error applying patch.")
++      return False
++    return True
++
++  def _Call(self, cmd):
++    return subprocess.call(cmd, shell=True)
++
++
++class WorkSocketServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
++  def __init__(self, daemon):
++    address = (daemon.ip, constants.PEER_PORT)
++    SocketServer.TCPServer.__init__(self, address, WorkHandler)
++    self.job_lock = threading.Lock()
++    self.daemon = daemon
+diff --git a/v8/tools/testrunner/testrunner.isolate b/v8/tools/testrunner/testrunner.isolate
+new file mode 100644
+index 0000000000000000000000000000000000000000..1e8e9dccb9966383f02c64244107e4af096208ea
+--- /dev/null
++++ b/v8/tools/testrunner/testrunner.isolate
+@@ -0,0 +1,24 @@
++# Copyright 2015 the V8 project authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++{
++  'variables': {
++    'command': [
++      '../run-tests.py',
++    ],
++    'files': [
++      '../run-tests.py',
++      './'
++    ],
++  },
++  'conditions': [
++    ['coverage==1 and sanitizer_coverage=="bb"', {
++      'variables': {
++        'files': [
++          '../sanitizers/sancov_merger.py',
++          '../../third_party/llvm/projects/compiler-rt/lib/sanitizer_common/scripts/sancov.py',
++        ],
++      },
++    }],
++  ],
++}
+diff --git a/v8/tools/tick-processor.html b/v8/tools/tick-processor.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..a785a6e3c869969462e6f41ac08ec8f4dc0b1909
+--- /dev/null
++++ b/v8/tools/tick-processor.html
+@@ -0,0 +1,164 @@
++<!DOCTYPE html>
++<!-- Copyright 2012 the V8 project authors. All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are
++met:
++    * Redistributions of source code must retain the above copyright
++      notice, this list of conditions and the following disclaimer.
++    * Redistributions in binary form must reproduce the above
++      copyright notice, this list of conditions and the following
++      disclaimer in the documentation and/or other materials provided
++      with the distribution.
++    * Neither the name of Google Inc. nor the names of its
++      contributors may be used to endorse or promote products derived
++      from this software without specific prior written permission.
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. -->
++
++<html lang="en">
++<head>
++  <meta charset="utf-8"/>
++  <title>V8 Tick Processor</title>
++
++  <style type="text/css">
++    body {
++      font-family: Verdana, Arial, Helvetica, sans-serif;
++      font-size: 10pt;
++    }
++    h4 {
++      margin-bottom: 0px;
++    }
++    p {
++      margin-top: 0px;
++    }
++  </style>
++
++  <script src="splaytree.js"></script>
++  <script src="codemap.js"></script>
++  <script src="csvparser.js"></script>
++  <script src="consarray.js"></script>
++  <script src="profile.js"></script>
++  <script src="profile_view.js"></script>
++  <script src="logreader.js"></script>
++  <script src="tickprocessor.js"></script>
++
++  <script type="text/javascript">
++
++var v8log_content;
++var textout;
++
++function load_logfile(evt) {
++  textout.value = "";
++  var f = evt.target.files[0];
++  if (f) {
++    var reader = new FileReader();
++    reader.onload = function(event) {
++      v8log_content = event.target.result;
++      start_process();
++    };
++    reader.onerror = function(event) {
++      console.error("File could not be read! Code " + event.target.error.code);
++    };
++    reader.readAsText(f);
++  } else {
++    alert("Failed to load file");
++  }
++}
++
++function print(arg) {
++  textout.value+=arg+"\n";
++}
++
++function start_process() {
++  ArgumentsProcessor.DEFAULTS = {
++    logFileName: 'v8.log',
++    platform: 'unix',
++    stateFilter: null,
++    callGraphSize: 5,
++    ignoreUnknown: false,
++    separateIc: false,
++    targetRootFS: '',
++    nm: 'nm'
++  };
++
++  var entriesProviders = {
++    'unix': UnixCppEntriesProvider,
++    'windows': WindowsCppEntriesProvider,
++    'mac': MacCppEntriesProvider
++  };
++
++  var tickProcessor = new TickProcessor(
++    new (entriesProviders[ArgumentsProcessor.DEFAULTS.platform])(
++        ArgumentsProcessor.DEFAULTS.nm,
++        ArgumentsProcessor.DEFAULTS.targetRootFS),
++    ArgumentsProcessor.DEFAULTS.separateIc,
++    ArgumentsProcessor.DEFAULTS.callGraphSize,
++    ArgumentsProcessor.DEFAULTS.ignoreUnknown,
++    ArgumentsProcessor.DEFAULTS.stateFilter);
++
++  tickProcessor.processLogChunk(v8log_content);
++  tickProcessor.printStatistics();
++}
++
++function Load() {
++  document.getElementById('fileinput').addEventListener(
++      'change', load_logfile, false);
++  textout = document.getElementById('textout');
++}
++</script>
++</head>
++<body onLoad="Load()">
++
++<h3 style="margin-top: 2px;">
++  Chrome V8 profiling log processor
++</h3>
++<p>
++Process V8's profiling information log (sampling profiler tick information)
++in your browser. Particularly useful if you don't have the V8 shell (d8)
++at hand on your system. You still have to run Chrome with the appropriate
++<a href="https://code.google.com/p/v8/wiki/ProfilingChromiumWithV8">
++  command line flags</a>
++to produce the profiling log.
++</p>
++<h4>Usage:</h4>
++<p>
++Click on the button and browse to the profiling log file (usually, v8.log).
++Process will start automatically and the output will be visible in the below
++text area.
++</p>
++<h4>Limitations and disclaimer:</h4>
++<p>
++This page offers a subset of the functionalities of the command-line tick
++processor utility in the V8 repository. In particular, this page cannot
++access the command-line utility that provides library symbol information,
++hence the [C++] section of the output stays empty. Also consider that this
++web-based tool is provided only for convenience and quick reference, you
++should refer to the
++<a href="https://code.google.com/p/v8/wiki/V8Profiler">
++  command-line</a>
++version for full output.
++</p>
++<p>
++<input type="file" id="fileinput" />
++</p>
++<p>
++<textarea name="myTextArea" cols="120" rows="40" wrap="off" id="textout"
++          readonly="yes"></textarea>
++</p>
++<p style="font-style:italic;">
++Copyright the V8 Authors - Last change to this page: 12/12/2012
++</p>
++
++
++</body>
++</html>
+diff --git a/v8/tools/tickprocessor-driver.js b/v8/tools/tickprocessor-driver.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..3f2321fed19d639f3f943140574b04d8bda4e885
+--- /dev/null
++++ b/v8/tools/tickprocessor-driver.js
+@@ -0,0 +1,77 @@
++// Copyright 2012 the V8 project authors. All rights reserved.
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Google Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++// Tick Processor's code flow.
++
++function processArguments(args) {
++  var processor = new ArgumentsProcessor(args);
++  if (processor.parse()) {
++    return processor.result();
++  } else {
++    processor.printUsageAndExit();
++  }
++}
++
++function initSourceMapSupport() {
++  // Pull dev tools source maps  into our name space.
++  SourceMap = WebInspector.SourceMap;
++
++  // Overwrite the load function to load scripts synchronously.
++  SourceMap.load = function(sourceMapURL) {
++    var content = readFile(sourceMapURL);
++    var sourceMapObject = (JSON.parse(content));
++    return new SourceMap(sourceMapURL, sourceMapObject);
++  };
++}
++
++var entriesProviders = {
++  'unix': UnixCppEntriesProvider,
++  'windows': WindowsCppEntriesProvider,
++  'mac': MacCppEntriesProvider
++};
++
++var params = processArguments(arguments);
++var sourceMap = null;
++if (params.sourceMap) {
++  initSourceMapSupport();
++  sourceMap = SourceMap.load(params.sourceMap);
++}
++var tickProcessor = new TickProcessor(
++  new (entriesProviders[params.platform])(params.nm, params.targetRootFS),
++  params.separateIc,
++  params.callGraphSize,
++  params.ignoreUnknown,
++  params.stateFilter,
++  params.distortion,
++  params.range,
++  sourceMap,
++  params.timedRange,
++  params.pairwiseTimedRange,
++  params.onlySummary);
++tickProcessor.processLogFile(params.logFileName);
++tickProcessor.printStatistics();
+diff --git a/v8/tools/tickprocessor.js b/v8/tools/tickprocessor.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..ba7401a2236dd3ec25a0ae1ad89cf456f1e51970
+--- /dev/null
++++ b/v8/tools/tickprocessor.js
+@@ -0,0 +1,893 @@
++// Copyright 2012 the V8 project authors. All rights reserved.
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Google Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++function inherits(childCtor, parentCtor) {
++  childCtor.prototype.__proto__ = parentCtor.prototype;
++};
++
++
++function V8Profile(separateIc) {
++  Profile.call(this);
++  if (!separateIc) {
++    this.skipThisFunction = function(name) { return V8Profile.IC_RE.test(name); };
++  }
++};
++inherits(V8Profile, Profile);
++
++
++V8Profile.IC_RE =
++    /^(?:CallIC|LoadIC|StoreIC)|(?:Builtin: (?:Keyed)?(?:Call|Load|Store)IC_)/;
++
++
++/**
++ * A thin wrapper around shell's 'read' function showing a file name on error.
++ */
++function readFile(fileName) {
++  try {
++    return read(fileName);
++  } catch (e) {
++    print(fileName + ': ' + (e.message || e));
++    throw e;
++  }
++}
++
++
++/**
++ * Parser for dynamic code optimization state.
++ */
++function parseState(s) {
++  switch (s) {
++  case "": return Profile.CodeState.COMPILED;
++  case "~": return Profile.CodeState.OPTIMIZABLE;
++  case "*": return Profile.CodeState.OPTIMIZED;
++  }
++  throw new Error("unknown code state: " + s);
++}
++
++
++function TickProcessor(
++    cppEntriesProvider,
++    separateIc,
++    callGraphSize,
++    ignoreUnknown,
++    stateFilter,
++    distortion,
++    range,
++    sourceMap,
++    timedRange,
++    pairwiseTimedRange,
++    onlySummary) {
++  LogReader.call(this, {
++      'shared-library': { parsers: [null, parseInt, parseInt],
++          processor: this.processSharedLibrary },
++      'code-creation': {
++          parsers: [null, parseInt, parseInt, parseInt, null, 'var-args'],
++          processor: this.processCodeCreation },
++      'code-move': { parsers: [parseInt, parseInt],
++          processor: this.processCodeMove },
++      'code-delete': { parsers: [parseInt],
++          processor: this.processCodeDelete },
++      'sfi-move': { parsers: [parseInt, parseInt],
++          processor: this.processFunctionMove },
++      'tick': {
++          parsers: [parseInt, parseInt, parseInt,
++                    parseInt, parseInt, 'var-args'],
++          processor: this.processTick },
++      'heap-sample-begin': { parsers: [null, null, parseInt],
++          processor: this.processHeapSampleBegin },
++      'heap-sample-end': { parsers: [null, null],
++          processor: this.processHeapSampleEnd },
++      'timer-event-start' : { parsers: [null, null, null],
++                              processor: this.advanceDistortion },
++      'timer-event-end' : { parsers: [null, null, null],
++                            processor: this.advanceDistortion },
++      // Ignored events.
++      'profiler': null,
++      'function-creation': null,
++      'function-move': null,
++      'function-delete': null,
++      'heap-sample-item': null,
++      'current-time': null,  // Handled specially, not parsed.
++      // Obsolete row types.
++      'code-allocate': null,
++      'begin-code-region': null,
++      'end-code-region': null },
++      timedRange,
++      pairwiseTimedRange);
++
++  this.cppEntriesProvider_ = cppEntriesProvider;
++  this.callGraphSize_ = callGraphSize;
++  this.ignoreUnknown_ = ignoreUnknown;
++  this.stateFilter_ = stateFilter;
++  this.sourceMap = sourceMap;
++  this.deserializedEntriesNames_ = [];
++  var ticks = this.ticks_ =
++    { total: 0, unaccounted: 0, excluded: 0, gc: 0 };
++
++  distortion = parseInt(distortion);
++  // Convert picoseconds to nanoseconds.
++  this.distortion_per_entry = isNaN(distortion) ? 0 : (distortion / 1000);
++  this.distortion = 0;
++  var rangelimits = range ? range.split(",") : [];
++  var range_start = parseInt(rangelimits[0]);
++  var range_end = parseInt(rangelimits[1]);
++  // Convert milliseconds to nanoseconds.
++  this.range_start = isNaN(range_start) ? -Infinity : (range_start * 1000);
++  this.range_end = isNaN(range_end) ? Infinity : (range_end * 1000)
++
++  V8Profile.prototype.handleUnknownCode = function(
++      operation, addr, opt_stackPos) {
++    var op = Profile.Operation;
++    switch (operation) {
++      case op.MOVE:
++        print('Code move event for unknown code: 0x' + addr.toString(16));
++        break;
++      case op.DELETE:
++        print('Code delete event for unknown code: 0x' + addr.toString(16));
++        break;
++      case op.TICK:
++        // Only unknown PCs (the first frame) are reported as unaccounted,
++        // otherwise tick balance will be corrupted (this behavior is compatible
++        // with the original tickprocessor.py script.)
++        if (opt_stackPos == 0) {
++          ticks.unaccounted++;
++        }
++        break;
++    }
++  };
++
++  this.profile_ = new V8Profile(separateIc);
++  this.codeTypes_ = {};
++  // Count each tick as a time unit.
++  this.viewBuilder_ = new ViewBuilder(1);
++  this.lastLogFileName_ = null;
++
++  this.generation_ = 1;
++  this.currentProducerProfile_ = null;
++  this.onlySummary_ = onlySummary;
++};
++inherits(TickProcessor, LogReader);
++
++
++TickProcessor.VmStates = {
++  JS: 0,
++  GC: 1,
++  COMPILER: 2,
++  OTHER: 3,
++  EXTERNAL: 4,
++  IDLE: 5
++};
++
++
++TickProcessor.CodeTypes = {
++  CPP: 0,
++  SHARED_LIB: 1
++};
++// Otherwise, this is JS-related code. We are not adding it to
++// codeTypes_ map because there can be zillions of them.
++
++
++TickProcessor.CALL_PROFILE_CUTOFF_PCT = 2.0;
++
++TickProcessor.CALL_GRAPH_SIZE = 5;
++
++/**
++ * @override
++ */
++TickProcessor.prototype.printError = function(str) {
++  print(str);
++};
++
++
++TickProcessor.prototype.setCodeType = function(name, type) {
++  this.codeTypes_[name] = TickProcessor.CodeTypes[type];
++};
++
++
++TickProcessor.prototype.isSharedLibrary = function(name) {
++  return this.codeTypes_[name] == TickProcessor.CodeTypes.SHARED_LIB;
++};
++
++
++TickProcessor.prototype.isCppCode = function(name) {
++  return this.codeTypes_[name] == TickProcessor.CodeTypes.CPP;
++};
++
++
++TickProcessor.prototype.isJsCode = function(name) {
++  return name !== "UNKNOWN" && !(name in this.codeTypes_);
++};
++
++
++TickProcessor.prototype.processLogFile = function(fileName) {
++  this.lastLogFileName_ = fileName;
++  var line;
++  while (line = readline()) {
++    this.processLogLine(line);
++  }
++};
++
++
++TickProcessor.prototype.processLogFileInTest = function(fileName) {
++   // Hack file name to avoid dealing with platform specifics.
++  this.lastLogFileName_ = 'v8.log';
++  var contents = readFile(fileName);
++  this.processLogChunk(contents);
++};
++
++
++TickProcessor.prototype.processSharedLibrary = function(
++    name, startAddr, endAddr) {
++  var entry = this.profile_.addLibrary(name, startAddr, endAddr);
++  this.setCodeType(entry.getName(), 'SHARED_LIB');
++
++  var self = this;
++  var libFuncs = this.cppEntriesProvider_.parseVmSymbols(
++      name, startAddr, endAddr, function(fName, fStart, fEnd) {
++    self.profile_.addStaticCode(fName, fStart, fEnd);
++    self.setCodeType(fName, 'CPP');
++  });
++};
++
++
++TickProcessor.prototype.processCodeCreation = function(
++    type, kind, start, size, name, maybe_func) {
++  name = this.deserializedEntriesNames_[start] || name;
++  if (maybe_func.length) {
++    var funcAddr = parseInt(maybe_func[0]);
++    var state = parseState(maybe_func[1]);
++    this.profile_.addFuncCode(type, name, start, size, funcAddr, state);
++  } else {
++    this.profile_.addCode(type, name, start, size);
++  }
++};
++
++
++TickProcessor.prototype.processCodeMove = function(from, to) {
++  this.profile_.moveCode(from, to);
++};
++
++
++TickProcessor.prototype.processCodeDelete = function(start) {
++  this.profile_.deleteCode(start);
++};
++
++
++TickProcessor.prototype.processFunctionMove = function(from, to) {
++  this.profile_.moveFunc(from, to);
++};
++
++
++TickProcessor.prototype.includeTick = function(vmState) {
++  return this.stateFilter_ == null || this.stateFilter_ == vmState;
++};
++
++TickProcessor.prototype.processTick = function(pc,
++                                               ns_since_start,
++                                               is_external_callback,
++                                               tos_or_external_callback,
++                                               vmState,
++                                               stack) {
++  this.distortion += this.distortion_per_entry;
++  ns_since_start -= this.distortion;
++  if (ns_since_start < this.range_start || ns_since_start > this.range_end) {
++    return;
++  }
++  this.ticks_.total++;
++  if (vmState == TickProcessor.VmStates.GC) this.ticks_.gc++;
++  if (!this.includeTick(vmState)) {
++    this.ticks_.excluded++;
++    return;
++  }
++  if (is_external_callback) {
++    // Don't use PC when in external callback code, as it can point
++    // inside callback's code, and we will erroneously report
++    // that a callback calls itself. Instead we use tos_or_external_callback,
++    // as simply resetting PC will produce unaccounted ticks.
++    pc = tos_or_external_callback;
++    tos_or_external_callback = 0;
++  } else if (tos_or_external_callback) {
++    // Find out, if top of stack was pointing inside a JS function
++    // meaning that we have encountered a frameless invocation.
++    var funcEntry = this.profile_.findEntry(tos_or_external_callback);
++    if (!funcEntry || !funcEntry.isJSFunction || !funcEntry.isJSFunction()) {
++      tos_or_external_callback = 0;
++    }
++  }
++
++  this.profile_.recordTick(this.processStack(pc, tos_or_external_callback, stack));
++};
++
++
++TickProcessor.prototype.advanceDistortion = function() {
++  this.distortion += this.distortion_per_entry;
++}
++
++
++TickProcessor.prototype.processHeapSampleBegin = function(space, state, ticks) {
++  if (space != 'Heap') return;
++  this.currentProducerProfile_ = new CallTree();
++};
++
++
++TickProcessor.prototype.processHeapSampleEnd = function(space, state) {
++  if (space != 'Heap' || !this.currentProducerProfile_) return;
++
++  print('Generation ' + this.generation_ + ':');
++  var tree = this.currentProducerProfile_;
++  tree.computeTotalWeights();
++  var producersView = this.viewBuilder_.buildView(tree);
++  // Sort by total time, desc, then by name, desc.
++  producersView.sort(function(rec1, rec2) {
++      return rec2.totalTime - rec1.totalTime ||
++          (rec2.internalFuncName < rec1.internalFuncName ? -1 : 1); });
++  this.printHeavyProfile(producersView.head.children);
++
++  this.currentProducerProfile_ = null;
++  this.generation_++;
++};
++
++
++TickProcessor.prototype.printStatistics = function() {
++  print('Statistical profiling result from ' + this.lastLogFileName_ +
++        ', (' + this.ticks_.total +
++        ' ticks, ' + this.ticks_.unaccounted + ' unaccounted, ' +
++        this.ticks_.excluded + ' excluded).');
++
++  if (this.ticks_.total == 0) return;
++
++  var flatProfile = this.profile_.getFlatProfile();
++  var flatView = this.viewBuilder_.buildView(flatProfile);
++  // Sort by self time, desc, then by name, desc.
++  flatView.sort(function(rec1, rec2) {
++      return rec2.selfTime - rec1.selfTime ||
++          (rec2.internalFuncName < rec1.internalFuncName ? -1 : 1); });
++  var totalTicks = this.ticks_.total;
++  if (this.ignoreUnknown_) {
++    totalTicks -= this.ticks_.unaccounted;
++  }
++  var printAllTicks = !this.onlySummary_;
++
++  // Count library ticks
++  var flatViewNodes = flatView.head.children;
++  var self = this;
++
++  var libraryTicks = 0;
++  if(printAllTicks) this.printHeader('Shared libraries');
++  this.printEntries(flatViewNodes, totalTicks, null,
++      function(name) { return self.isSharedLibrary(name); },
++      function(rec) { libraryTicks += rec.selfTime; }, printAllTicks);
++  var nonLibraryTicks = totalTicks - libraryTicks;
++
++  var jsTicks = 0;
++  if(printAllTicks) this.printHeader('JavaScript');
++  this.printEntries(flatViewNodes, totalTicks, nonLibraryTicks,
++      function(name) { return self.isJsCode(name); },
++      function(rec) { jsTicks += rec.selfTime; }, printAllTicks);
++
++  var cppTicks = 0;
++  if(printAllTicks) this.printHeader('C++');
++  this.printEntries(flatViewNodes, totalTicks, nonLibraryTicks,
++      function(name) { return self.isCppCode(name); },
++      function(rec) { cppTicks += rec.selfTime; }, printAllTicks);
++
++  this.printHeader('Summary');
++  this.printLine('JavaScript', jsTicks, totalTicks, nonLibraryTicks);
++  this.printLine('C++', cppTicks, totalTicks, nonLibraryTicks);
++  this.printLine('GC', this.ticks_.gc, totalTicks, nonLibraryTicks);
++  this.printLine('Shared libraries', libraryTicks, totalTicks, null);
++  if (!this.ignoreUnknown_ && this.ticks_.unaccounted > 0) {
++    this.printLine('Unaccounted', this.ticks_.unaccounted,
++                   this.ticks_.total, null);
++  }
++
++  if(printAllTicks) {
++    print('\n [C++ entry points]:');
++    print('   ticks    cpp   total   name');
++    var c_entry_functions = this.profile_.getCEntryProfile();
++    var total_c_entry = c_entry_functions[0].ticks;
++    for (var i = 1; i < c_entry_functions.length; i++) {
++      c = c_entry_functions[i];
++      this.printLine(c.name, c.ticks, total_c_entry, totalTicks);
++    }
++
++    this.printHeavyProfHeader();
++    var heavyProfile = this.profile_.getBottomUpProfile();
++    var heavyView = this.viewBuilder_.buildView(heavyProfile);
++    // To show the same percentages as in the flat profile.
++    heavyView.head.totalTime = totalTicks;
++    // Sort by total time, desc, then by name, desc.
++    heavyView.sort(function(rec1, rec2) {
++        return rec2.totalTime - rec1.totalTime ||
++            (rec2.internalFuncName < rec1.internalFuncName ? -1 : 1); });
++    this.printHeavyProfile(heavyView.head.children);
++  }
++};
++
++
++function padLeft(s, len) {
++  s = s.toString();
++  if (s.length < len) {
++    var padLength = len - s.length;
++    if (!(padLength in padLeft)) {
++      padLeft[padLength] = new Array(padLength + 1).join(' ');
++    }
++    s = padLeft[padLength] + s;
++  }
++  return s;
++};
++
++
++TickProcessor.prototype.printHeader = function(headerTitle) {
++  print('\n [' + headerTitle + ']:');
++  print('   ticks  total  nonlib   name');
++};
++
++
++TickProcessor.prototype.printLine = function(
++    entry, ticks, totalTicks, nonLibTicks) {
++  var pct = ticks * 100 / totalTicks;
++  var nonLibPct = nonLibTicks != null
++      ? padLeft((ticks * 100 / nonLibTicks).toFixed(1), 5) + '%  '
++      : '        ';
++  print('  ' + padLeft(ticks, 5) + '  ' +
++        padLeft(pct.toFixed(1), 5) + '%  ' +
++        nonLibPct +
++        entry);
++}
++
++TickProcessor.prototype.printHeavyProfHeader = function() {
++  print('\n [Bottom up (heavy) profile]:');
++  print('  Note: percentage shows a share of a particular caller in the ' +
++        'total\n' +
++        '  amount of its parent calls.');
++  print('  Callers occupying less than ' +
++        TickProcessor.CALL_PROFILE_CUTOFF_PCT.toFixed(1) +
++        '% are not shown.\n');
++  print('   ticks parent  name');
++};
++
++
++TickProcessor.prototype.processProfile = function(
++    profile, filterP, func) {
++  for (var i = 0, n = profile.length; i < n; ++i) {
++    var rec = profile[i];
++    if (!filterP(rec.internalFuncName)) {
++      continue;
++    }
++    func(rec);
++  }
++};
++
++TickProcessor.prototype.getLineAndColumn = function(name) {
++  var re = /:([0-9]+):([0-9]+)$/;
++  var array = re.exec(name);
++  if (!array) {
++    return null;
++  }
++  return {line: array[1], column: array[2]};
++}
++
++TickProcessor.prototype.hasSourceMap = function() {
++  return this.sourceMap != null;
++};
++
++
++TickProcessor.prototype.formatFunctionName = function(funcName) {
++  if (!this.hasSourceMap()) {
++    return funcName;
++  }
++  var lc = this.getLineAndColumn(funcName);
++  if (lc == null) {
++    return funcName;
++  }
++  // in source maps lines and columns are zero based
++  var lineNumber = lc.line - 1;
++  var column = lc.column - 1;
++  var entry = this.sourceMap.findEntry(lineNumber, column);
++  var sourceFile = entry[2];
++  var sourceLine = entry[3] + 1;
++  var sourceColumn = entry[4] + 1;
++
++  return sourceFile + ':' + sourceLine + ':' + sourceColumn + ' -> ' + funcName;
++};
++
++TickProcessor.prototype.printEntries = function(
++    profile, totalTicks, nonLibTicks, filterP, callback, printAllTicks) {
++  var that = this;
++  this.processProfile(profile, filterP, function (rec) {
++    if (rec.selfTime == 0) return;
++    callback(rec);
++    var funcName = that.formatFunctionName(rec.internalFuncName);
++    if(printAllTicks) {
++      that.printLine(funcName, rec.selfTime, totalTicks, nonLibTicks);
++    }
++  });
++};
++
++
++TickProcessor.prototype.printHeavyProfile = function(profile, opt_indent) {
++  var self = this;
++  var indent = opt_indent || 0;
++  var indentStr = padLeft('', indent);
++  this.processProfile(profile, function() { return true; }, function (rec) {
++    // Cut off too infrequent callers.
++    if (rec.parentTotalPercent < TickProcessor.CALL_PROFILE_CUTOFF_PCT) return;
++    var funcName = self.formatFunctionName(rec.internalFuncName);
++    print('  ' + padLeft(rec.totalTime, 5) + '  ' +
++          padLeft(rec.parentTotalPercent.toFixed(1), 5) + '%  ' +
++          indentStr + funcName);
++    // Limit backtrace depth.
++    if (indent < 2 * self.callGraphSize_) {
++      self.printHeavyProfile(rec.children, indent + 2);
++    }
++    // Delimit top-level functions.
++    if (indent == 0) {
++      print('');
++    }
++  });
++};
++
++
++function CppEntriesProvider() {
++};
++
++
++CppEntriesProvider.prototype.parseVmSymbols = function(
++    libName, libStart, libEnd, processorFunc) {
++  this.loadSymbols(libName);
++
++  var prevEntry;
++
++  function addEntry(funcInfo) {
++    // Several functions can be mapped onto the same address. To avoid
++    // creating zero-sized entries, skip such duplicates.
++    // Also double-check that function belongs to the library address space.
++    if (prevEntry && !prevEntry.end &&
++        prevEntry.start < funcInfo.start &&
++        prevEntry.start >= libStart && funcInfo.start <= libEnd) {
++      processorFunc(prevEntry.name, prevEntry.start, funcInfo.start);
++    }
++    if (funcInfo.end &&
++        (!prevEntry || prevEntry.start != funcInfo.start) &&
++        funcInfo.start >= libStart && funcInfo.end <= libEnd) {
++      processorFunc(funcInfo.name, funcInfo.start, funcInfo.end);
++    }
++    prevEntry = funcInfo;
++  }
++
++  while (true) {
++    var funcInfo = this.parseNextLine();
++    if (funcInfo === null) {
++      continue;
++    } else if (funcInfo === false) {
++      break;
++    }
++    if (funcInfo.start < libStart && funcInfo.start < libEnd - libStart) {
++      funcInfo.start += libStart;
++    }
++    if (funcInfo.size) {
++      funcInfo.end = funcInfo.start + funcInfo.size;
++    }
++    addEntry(funcInfo);
++  }
++  addEntry({name: '', start: libEnd});
++};
++
++
++CppEntriesProvider.prototype.loadSymbols = function(libName) {
++};
++
++
++CppEntriesProvider.prototype.parseNextLine = function() {
++  return false;
++};
++
++
++function UnixCppEntriesProvider(nmExec, targetRootFS) {
++  this.symbols = [];
++  this.parsePos = 0;
++  this.nmExec = nmExec;
++  this.targetRootFS = targetRootFS;
++  this.FUNC_RE = /^([0-9a-fA-F]{8,16}) ([0-9a-fA-F]{8,16} )?[tTwW] (.*)$/;
++};
++inherits(UnixCppEntriesProvider, CppEntriesProvider);
++
++
++UnixCppEntriesProvider.prototype.loadSymbols = function(libName) {
++  this.parsePos = 0;
++  libName = this.targetRootFS + libName;
++  try {
++    this.symbols = [
++      os.system(this.nmExec, ['-C', '-n', '-S', libName], -1, -1),
++      os.system(this.nmExec, ['-C', '-n', '-S', '-D', libName], -1, -1)
++    ];
++  } catch (e) {
++    // If the library cannot be found on this system let's not panic.
++    this.symbols = ['', ''];
++  }
++};
++
++
++UnixCppEntriesProvider.prototype.parseNextLine = function() {
++  if (this.symbols.length == 0) {
++    return false;
++  }
++  var lineEndPos = this.symbols[0].indexOf('\n', this.parsePos);
++  if (lineEndPos == -1) {
++    this.symbols.shift();
++    this.parsePos = 0;
++    return this.parseNextLine();
++  }
++
++  var line = this.symbols[0].substring(this.parsePos, lineEndPos);
++  this.parsePos = lineEndPos + 1;
++  var fields = line.match(this.FUNC_RE);
++  var funcInfo = null;
++  if (fields) {
++    funcInfo = { name: fields[3], start: parseInt(fields[1], 16) };
++    if (fields[2]) {
++      funcInfo.size = parseInt(fields[2], 16);
++    }
++  }
++  return funcInfo;
++};
++
++
++function MacCppEntriesProvider(nmExec, targetRootFS) {
++  UnixCppEntriesProvider.call(this, nmExec, targetRootFS);
++  // Note an empty group. It is required, as UnixCppEntriesProvider expects 3 groups.
++  this.FUNC_RE = /^([0-9a-fA-F]{8,16}) ()[iItT] (.*)$/;
++};
++inherits(MacCppEntriesProvider, UnixCppEntriesProvider);
++
++
++MacCppEntriesProvider.prototype.loadSymbols = function(libName) {
++  this.parsePos = 0;
++  libName = this.targetRootFS + libName;
++
++  // It seems that in OS X `nm` thinks that `-f` is a format option, not a
++  // "flat" display option flag.
++  try {
++    this.symbols = [os.system(this.nmExec, ['-n', libName], -1, -1), ''];
++  } catch (e) {
++    // If the library cannot be found on this system let's not panic.
++    this.symbols = '';
++  }
++};
++
++
++function WindowsCppEntriesProvider(_ignored_nmExec, targetRootFS) {
++  this.targetRootFS = targetRootFS;
++  this.symbols = '';
++  this.parsePos = 0;
++};
++inherits(WindowsCppEntriesProvider, CppEntriesProvider);
++
++
++WindowsCppEntriesProvider.FILENAME_RE = /^(.*)\.([^.]+)$/;
++
++
++WindowsCppEntriesProvider.FUNC_RE =
++    /^\s+0001:[0-9a-fA-F]{8}\s+([_\?@$0-9a-zA-Z]+)\s+([0-9a-fA-F]{8}).*$/;
++
++
++WindowsCppEntriesProvider.IMAGE_BASE_RE =
++    /^\s+0000:00000000\s+___ImageBase\s+([0-9a-fA-F]{8}).*$/;
++
++
++// This is almost a constant on Windows.
++WindowsCppEntriesProvider.EXE_IMAGE_BASE = 0x00400000;
++
++
++WindowsCppEntriesProvider.prototype.loadSymbols = function(libName) {
++  libName = this.targetRootFS + libName;
++  var fileNameFields = libName.match(WindowsCppEntriesProvider.FILENAME_RE);
++  if (!fileNameFields) return;
++  var mapFileName = fileNameFields[1] + '.map';
++  this.moduleType_ = fileNameFields[2].toLowerCase();
++  try {
++    this.symbols = read(mapFileName);
++  } catch (e) {
++    // If .map file cannot be found let's not panic.
++    this.symbols = '';
++  }
++};
++
++
++WindowsCppEntriesProvider.prototype.parseNextLine = function() {
++  var lineEndPos = this.symbols.indexOf('\r\n', this.parsePos);
++  if (lineEndPos == -1) {
++    return false;
++  }
++
++  var line = this.symbols.substring(this.parsePos, lineEndPos);
++  this.parsePos = lineEndPos + 2;
++
++  // Image base entry is above all other symbols, so we can just
++  // terminate parsing.
++  var imageBaseFields = line.match(WindowsCppEntriesProvider.IMAGE_BASE_RE);
++  if (imageBaseFields) {
++    var imageBase = parseInt(imageBaseFields[1], 16);
++    if ((this.moduleType_ == 'exe') !=
++        (imageBase == WindowsCppEntriesProvider.EXE_IMAGE_BASE)) {
++      return false;
++    }
++  }
++
++  var fields = line.match(WindowsCppEntriesProvider.FUNC_RE);
++  return fields ?
++      { name: this.unmangleName(fields[1]), start: parseInt(fields[2], 16) } :
++      null;
++};
++
++
++/**
++ * Performs very simple unmangling of C++ names.
++ *
++ * Does not handle arguments and template arguments. The mangled names have
++ * the form:
++ *
++ *   ?LookupInDescriptor@JSObject@internal@v8@@...arguments info...
++ */
++WindowsCppEntriesProvider.prototype.unmangleName = function(name) {
++  // Empty or non-mangled name.
++  if (name.length < 1 || name.charAt(0) != '?') return name;
++  var nameEndPos = name.indexOf('@@');
++  var components = name.substring(1, nameEndPos).split('@');
++  components.reverse();
++  return components.join('::');
++};
++
++
++function ArgumentsProcessor(args) {
++  this.args_ = args;
++  this.result_ = ArgumentsProcessor.DEFAULTS;
++
++  this.argsDispatch_ = {
++    '-j': ['stateFilter', TickProcessor.VmStates.JS,
++        'Show only ticks from JS VM state'],
++    '-g': ['stateFilter', TickProcessor.VmStates.GC,
++        'Show only ticks from GC VM state'],
++    '-c': ['stateFilter', TickProcessor.VmStates.COMPILER,
++        'Show only ticks from COMPILER VM state'],
++    '-o': ['stateFilter', TickProcessor.VmStates.OTHER,
++        'Show only ticks from OTHER VM state'],
++    '-e': ['stateFilter', TickProcessor.VmStates.EXTERNAL,
++        'Show only ticks from EXTERNAL VM state'],
++    '--call-graph-size': ['callGraphSize', TickProcessor.CALL_GRAPH_SIZE,
++        'Set the call graph size'],
++    '--ignore-unknown': ['ignoreUnknown', true,
++        'Exclude ticks of unknown code entries from processing'],
++    '--separate-ic': ['separateIc', true,
++        'Separate IC entries'],
++    '--unix': ['platform', 'unix',
++        'Specify that we are running on *nix platform'],
++    '--windows': ['platform', 'windows',
++        'Specify that we are running on Windows platform'],
++    '--mac': ['platform', 'mac',
++        'Specify that we are running on Mac OS X platform'],
++    '--nm': ['nm', 'nm',
++        'Specify the \'nm\' executable to use (e.g. --nm=/my_dir/nm)'],
++    '--target': ['targetRootFS', '',
++        'Specify the target root directory for cross environment'],
++    '--range': ['range', 'auto,auto',
++        'Specify the range limit as [start],[end]'],
++    '--distortion': ['distortion', 0,
++        'Specify the logging overhead in picoseconds'],
++    '--source-map': ['sourceMap', null,
++        'Specify the source map that should be used for output'],
++    '--timed-range': ['timedRange', true,
++        'Ignore ticks before first and after last Date.now() call'],
++    '--pairwise-timed-range': ['pairwiseTimedRange', true,
++        'Ignore ticks outside pairs of Date.now() calls'],
++    '--only-summary': ['onlySummary', true,
++        'Print only tick summary, exclude other information']
++  };
++  this.argsDispatch_['--js'] = this.argsDispatch_['-j'];
++  this.argsDispatch_['--gc'] = this.argsDispatch_['-g'];
++  this.argsDispatch_['--compiler'] = this.argsDispatch_['-c'];
++  this.argsDispatch_['--other'] = this.argsDispatch_['-o'];
++  this.argsDispatch_['--external'] = this.argsDispatch_['-e'];
++  this.argsDispatch_['--ptr'] = this.argsDispatch_['--pairwise-timed-range'];
++};
++
++
++ArgumentsProcessor.DEFAULTS = {
++  logFileName: 'v8.log',
++  platform: 'unix',
++  stateFilter: null,
++  callGraphSize: 5,
++  ignoreUnknown: false,
++  separateIc: false,
++  targetRootFS: '',
++  nm: 'nm',
++  range: 'auto,auto',
++  distortion: 0,
++  timedRange: false,
++  pairwiseTimedRange: false,
++  onlySummary: false
++};
++
++
++ArgumentsProcessor.prototype.parse = function() {
++  while (this.args_.length) {
++    var arg = this.args_.shift();
++    if (arg.charAt(0) != '-') {
++      this.result_.logFileName = arg;
++      continue;
++    }
++    var userValue = null;
++    var eqPos = arg.indexOf('=');
++    if (eqPos != -1) {
++      userValue = arg.substr(eqPos + 1);
++      arg = arg.substr(0, eqPos);
++    }
++    if (arg in this.argsDispatch_) {
++      var dispatch = this.argsDispatch_[arg];
++      this.result_[dispatch[0]] = userValue == null ? dispatch[1] : userValue;
++    } else {
++      return false;
++    }
++  }
++  return true;
++};
++
++
++ArgumentsProcessor.prototype.result = function() {
++  return this.result_;
++};
++
++
++ArgumentsProcessor.prototype.printUsageAndExit = function() {
++
++  function padRight(s, len) {
++    s = s.toString();
++    if (s.length < len) {
++      s = s + (new Array(len - s.length + 1).join(' '));
++    }
++    return s;
++  }
++
++  print('Cmdline args: [options] [log-file-name]\n' +
++        'Default log file name is "' +
++        ArgumentsProcessor.DEFAULTS.logFileName + '".\n');
++  print('Options:');
++  for (var arg in this.argsDispatch_) {
++    var synonyms = [arg];
++    var dispatch = this.argsDispatch_[arg];
++    for (var synArg in this.argsDispatch_) {
++      if (arg !== synArg && dispatch === this.argsDispatch_[synArg]) {
++        synonyms.push(synArg);
++        delete this.argsDispatch_[synArg];
++      }
++    }
++    print('  ' + padRight(synonyms.join(', '), 20) + " " + dispatch[2]);
++  }
++  quit(2);
++};
+diff --git a/v8/tools/trace-maps-processor.py b/v8/tools/trace-maps-processor.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..bf8c8a8c926b94c5d93976534b9c044619762292
+--- /dev/null
++++ b/v8/tools/trace-maps-processor.py
+@@ -0,0 +1,172 @@
++#!/usr/bin/env python
++# Copyright 2014 the V8 project authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++
++action = sys.argv[1]
++
++if action in ["help", "-h", "--help"] or len(sys.argv) != 3:
++  print("Usage: %s <action> <inputfile>, where action can be: \n"
++        "help    Print this message\n"
++        "plain   Print ASCII tree to stdout\n"
++        "dot     Print dot file to stdout\n"
++        "count   Count most frequent transition reasons\n" % sys.argv[0])
++  sys.exit(0)
++
++
++filename = sys.argv[2]
++maps = {}
++root_maps = []
++transitions = {}
++annotations = {}
++
++
++class Map(object):
++
++  def __init__(self, pointer, origin):
++    self.pointer = pointer
++    self.origin = origin
++
++  def __str__(self):
++    return "%s (%s)" % (self.pointer, self.origin)
++
++
++class Transition(object):
++
++  def __init__(self, from_map, to_map, reason):
++    self.from_map = from_map
++    self.to_map = to_map
++    self.reason = reason
++
++
++def RegisterNewMap(raw_map):
++  if raw_map in annotations:
++    annotations[raw_map] += 1
++  else:
++    annotations[raw_map] = 0
++  return AnnotateExistingMap(raw_map)
++
++
++def AnnotateExistingMap(raw_map):
++  return "%s_%d" % (raw_map, annotations[raw_map])
++
++
++def AddMap(pointer, origin):
++  pointer = RegisterNewMap(pointer)
++  maps[pointer] = Map(pointer, origin)
++  return pointer
++
++
++def AddTransition(from_map, to_map, reason):
++  from_map = AnnotateExistingMap(from_map)
++  to_map = AnnotateExistingMap(to_map)
++  if from_map not in transitions:
++    transitions[from_map] = {}
++  targets = transitions[from_map]
++  if to_map in targets:
++    # Some events get printed twice, that's OK. In some cases, ignore the
++    # second output...
++    old_reason = targets[to_map].reason
++    if old_reason.startswith("ReplaceDescriptors"):
++      return
++    # ...and in others use it for additional detail.
++    if reason in []:
++      targets[to_map].reason = reason
++      return
++    # Unexpected duplicate events? Warn.
++    print("// warning: already have a transition from %s to %s, reason: %s" %
++            (from_map, to_map, targets[to_map].reason))
++    return
++  targets[to_map] = Transition(from_map, to_map, reason)
++
++
++with open(filename, "r") as f:
++  last_to_map = ""
++  for line in f:
++    if not line.startswith("[TraceMaps: "): continue
++    words = line.split(" ")
++    event = words[1]
++    if event == "InitialMap":
++      assert words[2] == "map="
++      assert words[4] == "SFI="
++      new_map = AddMap(words[3], "SFI#%s" % words[5])
++      root_maps.append(new_map)
++      continue
++    if words[2] == "from=" and words[4] == "to=":
++      from_map = words[3]
++      to_map = words[5]
++      if from_map not in annotations:
++        print("// warning: unknown from_map %s" % from_map)
++        new_map = AddMap(from_map, "<unknown>")
++        root_maps.append(new_map)
++      if to_map != last_to_map:
++        AddMap(to_map, "<transition> (%s)" % event)
++      last_to_map = to_map
++      if event in ["Transition", "NoTransition"]:
++        assert words[6] == "name=", line
++        reason = "%s: %s" % (event, words[7])
++      elif event in ["Normalize", "ReplaceDescriptors", "SlowToFast"]:
++        assert words[6] == "reason=", line
++        reason = "%s: %s" % (event, words[7])
++        if words[8].strip() != "]":
++          reason = "%s_%s" % (reason, words[8])
++      else:
++        reason = event
++      AddTransition(from_map, to_map, reason)
++      continue
++
++
++def PlainPrint(m, indent, label):
++  print("%s%s (%s)" % (indent, m, label))
++  if m in transitions:
++    for t in transitions[m]:
++      PlainPrint(t, indent + "  ", transitions[m][t].reason)
++
++
++def CountTransitions(m):
++  if m not in transitions: return 0
++  return len(transitions[m])
++
++
++def DotPrint(m, label):
++  print("m%s [label=\"%s\"]" % (m[2:], label))
++  if m in transitions:
++    for t in transitions[m]:
++      # GraphViz doesn't like node labels looking like numbers, so use
++      # "m..." instead of "0x...".
++      print("m%s -> m%s" % (m[2:], t[2:]))
++      reason = transitions[m][t].reason
++      reason = reason.replace("\\", "BACKSLASH")
++      reason = reason.replace("\"", "\\\"")
++      DotPrint(t, reason)
++
++
++if action == "plain":
++  root_maps = sorted(root_maps, key=CountTransitions, reverse=True)
++  for m in root_maps:
++    PlainPrint(m, "", maps[m].origin)
++
++elif action == "dot":
++  print("digraph g {")
++  for m in root_maps:
++    DotPrint(m, maps[m].origin)
++  print("}")
++
++elif action == "count":
++  reasons = {}
++  for s in transitions:
++    for t in transitions[s]:
++      reason = transitions[s][t].reason
++      if reason not in reasons:
++        reasons[reason] = 1
++      else:
++        reasons[reason] += 1
++  reasons_list = []
++  for r in reasons:
++    reasons_list.append("%8d %s" % (reasons[r], r))
++  reasons_list.sort(reverse=True)
++  for r in reasons_list[:20]:
++    print r
+diff --git a/v8/tools/try_perf.py b/v8/tools/try_perf.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..fbd4036dadb49c6ddfd7407a0061bc567c355d05
+--- /dev/null
++++ b/v8/tools/try_perf.py
+@@ -0,0 +1,101 @@
++#!/usr/bin/env python
++# Copyright 2014 the V8 project authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import argparse
++import os
++import subprocess
++import sys
++
++BOTS = {
++  '--arm32': 'v8_arm32_perf_try',
++  '--linux32': 'v8_linux32_perf_try',
++  '--linux64': 'v8_linux64_perf_try',
++  '--linux64_atom': 'v8_linux64_atom_perf_try',
++  '--linux64_haswell': 'v8_linux64_haswell_perf_try',
++  '--nexus5': 'v8_nexus5_perf_try',
++  '--nexus7': 'v8_nexus7_perf_try',
++  '--nexus9': 'v8_nexus9_perf_try',
++  '--nexus10': 'v8_nexus10_perf_try',
++}
++
++DEFAULT_BOTS = [
++  'v8_arm32_perf_try',
++  'v8_linux32_perf_try',
++  'v8_linux64_haswell_perf_try',
++  'v8_nexus10_perf_try',
++]
++
++PUBLIC_BENCHMARKS = [
++  'arewefastyet',
++  'embenchen',
++  'emscripten',
++  'compile',
++  'jetstream',
++  'jsbench',
++  'jstests',
++  'kraken_orig',
++  'massive',
++  'memory',
++  'octane',
++  'octane-pr',
++  'octane-tf',
++  'octane-tf-pr',
++  'simdjs',
++  'sunspider',
++]
++
++V8_BASE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
++
++def main():
++  parser = argparse.ArgumentParser(description='')
++  parser.add_argument('benchmarks', nargs='+', help='The benchmarks to run.')
++  parser.add_argument('--extra-flags', default='',
++                      help='Extra flags to be passed to the executable.')
++  parser.add_argument('-r', '--revision', type=str, default=None,
++                      help='Revision (use full hash!) to use for the try job; '
++                           'default: the revision will be determined by the '
++                           'try server; see its waterfall for more info')
++  for option in sorted(BOTS):
++    parser.add_argument(
++        option, dest='bots', action='append_const', const=BOTS[option],
++        help='Add %s trybot.' % BOTS[option])
++  options = parser.parse_args()
++  if not options.bots:
++    print 'No trybots specified. Using default %s.' % ','.join(DEFAULT_BOTS)
++    options.bots = DEFAULT_BOTS
++
++  if not options.benchmarks:
++    print 'Please specify the benchmarks to run as arguments.'
++    return 1
++
++  for benchmark in options.benchmarks:
++    if benchmark not in PUBLIC_BENCHMARKS:
++      print ('%s not found in our benchmark list. The respective trybot might '
++            'fail, unless you run something this script isn\'t aware of. '
++            'Available public benchmarks: %s' % (benchmark, PUBLIC_BENCHMARKS))
++      print 'Proceed anyways? [Y/n] ',
++      answer = sys.stdin.readline().strip()
++      if answer != "" and answer != "Y" and answer != "y":
++        return 1
++
++  assert '"' not in options.extra_flags and '\'' not in options.extra_flags, (
++      'Invalid flag specification.')
++
++  # Ensure depot_tools are updated.
++  subprocess.check_output(
++      'gclient', shell=True, stderr=subprocess.STDOUT, cwd=V8_BASE)
++
++  cmd = ['git cl try -m internal.client.v8']
++  cmd += ['-b %s' % bot for bot in options.bots]
++  if options.revision: cmd += ['-r %s' % options.revision]
++  benchmarks = ['"%s"' % benchmark for benchmark in options.benchmarks]
++  cmd += ['-p \'testfilter=[%s]\'' % ','.join(benchmarks)]
++  if options.extra_flags:
++    cmd += ['-p \'extra_flags="%s"\'' % options.extra_flags]
++  subprocess.check_call(' '.join(cmd), shell=True, cwd=V8_BASE)
++
++
++if __name__ == '__main__':  # pragma: no cover
++  sys.exit(main())
+diff --git a/v8/tools/unittests/run_perf_test.py b/v8/tools/unittests/run_perf_test.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..1a4d73857ab609a68cd92153069bf078cf909bf3
+--- /dev/null
++++ b/v8/tools/unittests/run_perf_test.py
+@@ -0,0 +1,475 @@
++#!/usr/bin/env python
++# Copyright 2014 the V8 project authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++from collections import namedtuple
++import coverage
++import json
++from mock import DEFAULT
++from mock import MagicMock
++import os
++from os import path, sys
++import platform
++import shutil
++import subprocess
++import tempfile
++import unittest
++
++# Requires python-coverage and python-mock. Native python coverage
++# version >= 3.7.1 should be installed to get the best speed.
++
++TEST_WORKSPACE = path.join(tempfile.gettempdir(), "test-v8-run-perf")
++
++V8_JSON = {
++  "path": ["."],
++  "binary": "d7",
++  "flags": ["--flag"],
++  "main": "run.js",
++  "run_count": 1,
++  "results_regexp": "^%s: (.+)$",
++  "tests": [
++    {"name": "Richards"},
++    {"name": "DeltaBlue"},
++  ]
++}
++
++V8_NESTED_SUITES_JSON = {
++  "path": ["."],
++  "flags": ["--flag"],
++  "run_count": 1,
++  "units": "score",
++  "tests": [
++    {"name": "Richards",
++     "path": ["richards"],
++     "binary": "d7",
++     "main": "run.js",
++     "resources": ["file1.js", "file2.js"],
++     "run_count": 2,
++     "results_regexp": "^Richards: (.+)$"},
++    {"name": "Sub",
++     "path": ["sub"],
++     "tests": [
++       {"name": "Leaf",
++        "path": ["leaf"],
++        "run_count_x64": 3,
++        "units": "ms",
++        "main": "run.js",
++        "results_regexp": "^Simple: (.+) ms.$"},
++     ]
++    },
++    {"name": "DeltaBlue",
++     "path": ["delta_blue"],
++     "main": "run.js",
++     "flags": ["--flag2"],
++     "results_regexp": "^DeltaBlue: (.+)$"},
++    {"name": "ShouldntRun",
++     "path": ["."],
++     "archs": ["arm"],
++     "main": "run.js"},
++  ]
++}
++
++V8_GENERIC_JSON = {
++  "path": ["."],
++  "binary": "cc",
++  "flags": ["--flag"],
++  "generic": True,
++  "run_count": 1,
++  "units": "ms",
++}
++
++Output = namedtuple("Output", "stdout, stderr, timed_out")
++
++class PerfTest(unittest.TestCase):
++  @classmethod
++  def setUpClass(cls):
++    cls.base = path.dirname(path.dirname(path.abspath(__file__)))
++    sys.path.append(cls.base)
++    cls._cov = coverage.coverage(
++        include=([os.path.join(cls.base, "run_perf.py")]))
++    cls._cov.start()
++    import run_perf
++    from testrunner.local import commands
++    global commands
++    global run_perf
++
++  @classmethod
++  def tearDownClass(cls):
++    cls._cov.stop()
++    print ""
++    print cls._cov.report()
++
++  def setUp(self):
++    self.maxDiff = None
++    if path.exists(TEST_WORKSPACE):
++      shutil.rmtree(TEST_WORKSPACE)
++    os.makedirs(TEST_WORKSPACE)
++
++  def tearDown(self):
++    if path.exists(TEST_WORKSPACE):
++      shutil.rmtree(TEST_WORKSPACE)
++
++  def _WriteTestInput(self, json_content):
++    self._test_input = path.join(TEST_WORKSPACE, "test.json")
++    with open(self._test_input, "w") as f:
++      f.write(json.dumps(json_content))
++
++  def _MockCommand(self, *args, **kwargs):
++    # Fake output for each test run.
++    test_outputs = [Output(stdout=arg,
++                           stderr=None,
++                           timed_out=kwargs.get("timed_out", False))
++                    for arg in args[1]]
++    def execute(*args, **kwargs):
++      return test_outputs.pop()
++    commands.Execute = MagicMock(side_effect=execute)
++
++    # Check that d8 is called from the correct cwd for each test run.
++    dirs = [path.join(TEST_WORKSPACE, arg) for arg in args[0]]
++    def chdir(*args, **kwargs):
++      self.assertEquals(dirs.pop(), args[0])
++    os.chdir = MagicMock(side_effect=chdir)
++
++    subprocess.check_call = MagicMock()
++    platform.system = MagicMock(return_value='Linux')
++
++  def _CallMain(self, *args):
++    self._test_output = path.join(TEST_WORKSPACE, "results.json")
++    all_args=[
++      "--json-test-results",
++      self._test_output,
++      self._test_input,
++    ]
++    all_args += args
++    return run_perf.Main(all_args)
++
++  def _LoadResults(self, file_name=None):
++    with open(file_name or self._test_output) as f:
++      return json.load(f)
++
++  def _VerifyResults(self, suite, units, traces, file_name=None):
++    self.assertEquals([
++      {"units": units,
++       "graphs": [suite, trace["name"]],
++       "results": trace["results"],
++       "stddev": trace["stddev"]} for trace in traces],
++      self._LoadResults(file_name)["traces"])
++
++  def _VerifyErrors(self, errors):
++    self.assertEquals(errors, self._LoadResults()["errors"])
++
++  def _VerifyMock(self, binary, *args, **kwargs):
++    arg = [path.join(path.dirname(self.base), binary)]
++    arg += args
++    commands.Execute.assert_called_with(
++        arg, timeout=kwargs.get("timeout", 60))
++
++  def _VerifyMockMultiple(self, *args, **kwargs):
++    expected = []
++    for arg in args:
++      a = [path.join(path.dirname(self.base), arg[0])]
++      a += arg[1:]
++      expected.append(((a,), {"timeout": kwargs.get("timeout", 60)}))
++    self.assertEquals(expected, commands.Execute.call_args_list)
++
++  def testOneRun(self):
++    self._WriteTestInput(V8_JSON)
++    self._MockCommand(["."], ["x\nRichards: 1.234\nDeltaBlue: 10657567\ny\n"])
++    self.assertEquals(0, self._CallMain())
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["1.234"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["10657567.0"], "stddev": ""},
++    ])
++    self._VerifyErrors([])
++    self._VerifyMock(path.join("out", "x64.release", "d7"), "--flag", "run.js")
++
++  def testOneRunWithTestFlags(self):
++    test_input = dict(V8_JSON)
++    test_input["test_flags"] = ["2", "test_name"]
++    self._WriteTestInput(test_input)
++    self._MockCommand(["."], ["Richards: 1.234\nDeltaBlue: 10657567"])
++    self.assertEquals(0, self._CallMain())
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["1.234"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["10657567.0"], "stddev": ""},
++    ])
++    self._VerifyErrors([])
++    self._VerifyMock(path.join("out", "x64.release", "d7"), "--flag", "run.js",
++                     "--", "2", "test_name")
++
++  def testTwoRuns_Units_SuiteName(self):
++    test_input = dict(V8_JSON)
++    test_input["run_count"] = 2
++    test_input["name"] = "v8"
++    test_input["units"] = "ms"
++    self._WriteTestInput(test_input)
++    self._MockCommand([".", "."],
++                      ["Richards: 100\nDeltaBlue: 200\n",
++                       "Richards: 50\nDeltaBlue: 300\n"])
++    self.assertEquals(0, self._CallMain())
++    self._VerifyResults("v8", "ms", [
++      {"name": "Richards", "results": ["50.0", "100.0"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["300.0", "200.0"], "stddev": ""},
++    ])
++    self._VerifyErrors([])
++    self._VerifyMock(path.join("out", "x64.release", "d7"), "--flag", "run.js")
++
++  def testTwoRuns_SubRegexp(self):
++    test_input = dict(V8_JSON)
++    test_input["run_count"] = 2
++    del test_input["results_regexp"]
++    test_input["tests"][0]["results_regexp"] = "^Richards: (.+)$"
++    test_input["tests"][1]["results_regexp"] = "^DeltaBlue: (.+)$"
++    self._WriteTestInput(test_input)
++    self._MockCommand([".", "."],
++                      ["Richards: 100\nDeltaBlue: 200\n",
++                       "Richards: 50\nDeltaBlue: 300\n"])
++    self.assertEquals(0, self._CallMain())
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["50.0", "100.0"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["300.0", "200.0"], "stddev": ""},
++    ])
++    self._VerifyErrors([])
++    self._VerifyMock(path.join("out", "x64.release", "d7"), "--flag", "run.js")
++
++  def testNestedSuite(self):
++    self._WriteTestInput(V8_NESTED_SUITES_JSON)
++    self._MockCommand(["delta_blue", "sub/leaf", "richards"],
++                      ["DeltaBlue: 200\n",
++                       "Simple: 1 ms.\n",
++                       "Simple: 2 ms.\n",
++                       "Simple: 3 ms.\n",
++                       "Richards: 100\n",
++                       "Richards: 50\n"])
++    self.assertEquals(0, self._CallMain())
++    self.assertEquals([
++      {"units": "score",
++       "graphs": ["test", "Richards"],
++       "results": ["50.0", "100.0"],
++       "stddev": ""},
++      {"units": "ms",
++       "graphs": ["test", "Sub", "Leaf"],
++       "results": ["3.0", "2.0", "1.0"],
++       "stddev": ""},
++      {"units": "score",
++       "graphs": ["test", "DeltaBlue"],
++       "results": ["200.0"],
++       "stddev": ""},
++      ], self._LoadResults()["traces"])
++    self._VerifyErrors([])
++    self._VerifyMockMultiple(
++        (path.join("out", "x64.release", "d7"), "--flag", "run.js"),
++        (path.join("out", "x64.release", "d7"), "--flag", "run.js"),
++        (path.join("out", "x64.release", "d8"), "--flag", "run.js"),
++        (path.join("out", "x64.release", "d8"), "--flag", "run.js"),
++        (path.join("out", "x64.release", "d8"), "--flag", "run.js"),
++        (path.join("out", "x64.release", "d8"), "--flag", "--flag2", "run.js"))
++
++  def testOneRunStdDevRegExp(self):
++    test_input = dict(V8_JSON)
++    test_input["stddev_regexp"] = "^%s\-stddev: (.+)$"
++    self._WriteTestInput(test_input)
++    self._MockCommand(["."], ["Richards: 1.234\nRichards-stddev: 0.23\n"
++                              "DeltaBlue: 10657567\nDeltaBlue-stddev: 106\n"])
++    self.assertEquals(0, self._CallMain())
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["1.234"], "stddev": "0.23"},
++      {"name": "DeltaBlue", "results": ["10657567.0"], "stddev": "106"},
++    ])
++    self._VerifyErrors([])
++    self._VerifyMock(path.join("out", "x64.release", "d7"), "--flag", "run.js")
++
++  def testTwoRunsStdDevRegExp(self):
++    test_input = dict(V8_JSON)
++    test_input["stddev_regexp"] = "^%s\-stddev: (.+)$"
++    test_input["run_count"] = 2
++    self._WriteTestInput(test_input)
++    self._MockCommand(["."], ["Richards: 3\nRichards-stddev: 0.7\n"
++                              "DeltaBlue: 6\nDeltaBlue-boom: 0.9\n",
++                              "Richards: 2\nRichards-stddev: 0.5\n"
++                              "DeltaBlue: 5\nDeltaBlue-stddev: 0.8\n"])
++    self.assertEquals(1, self._CallMain())
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["2.0", "3.0"], "stddev": "0.7"},
++      {"name": "DeltaBlue", "results": ["5.0", "6.0"], "stddev": "0.8"},
++    ])
++    self._VerifyErrors(
++        ["Test Richards should only run once since a stddev is provided "
++         "by the test.",
++         "Test DeltaBlue should only run once since a stddev is provided "
++         "by the test.",
++         "Regexp \"^DeltaBlue\-stddev: (.+)$\" didn't match for test "
++         "DeltaBlue."])
++    self._VerifyMock(path.join("out", "x64.release", "d7"), "--flag", "run.js")
++
++  def testBuildbot(self):
++    self._WriteTestInput(V8_JSON)
++    self._MockCommand(["."], ["Richards: 1.234\nDeltaBlue: 10657567\n"])
++    self.assertEquals(0, self._CallMain("--buildbot"))
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["1.234"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["10657567.0"], "stddev": ""},
++    ])
++    self._VerifyErrors([])
++    self._VerifyMock(path.join("out", "Release", "d7"), "--flag", "run.js")
++
++  def testBuildbotWithTotal(self):
++    test_input = dict(V8_JSON)
++    test_input["total"] = True
++    self._WriteTestInput(test_input)
++    self._MockCommand(["."], ["Richards: 1.234\nDeltaBlue: 10657567\n"])
++    self.assertEquals(0, self._CallMain("--buildbot"))
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["1.234"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["10657567.0"], "stddev": ""},
++      {"name": "Total", "results": ["3626.49109719"], "stddev": ""},
++    ])
++    self._VerifyErrors([])
++    self._VerifyMock(path.join("out", "Release", "d7"), "--flag", "run.js")
++
++  def testBuildbotWithTotalAndErrors(self):
++    test_input = dict(V8_JSON)
++    test_input["total"] = True
++    self._WriteTestInput(test_input)
++    self._MockCommand(["."], ["x\nRichards: bla\nDeltaBlue: 10657567\ny\n"])
++    self.assertEquals(1, self._CallMain("--buildbot"))
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": [], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["10657567.0"], "stddev": ""},
++    ])
++    self._VerifyErrors(
++        ["Regexp \"^Richards: (.+)$\" "
++         "returned a non-numeric for test Richards.",
++         "Not all traces have the same number of results."])
++    self._VerifyMock(path.join("out", "Release", "d7"), "--flag", "run.js")
++
++  def testRegexpNoMatch(self):
++    self._WriteTestInput(V8_JSON)
++    self._MockCommand(["."], ["x\nRichaards: 1.234\nDeltaBlue: 10657567\ny\n"])
++    self.assertEquals(1, self._CallMain())
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": [], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["10657567.0"], "stddev": ""},
++    ])
++    self._VerifyErrors(
++        ["Regexp \"^Richards: (.+)$\" didn't match for test Richards."])
++    self._VerifyMock(path.join("out", "x64.release", "d7"), "--flag", "run.js")
++
++  def testOneRunGeneric(self):
++    test_input = dict(V8_GENERIC_JSON)
++    self._WriteTestInput(test_input)
++    self._MockCommand(["."], [
++      "RESULT Infra: Constant1= 11 count\n"
++      "RESULT Infra: Constant2= [10,5,10,15] count\n"
++      "RESULT Infra: Constant3= {12,1.2} count\n"
++      "RESULT Infra: Constant4= [10,5,error,15] count\n"])
++    self.assertEquals(1, self._CallMain())
++    self.assertEquals([
++      {"units": "count",
++       "graphs": ["test", "Infra", "Constant1"],
++       "results": ["11.0"],
++       "stddev": ""},
++      {"units": "count",
++       "graphs": ["test", "Infra", "Constant2"],
++       "results": ["10.0", "5.0", "10.0", "15.0"],
++       "stddev": ""},
++      {"units": "count",
++       "graphs": ["test", "Infra", "Constant3"],
++       "results": ["12.0"],
++       "stddev": "1.2"},
++      {"units": "count",
++       "graphs": ["test", "Infra", "Constant4"],
++       "results": [],
++       "stddev": ""},
++      ], self._LoadResults()["traces"])
++    self._VerifyErrors(["Found non-numeric in test/Infra/Constant4"])
++    self._VerifyMock(path.join("out", "x64.release", "cc"), "--flag", "")
++
++  def testOneRunTimingOut(self):
++    test_input = dict(V8_JSON)
++    test_input["timeout"] = 70
++    self._WriteTestInput(test_input)
++    self._MockCommand(["."], [""], timed_out=True)
++    self.assertEquals(1, self._CallMain())
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": [], "stddev": ""},
++      {"name": "DeltaBlue", "results": [], "stddev": ""},
++    ])
++    self._VerifyErrors([
++      "Regexp \"^Richards: (.+)$\" didn't match for test Richards.",
++      "Regexp \"^DeltaBlue: (.+)$\" didn't match for test DeltaBlue.",
++    ])
++    self._VerifyMock(
++        path.join("out", "x64.release", "d7"), "--flag", "run.js", timeout=70)
++
++  # Simple test that mocks out the android platform. Testing the platform would
++  # require lots of complicated mocks for the android tools.
++  def testAndroid(self):
++    self._WriteTestInput(V8_JSON)
++    # FIXME(machenbach): This is not test-local!
++    platform = run_perf.AndroidPlatform
++    platform.PreExecution = MagicMock(return_value=None)
++    platform.PostExecution = MagicMock(return_value=None)
++    platform.PreTests = MagicMock(return_value=None)
++    platform.Run = MagicMock(
++        return_value=("Richards: 1.234\nDeltaBlue: 10657567\n", None))
++    run_perf.AndroidPlatform = MagicMock(return_value=platform)
++    self.assertEquals(
++        0, self._CallMain("--android-build-tools", "/some/dir",
++                          "--arch", "arm"))
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["1.234"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["10657567.0"], "stddev": ""},
++    ])
++
++  def testTwoRuns_Trybot(self):
++    test_input = dict(V8_JSON)
++    test_input["run_count"] = 2
++    self._WriteTestInput(test_input)
++    self._MockCommand([".", ".", ".", "."],
++                      ["Richards: 100\nDeltaBlue: 200\n",
++                       "Richards: 200\nDeltaBlue: 20\n",
++                       "Richards: 50\nDeltaBlue: 200\n",
++                       "Richards: 100\nDeltaBlue: 20\n"])
++    test_output_no_patch = path.join(TEST_WORKSPACE, "results_no_patch.json")
++    self.assertEquals(0, self._CallMain(
++        "--outdir-no-patch", "out-no-patch",
++        "--json-test-results-no-patch", test_output_no_patch,
++    ))
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["100.0", "200.0"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["20.0", "20.0"], "stddev": ""},
++    ])
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["50.0", "100.0"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["200.0", "200.0"], "stddev": ""},
++    ], test_output_no_patch)
++    self._VerifyErrors([])
++    self._VerifyMockMultiple(
++        (path.join("out", "x64.release", "d7"), "--flag", "run.js"),
++        (path.join("out-no-patch", "x64.release", "d7"), "--flag", "run.js"),
++        (path.join("out", "x64.release", "d7"), "--flag", "run.js"),
++        (path.join("out-no-patch", "x64.release", "d7"), "--flag", "run.js"),
++    )
++
++  def testWrongBinaryWithProf(self):
++    test_input = dict(V8_JSON)
++    self._WriteTestInput(test_input)
++    self._MockCommand(["."], ["x\nRichards: 1.234\nDeltaBlue: 10657567\ny\n"])
++    self.assertEquals(0, self._CallMain("--extra-flags=--prof"))
++    self._VerifyResults("test", "score", [
++      {"name": "Richards", "results": ["1.234"], "stddev": ""},
++      {"name": "DeltaBlue", "results": ["10657567.0"], "stddev": ""},
++    ])
++    self._VerifyErrors([])
++    self._VerifyMock(path.join("out", "x64.release", "d7"),
++                     "--flag", "--prof", "run.js")
++
++  def testUnzip(self):
++    def Gen():
++      for i in [1, 2, 3]:
++        yield i, i + 1
++    l, r = run_perf.Unzip(Gen())
++    self.assertEquals([1, 2, 3], list(l()))
++    self.assertEquals([2, 3, 4], list(r()))
+diff --git a/v8/tools/v8-info.sh b/v8/tools/v8-info.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..838d92a0011f3ba8206cd558d02ece63fd4023ed
+--- /dev/null
++++ b/v8/tools/v8-info.sh
+@@ -0,0 +1,161 @@
++#!/bin/bash
++# Copyright 2013 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++########## Global variable definitions
++
++BASE_URL="https://code.google.com/p/v8/source/list"
++VERSION="include/v8-version.h"
++MAJOR="V8_MAJOR_VERSION"
++MINOR="V8_MINOR_VERSION"
++BUILD="V8_BUILD_NUMBER"
++PATCH="V8_PATCH_LEVEL"
++
++V8="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++
++########## Function definitions
++
++cd $V8
++
++usage() {
++cat << EOF
++usage: $0 OPTIONS
++
++Fetches V8 revision information from a git-svn checkout.
++
++OPTIONS:
++  -h    Show this message.
++
++  -i    Print revision info for all branches matching the V8 version.
++          Example usage: $0 -i 3.19.10$
++          Output format: [Git hash] [SVN revision] [V8 version]
++
++  -v    Print the V8 version tag for a trunk SVN revision.
++          Example usage: $0 -v 14981
++          Output format: [V8 version]
++
++  -m    Print all patches that were merged to the specified V8 branch.
++          Example usage: $0 -m 3.18
++          Output format: [V8 version] [SVN revision] [SVN patch merged]*.
++
++  -p    Print all patches merged to a specific V8 point-release.
++          Example usage: $0 -p 3.19.12.1
++          Output format: [SVN patch merged]*
++
++  -u    Print a link to all SVN revisions between two V8 revision tags.
++          Example usage: $0 -u 3.19.10:3.19.11
++EOF
++}
++
++tags() {
++  git for-each-ref --format="%(objectname) %(refname:short)" refs/remotes/svn
++}
++
++tag_revision() {
++  cut -d" " -f1
++}
++
++tag_log() {
++  git log --format="%h %ci %ce %s" -1 $1
++}
++
++v8_hash() {
++  tags | grep "svn/tags/$1$" | tag_revision
++}
++
++point_merges() {
++  echo $1 | grep -o "r[0-9]\+"
++}
++
++hash_to_svn() {
++  git svn log -1 --oneline $1 | cut -d" " -f1
++}
++
++tag_version() {
++  tags | grep svn/tags/$1 | while read tag; do
++    id=$(echo $tag | grep -o "[^/]*$")
++    rev=$(echo $tag | tag_revision)
++    svn=$(hash_to_svn $rev)
++    echo $rev $svn $id
++  done
++}
++
++svn_rev() {
++  git svn find-rev $2 svn/$1
++}
++
++v8_rev() {
++  cd $(git rev-parse --show-toplevel)
++  rev=$(git show $1:$VERSION \
++      | grep "#define" \
++      | grep "$MAJOR\|$MINOR\|$BUILD\|$PATCH" \
++      | grep -o "[0-9]\+$" \
++      | tr "\\n" ".")
++  echo ${rev%?}
++}
++
++merges_to_branch() {
++  git cherry -v svn/trunk svn/$1 | while read merge; do
++    h=$(echo $merge | cut -d" " -f2)
++    svn=$(svn_rev $1 $h)
++    merges=$(echo $merge | grep -o "r[0-9]\+")
++    rev=$(v8_rev $h)
++    echo $rev r$svn $merges
++  done
++}
++
++url_for() {
++  first=$(svn_rev trunk $(v8_hash $(echo $1 | cut -d":" -f1)))
++  last=$(svn_rev trunk $(v8_hash $(echo $1 | cut -d":" -f2)))
++  num=$[ $last - $first]
++  echo "$BASE_URL?num=$num&start=$last"
++}
++
++########## Option parsing
++
++while getopts ":hi:v:m:p:u:" OPTION ; do
++  case $OPTION in
++    h)  usage
++        exit 0
++        ;;
++    i)  tag_version $OPTARG
++        ;;
++    v)  v8_rev $(svn_rev trunk r$OPTARG)
++        ;;
++    m)  merges_to_branch $OPTARG
++        ;;
++    p)  echo $(point_merges "$(tag_log $(v8_hash $OPTARG)^1)")
++        ;;
++    u)  url_for $OPTARG
++        ;;
++    ?)  echo "Illegal option: -$OPTARG"
++        usage
++        exit 1
++        ;;
++  esac
++done
+diff --git a/v8/tools/v8-rolls.sh b/v8/tools/v8-rolls.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..590e05c1f9cd81498589c8770794bc1dc575bb9e
+--- /dev/null
++++ b/v8/tools/v8-rolls.sh
+@@ -0,0 +1,120 @@
++#!/bin/bash
++# Copyright 2013 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++
++########## Global variable definitions
++
++DEPS_STRING='"v8_revision":'
++INFO=tools/v8-info.sh
++
++V8="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
++
++########## Function definitions
++
++usage() {
++cat << EOF
++usage: $0 OPTIONS
++
++Run in chromium/src to get information about V8 rolls.
++
++OPTIONS:
++  -h    Show this message.
++  -n    Number of rolls to print information about.
++  -s    Chromium git hash to start printing V8 information about.
++EOF
++}
++
++v8_line() {
++  git show $1:DEPS | grep -n $DEPS_STRING | cut -d":" -f1
++}
++
++v8_info() {
++  git blame -L$(v8_line $1),+1 $1 DEPS | grep $DEPS_STRING
++}
++
++v8_svn() {
++  sed -e 's/^.*"\([0-9]\+\)",$/\1/'
++}
++
++v8_roll() {
++  cut -d" " -f1
++}
++
++find_rev() {
++  git svn find-rev $1
++}
++
++msg() {
++  msg=$(git log --format="%h %ci %ce" -1 $1)
++  h=$(echo $msg | cut -d" " -f1)
++  d=$(echo $msg | cut -d" " -f2)
++  t=$(echo $msg | cut -d" " -f3)
++  a=$(echo $msg | cut -d" " -f5)
++  a1=$(echo $a | cut -d"@" -f1)
++  a2=$(echo $a | cut -d"@" -f2)
++  echo $h $d $t $a1@$a2
++}
++
++v8_revision() {
++  cd $V8
++  $INFO -v $1
++}
++
++rolls() {
++  roll=$2
++  for i in $(seq 1 $1); do
++    info=$(v8_info $roll)
++    roll=$(echo $info | v8_roll $roll)
++    trunk=$(echo $info | v8_svn $roll)
++    echo "$(v8_revision $trunk) $trunk $(find_rev $roll) $(msg $roll)"
++    roll=$roll^1
++  done
++}
++
++########## Option parsing
++
++REVISIONS=1
++START=HEAD
++
++while getopts ":hn:s:" OPTION ; do
++  case $OPTION in
++    h)  usage
++        exit 0
++        ;;
++    n) REVISIONS=$OPTARG
++        ;;
++    s) START=$OPTARG
++        ;;
++    ?)  echo "Illegal option: -$OPTARG"
++        usage
++        exit 1
++        ;;
++  esac
++done
++
++rolls $REVISIONS $START
+diff --git a/v8/tools/v8.xcodeproj/README.txt b/v8/tools/v8.xcodeproj/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..e064ff6bf140f6ad879944b69f743ee43c2fa3b6
+--- /dev/null
++++ b/v8/tools/v8.xcodeproj/README.txt
+@@ -0,0 +1,11 @@
++The Xcode project for V8 has been retired. If an Xcode project
++is needed for building on a Mac there is the option of using GYP to
++generate it. Please look in the build directory in the root of the
++V8 project. It contains the required infrastructure and a README.txt
++file explaining how to get started.
++
++Generating Xcode projects using GYP is how the Chromium
++project integrated V8 into the Mac build.
++
++The main build system for V8 is still SCons, see
++http://code.google.com/apis/v8/build.html for details.
+diff --git a/v8/tools/v8heapconst.py b/v8/tools/v8heapconst.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..39cfeb1707322bfb20f61182a6dbbe2e8ae90d0f
+--- /dev/null
++++ b/v8/tools/v8heapconst.py
+@@ -0,0 +1,294 @@
++# Copyright 2013 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++# This file is automatically generated from the V8 source and should not
++# be modified manually, run 'make grokdump' instead to update this file.
++
++# List of known V8 instance types.
++INSTANCE_TYPES = {
++  64: "STRING_TYPE",
++  68: "ONE_BYTE_STRING_TYPE",
++  65: "CONS_STRING_TYPE",
++  69: "CONS_ONE_BYTE_STRING_TYPE",
++  67: "SLICED_STRING_TYPE",
++  71: "SLICED_ONE_BYTE_STRING_TYPE",
++  66: "EXTERNAL_STRING_TYPE",
++  70: "EXTERNAL_ONE_BYTE_STRING_TYPE",
++  74: "EXTERNAL_STRING_WITH_ONE_BYTE_DATA_TYPE",
++  82: "SHORT_EXTERNAL_STRING_TYPE",
++  86: "SHORT_EXTERNAL_ONE_BYTE_STRING_TYPE",
++  90: "SHORT_EXTERNAL_STRING_WITH_ONE_BYTE_DATA_TYPE",
++  0: "INTERNALIZED_STRING_TYPE",
++  4: "ONE_BYTE_INTERNALIZED_STRING_TYPE",
++  2: "EXTERNAL_INTERNALIZED_STRING_TYPE",
++  6: "EXTERNAL_ONE_BYTE_INTERNALIZED_STRING_TYPE",
++  10: "EXTERNAL_INTERNALIZED_STRING_WITH_ONE_BYTE_DATA_TYPE",
++  18: "SHORT_EXTERNAL_INTERNALIZED_STRING_TYPE",
++  22: "SHORT_EXTERNAL_ONE_BYTE_INTERNALIZED_STRING_TYPE",
++  26: "SHORT_EXTERNAL_INTERNALIZED_STRING_WITH_ONE_BYTE_DATA_TYPE",
++  128: "SYMBOL_TYPE",
++  130: "SIMD128_VALUE_TYPE",
++  132: "MAP_TYPE",
++  133: "CODE_TYPE",
++  131: "ODDBALL_TYPE",
++  171: "CELL_TYPE",
++  174: "PROPERTY_CELL_TYPE",
++  129: "HEAP_NUMBER_TYPE",
++  134: "MUTABLE_HEAP_NUMBER_TYPE",
++  135: "FOREIGN_TYPE",
++  136: "BYTE_ARRAY_TYPE",
++  137: "BYTECODE_ARRAY_TYPE",
++  138: "FREE_SPACE_TYPE",
++  139: "FIXED_INT8_ARRAY_TYPE",
++  140: "FIXED_UINT8_ARRAY_TYPE",
++  141: "FIXED_INT16_ARRAY_TYPE",
++  142: "FIXED_UINT16_ARRAY_TYPE",
++  143: "FIXED_INT32_ARRAY_TYPE",
++  144: "FIXED_UINT32_ARRAY_TYPE",
++  145: "FIXED_FLOAT32_ARRAY_TYPE",
++  146: "FIXED_FLOAT64_ARRAY_TYPE",
++  147: "FIXED_UINT8_CLAMPED_ARRAY_TYPE",
++  149: "FILLER_TYPE",
++  150: "ACCESSOR_INFO_TYPE",
++  151: "ACCESSOR_PAIR_TYPE",
++  152: "ACCESS_CHECK_INFO_TYPE",
++  153: "INTERCEPTOR_INFO_TYPE",
++  154: "CALL_HANDLER_INFO_TYPE",
++  155: "FUNCTION_TEMPLATE_INFO_TYPE",
++  156: "OBJECT_TEMPLATE_INFO_TYPE",
++  157: "SIGNATURE_INFO_TYPE",
++  158: "TYPE_SWITCH_INFO_TYPE",
++  160: "ALLOCATION_MEMENTO_TYPE",
++  159: "ALLOCATION_SITE_TYPE",
++  161: "SCRIPT_TYPE",
++  162: "CODE_CACHE_TYPE",
++  163: "POLYMORPHIC_CODE_CACHE_TYPE",
++  164: "TYPE_FEEDBACK_INFO_TYPE",
++  165: "ALIASED_ARGUMENTS_ENTRY_TYPE",
++  166: "BOX_TYPE",
++  175: "PROTOTYPE_INFO_TYPE",
++  176: "SLOPPY_BLOCK_WITH_EVAL_CONTEXT_EXTENSION_TYPE",
++  169: "FIXED_ARRAY_TYPE",
++  148: "FIXED_DOUBLE_ARRAY_TYPE",
++  170: "SHARED_FUNCTION_INFO_TYPE",
++  172: "WEAK_CELL_TYPE",
++  173: "TRANSITION_ARRAY_TYPE",
++  179: "JS_MESSAGE_OBJECT_TYPE",
++  178: "JS_VALUE_TYPE",
++  180: "JS_DATE_TYPE",
++  181: "JS_OBJECT_TYPE",
++  182: "JS_CONTEXT_EXTENSION_OBJECT_TYPE",
++  183: "JS_GENERATOR_OBJECT_TYPE",
++  184: "JS_MODULE_TYPE",
++  185: "JS_GLOBAL_OBJECT_TYPE",
++  186: "JS_GLOBAL_PROXY_TYPE",
++  187: "JS_ARRAY_TYPE",
++  188: "JS_ARRAY_BUFFER_TYPE",
++  189: "JS_TYPED_ARRAY_TYPE",
++  190: "JS_DATA_VIEW_TYPE",
++  177: "JS_PROXY_TYPE",
++  191: "JS_SET_TYPE",
++  192: "JS_MAP_TYPE",
++  193: "JS_SET_ITERATOR_TYPE",
++  194: "JS_MAP_ITERATOR_TYPE",
++  195: "JS_ITERATOR_RESULT_TYPE",
++  196: "JS_WEAK_MAP_TYPE",
++  197: "JS_WEAK_SET_TYPE",
++  198: "JS_PROMISE_TYPE",
++  199: "JS_REGEXP_TYPE",
++  200: "JS_BOUND_FUNCTION_TYPE",
++  201: "JS_FUNCTION_TYPE",
++  167: "DEBUG_INFO_TYPE",
++  168: "BREAK_POINT_INFO_TYPE",
++}
++
++# List of known V8 maps.
++KNOWN_MAPS = {
++  0x08081: (136, "ByteArrayMap"),
++  0x080ad: (132, "MetaMap"),
++  0x080d9: (131, "NullMap"),
++  0x08105: (169, "FixedArrayMap"),
++  0x08131: (4, "OneByteInternalizedStringMap"),
++  0x0815d: (138, "FreeSpaceMap"),
++  0x08189: (149, "OnePointerFillerMap"),
++  0x081b5: (149, "TwoPointerFillerMap"),
++  0x081e1: (131, "UndefinedMap"),
++  0x0820d: (129, "HeapNumberMap"),
++  0x08239: (131, "TheHoleMap"),
++  0x08265: (131, "BooleanMap"),
++  0x08291: (131, "UninitializedMap"),
++  0x082bd: (171, "CellMap"),
++  0x082e9: (174, "GlobalPropertyCellMap"),
++  0x08315: (170, "SharedFunctionInfoMap"),
++  0x08341: (134, "MutableHeapNumberMap"),
++  0x0836d: (130, "Float32x4Map"),
++  0x08399: (130, "Int32x4Map"),
++  0x083c5: (130, "Uint32x4Map"),
++  0x083f1: (130, "Bool32x4Map"),
++  0x0841d: (130, "Int16x8Map"),
++  0x08449: (130, "Uint16x8Map"),
++  0x08475: (130, "Bool16x8Map"),
++  0x084a1: (130, "Int8x16Map"),
++  0x084cd: (130, "Uint8x16Map"),
++  0x084f9: (130, "Bool8x16Map"),
++  0x08525: (169, "NativeContextMap"),
++  0x08551: (133, "CodeMap"),
++  0x0857d: (169, "ScopeInfoMap"),
++  0x085a9: (169, "FixedCOWArrayMap"),
++  0x085d5: (148, "FixedDoubleArrayMap"),
++  0x08601: (172, "WeakCellMap"),
++  0x0862d: (173, "TransitionArrayMap"),
++  0x08659: (68, "OneByteStringMap"),
++  0x08685: (169, "FunctionContextMap"),
++  0x086b1: (131, "NoInterceptorResultSentinelMap"),
++  0x086dd: (131, "ArgumentsMarkerMap"),
++  0x08709: (131, "ExceptionMap"),
++  0x08735: (131, "TerminationExceptionMap"),
++  0x08761: (169, "HashTableMap"),
++  0x0878d: (169, "OrderedHashTableMap"),
++  0x087b9: (128, "SymbolMap"),
++  0x087e5: (64, "StringMap"),
++  0x08811: (69, "ConsOneByteStringMap"),
++  0x0883d: (65, "ConsStringMap"),
++  0x08869: (67, "SlicedStringMap"),
++  0x08895: (71, "SlicedOneByteStringMap"),
++  0x088c1: (66, "ExternalStringMap"),
++  0x088ed: (74, "ExternalStringWithOneByteDataMap"),
++  0x08919: (70, "ExternalOneByteStringMap"),
++  0x08945: (70, "NativeSourceStringMap"),
++  0x08971: (82, "ShortExternalStringMap"),
++  0x0899d: (90, "ShortExternalStringWithOneByteDataMap"),
++  0x089c9: (0, "InternalizedStringMap"),
++  0x089f5: (2, "ExternalInternalizedStringMap"),
++  0x08a21: (10, "ExternalInternalizedStringWithOneByteDataMap"),
++  0x08a4d: (6, "ExternalOneByteInternalizedStringMap"),
++  0x08a79: (18, "ShortExternalInternalizedStringMap"),
++  0x08aa5: (26, "ShortExternalInternalizedStringWithOneByteDataMap"),
++  0x08ad1: (22, "ShortExternalOneByteInternalizedStringMap"),
++  0x08afd: (86, "ShortExternalOneByteStringMap"),
++  0x08b29: (140, "FixedUint8ArrayMap"),
++  0x08b55: (139, "FixedInt8ArrayMap"),
++  0x08b81: (142, "FixedUint16ArrayMap"),
++  0x08bad: (141, "FixedInt16ArrayMap"),
++  0x08bd9: (144, "FixedUint32ArrayMap"),
++  0x08c05: (143, "FixedInt32ArrayMap"),
++  0x08c31: (145, "FixedFloat32ArrayMap"),
++  0x08c5d: (146, "FixedFloat64ArrayMap"),
++  0x08c89: (147, "FixedUint8ClampedArrayMap"),
++  0x08cb5: (169, "SloppyArgumentsElementsMap"),
++  0x08ce1: (169, "CatchContextMap"),
++  0x08d0d: (169, "WithContextMap"),
++  0x08d39: (169, "BlockContextMap"),
++  0x08d65: (169, "ModuleContextMap"),
++  0x08d91: (169, "ScriptContextMap"),
++  0x08dbd: (169, "ScriptContextTableMap"),
++  0x08de9: (179, "JSMessageObjectMap"),
++  0x08e15: (135, "ForeignMap"),
++  0x08e41: (181, "NeanderMap"),
++  0x08e6d: (181, "ExternalMap"),
++  0x08e99: (160, "AllocationMementoMap"),
++  0x08ec5: (159, "AllocationSiteMap"),
++  0x08ef1: (163, "PolymorphicCodeCacheMap"),
++  0x08f1d: (161, "ScriptMap"),
++  0x08f75: (137, "BytecodeArrayMap"),
++  0x08fa1: (166, "BoxMap"),
++  0x08fcd: (150, "AccessorInfoMap"),
++  0x08ff9: (151, "AccessorPairMap"),
++  0x09025: (152, "AccessCheckInfoMap"),
++  0x09051: (153, "InterceptorInfoMap"),
++  0x0907d: (154, "CallHandlerInfoMap"),
++  0x090a9: (155, "FunctionTemplateInfoMap"),
++  0x090d5: (156, "ObjectTemplateInfoMap"),
++  0x09101: (162, "CodeCacheMap"),
++  0x0912d: (164, "TypeFeedbackInfoMap"),
++  0x09159: (165, "AliasedArgumentsEntryMap"),
++  0x09185: (167, "DebugInfoMap"),
++  0x091b1: (168, "BreakPointInfoMap"),
++  0x091dd: (175, "PrototypeInfoMap"),
++  0x09209: (176, "SloppyBlockWithEvalContextExtensionMap"),
++}
++
++# List of known V8 objects.
++KNOWN_OBJECTS = {
++  ("OLD_SPACE", 0x08081): "NullValue",
++  ("OLD_SPACE", 0x08095): "EmptyDescriptorArray",
++  ("OLD_SPACE", 0x0809d): "EmptyFixedArray",
++  ("OLD_SPACE", 0x080c9): "UndefinedValue",
++  ("OLD_SPACE", 0x080f5): "NanValue",
++  ("OLD_SPACE", 0x08105): "TheHoleValue",
++  ("OLD_SPACE", 0x08129): "TrueValue",
++  ("OLD_SPACE", 0x08161): "FalseValue",
++  ("OLD_SPACE", 0x08189): "empty_string",
++  ("OLD_SPACE", 0x08195): "hidden_string",
++  ("OLD_SPACE", 0x081a1): "UninitializedValue",
++  ("OLD_SPACE", 0x081d1): "EmptyByteArray",
++  ("OLD_SPACE", 0x081d9): "NoInterceptorResultSentinel",
++  ("OLD_SPACE", 0x08219): "ArgumentsMarker",
++  ("OLD_SPACE", 0x08249): "Exception",
++  ("OLD_SPACE", 0x08275): "TerminationException",
++  ("OLD_SPACE", 0x082ad): "NumberStringCache",
++  ("OLD_SPACE", 0x08ab5): "SingleCharacterStringCache",
++  ("OLD_SPACE", 0x08f4d): "StringSplitCache",
++  ("OLD_SPACE", 0x09355): "RegExpMultipleCache",
++  ("OLD_SPACE", 0x0975d): "EmptyFixedUint8Array",
++  ("OLD_SPACE", 0x0976d): "EmptyFixedInt8Array",
++  ("OLD_SPACE", 0x0977d): "EmptyFixedUint16Array",
++  ("OLD_SPACE", 0x0978d): "EmptyFixedInt16Array",
++  ("OLD_SPACE", 0x0979d): "EmptyFixedUint32Array",
++  ("OLD_SPACE", 0x097ad): "EmptyFixedInt32Array",
++  ("OLD_SPACE", 0x097bd): "EmptyFixedFloat32Array",
++  ("OLD_SPACE", 0x097cd): "EmptyFixedFloat64Array",
++  ("OLD_SPACE", 0x097dd): "EmptyFixedUint8ClampedArray",
++  ("OLD_SPACE", 0x097ed): "InfinityValue",
++  ("OLD_SPACE", 0x097fd): "MinusZeroValue",
++  ("OLD_SPACE", 0x0980d): "MinusInfinityValue",
++  ("OLD_SPACE", 0x0981d): "MessageListeners",
++  ("OLD_SPACE", 0x09839): "CodeStubs",
++  ("OLD_SPACE", 0x0feb9): "DummyVector",
++  ("OLD_SPACE", 0x13fed): "NonMonomorphicCache",
++  ("OLD_SPACE", 0x14601): "PolymorphicCodeCache",
++  ("OLD_SPACE", 0x14609): "NativesSourceCache",
++  ("OLD_SPACE", 0x1488d): "ExperimentalNativesSourceCache",
++  ("OLD_SPACE", 0x148c1): "ExtraNativesSourceCache",
++  ("OLD_SPACE", 0x148e1): "ExperimentalExtraNativesSourceCache",
++  ("OLD_SPACE", 0x148ed): "EmptyScript",
++  ("OLD_SPACE", 0x1492d): "IntrinsicFunctionNames",
++  ("OLD_SPACE", 0x2e919): "EmptyPropertiesDictionary",
++  ("OLD_SPACE", 0x2e965): "UndefinedCell",
++  ("OLD_SPACE", 0x2e96d): "ObservationState",
++  ("OLD_SPACE", 0x2e979): "ScriptList",
++  ("OLD_SPACE", 0x2eb01): "ClearedOptimizedCodeMap",
++  ("OLD_SPACE", 0x2eb0d): "EmptyWeakCell",
++  ("OLD_SPACE", 0x534d1): "EmptySlowElementDictionary",
++  ("OLD_SPACE", 0x5351d): "WeakObjectToCodeTable",
++  ("OLD_SPACE", 0x53631): "ArrayProtector",
++  ("OLD_SPACE", 0x53641): "EmptyPropertyCell",
++  ("OLD_SPACE", 0x53651): "NoScriptSharedFunctionInfos",
++  ("OLD_SPACE", 0x59cf1): "StringTable",
++  ("CODE_SPACE", 0x1a001): "JsEntryCode",
++  ("CODE_SPACE", 0x1e721): "JsConstructEntryCode",
++}
+diff --git a/v8/tools/v8heapconst.py.tmpl b/v8/tools/v8heapconst.py.tmpl
+new file mode 100644
+index 0000000000000000000000000000000000000000..a773f47c8b942d792ebf89bfd2ba4ac940452538
+--- /dev/null
++++ b/v8/tools/v8heapconst.py.tmpl
+@@ -0,0 +1,30 @@
++# Copyright 2013 the V8 project authors. All rights reserved.
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++#       notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++#       copyright notice, this list of conditions and the following
++#       disclaimer in the documentation and/or other materials provided
++#       with the distribution.
++#     * Neither the name of Google Inc. nor the names of its
++#       contributors may be used to endorse or promote products derived
++#       from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++# This file is automatically generated from the V8 source and should not
++# be modified manually, run 'make grokdump' instead to update this file.
++
+diff --git a/v8/tools/verify_source_deps.py b/v8/tools/verify_source_deps.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..50caace79c8e71903379441e504001243e281755
+--- /dev/null
++++ b/v8/tools/verify_source_deps.py
+@@ -0,0 +1,106 @@
++#!/usr/bin/env python
++# Copyright 2015 the V8 project authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Script to print potentially missing source dependencies based on the actual
++.h and .cc files in the source tree and which files are included in the gyp
++and gn files. The latter inclusion is overapproximated.
++
++TODO(machenbach): Gyp files in src will point to source files in src without a
++src/ prefix. For simplicity, all paths relative to src are stripped. But this
++tool won't be accurate for other sources in other directories (e.g. cctest).
++"""
++
++import itertools
++import re
++import os
++
++
++V8_BASE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
++V8_SRC_BASE = os.path.join(V8_BASE, 'src')
++V8_INCLUDE_BASE = os.path.join(V8_BASE, 'include')
++
++GYP_FILES = [
++  os.path.join(V8_BASE, 'src', 'd8.gyp'),
++  os.path.join(V8_BASE, 'src', 'third_party', 'vtune', 'v8vtune.gyp'),
++  os.path.join(V8_BASE, 'test', 'cctest', 'cctest.gyp'),
++  os.path.join(V8_BASE, 'test', 'unittests', 'unittests.gyp'),
++  os.path.join(V8_BASE, 'tools', 'gyp', 'v8.gyp'),
++  os.path.join(V8_BASE, 'tools', 'parser-shell.gyp'),
++]
++
++
++def path_no_prefix(path):
++  if path.startswith('../'):
++    return path_no_prefix(path[3:])
++  elif path.startswith('src/'):
++    return path_no_prefix(path[4:])
++  else:
++    return path
++
++
++def isources(directory):
++  for root, dirs, files in os.walk(directory):
++    for f in files:
++      if not (f.endswith('.h') or f.endswith('.cc')):
++        continue
++      yield path_no_prefix(os.path.relpath(os.path.join(root, f), V8_BASE))
++
++
++def iflatten(obj):
++  if isinstance(obj, dict):
++    for value in obj.values():
++      for i in iflatten(value):
++        yield i
++  elif isinstance(obj, list):
++    for value in obj:
++      for i in iflatten(value):
++        yield i
++  elif isinstance(obj, basestring):
++    yield path_no_prefix(obj)
++
++
++def iflatten_gyp_file(gyp_file):
++  """Overaproximates all values in the gyp file.
++
++  Iterates over all string values recursively. Removes '../' path prefixes.
++  """
++  with open(gyp_file) as f:
++    return iflatten(eval(f.read()))
++
++
++def iflatten_gn_file(gn_file):
++  """Overaproximates all values in the gn file.
++
++  Iterates over all double quoted strings.
++  """
++  with open(gn_file) as f:
++    for line in f.read().splitlines():
++      match = re.match(r'.*"([^"]*)".*', line)
++      if match:
++        yield path_no_prefix(match.group(1))
++
++
++def icheck_values(values, *source_dirs):
++  for source_file in itertools.chain(
++      *[isources(source_dir) for source_dir in source_dirs]
++    ):
++    if source_file not in values:
++      yield source_file
++
++
++gyp_values = set(itertools.chain(
++  *[iflatten_gyp_file(gyp_file) for gyp_file in GYP_FILES]
++  ))
++
++print "----------- Files not in gyp: ------------"
++for i in sorted(icheck_values(gyp_values, V8_SRC_BASE, V8_INCLUDE_BASE)):
++  print i
++
++gn_values = set(iflatten_gn_file(os.path.join(V8_BASE, 'BUILD.gn')))
++
++print "\n----------- Files not in gn: -------------"
++for i in sorted(icheck_values(gn_values, V8_SRC_BASE, V8_INCLUDE_BASE)):
++  print i
+diff --git a/v8/tools/vim/ninja-build.vim b/v8/tools/vim/ninja-build.vim
+new file mode 100644
+index 0000000000000000000000000000000000000000..3e9b8948ca85c395435483be2c517173b45dd3c6
+--- /dev/null
++++ b/v8/tools/vim/ninja-build.vim
+@@ -0,0 +1,119 @@
++" Copyright (c) 2015 the V8 project authors. All rights reserved.
++" Use of this source code is governed by a BSD-style license that can be
++" found in the LICENSE file.
++"
++" Adds a "Compile this file" function, using ninja. On Mac, binds Cmd-k to
++" this command. On Windows, Ctrl-F7 (which is the same as the VS default).
++" On Linux, <Leader>o, which is \o by default ("o"=creates .o files)
++"
++" Adds a "Build this target" function, using ninja. This is not bound
++" to any key by default, but can be used via the :CrBuild command.
++" It builds 'd8' by default, but :CrBuild target1 target2 etc works as well,
++" i.e. :CrBuild all or :CrBuild d8 cctest unittests.
++"
++" Requires that gyp has already generated build.ninja files, and that ninja is
++" in your path (which it is automatically if depot_tools is in your path).
++" Bumps the number of parallel jobs in ninja automatically if goma is
++" detected.
++"
++" Add the following to your .vimrc file:
++"     so /path/to/src/tools/vim/ninja-build.vim
++
++python << endpython
++import os
++import vim
++
++
++def path_to_current_buffer():
++  """Returns the absolute path of the current buffer."""
++  return vim.current.buffer.name
++
++
++def path_to_source_root():
++  """Returns the absolute path to the V8 source root."""
++  candidate = os.path.dirname(path_to_current_buffer())
++  # This is a list of files that need to identify the src directory. The shorter
++  # it is, the more likely it's wrong. The longer it is, the more likely it is to
++  # break when we rename directories.
++  fingerprints = ['.git', 'build', 'include', 'samples', 'src', 'testing',
++                  'third_party', 'tools']
++  while candidate and not all(
++      [os.path.isdir(os.path.join(candidate, fp)) for fp in fingerprints]):
++    candidate = os.path.dirname(candidate)
++  return candidate
++
++
++def path_to_build_dir(configuration):
++  """Returns <v8_root>/<output_dir>/(Release|Debug)."""
++
++  v8_root = path_to_source_root()
++  sys.path.append(os.path.join(v8_root, 'tools', 'ninja'))
++  from ninja_output import GetNinjaOutputDirectory
++  return GetNinjaOutputDirectory(v8_root, configuration)
++
++
++def compute_ninja_command_for_targets(targets='', configuration=None):
++  flags = []
++  if "use_goma=1" in os.getenv('GYP_DEFINES', '').split(' '):
++    flags = ['-j', '512']
++  build_dir = path_to_build_dir(configuration);
++  build_cmd = ' '.join(['ninja'] + flags + ['-C', build_dir, targets])
++  vim.command('return "%s"' % build_cmd)
++
++
++def compute_ninja_command_for_current_buffer(configuration=None):
++  """Returns the shell command to compile the file in the current buffer."""
++  build_dir = path_to_build_dir(configuration)
++
++  # ninja needs filepaths for the ^ syntax to be relative to the
++  # build directory.
++  file_to_build = path_to_current_buffer()
++  file_to_build = os.path.relpath(file_to_build, build_dir) + '^'
++  if sys.platform == 'win32':
++    # Escape \ for Vim, and ^ for both Vim and shell.
++    file_to_build = file_to_build.replace('\\', '\\\\').replace('^', '^^^^')
++  compute_ninja_command_for_targets(file_to_build, configuration)
++endpython
++
++fun! s:MakeWithCustomCommand(build_cmd)
++  let l:oldmakepgr = &makeprg
++  let &makeprg=a:build_cmd
++  silent make | cwindow
++  if !has('gui_running')
++    redraw!
++  endif
++  let &makeprg = l:oldmakepgr
++endfun
++
++fun! s:NinjaCommandForCurrentBuffer()
++  python compute_ninja_command_for_current_buffer()
++endfun
++
++fun! s:NinjaCommandForTargets(targets)
++  python compute_ninja_command_for_targets(vim.eval('a:targets'))
++endfun
++
++fun! CrCompileFile()
++  call s:MakeWithCustomCommand(s:NinjaCommandForCurrentBuffer())
++endfun
++
++fun! CrBuild(...)
++  let l:targets = a:0 > 0 ? join(a:000, ' ') : ''
++  if (l:targets !~ '\i')
++    let l:targets = 'd8'
++  endif
++  call s:MakeWithCustomCommand(s:NinjaCommandForTargets(l:targets))
++endfun
++
++command! CrCompileFile call CrCompileFile()
++command! -nargs=* CrBuild call CrBuild(<q-args>)
++
++if has('mac')
++  map <D-k> :CrCompileFile<cr>
++  imap <D-k> <esc>:CrCompileFile<cr>
++elseif has('win32')
++  map <C-F7> :CrCompileFile<cr>
++  imap <C-F7> <esc>:CrCompileFile<cr>
++elseif has('unix')
++  map <Leader>o :CrCompileFile<cr>
++endif
+diff --git a/v8/tools/visual_studio/README.txt b/v8/tools/visual_studio/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..b199e181fcdc7b777defa2232ce50ddc35c70ff3
+--- /dev/null
++++ b/v8/tools/visual_studio/README.txt
+@@ -0,0 +1,12 @@
++The Microsoft Visual Studio project files for including V8 in a Visual
++Studio/Visual C++ Express solution has been retired. If a Visual
++Studio project/solution is needed there is the option of using GYP to
++generate these. Please look in the build directory in the root of the
++V8 project. It contains the required infrastructure and a README.txt
++file explaining how to get started.
++
++Generating Visual Studio projects using GYP is how the Chromium
++project integrated V8 into the Windows build.
++
++The main build system for V8 is still SCons, see the V8 wiki page
++http://code.google.com/p/v8/wiki/BuildingOnWindows for details.
+diff --git a/v8/tools/whitespace.txt b/v8/tools/whitespace.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..d1395f5d9132ac7f4ffc44a7b7482d4c5ff4f535
+--- /dev/null
++++ b/v8/tools/whitespace.txt
+@@ -0,0 +1,8 @@
++You can modify this file to create no-op changelists.
++
++Try to write something funny. And please don't add trailing whitespace.
++
++A Smi balks into a war and says:
++"I'm so deoptimized today!"
++The doubles heard this and started to unbox.
++The Smi looked at them when a crazy v8-autoroll account showed up..
+diff --git a/v8/tools/windows-tick-processor.bat b/v8/tools/windows-tick-processor.bat
+new file mode 100755
+index 0000000000000000000000000000000000000000..79b440fa6c64b46f8035a7faf8cb26887404fb8b
+--- /dev/null
++++ b/v8/tools/windows-tick-processor.bat
+@@ -0,0 +1,30 @@
++@echo off
++
++SET tools_dir=%~dp0
++IF 1%D8_PATH% == 1 (SET D8_PATH=%tools_dir%..)
++
++SET log_file=v8.log
++
++rem find the name of the log file to process, it must not start with a dash.
++rem we prepend cmdline args with a number (in fact, any letter or number)
++rem to cope with empty arguments.
++SET arg1=1%1
++IF NOT %arg1:~0,2% == 1 (IF NOT %arg1:~0,2% == 1- SET log_file=%1)
++SET arg2=2%2
++IF NOT %arg2:~0,2% == 2 (IF NOT %arg2:~0,2% == 2- SET log_file=%2)
++SET arg3=3%3
++IF NOT %arg3:~0,2% == 3 (IF NOT %arg3:~0,2% == 3- SET log_file=%3)
++SET arg4=4%4
++IF NOT %arg4:~0,2% == 4 (IF NOT %arg4:~0,2% == 4- SET log_file=%4)
++SET arg5=5%5
++IF NOT %arg5:~0,2% == 5 (IF NOT %arg5:~0,2% == 5- SET log_file=%5)
++SET arg6=6%6
++IF NOT %arg6:~0,2% == 6 (IF NOT %arg6:~0,2% == 6- SET log_file=%6)
++SET arg7=7%7
++IF NOT %arg7:~0,2% == 7 (IF NOT %arg7:~0,2% == 7- SET log_file=%7)
++SET arg8=8%8
++IF NOT %arg8:~0,2% == 8 (IF NOT %arg8:~0,2% == 8- SET log_file=%8)
++SET arg9=9%9
++IF NOT %arg9:~0,2% == 9 (IF NOT %arg9:~0,2% == 9- SET log_file=%9)
++
++type %log_file% | %D8_PATH%\d8 %tools_dir%splaytree.js %tools_dir%codemap.js %tools_dir%csvparser.js %tools_dir%consarray.js %tools_dir%profile.js %tools_dir%profile_view.js %tools_dir%logreader.js %tools_dir%SourceMap.js %tools_dir%tickprocessor.js %tools_dir%tickprocessor-driver.js -- --windows %*
