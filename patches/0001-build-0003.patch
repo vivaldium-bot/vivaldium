@@ -1,3 +1,213 @@
+diff --git a/tools/gyp/test/msvs/list_excluded/gyptest-all.py b/tools/gyp/test/msvs/list_excluded/gyptest-all.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..5a370f6b47643157c53ad506b2152c2199a239a5
+--- /dev/null
++++ b/tools/gyp/test/msvs/list_excluded/gyptest-all.py
+@@ -0,0 +1,51 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that msvs_list_excluded_files=0 doesn't list files that would
++normally be in _excluded_files, and that if that flag is not set, then they
++are still listed.
++"""
++
++import os
++import TestGyp
++
++test = TestGyp.TestGyp(formats=['msvs'], workdir='workarea_all')
++
++
++# with the flag set to 0
++try:
++  os.environ['GYP_GENERATOR_FLAGS'] = 'msvs_list_excluded_files=0'
++  test.run_gyp('hello_exclude.gyp')
++finally:
++  del os.environ['GYP_GENERATOR_FLAGS']
++if test.uses_msbuild:
++  test.must_not_contain('hello.vcxproj', 'hello_mac')
++else:
++  test.must_not_contain('hello.vcproj', 'hello_mac')
++
++
++# with the flag not set
++test.run_gyp('hello_exclude.gyp')
++if test.uses_msbuild:
++  test.must_contain('hello.vcxproj', 'hello_mac')
++else:
++  test.must_contain('hello.vcproj', 'hello_mac')
++
++
++# with the flag explicitly set to 1
++try:
++  os.environ['GYP_GENERATOR_FLAGS'] = 'msvs_list_excluded_files=1'
++  test.run_gyp('hello_exclude.gyp')
++finally:
++  del os.environ['GYP_GENERATOR_FLAGS']
++if test.uses_msbuild:
++  test.must_contain('hello.vcxproj', 'hello_mac')
++else:
++  test.must_contain('hello.vcproj', 'hello_mac')
++
++
++test.pass_test()
+diff --git a/tools/gyp/test/msvs/list_excluded/hello.cpp b/tools/gyp/test/msvs/list_excluded/hello.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc0c0265b53750cc100156f780cbf0050aaf6048
+--- /dev/null
++++ b/tools/gyp/test/msvs/list_excluded/hello.cpp
+@@ -0,0 +1,10 @@
++// Copyright (c) 2012 Google Inc. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <stdio.h>
++
++int main(void) {
++  printf("Hello, world!\n");
++  return 0;
++}
+diff --git a/tools/gyp/test/msvs/list_excluded/hello_exclude.gyp b/tools/gyp/test/msvs/list_excluded/hello_exclude.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa160f2367a19224886708cedb92c68449e32367
+--- /dev/null
++++ b/tools/gyp/test/msvs/list_excluded/hello_exclude.gyp
+@@ -0,0 +1,19 @@
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'hello',
++      'type': 'executable',
++      'sources': [
++        'hello.cpp',
++        'hello_mac.cpp',
++      ],
++      'conditions': [
++        ['OS!="mac"', {'sources!': ['hello_mac.cpp']}],
++      ]
++    },
++  ],
++}
+diff --git a/tools/gyp/test/msvs/list_excluded/hello_mac.cpp b/tools/gyp/test/msvs/list_excluded/hello_mac.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..b9f6242c4b3ab590edf1154cc674db818cc75464
+--- /dev/null
++++ b/tools/gyp/test/msvs/list_excluded/hello_mac.cpp
+@@ -0,0 +1,10 @@
++// Copyright (c) 2012 Google Inc. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <stdio.h>
++
++int hello2() {
++  printf("Hello, two!\n");
++  return 0;
++}
+diff --git a/tools/gyp/test/msvs/missing_sources/gyptest-missing.py b/tools/gyp/test/msvs/missing_sources/gyptest-missing.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..62a99ef0f105cef60a454217b5d2bc6f4646ae5b
+--- /dev/null
++++ b/tools/gyp/test/msvs/missing_sources/gyptest-missing.py
+@@ -0,0 +1,43 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that missing 'sources' files are treated as fatal errors when the
++the generator flag 'msvs_error_on_missing_sources' is set.
++"""
++
++import TestGyp
++import os
++import sys
++
++if sys.platform == 'win32':
++  test = TestGyp.TestGyp(formats=['msvs', 'ninja'], workdir='workarea_all')
++
++  # With the flag not set
++  test.run_gyp('hello_missing.gyp')
++
++  # With the flag explicitly set to 0
++  try:
++    os.environ['GYP_GENERATOR_FLAGS'] = 'msvs_error_on_missing_sources=0'
++    test.run_gyp('hello_missing.gyp')
++  finally:
++    del os.environ['GYP_GENERATOR_FLAGS']
++
++  # With the flag explicitly set to 1
++  try:
++    os.environ['GYP_GENERATOR_FLAGS'] = 'msvs_error_on_missing_sources=1'
++    # Test to make sure GYP raises an exception (exit status 1). Since this will
++    # also print a backtrace, ensure that TestGyp is not checking that stderr is
++    # empty by specifying None, which means do not perform any checking.
++    # Instead, stderr is checked below to ensure it contains the expected
++    # output.
++    test.run_gyp('hello_missing.gyp', status=1, stderr=None)
++  finally:
++    del os.environ['GYP_GENERATOR_FLAGS']
++  test.must_contain_any_line(test.stderr(),
++                            ["Missing input files:"])
++
++  test.pass_test()
+diff --git a/tools/gyp/test/msvs/missing_sources/hello_missing.gyp b/tools/gyp/test/msvs/missing_sources/hello_missing.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..c08926bbff4ea3aed30c19d02371d883f0f353f1
+--- /dev/null
++++ b/tools/gyp/test/msvs/missing_sources/hello_missing.gyp
+@@ -0,0 +1,15 @@
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'hello',
++      'type': 'executable',
++      'sources': [
++        'hello_missing.cpp',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/msvs/multiple_actions_error_handling/action_fail.py b/tools/gyp/test/msvs/multiple_actions_error_handling/action_fail.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..286fc4e1329aa9302303cfebe3f80878267e6a45
+--- /dev/null
++++ b/tools/gyp/test/msvs/multiple_actions_error_handling/action_fail.py
+@@ -0,0 +1,7 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++sys.exit(1)
+diff --git a/tools/gyp/test/msvs/multiple_actions_error_handling/action_succeed.py b/tools/gyp/test/msvs/multiple_actions_error_handling/action_succeed.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..35543731976775ce8bfaee0abe082f2b8310d7b9
+--- /dev/null
++++ b/tools/gyp/test/msvs/multiple_actions_error_handling/action_succeed.py
+@@ -0,0 +1,7 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++sys.exit(0)
 diff --git a/tools/gyp/test/msvs/multiple_actions_error_handling/actions.gyp b/tools/gyp/test/msvs/multiple_actions_error_handling/actions.gyp
 new file mode 100644
 index 0000000000000000000000000000000000000000..ab99e929e2496628ac3e4e24c8a89e92b634eda8
@@ -16409,333 +16619,6 @@ index 0000000000000000000000000000000000000000..671cbaa802f5366c32c09d76043702b8
 +        'delayimp.lib',
 +        'shell32.lib',
 +      ],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/delay-load.cc b/tools/gyp/test/win/linker-flags/delay-load.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..2be34aa876c79a9b4061194e865b085b9430715e
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/delay-load.cc
-@@ -0,0 +1,10 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include <shlobj.h>
-+
-+int main() {
-+  SHCreateDirectory(0, 0);
-+  return 0;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/embed-manifest.gyp b/tools/gyp/test/win/linker-flags/embed-manifest.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..fefb2f56d85e2a17560c6082b3faed2dba96d580
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/embed-manifest.gyp
-@@ -0,0 +1,109 @@
-+# Copyright (c) 2013 Yandex LLC. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'test_manifest_exe',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'LinkIncremental': '1',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        }
-+      },
-+    },
-+    {
-+      'target_name': 'test_manifest_dll',
-+      'type': 'loadable_module',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'LinkIncremental': '1',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        }
-+      },
-+    },
-+    {
-+      'target_name': 'test_manifest_extra1',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+          'AdditionalManifestFiles': 'extra.manifest',
-+        }
-+      },
-+    },
-+    {
-+      'target_name': 'test_manifest_extra2',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+          'AdditionalManifestFiles': 'extra.manifest;extra2.manifest',
-+        }
-+      },
-+    },
-+    {
-+      'target_name': 'test_manifest_extra_list',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+          'AdditionalManifestFiles': [
-+            'extra.manifest',
-+            'extra2.manifest'
-+          ],
-+        }
-+      },
-+    },
-+    {
-+      'target_name': 'test_manifest_dll_inc',
-+      'type': 'loadable_module',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'LinkIncremental': '2',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        }
-+      },
-+    },
-+    {
-+      'target_name': 'test_manifest_exe_inc',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'LinkIncremental': '2',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        }
-+      },
-+    },
-+    {
-+      'target_name': 'test_manifest_exe_inc_no_embed',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'LinkIncremental': '2',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'false',
-+        }
-+      },
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/enable-uac.gyp b/tools/gyp/test/win/linker-flags/enable-uac.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..4e58c86ec8855038726205b21743852b1d20aaf3
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/enable-uac.gyp
-@@ -0,0 +1,45 @@
-+# Copyright 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'enable_uac',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        }
-+      },
-+    },
-+    {
-+      'target_name': 'enable_uac_no',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EnableUAC': 'false',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        }
-+      },
-+    },
-+    {
-+      'target_name': 'enable_uac_admin',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'UACExecutionLevel': 2,
-+          'UACUIAccess': 'true',
-+        },
-+        'VCManifestTool': {
-+          'EmbedManifest': 'true',
-+        }
-+      },
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/entrypointsymbol.cc b/tools/gyp/test/win/linker-flags/entrypointsymbol.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..b567bc87b30bca79945a3efc30c05c511db67866
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/entrypointsymbol.cc
-@@ -0,0 +1,13 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+// The entry point specified by link.exe /ENTRY option.
-+extern "C" void MainEntryPoint() {
-+}
-+
-+// Still needed because the linker checks for existence of one of main, wmain,
-+// WinMain, or wMain to offer informative diagnositics.
-+int main() {
-+  return 0;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/entrypointsymbol.gyp b/tools/gyp/test/win/linker-flags/entrypointsymbol.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..7f2c14252d013e8d2562e6917107ca8d6aa82686
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/entrypointsymbol.gyp
-@@ -0,0 +1,28 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_ok',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EntryPointSymbol': 'MainEntryPoint',
-+        }
-+      },
-+      'sources': ['entrypointsymbol.cc'],
-+    },
-+    {
-+      'target_name': 'test_fail',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'EntryPointSymbol': 'MainEntryPoint',
-+        }
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/extra.manifest b/tools/gyp/test/win/linker-flags/extra.manifest
-new file mode 100644
-index 0000000000000000000000000000000000000000..2e436dc2517ec0587575bc0a8ada788093218c25
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/extra.manifest
-@@ -0,0 +1,11 @@
-+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-+
-+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
-+    <application>
-+      <!--This Id value indicates the application supports Windows 7 functionality-->
-+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
-+    </application>
-+  </compatibility>
-+  
-+</assembly>
-diff --git a/tools/gyp/test/win/linker-flags/extra2.manifest b/tools/gyp/test/win/linker-flags/extra2.manifest
-new file mode 100644
-index 0000000000000000000000000000000000000000..bfb570ca5913db3335f506d72b571d57db32436a
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/extra2.manifest
-@@ -0,0 +1,11 @@
-+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-+
-+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
-+    <application>
-+      <!--This Id value indicates the application supports Windows Vista functionality -->
-+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
-+    </application>
-+  </compatibility>
-+  
-+</assembly>
-diff --git a/tools/gyp/test/win/linker-flags/fixed-base.gyp b/tools/gyp/test/win/linker-flags/fixed-base.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..cc2982eb2799cbec96d929b237252e3f52b09670
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/fixed-base.gyp
-@@ -0,0 +1,52 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    # Disable DYNAMICBASE for these tests because it implies/doesn't imply
-+    # FIXED in certain cases so it complicates the test for FIXED.
-+    {
-+      'target_name': 'test_fixed_default_exe',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'RandomizedBaseAddress': '1',
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_fixed_default_dll',
-+      'type': 'shared_library',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'RandomizedBaseAddress': '1',
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_fixed_no',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'FixedBaseAddress': '1',
-+          'RandomizedBaseAddress': '1',
-+        }
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_fixed_yes',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'FixedBaseAddress': '2',
-+          'RandomizedBaseAddress': '1',
-+        },
-+      },
-+      'sources': ['hello.cc'],
 +    },
 +  ]
 +}

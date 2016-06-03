@@ -2088,6 +2088,96 @@ index 0000000000000000000000000000000000000000..91c068413d7ef1d0ebc28aea4f506995
 +  ],
 +}
 +
+diff --git a/tools/gyp/test/ios/framework/framework.gyp b/tools/gyp/test/ios/framework/framework.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..a99079226d4cdb6cabe328b8aed7402c774247bf
+--- /dev/null
++++ b/tools/gyp/test/ios/framework/framework.gyp
+@@ -0,0 +1,39 @@
++# Copyright 2016 The Chromium Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'iOSFramework',
++      'type': 'shared_library',
++      'mac_bundle': 1,
++      'sources': [
++        'iOSFramework/iOSFramework.h',
++      ],
++      'link_settings': {
++        'libraries': [
++          '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
++          '$(SDKROOT)/System/Library/Frameworks/UIKit.framework',
++        ],
++      },
++      'mac_framework_headers': [
++        'iOSFramework/iOSFramework.h',
++      ],
++      'mac_framework_dirs': [
++        '$(SDKROOT)/../../Library/Frameworks',
++      ],
++      'xcode_settings': {
++        'OTHER_CFLAGS': [
++          '-fobjc-abi-version=2',
++        ],
++        'INFOPLIST_FILE': 'iOSFramework/Info.plist',
++        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
++        'SDKROOT': 'iphoneos',
++        'IPHONEOS_DEPLOYMENT_TARGET': '8.0',
++        'CONFIGURATION_BUILD_DIR':'build/Default',
++        'CODE_SIGN_IDENTITY[sdk=iphoneos*]': 'iPhone Developer',
++      },
++    },
++  ],
++}
+diff --git a/tools/gyp/test/ios/framework/iOSFramework/Info.plist b/tools/gyp/test/ios/framework/iOSFramework/Info.plist
+new file mode 100644
+index 0000000000000000000000000000000000000000..d3de8eefb69556c5bf61c107232e095548dc387c
+--- /dev/null
++++ b/tools/gyp/test/ios/framework/iOSFramework/Info.plist
+@@ -0,0 +1,26 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>en</string>
++	<key>CFBundleExecutable</key>
++	<string>$(EXECUTABLE_NAME)</string>
++	<key>CFBundleIdentifier</key>
++	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundleName</key>
++	<string>$(PRODUCT_NAME)</string>
++	<key>CFBundlePackageType</key>
++	<string>FMWK</string>
++	<key>CFBundleShortVersionString</key>
++	<string>1.0</string>
++	<key>CFBundleSignature</key>
++	<string>????</string>
++	<key>CFBundleVersion</key>
++	<string>$(CURRENT_PROJECT_VERSION)</string>
++	<key>NSPrincipalClass</key>
++	<string></string>
++</dict>
++</plist>
+diff --git a/tools/gyp/test/ios/framework/iOSFramework/iOSFramework.h b/tools/gyp/test/ios/framework/iOSFramework/iOSFramework.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..6181a97ac912b187cb868e3c8e19ed8faad947f8
+--- /dev/null
++++ b/tools/gyp/test/ios/framework/iOSFramework/iOSFramework.h
+@@ -0,0 +1,7 @@
++#import <UIKit/UIKit.h>
++
++//! Project version number for iOSFramework.
++FOUNDATION_EXPORT double iOSFrameworkVersionNumber;
++
++//! Project version string for iOSFramework.
++FOUNDATION_EXPORT const unsigned char iOSFrameworkVersionString[];
 diff --git a/tools/gyp/test/ios/gyptest-app-ios-assets-catalog.py b/tools/gyp/test/ios/gyptest-app-ios-assets-catalog.py
 new file mode 100755
 index 0000000000000000000000000000000000000000..efd96ac752f02833b9a7825567f7833c0ccf9565
@@ -2416,6 +2506,46 @@ index 0000000000000000000000000000000000000000..c5e76d93ff259aea1d36b3410fbd2ef7
 +      chdir='extension')
 +  CheckStrip(path, "ActionViewController")
 +  CheckEntrypoint(path, "_NSExtensionMain")
++
++  test.pass_test()
++
+diff --git a/tools/gyp/test/ios/gyptest-framework.py b/tools/gyp/test/ios/gyptest-framework.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..a9012e038f942b766102db06140d18d418f30410
+--- /dev/null
++++ b/tools/gyp/test/ios/gyptest-framework.py
+@@ -0,0 +1,34 @@
++#!/usr/bin/env python
++
++# Copyright 2016 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that ios app frameworks are built correctly.
++"""
++
++import TestGyp
++import TestMac
++import subprocess
++import sys
++
++if sys.platform == 'darwin' and TestMac.Xcode.Version()>="0700":
++
++  test = TestGyp.TestGyp(formats=['ninja'])
++  if test.format == 'xcode-ninja':
++    test.skip_test()
++
++  test.run_gyp('framework.gyp', chdir='framework')
++
++  test.build('framework.gyp', 'iOSFramework', chdir='framework')
++
++  test.built_file_must_exist(
++      'iOSFramework.framework/Headers/iOSFramework.h',
++      chdir='framework')
++  test.built_file_must_exist(
++      'iOSFramework.framework/iOSFramework',
++      chdir='framework')
 +
 +  test.pass_test()
 +
@@ -6163,10 +6293,10 @@ index 0000000000000000000000000000000000000000..2f526a6e3d729e82b9ca6915137b9da5
 +# vim: set expandtab tabstop=4 shiftwidth=4:
 diff --git a/tools/gyp/test/lib/TestGyp.py b/tools/gyp/test/lib/TestGyp.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..c59b811a8d9f295927a68f4f3795e8b99f9e31df
+index 0000000000000000000000000000000000000000..f32099be98794f9a90db3cd378ad777314266ca7
 --- /dev/null
 +++ b/tools/gyp/test/lib/TestGyp.py
-@@ -0,0 +1,1151 @@
+@@ -0,0 +1,1190 @@
 +# Copyright (c) 2012 Google Inc. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -6383,6 +6513,27 @@ index 0000000000000000000000000000000000000000..c59b811a8d9f295927a68f4f3795e8b9
 +        source = os.path.join(root, filename)
 +        destination = source.replace(source_dir, dest_dir)
 +        shutil.copy2(source, destination)
++
++    # The gyp tests are run with HOME pointing to |dest_dir| to provide an
++    # hermetic environment. Symlink login.keychain and the 'Provisioning
++    # Profiles' folder to allow codesign to access to the data required for
++    # signing binaries.
++    if sys.platform == 'darwin':
++      old_keychain = GetDefaultKeychainPath()
++      old_provisioning_profiles = os.path.join(
++          os.environ['HOME'], 'Library', 'MobileDevice',
++          'Provisioning Profiles')
++
++      new_keychain = os.path.join(dest_dir, 'Library', 'Keychains')
++      MakeDirs(new_keychain)
++      os.symlink(old_keychain, os.path.join(new_keychain, 'login.keychain'))
++
++      if os.path.exists(old_provisioning_profiles):
++        new_provisioning_profiles = os.path.join(
++            dest_dir, 'Library', 'MobileDevice')
++        MakeDirs(new_provisioning_profiles)
++        os.symlink(old_provisioning_profiles,
++            os.path.join(new_provisioning_profiles, 'Provisioning Profiles'))
 +
 +  def initialize_build_tool(self):
 +    """
@@ -6777,6 +6928,23 @@ index 0000000000000000000000000000000000000000..c59b811a8d9f295927a68f4f3795e8b9
 +    path = p.communicate()[0].strip()
 +  return path
 +
++
++def MakeDirs(new_dir):
++  """A wrapper around os.makedirs() that emulates "mkdir -p"."""
++  try:
++    os.makedirs(new_dir)
++  except OSError as e:
++    if e.errno != errno.EEXIST:
++      raise
++
++def GetDefaultKeychainPath():
++  """Get the keychain path, for used before updating HOME."""
++  assert sys.platform == 'darwin'
++  # Format is:
++  # $ security default-keychain
++  #     "/Some/Path/To/default.keychain"
++  path = subprocess.check_output(['security', 'default-keychain']).strip()
++  return path[1:-1]
 +
 +def FindMSBuildInstallation(msvs_version = 'auto'):
 +  """Returns path to MSBuild for msvs_version or latest available.
@@ -7179,7 +7347,8 @@ index 0000000000000000000000000000000000000000..c59b811a8d9f295927a68f4f3795e8b9
 +        if not TestCmd.is_List(expected):
 +          expected = expected.split('\n')
 +        actual = [a for a in actual
-+                    if 'No recorder, buildTask: <Xcode3BuildTask:' not in a]
++                    if 'No recorder, buildTask: <Xcode3BuildTask:' not in a and
++                       'Beginning test session' not in a]
 +      return match(actual, expected)
 +    kw['match'] = match_filter_xcode
 +
@@ -8442,6 +8611,55 @@ index 0000000000000000000000000000000000000000..43a4607adf9f7b704f8014b97235457b
 +  test.build('test.gyp', chdir=CHDIR)
 +
 +  test.pass_test()
+diff --git a/tools/gyp/test/linux/gyptest-target-rpath.py b/tools/gyp/test/linux/gyptest-target-rpath.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..2950a2026a2f8e83de593a42fde546638c6221bf
+--- /dev/null
++++ b/tools/gyp/test/linux/gyptest-target-rpath.py
+@@ -0,0 +1,43 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Check target_rpath generator flag for ninja.
++"""
++
++import TestGyp
++
++import re
++import subprocess
++import sys
++
++if sys.platform.startswith('linux'):
++  test = TestGyp.TestGyp(formats=['ninja'])
++
++  CHDIR = 'target-rpath'
++  test.run_gyp('test.gyp', '-G', 'target_rpath=/usr/lib/gyptest/', chdir=CHDIR)
++  test.build('test.gyp', test.ALL, chdir=CHDIR)
++
++  def GetRpaths(p):
++    p = test.built_file_path(p, chdir=CHDIR)
++    r = re.compile(r'Library rpath: \[([^\]]+)\]')
++    proc = subprocess.Popen(['readelf', '-d', p], stdout=subprocess.PIPE)
++    o = proc.communicate()[0]
++    assert not proc.returncode
++    return r.findall(o)
++
++  expect = '/usr/lib/gyptest/'
++
++  if GetRpaths('shared_executable') != [expect]:
++    test.fail_test()
++
++  if GetRpaths('shared_executable_no_so_suffix') != [expect]:
++    test.fail_test()
++
++  if GetRpaths('static_executable'):
++    test.fail_test()
++
++  test.pass_test()
 diff --git a/tools/gyp/test/linux/implicit-rpath/file.c b/tools/gyp/test/linux/implicit-rpath/file.c
 new file mode 100644
 index 0000000000000000000000000000000000000000..56757a701bf5cfd58c3d4b546d3444da4cf30711
@@ -8625,6 +8843,73 @@ index 0000000000000000000000000000000000000000..c36835b18f0f774e6b55efcda31dcf2c
 +      'sources': [
 +        'lib2.c',
 +      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/linux/target-rpath/file.c b/tools/gyp/test/linux/target-rpath/file.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..56757a701bf5cfd58c3d4b546d3444da4cf30711
+--- /dev/null
++++ b/tools/gyp/test/linux/target-rpath/file.c
+@@ -0,0 +1 @@
++void f() {}
+diff --git a/tools/gyp/test/linux/target-rpath/main.c b/tools/gyp/test/linux/target-rpath/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..237c8ce181774d991a9dbdd8cacf1a5fb9f199f1
+--- /dev/null
++++ b/tools/gyp/test/linux/target-rpath/main.c
+@@ -0,0 +1 @@
++int main() {}
+diff --git a/tools/gyp/test/linux/target-rpath/test.gyp b/tools/gyp/test/linux/target-rpath/test.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..b546106986e19d3b295e117e4712ca16cc35513f
+--- /dev/null
++++ b/tools/gyp/test/linux/target-rpath/test.gyp
+@@ -0,0 +1,47 @@
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++{
++  'targets': [
++    {
++      'target_name': 'shared',
++      'type': 'shared_library',
++      'sources': [ 'file.c' ],
++    },
++    {
++      'target_name': 'shared_no_so_suffix',
++      'product_extension': 'so.0.1',
++      'type': 'shared_library',
++      'sources': [ 'file.c' ],
++    },
++    {
++      'target_name': 'static',
++      'type': 'static_library',
++      'sources': [ 'file.c' ],
++    },
++    {
++      'target_name': 'shared_executable',
++      'type': 'executable',
++      'sources': [ 'main.c' ],
++      'dependencies': [
++        'shared',
++      ]
++    },
++    {
++      'target_name': 'shared_executable_no_so_suffix',
++      'type': 'executable',
++      'sources': [ 'main.c' ],
++      'dependencies': [
++        'shared_no_so_suffix',
++      ]
++    },
++    {
++      'target_name': 'static_executable',
++      'type': 'executable',
++      'sources': [ 'main.c' ],
++      'dependencies': [
++        'static',
++      ]
 +    },
 +  ],
 +}
@@ -17957,10 +18242,10 @@ index 0000000000000000000000000000000000000000..981c3fc564a9d681a3ba540f7437883b
 +  test.pass_test()
 diff --git a/tools/gyp/test/mac/gyptest-xcode-gcc.py b/tools/gyp/test/mac/gyptest-xcode-gcc.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..e45d0b5e8bc0c57c06e80966d209d5bab94139e5
+index 0000000000000000000000000000000000000000..dee4bd5929deffdaa0396aa7811dc4e5439ab139
 --- /dev/null
 +++ b/tools/gyp/test/mac/gyptest-xcode-gcc.py
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,59 @@
 +#!/usr/bin/env python
 +
 +# Copyright (c) 2012 Google Inc. All rights reserved.
@@ -17993,6 +18278,9 @@ index 0000000000000000000000000000000000000000..e45d0b5e8bc0c57c06e80966d209d5ba
 +
 +if sys.platform == 'darwin':
 +  test = TestGyp.TestGyp(formats=['ninja', 'make', 'xcode'])
++
++  if test.format == 'xcode-ninja':
++    test.skip_test()
 +
 +  CHDIR = 'xcode-gcc'
 +  test.run_gyp('test.gyp', chdir=CHDIR)
@@ -26144,213 +26432,3 @@ index 0000000000000000000000000000000000000000..d8131d5d7bd38e92ef57fb2262c51859
 +
 +
 +test.pass_test()
-diff --git a/tools/gyp/test/msvs/list_excluded/gyptest-all.py b/tools/gyp/test/msvs/list_excluded/gyptest-all.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..5a370f6b47643157c53ad506b2152c2199a239a5
---- /dev/null
-+++ b/tools/gyp/test/msvs/list_excluded/gyptest-all.py
-@@ -0,0 +1,51 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies that msvs_list_excluded_files=0 doesn't list files that would
-+normally be in _excluded_files, and that if that flag is not set, then they
-+are still listed.
-+"""
-+
-+import os
-+import TestGyp
-+
-+test = TestGyp.TestGyp(formats=['msvs'], workdir='workarea_all')
-+
-+
-+# with the flag set to 0
-+try:
-+  os.environ['GYP_GENERATOR_FLAGS'] = 'msvs_list_excluded_files=0'
-+  test.run_gyp('hello_exclude.gyp')
-+finally:
-+  del os.environ['GYP_GENERATOR_FLAGS']
-+if test.uses_msbuild:
-+  test.must_not_contain('hello.vcxproj', 'hello_mac')
-+else:
-+  test.must_not_contain('hello.vcproj', 'hello_mac')
-+
-+
-+# with the flag not set
-+test.run_gyp('hello_exclude.gyp')
-+if test.uses_msbuild:
-+  test.must_contain('hello.vcxproj', 'hello_mac')
-+else:
-+  test.must_contain('hello.vcproj', 'hello_mac')
-+
-+
-+# with the flag explicitly set to 1
-+try:
-+  os.environ['GYP_GENERATOR_FLAGS'] = 'msvs_list_excluded_files=1'
-+  test.run_gyp('hello_exclude.gyp')
-+finally:
-+  del os.environ['GYP_GENERATOR_FLAGS']
-+if test.uses_msbuild:
-+  test.must_contain('hello.vcxproj', 'hello_mac')
-+else:
-+  test.must_contain('hello.vcproj', 'hello_mac')
-+
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/msvs/list_excluded/hello.cpp b/tools/gyp/test/msvs/list_excluded/hello.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..bc0c0265b53750cc100156f780cbf0050aaf6048
---- /dev/null
-+++ b/tools/gyp/test/msvs/list_excluded/hello.cpp
-@@ -0,0 +1,10 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include <stdio.h>
-+
-+int main(void) {
-+  printf("Hello, world!\n");
-+  return 0;
-+}
-diff --git a/tools/gyp/test/msvs/list_excluded/hello_exclude.gyp b/tools/gyp/test/msvs/list_excluded/hello_exclude.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..aa160f2367a19224886708cedb92c68449e32367
---- /dev/null
-+++ b/tools/gyp/test/msvs/list_excluded/hello_exclude.gyp
-@@ -0,0 +1,19 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'hello',
-+      'type': 'executable',
-+      'sources': [
-+        'hello.cpp',
-+        'hello_mac.cpp',
-+      ],
-+      'conditions': [
-+        ['OS!="mac"', {'sources!': ['hello_mac.cpp']}],
-+      ]
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/msvs/list_excluded/hello_mac.cpp b/tools/gyp/test/msvs/list_excluded/hello_mac.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..b9f6242c4b3ab590edf1154cc674db818cc75464
---- /dev/null
-+++ b/tools/gyp/test/msvs/list_excluded/hello_mac.cpp
-@@ -0,0 +1,10 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include <stdio.h>
-+
-+int hello2() {
-+  printf("Hello, two!\n");
-+  return 0;
-+}
-diff --git a/tools/gyp/test/msvs/missing_sources/gyptest-missing.py b/tools/gyp/test/msvs/missing_sources/gyptest-missing.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..62a99ef0f105cef60a454217b5d2bc6f4646ae5b
---- /dev/null
-+++ b/tools/gyp/test/msvs/missing_sources/gyptest-missing.py
-@@ -0,0 +1,43 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies that missing 'sources' files are treated as fatal errors when the
-+the generator flag 'msvs_error_on_missing_sources' is set.
-+"""
-+
-+import TestGyp
-+import os
-+import sys
-+
-+if sys.platform == 'win32':
-+  test = TestGyp.TestGyp(formats=['msvs', 'ninja'], workdir='workarea_all')
-+
-+  # With the flag not set
-+  test.run_gyp('hello_missing.gyp')
-+
-+  # With the flag explicitly set to 0
-+  try:
-+    os.environ['GYP_GENERATOR_FLAGS'] = 'msvs_error_on_missing_sources=0'
-+    test.run_gyp('hello_missing.gyp')
-+  finally:
-+    del os.environ['GYP_GENERATOR_FLAGS']
-+
-+  # With the flag explicitly set to 1
-+  try:
-+    os.environ['GYP_GENERATOR_FLAGS'] = 'msvs_error_on_missing_sources=1'
-+    # Test to make sure GYP raises an exception (exit status 1). Since this will
-+    # also print a backtrace, ensure that TestGyp is not checking that stderr is
-+    # empty by specifying None, which means do not perform any checking.
-+    # Instead, stderr is checked below to ensure it contains the expected
-+    # output.
-+    test.run_gyp('hello_missing.gyp', status=1, stderr=None)
-+  finally:
-+    del os.environ['GYP_GENERATOR_FLAGS']
-+  test.must_contain_any_line(test.stderr(),
-+                            ["Missing input files:"])
-+
-+  test.pass_test()
-diff --git a/tools/gyp/test/msvs/missing_sources/hello_missing.gyp b/tools/gyp/test/msvs/missing_sources/hello_missing.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..c08926bbff4ea3aed30c19d02371d883f0f353f1
---- /dev/null
-+++ b/tools/gyp/test/msvs/missing_sources/hello_missing.gyp
-@@ -0,0 +1,15 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'hello',
-+      'type': 'executable',
-+      'sources': [
-+        'hello_missing.cpp',
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/msvs/multiple_actions_error_handling/action_fail.py b/tools/gyp/test/msvs/multiple_actions_error_handling/action_fail.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..286fc4e1329aa9302303cfebe3f80878267e6a45
---- /dev/null
-+++ b/tools/gyp/test/msvs/multiple_actions_error_handling/action_fail.py
-@@ -0,0 +1,7 @@
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import sys
-+
-+sys.exit(1)
-diff --git a/tools/gyp/test/msvs/multiple_actions_error_handling/action_succeed.py b/tools/gyp/test/msvs/multiple_actions_error_handling/action_succeed.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..35543731976775ce8bfaee0abe082f2b8310d7b9
---- /dev/null
-+++ b/tools/gyp/test/msvs/multiple_actions_error_handling/action_succeed.py
-@@ -0,0 +1,7 @@
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import sys
-+
-+sys.exit(0)
