@@ -1,3 +1,467 @@
+diff --git a/tools/gyp/test/msvs/express/express.gyp b/tools/gyp/test/msvs/express/express.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..917abe2cc0b17083418b52e615c74b99e1f9cc16
+--- /dev/null
++++ b/tools/gyp/test/msvs/express/express.gyp
+@@ -0,0 +1,19 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'express',
++      'type': 'executable',
++      'dependencies': [
++        'base/base.gyp:a',
++        'base/base.gyp:b',
++      ],
++      'sources': [
++        'main.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/msvs/express/gyptest-express.py b/tools/gyp/test/msvs/express/gyptest-express.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..54c06f664ae7515f1ca71c08d73e075c5a0d6f7b
+--- /dev/null
++++ b/tools/gyp/test/msvs/express/gyptest-express.py
+@@ -0,0 +1,29 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that flat solutions get generated for Express versions of
++Visual Studio.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp(formats=['msvs'])
++
++test.run_gyp('express.gyp', '-G', 'msvs_version=2005')
++test.must_contain('express.sln', '(base)')
++
++test.run_gyp('express.gyp', '-G', 'msvs_version=2008')
++test.must_contain('express.sln', '(base)')
++
++test.run_gyp('express.gyp', '-G', 'msvs_version=2005e')
++test.must_not_contain('express.sln', '(base)')
++
++test.run_gyp('express.gyp', '-G', 'msvs_version=2008e')
++test.must_not_contain('express.sln', '(base)')
++
++
++test.pass_test()
+diff --git a/tools/gyp/test/msvs/external_builder/external.gyp b/tools/gyp/test/msvs/external_builder/external.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..abe5b5889c3565a17886ae4ee7284f2031e3e1dc
+--- /dev/null
++++ b/tools/gyp/test/msvs/external_builder/external.gyp
+@@ -0,0 +1,68 @@
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'variables': {
++    # the test driver switches this flag when testing external builder
++    'use_external_builder%': 0,
++  },
++  'targets': [
++    {
++      'target_name': 'external',
++      'type': 'executable',
++      'sources': [
++        'hello.cpp',
++        'hello.z',
++      ],
++      'rules': [
++        {
++          'rule_name': 'test_rule',
++          'extension': 'z',
++          'outputs': [
++            'msbuild_rule.out',
++          ],
++          'action': [
++            'python',
++            'msbuild_rule.py',
++            '<(RULE_INPUT_PATH)',
++            'a', 'b', 'c',
++          ],
++          'msvs_cygwin_shell': 0,
++        },
++      ],
++      'actions': [
++        {
++          'action_name': 'test action',
++          'inputs': [
++            'msbuild_action.py',
++          ],
++          'outputs': [
++            'msbuild_action.out',
++          ],
++          'action': [
++            'python',
++            '<@(_inputs)',
++            'x', 'y', 'z',
++          ],
++          'msvs_cygwin_shell': 0,
++        },
++      ],
++      'conditions': [
++        ['use_external_builder==1', {
++          'msvs_external_builder': 'test',
++          'msvs_external_builder_build_cmd': [
++            'python',
++            'external_builder.py',
++            'build', '1', '2', '3',
++          ],
++          'msvs_external_builder_clean_cmd': [
++            'python',
++            'external_builder.py',
++            'clean', '4', '5',
++          ],
++        }],
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/msvs/external_builder/external_builder.py b/tools/gyp/test/msvs/external_builder/external_builder.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ddfc1e5e33c10b247ba11adfb2e3b39e0aaf07b0
+--- /dev/null
++++ b/tools/gyp/test/msvs/external_builder/external_builder.py
+@@ -0,0 +1,9 @@
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++with open('external_builder.out', 'w') as f:
++  f.write(' '.join(sys.argv))
++
+diff --git a/tools/gyp/test/msvs/external_builder/gyptest-all.py b/tools/gyp/test/msvs/external_builder/gyptest-all.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..72faa7ab7f8e19cd9e2f5f27aed3543e553cd830
+--- /dev/null
++++ b/tools/gyp/test/msvs/external_builder/gyptest-all.py
+@@ -0,0 +1,59 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that msvs_external_builder being set will invoke the provided
++msvs_external_builder_build_cmd and msvs_external_builder_clean_cmd, and will
++not invoke MSBuild actions and rules.
++"""
++
++import os
++import sys
++import TestGyp
++
++if int(os.environ.get('GYP_MSVS_VERSION', 0)) < 2010:
++  sys.exit(0)
++
++test = TestGyp.TestGyp(formats=['msvs'], workdir='workarea_all')
++
++# without the flag set
++test.run_gyp('external.gyp')
++test.build('external.gyp', target='external')
++test.must_not_exist('external_builder.out')
++test.must_exist('msbuild_rule.out')
++test.must_exist('msbuild_action.out')
++test.must_match('msbuild_rule.out', 'msbuild_rule.py hello.z a b c')
++test.must_match('msbuild_action.out', 'msbuild_action.py x y z')
++os.remove('msbuild_rule.out')
++os.remove('msbuild_action.out')
++
++# with the flag set, using Build
++try:
++  os.environ['GYP_DEFINES'] = 'use_external_builder=1'
++  test.run_gyp('external.gyp')
++  test.build('external.gyp', target='external')
++finally:
++  del os.environ['GYP_DEFINES']
++test.must_not_exist('msbuild_rule.out')
++test.must_not_exist('msbuild_action.out')
++test.must_exist('external_builder.out')
++test.must_match('external_builder.out', 'external_builder.py build 1 2 3')
++os.remove('external_builder.out')
++
++# with the flag set, using Clean
++try:
++  os.environ['GYP_DEFINES'] = 'use_external_builder=1'
++  test.run_gyp('external.gyp')
++  test.build('external.gyp', target='external', clean=True)
++finally:
++  del os.environ['GYP_DEFINES']
++test.must_not_exist('msbuild_rule.out')
++test.must_not_exist('msbuild_action.out')
++test.must_exist('external_builder.out')
++test.must_match('external_builder.out', 'external_builder.py clean 4 5')
++os.remove('external_builder.out')
++
++test.pass_test()
+diff --git a/tools/gyp/test/msvs/external_builder/hello.cpp b/tools/gyp/test/msvs/external_builder/hello.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..bc0c0265b53750cc100156f780cbf0050aaf6048
+--- /dev/null
++++ b/tools/gyp/test/msvs/external_builder/hello.cpp
+@@ -0,0 +1,10 @@
++// Copyright (c) 2012 Google Inc. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <stdio.h>
++
++int main(void) {
++  printf("Hello, world!\n");
++  return 0;
++}
+diff --git a/tools/gyp/test/msvs/external_builder/hello.z b/tools/gyp/test/msvs/external_builder/hello.z
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa478827b50f552feae808e98e83275669ffa808
+--- /dev/null
++++ b/tools/gyp/test/msvs/external_builder/hello.z
+@@ -0,0 +1,6 @@
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++This file will be passed to the test rule.
++
+diff --git a/tools/gyp/test/msvs/external_builder/msbuild_action.py b/tools/gyp/test/msvs/external_builder/msbuild_action.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..632d786922fd52851f7253abd644a6279084d3ed
+--- /dev/null
++++ b/tools/gyp/test/msvs/external_builder/msbuild_action.py
+@@ -0,0 +1,9 @@
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++with open('msbuild_action.out', 'w') as f:
++  f.write(' '.join(sys.argv))
++
+diff --git a/tools/gyp/test/msvs/external_builder/msbuild_rule.py b/tools/gyp/test/msvs/external_builder/msbuild_rule.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..0d6e315775f7644da9f39466ae4f51a525ebca6b
+--- /dev/null
++++ b/tools/gyp/test/msvs/external_builder/msbuild_rule.py
+@@ -0,0 +1,11 @@
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys, os.path
++
++sys.argv[1] = os.path.basename(sys.argv[1])
++
++with open('msbuild_rule.out', 'w') as f:
++  f.write(' '.join(sys.argv))
++
+diff --git a/tools/gyp/test/msvs/filters/filters.gyp b/tools/gyp/test/msvs/filters/filters.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..a4106dc8eb30be1c1d3562780d1f03ab69f66ea8
+--- /dev/null
++++ b/tools/gyp/test/msvs/filters/filters.gyp
+@@ -0,0 +1,47 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'no_source_files',
++      'type': 'none',
++      'sources': [ ],
++    },
++    {
++      'target_name': 'one_source_file',
++      'type': 'executable',
++      'sources': [
++        '../folder/a.c',
++      ],
++    },
++    {
++      'target_name': 'two_source_files',
++      'type': 'executable',
++      'sources': [
++        '../folder/a.c',
++        '../folder/b.c',
++      ],
++    },
++    {
++      'target_name': 'three_files_in_two_folders',
++      'type': 'executable',
++      'sources': [
++        '../folder1/a.c',
++        '../folder1/b.c',
++        '../folder2/c.c',
++      ],
++    },
++    {
++      'target_name': 'nested_folders',
++      'type': 'executable',
++      'sources': [
++        '../folder1/nested/a.c',
++        '../folder2/d.c',
++        '../folder1/nested/b.c',
++        '../folder1/other/c.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/msvs/filters/gyptest-filters-2008.py b/tools/gyp/test/msvs/filters/gyptest-filters-2008.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..41ca085823a9bdf74056f16d298dcbd46498b47a
+--- /dev/null
++++ b/tools/gyp/test/msvs/filters/gyptest-filters-2008.py
+@@ -0,0 +1,68 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that extra filters are pruned correctly for Visual Studio 2008.
++"""
++
++import re
++import TestGyp
++
++
++def strip_ws(str):
++    return re.sub('^ +', '', str, flags=re.M).replace('\n', '')
++
++
++test = TestGyp.TestGyp(formats=['msvs'])
++
++test.run_gyp('filters.gyp', '-G', 'standalone', '-G', 'msvs_version=2008')
++
++test.must_contain('no_source_files.vcproj', '<Files/>')
++
++test.must_contain('one_source_file.vcproj', strip_ws('''\
++<Files>
++  <File RelativePath="..\\folder\\a.c"/>
++</Files>
++'''))
++
++test.must_contain('two_source_files.vcproj', strip_ws('''\
++<Files>
++  <File RelativePath="..\\folder\\a.c"/>
++  <File RelativePath="..\\folder\\b.c"/>
++</Files>
++'''))
++
++test.must_contain('three_files_in_two_folders.vcproj', strip_ws('''\
++<Files>
++  <Filter Name="folder1">
++    <File RelativePath="..\\folder1\\a.c"/>
++    <File RelativePath="..\\folder1\\b.c"/>
++  </Filter>
++  <Filter Name="folder2">
++    <File RelativePath="..\\folder2\\c.c"/>
++  </Filter>
++</Files>
++'''))
++
++test.must_contain('nested_folders.vcproj', strip_ws('''\
++<Files>
++  <Filter Name="folder1">
++    <Filter Name="nested">
++      <File RelativePath="..\\folder1\\nested\\a.c"/>
++      <File RelativePath="..\\folder1\\nested\\b.c"/>
++    </Filter>
++    <Filter Name="other">
++      <File RelativePath="..\\folder1\\other\\c.c"/>
++    </Filter>
++  </Filter>
++  <Filter Name="folder2">
++    <File RelativePath="..\\folder2\\d.c"/>
++  </Filter>
++</Files>
++'''))
++
++
++test.pass_test()
+diff --git a/tools/gyp/test/msvs/filters/gyptest-filters-2010.py b/tools/gyp/test/msvs/filters/gyptest-filters-2010.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d8131d5d7bd38e92ef57fb2262c51859a226be05
+--- /dev/null
++++ b/tools/gyp/test/msvs/filters/gyptest-filters-2010.py
+@@ -0,0 +1,57 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that extra filters are pruned correctly for Visual Studio 2010
++and later.
++"""
++
++import TestGyp
++
++
++test = TestGyp.TestGyp(formats=['msvs'])
++
++test.run_gyp('filters.gyp', '-G', 'standalone', '-G', 'msvs_version=2010')
++
++test.must_not_exist('no_source_files.vcxproj.filters')
++
++test.must_not_exist('one_source_file.vcxproj.filters')
++
++test.must_not_exist('two_source_files.vcxproj.filters')
++
++test.must_contain('three_files_in_two_folders.vcxproj.filters', '''\
++  <ItemGroup>
++    <ClCompile Include="..\\folder1\\a.c">
++      <Filter>folder1</Filter>
++    </ClCompile>
++    <ClCompile Include="..\\folder1\\b.c">
++      <Filter>folder1</Filter>
++    </ClCompile>
++    <ClCompile Include="..\\folder2\\c.c">
++      <Filter>folder2</Filter>
++    </ClCompile>
++  </ItemGroup>
++'''.replace('\n', '\r\n'))
++
++test.must_contain('nested_folders.vcxproj.filters', '''\
++  <ItemGroup>
++    <ClCompile Include="..\\folder1\\nested\\a.c">
++      <Filter>folder1\\nested</Filter>
++    </ClCompile>
++    <ClCompile Include="..\\folder2\\d.c">
++      <Filter>folder2</Filter>
++    </ClCompile>
++    <ClCompile Include="..\\folder1\\nested\\b.c">
++      <Filter>folder1\\nested</Filter>
++    </ClCompile>
++    <ClCompile Include="..\\folder1\\other\\c.c">
++      <Filter>folder1\\other</Filter>
++    </ClCompile>
++  </ItemGroup>
++'''.replace('\n', '\r\n'))
++
++
++test.pass_test()
 diff --git a/tools/gyp/test/msvs/list_excluded/gyptest-all.py b/tools/gyp/test/msvs/list_excluded/gyptest-all.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..5a370f6b47643157c53ad506b2152c2199a239a5
@@ -9847,6 +10311,50 @@ index 0000000000000000000000000000000000000000..3bacbbc135e63b4c910b05915f14041d
 +    },
 +  ]
 +}
+diff --git a/tools/gyp/test/win/compiler-flags/compile-as-winrt.cc b/tools/gyp/test/win/compiler-flags/compile-as-winrt.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..da9954f8fbce0af6962650fa1d636674db92e890
+--- /dev/null
++++ b/tools/gyp/test/win/compiler-flags/compile-as-winrt.cc
+@@ -0,0 +1,12 @@
++// Copyright (c) 2016 Google Inc. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++using namespace Platform;
++
++int main() {
++  wchar_t msg[] = L"Test";
++  String^ str1 = ref new String(msg);
++  auto str2 = String::Concat(str1, " Concat");
++  return 0;
++}
+diff --git a/tools/gyp/test/win/compiler-flags/compile-as-winrt.gyp b/tools/gyp/test/win/compiler-flags/compile-as-winrt.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..8978e5059de2f26c2231ed19fe108c08b6326afc
+--- /dev/null
++++ b/tools/gyp/test/win/compiler-flags/compile-as-winrt.gyp
+@@ -0,0 +1,20 @@
++# Copyright (c) 2016 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'test-compile-as-winrt',
++      'type': 'executable',
++      'msvs_windows_sdk_version': 'v10.0',
++      'msvs_settings': {
++        'VCCLCompilerTool': {
++          'AdditionalUsingDirectories': ['$(VCInstallDir)vcpackages;$(WindowsSdkDir)UnionMetadata;%(AdditionalUsingDirectories)'],
++          'CompileAsWinRT': 'true'
++        }
++      },
++      'sources': ['compile-as-winrt.cc']
++    }
++  ]
++}
 diff --git a/tools/gyp/test/win/compiler-flags/debug-format.gyp b/tools/gyp/test/win/compiler-flags/debug-format.gyp
 new file mode 100644
 index 0000000000000000000000000000000000000000..daaed23ff1f7c0da2a66dae2e57b8fe2ab46c40c
@@ -11798,6 +12306,33 @@ index 0000000000000000000000000000000000000000..0d7b420485e86659e5188cca6e4ab744
 +  test.build('compile-as-managed.gyp', "test-compile-as-unmanaged",
 +    chdir=CHDIR, status=1)
 +  test.pass_test()
+diff --git a/tools/gyp/test/win/gyptest-cl-compile-as-winrt.py b/tools/gyp/test/win/gyptest-cl-compile-as-winrt.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3e0168b67876a8750d96e54d350bb8c8e9c04406
+--- /dev/null
++++ b/tools/gyp/test/win/gyptest-cl-compile-as-winrt.py
+@@ -0,0 +1,20 @@
++# Copyright (c) 2016 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import TestGyp
++
++import os
++import sys
++
++if (sys.platform == 'win32' and
++    int(os.environ.get('GYP_MSVS_VERSION', 0)) >= 2015):
++  test = TestGyp.TestGyp(formats=['msvs'])
++
++  CHDIR = 'compiler-flags'
++
++  test.run_gyp('compile-as-winrt.gyp', chdir=CHDIR)
++
++  test.build('compile-as-winrt.gyp', 'test-compile-as-winrt', chdir=CHDIR)
++
++  test.pass_test()
+\ No newline at end of file
 diff --git a/tools/gyp/test/win/gyptest-cl-debug-format.py b/tools/gyp/test/win/gyptest-cl-debug-format.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..6c68a619bed82bf5fc62d0d998bc47b38fcd51eb
@@ -16209,416 +16744,3 @@ index 0000000000000000000000000000000000000000..82312d54b8e7b0afbeac97a2b0252b73
 +
 +int answer();
 \ No newline at end of file
-diff --git a/tools/gyp/test/win/lib-flags/ltcg.gyp b/tools/gyp/test/win/lib-flags/ltcg.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..c183107730ad2c96dd7988f0265f0f9091842ecb
---- /dev/null
-+++ b/tools/gyp/test/win/lib-flags/ltcg.gyp
-@@ -0,0 +1,21 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'lib_answer',
-+      'type': 'static_library',
-+      'msvs_settings': {
-+        'VCCLCompilerTool': {
-+          'WholeProgramOptimization': 'true',  # /GL
-+        },
-+        'VCLibrarianTool': {
-+          'LinkTimeCodeGeneration': 'true',    # /LTCG
-+        },
-+      },
-+      'sources': ['answer.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/a/x.cc b/tools/gyp/test/win/linker-flags/a/x.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..f5f763b0956348e03bb20ea79ffa2462b6ea6aa1
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/a/x.cc
-@@ -0,0 +1,7 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+int x() {
-+  return 1;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/a/z.cc b/tools/gyp/test/win/linker-flags/a/z.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..8a43501270ae8aa85be0fa9a20c9e36a0b93eb93
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/a/z.cc
-@@ -0,0 +1,7 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+int z() {
-+  return 3;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/additional-deps.cc b/tools/gyp/test/win/linker-flags/additional-deps.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..7dfb589d26d198b5f33a0c42be39b9f2519ed846
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/additional-deps.cc
-@@ -0,0 +1,10 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include <winsock2.h>
-+
-+int main() {
-+  WSAStartup(0, 0);
-+  return 0;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/additional-deps.gyp b/tools/gyp/test/win/linker-flags/additional-deps.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..55afe64fb09466de37891aaa9562e4cf44160ffa
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/additional-deps.gyp
-@@ -0,0 +1,30 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_deps_none',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+        }
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_deps_few',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'AdditionalDependencies': [
-+            'wininet.lib',
-+            'ws2_32.lib',
-+          ]
-+        }
-+      },
-+      'sources': ['additional-deps.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/additional-options.gyp b/tools/gyp/test/win/linker-flags/additional-options.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..cab3994cd10bcb9c22e6ce1fc0c4c1b2488d03a4
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/additional-options.gyp
-@@ -0,0 +1,29 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_additional_none',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+        }
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_additional_few',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'AdditionalOptions': [
-+            '/dynamicbase:no',
-+          ]
-+        }
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/aslr.gyp b/tools/gyp/test/win/linker-flags/aslr.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..b3aefd50b7f0c481f09b1921a5ea5398d33d8266
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/aslr.gyp
-@@ -0,0 +1,35 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_aslr_default',
-+      'type': 'executable',
-+      'msvs_settings': {
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_aslr_no',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'RandomizedBaseAddress': '1',
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_aslr_yes',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'RandomizedBaseAddress': '2',
-+        }
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/b/y.cc b/tools/gyp/test/win/linker-flags/b/y.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..bd884119fcd44ab7f0c2b78f52ae5c62517f7a66
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/b/y.cc
-@@ -0,0 +1,7 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+int y() {
-+  return 2;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/base-address.gyp b/tools/gyp/test/win/linker-flags/base-address.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..873ebfea3f124e267f15b8f8cb1a1a4119bc58f7
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/base-address.gyp
-@@ -0,0 +1,38 @@
-+# Copyright 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_base_specified_exe',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'BaseAddress': '0x00420000',
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_base_specified_dll',
-+      'type': 'shared_library',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'BaseAddress': '0x10420000',
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_base_default_exe',
-+      'type': 'executable',
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_base_default_dll',
-+      'type': 'shared_library',
-+      'sources': ['hello.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/debug-info.gyp b/tools/gyp/test/win/linker-flags/debug-info.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..d47d0ecced958a0db18dfd935f78b667fab1dd8f
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/debug-info.gyp
-@@ -0,0 +1,28 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_debug_off',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'GenerateDebugInformation': 'false'
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+    {
-+      'target_name': 'test_debug_on',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'GenerateDebugInformation': 'true'
-+        },
-+      },
-+      'sources': ['hello.cc'],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/deffile-multiple.gyp b/tools/gyp/test/win/linker-flags/deffile-multiple.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..c74a9af20aecc39824e8f65268def3139db66254
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/deffile-multiple.gyp
-@@ -0,0 +1,17 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_deffile_multiple_fail',
-+      'type': 'shared_library',
-+      'sources': [
-+          'deffile.cc',
-+          'deffile.def',
-+          'deffile2.def',
-+      ],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/deffile.cc b/tools/gyp/test/win/linker-flags/deffile.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..fa203b34c84e1ec2537e8d84e79d3f2ecd4802fd
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/deffile.cc
-@@ -0,0 +1,13 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+void AnExportedFunction() {
-+}
-+
-+void AnotherExportedFunction() {
-+}
-+
-+int main() {
-+  return 0;
-+}
-diff --git a/tools/gyp/test/win/linker-flags/deffile.def b/tools/gyp/test/win/linker-flags/deffile.def
-new file mode 100644
-index 0000000000000000000000000000000000000000..ba9d399bd6f9ae512179768e06cbd5ee5fa20d17
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/deffile.def
-@@ -0,0 +1,8 @@
-+; Copyright (c) 2012 Google Inc. All rights reserved.
-+; Use of this source code is governed by a BSD-style license that can be
-+; found in the LICENSE file.
-+
-+LIBRARY test_deffile_ok
-+
-+EXPORTS
-+        AnExportedFunction
-diff --git a/tools/gyp/test/win/linker-flags/deffile.gyp b/tools/gyp/test/win/linker-flags/deffile.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..7b241d5e3ae45abeba7151ab9861a5b3869772b7
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/deffile.gyp
-@@ -0,0 +1,38 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_deffile_dll_ok',
-+      'type': 'shared_library',
-+      'sources': [
-+          'deffile.cc',
-+          'deffile.def',
-+      ],
-+    },
-+    {
-+      'target_name': 'test_deffile_dll_notexported',
-+      'type': 'shared_library',
-+      'sources': [
-+          'deffile.cc',
-+      ],
-+    },
-+    {
-+      'target_name': 'test_deffile_exe_ok',
-+      'type': 'executable',
-+      'sources': [
-+          'deffile.cc',
-+          'deffile.def',
-+      ],
-+    },
-+    {
-+      'target_name': 'test_deffile_exe_notexported',
-+      'type': 'executable',
-+      'sources': [
-+          'deffile.cc',
-+      ],
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/win/linker-flags/delay-load-dlls.gyp b/tools/gyp/test/win/linker-flags/delay-load-dlls.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..671cbaa802f5366c32c09d76043702b8335e3c38
---- /dev/null
-+++ b/tools/gyp/test/win/linker-flags/delay-load-dlls.gyp
-@@ -0,0 +1,35 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+    {
-+      'target_name': 'test_dld_none',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+        }
-+      },
-+      'sources': ['delay-load.cc'],
-+      'libraries': [
-+        'delayimp.lib',
-+        'shell32.lib',
-+      ],
-+    },
-+    {
-+      'target_name': 'test_dld_shell32',
-+      'type': 'executable',
-+      'msvs_settings': {
-+        'VCLinkerTool': {
-+          'DelayLoadDLLs': ['shell32.dll']
-+        }
-+      },
-+      'sources': ['delay-load.cc'],
-+      'libraries': [
-+        'delayimp.lib',
-+        'shell32.lib',
-+      ],
-+    },
-+  ]
-+}
