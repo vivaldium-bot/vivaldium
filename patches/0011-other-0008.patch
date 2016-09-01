@@ -1,480 +1,3 @@
-diff --git a/native_client/tools/synthesize_code.py b/native_client/tools/synthesize_code.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..eca4817c74a5def3ea3587676f35f9d6b6d3c898
---- /dev/null
-+++ b/native_client/tools/synthesize_code.py
-@@ -0,0 +1,55 @@
-+#!/usr/bin/python
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+
-+"""This tool synthesizes a very large C program based on a single
-+integer argument passed on the command line.
-+"""
-+import sys
-+
-+# The genareted code alternated between these operators
-+OPERATORS = ["+", "-", "*", "/"]
-+# number of function calls made by each function
-+# A fairly high number here will disuade the inliner from doing anything
-+# because function bodies will be large and the number of callers will be large.
-+NUM_CALLS = 100
-+
-+def EmitProlog(n, out):
-+  out.write("/* n == %d */\n" % n)
-+
-+  for i in range(n):
-+    out.write("int func_%d(int x);\n" % i)
-+
-+def EmitFunctions(n, out):
-+  for i in range(n):
-+    out.write("\n")
-+    out.write("int func_%d(int x) {\n" % i)
-+    out.write("  int result = %d;\n" % i)
-+    op = OPERATORS[i % len(OPERATORS)]
-+    fun_indices = [(i + x) % n for x in range(1, NUM_CALLS + 1)]
-+    for f in fun_indices:
-+      out.write("  if (result != %d) result %s= func_%d(result);\n" %
-+                (f, op, f))
-+    out.write("  return result;\n")
-+    out.write("}\n")
-+
-+def EmitMain(n, out):
-+  out.write("\n")
-+  # Note, use of argc is intended to thwart optimization
-+  out.write("int main(int argc, char* argv[]) { return func_0(argc); }\n")
-+
-+def main(argv):
-+  if len(argv) != 2:
-+    print "Expecting integer parameter"
-+    return 1
-+  n = int(argv[1])
-+  out = sys.stdout
-+  out.write("/* This code was generated using %s */\n" % repr(argv))
-+  EmitProlog(n, out)
-+  EmitFunctions(n, out)
-+  EmitMain(n, out)
-+
-+if __name__ == '__main__':
-+  sys.exit(main(sys.argv))
-diff --git a/native_client/tools/syscall_stats.py b/native_client/tools/syscall_stats.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..6455fe28e79ce8362b1d7d0e28ce4b993f0b9e40
---- /dev/null
-+++ b/native_client/tools/syscall_stats.py
-@@ -0,0 +1,244 @@
-+#!/usr/bin/python
-+# Copyright 2008 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+
-+
-+"""
-+Filter service runtime logging output and compute system call statistics.
-+
-+To use this script, define the BENCHMARK symbol to be zero (default)
-+in nacl_syscall_hook.c.  Next, run the service runtime with NACLLOG
-+set to an output file name.  When the run is complete, run this script
-+with that file as input.
-+
-+"""
-+
-+import math
-+import re
-+import sys
-+
-+
-+class Stats:
-+  """
-+  Compute basic statistics.
-+  """
-+  def __init__(self):
-+    self._sum_x = 0.0
-+    self._sum_x_squared = 0.0
-+    self._n = 0
-+
-+  def Enter(self, val):
-+    """Enter a new value.
-+
-+    Args:
-+      val: the new (floating point) value
-+    """
-+    self._sum_x += val
-+    self._sum_x_squared += val * val
-+    self._n += 1
-+
-+  def Mean(self):
-+    """Returns the mean of entered values.
-+    """
-+    return self._sum_x / self._n
-+
-+  def Variance(self):
-+    """Returns the variance of entered values.
-+    """
-+    mean = self.Mean()
-+    return self._sum_x_squared / self._n - mean * mean
-+
-+  def Stddev(self):
-+    """Returns the standard deviation of entered values.
-+    """
-+    return math.sqrt(self.Variance())
-+
-+  def NumEntries(self):
-+    """Returns the number of data points entered.
-+    """
-+    return self._n
-+
-+
-+class PeakStats:
-+  """Compute min and max for a data set.  While far less efficient
-+  than using a reduce, this class makes streaming data handling
-+  easier.
-+  """
-+
-+  def __init__(self):
-+    self._min = 1L << 64
-+    self._max = -1
-+
-+  def Enter(self, val):
-+    """Enter a new datum.
-+
-+    Args:
-+      val: the new datum to be entered.
-+    """
-+    if val > self._max:
-+      self._max = val
-+    if val < self._min:
-+      self._min = val
-+
-+  def Max(self):
-+    """Returns the maximum value found so far.
-+    """
-+    return self._max
-+
-+  def Min(self):
-+    """Returns the minimum value found so far.
-+    """
-+    return self._min
-+
-+
-+class WindowedRate:
-+
-+  """Class for computing statistics on events based on counting the
-+  number of occurrences in a time interval.  Statistcs on these
-+  bucketed counts are then available.
-+
-+  """
-+  def __init__(self, duration):
-+    self._t_start = -1
-+    self._t_duration = duration
-+    self._t_end = -1
-+    self._event_count = 0
-+    self._rate_stats = Stats()
-+    self._peak_stats = PeakStats()
-+
-+  def Enter(self, t):
-+    """Enter in a new event that occurred at time t.
-+
-+    Args:
-+      t: the time at which an event occurred.
-+    """
-+    if self._t_start == -1:
-+      self._t_start = t
-+      self._t_end = t + self._t_duration
-+      return
-+    # [ t_start, t_start + duration )
-+    if t < self._t_end:
-+      self._event_count += 1
-+      return
-+    self.Compute()
-+    self._event_count = 1
-+    next_end = self._t_end
-+    while next_end < t:
-+      next_end += self._t_duration
-+    self._t_end = next_end
-+    self._t_start = next_end - self._t_duration
-+
-+  def Compute(self):
-+    """Finalize the last bucket.
-+
-+    """
-+    self._rate_stats.Enter(self._event_count)
-+    self._peak_stats.Enter(self._event_count)
-+    self._event_count = 0
-+
-+  def RateStats(self):
-+    """Returns the event rate statistics object.
-+
-+    """
-+    return self._rate_stats
-+
-+  def PeakStats(self):
-+    """Returns the peak event rate statistics object.
-+
-+    """
-+    return self._peak_stats
-+
-+
-+class TimestampParser:
-+  """
-+  A class to parse timestamp strings.  This is needed because there is
-+  implicit state: the timestamp string is HH:MM:SS.fract and may cross
-+  a 24 hour boundary -- we do not log the date since that would make
-+  the log file much larger and generally it is not needed (implicit in
-+  file modification time) -- so we convert to a numeric representation
-+  that is relative to an arbitrary epoch start, and the state enables
-+  us to correctly handle midnight.
-+
-+  This code assumes that the timestamps are monotonically
-+  non-decreasing.
-+
-+  """
-+  def __init__(self):
-+    self._min_time = -1
-+
-+  def Convert(self, timestamp):
-+    """Converts a timestamp string into a numeric timestamp value.
-+
-+    Args:
-+      timestamp: A timestamp string in HH:MM:SS.fraction format.
-+
-+    Returns:
-+      a numeric timestamp (arbitrary epoch)
-+    """
-+    (hh, mm, ss) = map(float,timestamp.split(':'))
-+    t = ((hh * 60) + mm) * 60 + ss
-+    if self._min_time == -1:
-+      self._min_time = t
-+    while t < self._min_time:
-+      t += 24 * 60 * 60
-+    self._min_time = t
-+    return t
-+
-+
-+def ReadFileHandle(fh, duration):
-+  """Reads log data from the provided file handle, and compute and
-+  print various statistics on the system call rate based on the log
-+  data.
-+
-+  """
-+  # log format "[pid:timestamp] msg" where the timestamp is
-+  log_re = re.compile(r'\[[0-9,]+:([:.0-9]+)\] system call [0-9]+')
-+  parser = TimestampParser()
-+  inter_stats = Stats()
-+  rate_stats = Stats()
-+  windowed = WindowedRate(duration)
-+  prev_time = -1
-+  start_time = 0
-+  for line in fh:  # generator
-+    m = log_re.search(line)
-+    if m is not None:
-+      timestamp = m.group(1)
-+      t = parser.Convert(timestamp)
-+
-+      windowed.Enter(t)
-+
-+      if prev_time != -1:
-+        elapsed = t - prev_time
-+        inter_stats.Enter(elapsed)
-+        rate_stats.Enter(1.0/elapsed)
-+      else:
-+        start_time = t
-+      prev_time = t
-+
-+  print '\nInter-syscall time'
-+  print 'Mean:   %g' % inter_stats.Mean()
-+  print 'Stddev: %g' % inter_stats.Stddev()
-+  print '\nInstantaneous Syscall Rate (unweighted!)'
-+  print 'Mean :  %g' % rate_stats.Mean()
-+  print 'Stddev: %g' % rate_stats.Stddev()
-+  print '\nAvg Syscall Rate: %g' % (rate_stats.NumEntries()
-+                                    / (prev_time - start_time))
-+
-+  print '\nSyscalls in %f interval' % duration
-+  print 'Mean:   %g' % windowed.RateStats().Mean()
-+  print 'Stddev: %g' % windowed.RateStats().Stddev()
-+  print 'Min:    %g' % windowed.PeakStats().Min()
-+  print 'Max:    %g' % windowed.PeakStats().Max()
-+
-+
-+def main(argv):
-+  if len(argv) > 1:
-+    print >>sys.stderr, 'no arguments expected\n'
-+    return 1
-+  ReadFileHandle(sys.stdin, 0.010)
-+  return 0
-+
-+if __name__ == '__main__':
-+  sys.exit(main(sys.argv))
-diff --git a/native_client/tools/sysinfo.py b/native_client/tools/sysinfo.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..00d1c7e7bd1e939cc05db42658f396ba48c33764
---- /dev/null
-+++ b/native_client/tools/sysinfo.py
-@@ -0,0 +1,160 @@
-+#!/usr/bin/python
-+# Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+
-+"""Simple system info tool for bug reports, etc.
-+
-+"""
-+
-+
-+
-+# More info at:
-+#
-+# http://code.activestate.com/recipes/511491/
-+# http://www.koders.com/python/fidB436B8043AA994C550C0961247DACC3E04E84734.aspx?s=config
-+# http://developer.apple.com/documentation/Darwin/Reference/ManPages/man8/sysctl.8.html
-+
-+# imports
-+import os
-+import sys
-+import time
-+
-+
-+VERBOSE = 0
-+
-+
-+def Banner(text):
-+  print '=' * 70
-+  print text
-+  print '=' * 70
-+  # quick hack to keep banner in sync with os.system output
-+  sys.stdout.flush()
-+
-+
-+def InfoLinux():
-+  Banner('OS:')
-+  os.system('uname -a')
-+
-+  Banner('CPU:')
-+  if VERBOSE:
-+    os.system('cat /proc/cpuinfo')
-+  else:
-+    os.system("egrep 'name|MHz|stepping' /proc/cpuinfo")
-+
-+  Banner('RAM:')
-+  if VERBOSE:
-+    os.system('cat /proc/meminfo')
-+  else:
-+    os.system('cat /proc/meminfo | egrep Mem')
-+
-+  Banner('LOAD:')
-+  os.system('cat /proc/loadavg')
-+
-+  Banner('UPTIME:')
-+  os.system('cat /proc/uptime')
-+
-+
-+def InfoDarwin():
-+  Banner('OS:')
-+  os.system('sysctl kern | egrep "kern\.os|version"')
-+
-+  Banner('CPU:')
-+  os.system('sysctl hw.machine')
-+  os.system('sysctl hw.model')
-+  os.system('sysctl hw.ncpu')
-+  if VERBOSE:
-+    os.system("sysctl hw")
-+  else:
-+    os.system("sysctl hw | egrep 'cpu'")
-+
-+  Banner('RAM:')
-+  if VERBOSE:
-+    os.system("sysctl hw")
-+  else:
-+    os.system("sysctl hw | egrep 'mem'")
-+
-+  Banner('LOAD:')
-+  print 'TBD'
-+
-+  Banner('UPTIME:')
-+  os.system('sysctl kern | egrep "kern\.boottime"')
-+
-+
-+def InfoWin32():
-+  import _winreg
-+
-+  def GetRegistryOS( value):
-+    db = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE,
-+                         'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion')
-+
-+    return _winreg.QueryValueEx(db, value)[0]
-+
-+  Banner('OS:')
-+  for key in ['ProductName',
-+              'CSDVersion',
-+              'CurrentBuildNumber']:
-+    print  GetRegistryOS(key)
-+
-+  Banner('CPU:')
-+  db = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE,
-+                       'HARDWARE\\DESCRIPTION\\System\\CentralProcessor')
-+  for n in range(0, 1000):
-+     try:
-+       cpu = _winreg.EnumKey(db, n)
-+     except Exception:
-+       break
-+     print "\nProcessor :", cpu
-+     db_cpu = _winreg.OpenKey(db, cpu)
-+     for i in range(0, 1000):
-+       try:
-+         name, value, type =_winreg.EnumValue(db_cpu, i)
-+       except Exception:
-+         break
-+       # skip binary data
-+       if type == _winreg.REG_BINARY: continue
-+       if type == _winreg.REG_FULL_RESOURCE_DESCRIPTOR: continue
-+       print name, type, value
-+
-+  Banner('RAM:')
-+  print 'TBD'
-+  # TODO: this is currently broken since ctypes is not available
-+
-+  Banner('LOAD:')
-+  print 'TBD'
-+
-+  Banner('UPTIME:')
-+  print 'TBD'
-+
-+
-+PLATFORM_INFO = {
-+    'linux2': InfoLinux,
-+    'linux3': InfoLinux,
-+    'darwin': InfoDarwin,
-+    'win32': InfoWin32,
-+    }
-+
-+
-+def main():
-+  Banner('Python Info:')
-+  print sys.platform
-+  print sys.version
-+
-+  Banner('ENV:')
-+  for e in ['PATH']:
-+    print e, os.getenv(e)
-+
-+
-+  if sys.platform in PLATFORM_INFO:
-+    try:
-+      PLATFORM_INFO[sys.platform]()
-+    except Exception, err:
-+      print 'ERRROR: processing sys info', str(err)
-+  else:
-+    print 'ERROR: unknwon platform', system.platform
-+
-+  return 0
-+
-+
-+sys.exit(main())
 diff --git a/native_client/tools/test_lib.py b/native_client/tools/test_lib.py
 new file mode 100755
 index 0000000000000000000000000000000000000000..bc96de2f31e04cce4d9c619816289c42b6e174b7
@@ -4471,6 +3994,19 @@ index 0000000000000000000000000000000000000000..d07411dbdf439fedc9f8ea83b74d0e58
 +
 +if __name__ == '__main__':
 +  sys.exit(main(sys.argv))
+diff --git a/ppapi/ppapi_sources.gypi b/ppapi/ppapi_sources.gypi
+index 674c868aee7cde5f3bfb8833d975fbec00c3ad59..c7fbdfc87464a4ac3b6dd63237e0b1e51c7e133a 100644
+--- a/ppapi/ppapi_sources.gypi
++++ b/ppapi/ppapi_sources.gypi
+@@ -68,7 +68,7 @@
+       'c/ppb_video_encoder.h',
+       'c/ppb_video_frame.h',
+       'c/ppb_view.h',
+-      'c/ppb_ppb_vpn_provider.h',
++      #'c/ppb_ppb_vpn_provider.h',
+       'c/ppb_websocket.h',
+       'c/ppp.h',
+       'c/ppp_graphics_3d.h',
 diff --git a/ppapi/shared_impl/media_stream_buffer_manager_unittest.cc b/ppapi/shared_impl/media_stream_buffer_manager_unittest.cc
 index 97cf90a17b42db364b10bfd7ca2cddda5661d8c8..9e988ae40d4336203d75736951532998fb2a7a04 100644
 --- a/ppapi/shared_impl/media_stream_buffer_manager_unittest.cc
@@ -81794,18 +81330,18 @@ index 47a204bef5bb6228c96ad53d8d05263ea8a8f9ad..45bc7e0ef39c5a9ad48ea5e63718aa78
  
  message TabNavigation {
 diff --git a/sync/sync.gyp b/sync/sync.gyp
-index e6725824064862538dc83632d158c5355114ab1a..5bbf013131e9d9620b562e79f7591bef8e5833d0 100644
+index 175d9fbbe2628c2ecf0f58cf5ad8f42bc8ca41ee..58a81cddacceba091e0280ac92a61d3f64fb4c95 100644
 --- a/sync/sync.gyp
 +++ b/sync/sync.gyp
-@@ -329,7 +329,7 @@
-         'internal_api/public/simple_metadata_change_list.h',
-         'internal_api/public/sync_auth_provider.h',
-         'internal_api/public/sync_context.h',
--        'internal_api/public/sync_context_proxy.h',
-+        #'internal_api/public/sync_context_proxy.h',
-         'internal_api/public/sync_encryption_handler.cc',
-         'internal_api/public/sync_encryption_handler.h',
-         'internal_api/public/sync_manager.cc',
+@@ -305,7 +305,7 @@
+         'internal_api/public/internal_components_factory.h',
+         'internal_api/public/internal_components_factory_impl.h',
+         'internal_api/public/model_type_connector.h',
+-        'internal_api/public/model_type_connector_proxy.h',
++        #'internal_api/public/model_type_connector_proxy.h',
+         'internal_api/public/model_type_processor.cc',
+         'internal_api/public/model_type_processor.h',
+         'internal_api/public/model_type_store_backend.h',
 diff --git a/testing/gmock/CHANGES b/testing/gmock/CHANGES
 new file mode 100644
 index 0000000000000000000000000000000000000000..d6f2f760e3424715262ec14f318e1df9dac909bf
@@ -199957,10 +199493,10 @@ index 0000000000000000000000000000000000000000..0452a63d0c6c79c642682a3fd55f7317
 +	rootObject = 0867D690FE84028FC02AAC07 /* Project object */;
 +}
 diff --git a/testing/variations/fieldtrial_testing_config_linux.json b/testing/variations/fieldtrial_testing_config_linux.json
-index 43de8b21f1d4b03f9ab9582d8939e6ad63991984..6071aca894bc8a245d72713ec762ab824ca17a82 100644
+index 0a1781445d25ecf5f0fb0bdc1f162e7d5e423367..3b6ba20e20b885b042b5f41c8a3509549131b2d6 100644
 --- a/testing/variations/fieldtrial_testing_config_linux.json
 +++ b/testing/variations/fieldtrial_testing_config_linux.json
-@@ -63,7 +63,7 @@
+@@ -79,7 +79,7 @@
      ],
      "ExtensionActionRedesign": [
          {
@@ -199968,12 +199504,12 @@ index 43de8b21f1d4b03f9ab9582d8939e6ad63991984..6071aca894bc8a245d72713ec762ab82
 +            "group_name": "Disabled"
          }
      ],
-     "InstanceID": [
+     "GoogleBrandedContextMenu": [
 diff --git a/testing/variations/fieldtrial_testing_config_mac.json b/testing/variations/fieldtrial_testing_config_mac.json
-index bf7f987809e9caa45e7d8214d2a473969c972601..27af6208ba0327a3d81834ba9048294177a84f1a 100644
+index 164280c99a3a1a3fc60cf215dc399bb2f2c076aa..78a3154cf1417bef17a83c0969dce8df2f479b2c 100644
 --- a/testing/variations/fieldtrial_testing_config_mac.json
 +++ b/testing/variations/fieldtrial_testing_config_mac.json
-@@ -64,7 +64,7 @@
+@@ -80,7 +80,7 @@
      ],
      "ExtensionActionRedesign": [
          {
@@ -199983,10 +199519,10 @@ index bf7f987809e9caa45e7d8214d2a473969c972601..27af6208ba0327a3d81834ba90482941
      ],
      "ExtensionDeveloperModeWarning": [
 diff --git a/testing/variations/fieldtrial_testing_config_win.json b/testing/variations/fieldtrial_testing_config_win.json
-index 25aadf13aecffbc48e56be369549e66bbe9f6cea..3e89eb406e9980bfc782bcf6ede9fb1b6dd85d8c 100644
+index 1eca7d8739b5a13448775a9135c4f09aaa338487..1a2d7c58c8a2a743fb3fc3bb6204925b7670d742 100644
 --- a/testing/variations/fieldtrial_testing_config_win.json
 +++ b/testing/variations/fieldtrial_testing_config_win.json
-@@ -84,7 +84,7 @@
+@@ -97,7 +97,7 @@
      ],
      "ExtensionActionRedesign": [
          {

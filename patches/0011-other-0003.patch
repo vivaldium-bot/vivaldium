@@ -1,218 +1,3 @@
-diff --git a/native_client/pnacl/driver/redirect.sh b/native_client/pnacl/driver/redirect.sh
-new file mode 100644
-index 0000000000000000000000000000000000000000..58c247da0472d69731a1659cc549ad7015cbb2aa
---- /dev/null
-+++ b/native_client/pnacl/driver/redirect.sh
-@@ -0,0 +1,22 @@
-+#!/bin/sh
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+# Keep this script compatible with different shells.
-+# It has been tested to work with: bash, zsh, ksh93, and dash.
-+
-+if [ -z "${BASH_VERSION}" ]; then
-+  DRIVER_BIN="`dirname "$0"`"
-+  TOOLNAME="`basename "$0"`"
-+else
-+  TOOLNAME="${0##*/}"
-+  DRIVER_BIN="${0/%\/${TOOLNAME}/}"
-+fi
-+
-+PYDIR="${DRIVER_BIN}/pydir"
-+
-+# Expect to find python in the PATH. It can be overridden with PNACLPYTHON.
-+PNACLPYTHON="${PNACLPYTHON:-python}"
-+${PNACLPYTHON} "${PYDIR}/loader.py" "${TOOLNAME}" "$@"
-+
-diff --git a/native_client/pnacl/driver/shelltools.py b/native_client/pnacl/driver/shelltools.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..62088acaf277d0cde68d8da2525a41aeb8526284
---- /dev/null
-+++ b/native_client/pnacl/driver/shelltools.py
-@@ -0,0 +1,83 @@
-+#!/usr/bin/python
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+from driver_log import Log
-+
-+import types
-+
-+######################################################################
-+#
-+# Shell Utilities
-+#
-+######################################################################
-+
-+class shell(object):
-+
-+  @staticmethod
-+  def unescape(s):
-+    w = shell.split(s)
-+    if len(w) == 0:
-+      return ''
-+    if len(w) == 1:
-+      return w[0]
-+    # String was not properly escaped in the first place?
-+    assert(False)
-+
-+  # TODO(pdox): Simplify this function by moving more of it into unescape
-+  @staticmethod
-+  def split(s):
-+    """Split a shell-style string up into a list of distinct arguments.
-+    For example: split('cmd -arg1 -arg2="a b c"')
-+    Returns ['cmd', '-arg1', '-arg2=a b c']
-+    """
-+    assert(isinstance(s, types.StringTypes))
-+    out = []
-+    inspace = True
-+    inquote = False
-+    buf = ''
-+
-+    i = 0
-+    while i < len(s):
-+      if s[i] == '"':
-+        inspace = False
-+        inquote = not inquote
-+      elif s[i] == ' ' and not inquote:
-+        if not inspace:
-+          out.append(buf)
-+          buf = ''
-+        inspace = True
-+      elif s[i] == '\\':
-+        if not i+1 < len(s):
-+          Log.Fatal('Unterminated \\ escape sequence')
-+        inspace = False
-+        i += 1
-+        buf += s[i]
-+      else:
-+        inspace = False
-+        buf += s[i]
-+      i += 1
-+    if inquote:
-+      Log.Fatal('Unterminated quote')
-+    if not inspace:
-+      out.append(buf)
-+    return out
-+
-+  @staticmethod
-+  def join(args):
-+    """Turn a list into a shell-style string For example:
-+       shell.join([ 'a', 'b', 'c d e' ]) = 'a b "c d e"'
-+    """
-+    return ' '.join([ shell.escape(a) for a in args ])
-+
-+  @staticmethod
-+  def escape(s):
-+    """Shell-escape special characters in a string
-+       Surround with quotes if necessary
-+    """
-+    s = s.replace('\\', '\\\\')
-+    s = s.replace('"', '\\"')
-+    if ' ' in s:
-+      s = '"' + s + '"'
-+    return s
-diff --git a/native_client/pnacl/driver/tests/TEST_REV_GIT b/native_client/pnacl/driver/tests/TEST_REV_GIT
-new file mode 100644
-index 0000000000000000000000000000000000000000..3027a8713166907afe7e66fa2ffd8e4d57625fae
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/TEST_REV_GIT
-@@ -0,0 +1,12 @@
-+[GIT] https://chromium.googlesource.com/native_client/src/native_client.git: ebba42f04c6a61f2a92e0a15ab835ef2371b6836
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-compiler-rt.git: 042faedc42471163bd25591e062456a07b490ed7
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-gcc.git: 574429118e460375c377728420c43aad4a3103dc
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-llvm.git: 9dd1dea7a54652afee2582c8d5686a16feb406fa
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-libcxxabi.git: d980d1191e1034abd4e1c06ed9c532b6f9db2d5c
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-llvm-testsuite.git: 6438a2b505fa29f82eb850aed1785db1738b971c
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-libcxx.git: ba6de7e3eaac146ce1553c4b28141c19246c50e9
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-subzero.git: dddaf9cae5107a60becbe69628d774815e9305e7
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-clang.git: ee9f4759d2c241a5e896e922865895289a7ca702
-+[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 1d8592cc9f02cc9aeaef992c296376a8fd4c8761
-+[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 84c8183a55ddc46a4c2be03eef840cceb83d6bcb
-+[GIT] https://chromium.googlesource.com/native_client/nacl-newlib.git: 4e25c2883f51b43758f44ffcc6abb31b8680fb7c
-diff --git a/native_client/pnacl/driver/tests/TEST_REV_GIT2 b/native_client/pnacl/driver/tests/TEST_REV_GIT2
-new file mode 100644
-index 0000000000000000000000000000000000000000..0abbff235451220cc3cab8a55c6791923c1a1794
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/TEST_REV_GIT2
-@@ -0,0 +1,12 @@
-+[GIT] https://chromium.googlesource.com/a/native_client/src/native_client: 587c9f0a79e679a27304980809e4f0bfd2a6c3c2
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-compiler-rt.git: 042faedc42471163bd25591e062456a07b490ed7
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-gcc.git: 574429118e460375c377728420c43aad4a3103dc
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-llvm.git: 9dd1dea7a54652afee2582c8d5686a16feb406fa
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-libcxxabi.git: d980d1191e1034abd4e1c06ed9c532b6f9db2d5c
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-llvm-testsuite.git: 6438a2b505fa29f82eb850aed1785db1738b971c
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-libcxx.git: ba6de7e3eaac146ce1553c4b28141c19246c50e9
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-subzero.git: dddaf9cae5107a60becbe69628d774815e9305e7
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-clang.git: ee9f4759d2c241a5e896e922865895289a7ca702
-+[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 1d8592cc9f02cc9aeaef992c296376a8fd4c8761
-+[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 84c8183a55ddc46a4c2be03eef840cceb83d6bcb
-+[GIT] https://chromium.googlesource.com/native_client/nacl-newlib.git: 4e25c2883f51b43758f44ffcc6abb31b8680fb7c
-diff --git a/native_client/pnacl/driver/tests/default_output_filename_test.py b/native_client/pnacl/driver/tests/default_output_filename_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..22c8525c028172aad5ba365dffb2d95cee1a87c8
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/default_output_filename_test.py
-@@ -0,0 +1,56 @@
-+#!/usr/bin/python
-+# Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Tests of the pnacl driver.
-+
-+Test that the driver is able to pick a default filename if "-o" is not given.
-+"""
-+
-+import os
-+import tempfile
-+import unittest
-+
-+from driver_env import env
-+import driver_test_utils
-+import driver_tools
-+pnacl_driver = __import__("pnacl-driver")
-+
-+
-+class TestDefaultOutputFilename(driver_test_utils.DriverTesterCommon):
-+
-+  def setUp(self):
-+    super(TestDefaultOutputFilename, self).setUp()
-+    driver_test_utils.ApplyTestEnvOverrides(env)
-+    env.set('SHARED', '0')
-+    # Driver mode flags to test.  Having no mode flag at all is expected to
-+    # generate an a.out file, but that is currently hard to test
-+    # without actually running clang, the bitcode linker, pnacl-llc, then
-+    # the native linker.
-+    self.driver_flags = ['-E', '-S', '-c']
-+
-+  def test_bitcode_result(self):
-+    """ Test the default output filename when generating bitcode. """
-+    # Output filename should only take the basename, which will end up
-+    # dumping the output to the PWD instead of the directory of the source.
-+    # Thus the result for |base| should be the same as for |in_dir|.
-+    base = 'foo.c'
-+    in_dir = '/tmp/bar/foo.c'
-+    # Expected results for each of self.driver_flags.
-+    # -E is the only one that prints to stdout, via a '-'.
-+    expected_results = ['-', 'foo.ll', 'foo.o']
-+    for f, exp in zip(self.driver_flags, expected_results):
-+      outtype = pnacl_driver.DriverOutputTypes(f, False)
-+      self.assertTrue(driver_tools.DefaultOutputName(base, outtype) == exp)
-+      self.assertTrue(driver_tools.DefaultOutputName(in_dir, outtype) == exp)
-+
-+  def test_native_result(self):
-+    """ Test the default output filename when generating native code. """
-+    base = 'foo.c'
-+    in_dir = '/tmp/bar/foo.c'
-+    expected_results = ['-', 'foo.s', 'foo.o']
-+    for f, exp in zip(self.driver_flags, expected_results):
-+      outtype = pnacl_driver.DriverOutputTypes(f, True)
-+      self.assertTrue(driver_tools.DefaultOutputName(base, outtype) == exp)
-+      self.assertTrue(driver_tools.DefaultOutputName(in_dir, outtype) == exp)
 diff --git a/native_client/pnacl/driver/tests/diagnostic_flags_test.py b/native_client/pnacl/driver/tests/diagnostic_flags_test.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..cfc7025fe2b8d2b121b6ce1429405aea649e761e
@@ -16307,51 +16092,58 @@ index 0000000000000000000000000000000000000000..61e6fd94e10ef703b9c20ee0cd7c0641
 +AtModuleLoad()
 diff --git a/native_client/src/BUILD.gn b/native_client/src/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..d2917a6156a4d5c35e29ff482aade74dd30b24f4
+index 0000000000000000000000000000000000000000..e6920cf03dfa2d3c3b84e18c8781e98909cc9048
 --- /dev/null
 +++ b/native_client/src/BUILD.gn
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,57 @@
 +# Copyright (c) 2014 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
 +
 +group("trusted_targets") {
 +  deps = [
++    "//native_client/src/shared/imc:imc",
++    "//native_client/src/shared/platform:platform",
 +    "//native_client/src/trusted/cpu_features:all_cpu_features",
 +    "//native_client/src/trusted/debug_stub:debug_stub",
 +    "//native_client/src/trusted/desc:nrd_xfer",
-+    "//native_client/src/trusted/validator/driver:ncval_new",
-+    "//native_client/src/trusted/validator/driver:elf_load",
-+    "//native_client/src/trusted/validator_ragel:rdfa_validator",
-+    "//native_client/src/trusted/service_runtime:sel",
-+    "//native_client/src/trusted/service_runtime:sel_main",
-+    "//native_client/src/trusted/service_runtime:env_cleanser",
-+    "//native_client/src/trusted/service_runtime:nacl_error_code",
 +    "//native_client/src/trusted/desc:nrd_xfer",
-+    "//native_client/src/trusted/perf_counter:nacl_perf_counter",
-+    "//native_client/src/trusted/nacl_base:nacl_base",
-+    "//native_client/src/shared/imc:imc",
 +    "//native_client/src/trusted/fault_injection:nacl_fault_inject",
 +    "//native_client/src/trusted/interval_multiset:nacl_interval",
-+    "//native_client/src/shared/platform:platform",
++    "//native_client/src/trusted/nacl_base:nacl_base",
++    "//native_client/src/trusted/perf_counter:nacl_perf_counter",
 +    "//native_client/src/trusted/platform_qualify:platform_qual_lib",
++    "//native_client/src/trusted/service_runtime:env_cleanser",
++    "//native_client/src/trusted/service_runtime:nacl_error_code",
++    "//native_client/src/trusted/service_runtime:sel",
 +    "//native_client/src/trusted/service_runtime:sel_ldr",
++    "//native_client/src/trusted/service_runtime:sel_main",
++    "//native_client/src/trusted/validator/driver:elf_load",
++    "//native_client/src/trusted/validator/driver:ncval_new",
++    "//native_client/src/trusted/validator_ragel:rdfa_validator",
 +  ]
 +  if (is_linux) {
-+    deps += [
-+      "//native_client/src/nonsfi/loader:nonsfi_loader",
-+    ]
++    deps += [ "//native_client/src/nonsfi/loader:nonsfi_loader" ]
 +  }
++}
++
++group("tests") {
++  testonly = true
++  deps = [
++    "//native_client/tests:large_tests",
++    "//native_client/tests:medium_tests",
++    "//native_client/tests:small_tests",
++  ]
 +}
 +
 +if (is_nacl) {
 +  group("untrusted_targets") {
 +    deps = [
-+      "//native_client/tests/hello_world:hello_world",
 +      "//native_client/src/shared/gio:gio",
 +      "//native_client/src/shared/platform:platform",
-+      "//native_client/src/untrusted/nacl:imc_syscalls",
 +      "//native_client/src/untrusted/elf_loader:elf_loader",
++      "//native_client/src/untrusted/nacl:imc_syscalls",
++      "//native_client/tests/hello_world:hello_world",
 +    ]
 +  }
 +
@@ -20830,10 +20622,10 @@ index 0000000000000000000000000000000000000000..42157af10e4723a2d8a6bb8487b6857e
 +#endif  /* NATIVE_CLIENT_SRC_INCLUDE_NACL_ASM_H_ */
 diff --git a/native_client/src/include/nacl_assert.h b/native_client/src/include/nacl_assert.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..c09c6ef68bcc1fcca2bd16470c5b36d1237c9d8c
+index 0000000000000000000000000000000000000000..4daf2636cf8ff009b8bf960ed33cda48a098c759
 --- /dev/null
 +++ b/native_client/src/include/nacl_assert.h
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,95 @@
 +/*
 + * Copyright 2010 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -20880,18 +20672,27 @@ index 0000000000000000000000000000000000000000..c09c6ef68bcc1fcca2bd16470c5b36d1
 +    }                                                                     \
 +  } while (0)
 +
++static INLINE void NaClAssertOpFailMessage(uintptr_t lhs,
++                                           uintptr_t rhs,
++                                           const char *lhs_expr,
++                                           const char *rhs_expr,
++                                           const char *comparison_op,
++                                           int source_line,
++                                           const char *source_file) {
++  fprintf(stderr,
++          "Error at line %d, %s:\n"
++          "Error: %s %s %s is FALSE\n",
++          source_line, source_file, lhs_expr, comparison_op, rhs_expr);
++  fprintf(stderr,
++          "got 0x%08" NACL_PRIxPTR " (%" NACL_PRIdPTR "); "
++          "comparison value 0x%08" NACL_PRIxPTR " (%" NACL_PRIdPTR ")\n",
++          lhs, lhs, rhs, rhs);
++}
++
 +#define ASSERT_OP_THUNK(lhs, op, rhs, slhs, srhs, thunk) do {             \
 +    if (!((lhs) op (rhs))) {                                              \
-+      fprintf(stderr,                                                     \
-+              "Error at line %d, %s:\n"                                   \
-+              "Error: %s "#op" %s"                                        \
-+              " is FALSE\n",                                              \
-+              __LINE__, __FILE__, slhs, srhs);                            \
-+      fprintf(stderr,                                                     \
-+              "got 0x%08" NACL_PRIxPTR " (%" NACL_PRIdPTR "); "           \
-+              "comparison value 0x%08" NACL_PRIxPTR " (%" NACL_PRIdPTR" )\n", \
-+              (uintptr_t) (lhs), (uintptr_t) (lhs),                       \
-+              (uintptr_t) (rhs), (uintptr_t) (rhs));                      \
++      NaClAssertOpFailMessage((uintptr_t) (lhs), (uintptr_t) (rhs),       \
++                              slhs, srhs, #op, __LINE__, __FILE__);       \
 +      thunk;                                                              \
 +      printf("FAIL\n");                                                   \
 +      exit(1);                                                            \
@@ -27223,10 +27024,10 @@ index 0000000000000000000000000000000000000000..96e0a17cbcd811c2ae70dba9e1e8e574
 +of a toolchain build belongs instead in native_client/src/include/nacl/.
 diff --git a/native_client/src/public/chrome_main.h b/native_client/src/public/chrome_main.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..308dab791df0790b00e6fae26b9d5db59a6b6c17
+index 0000000000000000000000000000000000000000..7f41eca81714b854f737f10b812f66f2be68b9f6
 --- /dev/null
 +++ b/native_client/src/public/chrome_main.h
-@@ -0,0 +1,281 @@
+@@ -0,0 +1,273 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -27342,6 +27143,16 @@ index 0000000000000000000000000000000000000000..308dab791df0790b00e6fae26b9d5db5
 +   */
 +  uint32_t initial_nexe_max_code_bytes;
 +
++#if NACL_LINUX || NACL_OSX
++  /*
++   * Server socket that will be used by debug stub to accept connections
++   * from NaCl GDB.  This socket descriptor has already had bind() and listen()
++   * called on it.  Optional; may be -1.
++   * TODO(leslieb): Deprecated when debug_stub_pipe_fd is fully implemented in
++   * chrome.
++   */
++  int debug_stub_server_bound_socket_fd;
++
 +  /*
 +   * Socketpair fd sent from the embedder. This will be used to send information
 +   * between a server socket set up in the embedder and the debug stub.
@@ -27353,24 +27164,12 @@ index 0000000000000000000000000000000000000000..308dab791df0790b00e6fae26b9d5db5
 +   * Optional; may be -1. This will be used over
 +   * debug_stub_server_bound_socket_fd if both are set.
 +   */
-+  NaClHandle debug_stub_pipe_fd;
-+
-+#if NACL_LINUX || NACL_OSX
-+  /*
-+   * Server socket that will be used by debug stub to accept connections
-+   * from NaCl GDB.  This socket descriptor has already had bind() and listen()
-+   * called on it.  Optional; may be -1.
-+   * TODO(leslieb): Deprecated when debug_stub_pipe_fd is fully implemented in
-+   * chrome.
-+   */
-+  int debug_stub_server_bound_socket_fd;
++  int debug_stub_pipe_fd;
 +#endif
 +
 +#if NACL_WINDOWS
 +  /*
 +   * Callback called when debug stub port is known.  Optional; may be NULL.
-+   * TODO(leslieb): Deprecated when debug_stub_pipe_fd is fully implemented in
-+   * chrome.
 +   */
 +  void (*debug_stub_server_port_selected_handler_func)(uint16_t port);
 +#endif
@@ -27385,12 +27184,6 @@ index 0000000000000000000000000000000000000000..308dab791df0790b00e6fae26b9d5db5
 +  struct NaClValidationCache *validation_cache;
 +
 +#if NACL_WINDOWS
-+  /*
-+   * Callback to use instead of DuplicateHandle() for copying a
-+   * Windows handle to another process.  Optional; may be NULL.
-+   */
-+  NaClBrokerDuplicateHandleFunc broker_duplicate_handle_func;
-+
 +  /*
 +   * Callback to use for requesting that a debug exception handler be
 +   * attached to this process for handling hardware exceptions via the
@@ -30215,10 +30008,10 @@ index 0000000000000000000000000000000000000000..608fa2ec8783e2daa96be020f2011452
 +}
 diff --git a/native_client/src/shared/imc/nacl_imc_c.h b/native_client/src/shared/imc/nacl_imc_c.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..da8099cc08081c67bf9a5cdf3c6a82d3591e4e3a
+index 0000000000000000000000000000000000000000..7602b892b23756da44d3faa6e447560cbab7b6e9
 --- /dev/null
 +++ b/native_client/src/shared/imc/nacl_imc_c.h
-@@ -0,0 +1,295 @@
+@@ -0,0 +1,274 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -30458,27 +30251,6 @@ index 0000000000000000000000000000000000000000..da8099cc08081c67bf9a5cdf3c6a82d3
 + * to be provided that works in an outer sandbox.
 + */
 +void NaClSetCreateMemoryObjectFunc(NaClCreateMemoryObjectFunc func);
-+
-+#if NACL_WINDOWS
-+/*
-+ * Type of function supplied to NaClSetBrokerDuplicateHandleFunc().
-+ * Such a function copies a Windows handle into the target process
-+ * with the given process ID.  This is a more restricted version of
-+ * Windows' DuplicateHandle() that can send handles but not retrieve
-+ * them.
-+ */
-+typedef int (*NaClBrokerDuplicateHandleFunc)(NaClHandle source_handle,
-+                                             uint32_t target_process_id,
-+                                             NaClHandle *target_handle,
-+                                             uint32_t desired_access,
-+                                             uint32_t options);
-+
-+/*
-+ * This allows a replacement for Windows' DuplicateHandle() to be
-+ * provided that works in an outer sandbox.
-+ */
-+void NaClSetBrokerDuplicateHandleFunc(NaClBrokerDuplicateHandleFunc func);
-+#endif
 +
 +/*
 + * Creates a memory object of length bytes.
@@ -32268,10 +32040,10 @@ index 0000000000000000000000000000000000000000..3d7a449786b56da4464318fc4f3084a5
 +}
 diff --git a/native_client/src/shared/imc/win/nacl_imc.cc b/native_client/src/shared/imc/win/nacl_imc.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..fda9868a8a66ba497676e8543bf0b86be6c59e6d
+index 0000000000000000000000000000000000000000..6e432eb7508425c3af2222358322db4f167ebdaf
 --- /dev/null
 +++ b/native_client/src/shared/imc/win/nacl_imc.cc
-@@ -0,0 +1,602 @@
+@@ -0,0 +1,582 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -32298,12 +32070,6 @@ index 0000000000000000000000000000000000000000..fda9868a8a66ba497676e8543bf0b86b
 +#include "native_client/src/include/portability.h"
 +#include "native_client/src/shared/imc/nacl_imc_c.h"
 +
-+
-+static NaClBrokerDuplicateHandleFunc g_broker_duplicate_handle_func;
-+
-+void NaClSetBrokerDuplicateHandleFunc(NaClBrokerDuplicateHandleFunc func) {
-+  g_broker_duplicate_handle_func = func;
-+}
 +
 +/* Duplicate a Windows HANDLE within the current process. */
 +NaClHandle NaClDuplicateNaClHandle(NaClHandle handle) {
@@ -32533,25 +32299,15 @@ index 0000000000000000000000000000000000000000..fda9868a8a66ba497676e8543bf0b86b
 +        header.command != kEchoResponse) {
 +      return -1;
 +    }
-+    if (g_broker_duplicate_handle_func == NULL) {
-+      target = OpenProcess(PROCESS_DUP_HANDLE, FALSE, header.pid);
-+      if (target == NULL) {
-+        return -1;
-+      }
++    target = OpenProcess(PROCESS_DUP_HANDLE, FALSE, header.pid);
++    if (target == NULL) {
++      return -1;
 +    }
 +    for (i = 0; i < message->handle_count; ++i) {
 +      HANDLE temp_remote_handle;
-+      bool success;
-+      if (g_broker_duplicate_handle_func != NULL) {
-+        success = g_broker_duplicate_handle_func(message->handles[i],
-+                                                 header.pid,
-+                                                 &temp_remote_handle,
-+                                                 0, DUPLICATE_SAME_ACCESS) != 0;
-+      } else {
-+        success = DuplicateHandle(GetCurrentProcess(), message->handles[i],
-+                                  target, &temp_remote_handle,
-+                                  0, FALSE, DUPLICATE_SAME_ACCESS) != 0;
-+      }
++      bool success = DuplicateHandle(GetCurrentProcess(), message->handles[i],
++                                     target, &temp_remote_handle,
++                                     0, FALSE, DUPLICATE_SAME_ACCESS) != 0;
 +      if (!success) {
 +        /*
 +         * Send the kCancel message to revoke the handles duplicated
@@ -32563,16 +32319,12 @@ index 0000000000000000000000000000000000000000..fda9868a8a66ba497676e8543bf0b86b
 +          WriteAll(handle, &header, sizeof header);
 +          WriteAll(handle, remote_handles, sizeof(uint64_t) * i);
 +        }
-+        if (g_broker_duplicate_handle_func == NULL) {
-+          CloseHandle(target);
-+        }
++        CloseHandle(target);
 +        return -1;
 +      }
 +      remote_handles[i] = (uint64_t) temp_remote_handle;
 +    }
-+    if (g_broker_duplicate_handle_func == NULL) {
-+      CloseHandle(target);
-+    }
++    CloseHandle(target);
 +  }
 +  header.command = kMessage;
 +  header.handle_count = message->handle_count;
@@ -32999,10 +32751,10 @@ index 0000000000000000000000000000000000000000..c93e76cf94f3fa8b281a329662e9c179
 +}
 diff --git a/native_client/src/shared/platform/BUILD.gn b/native_client/src/shared/platform/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..deede102446a37253269091e06caeadefe066768
+index 0000000000000000000000000000000000000000..f6c4d791a30b67507b00bf4c5320d381a5f86479
 --- /dev/null
 +++ b/native_client/src/shared/platform/BUILD.gn
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,107 @@
 +# Copyright (c) 2014 The Native ClientAuthors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -33086,7 +32838,6 @@ index 0000000000000000000000000000000000000000..deede102446a37253269091e06caeade
 +        "osx/nacl_clock.c",
 +        "osx/nacl_host_dir.c",
 +        "osx/nacl_semaphore.c",
-+        "osx/strnlen_osx.c",
 +      ]
 +    }
 +
@@ -33159,10 +32910,10 @@ index 0000000000000000000000000000000000000000..7db7ce378d2c57e7800c11a4c7a86b34
 +#endif
 diff --git a/native_client/src/shared/platform/build.scons b/native_client/src/shared/platform/build.scons
 new file mode 100644
-index 0000000000000000000000000000000000000000..f2f5935b1ba554d74e3d7b951add3dd3b2efd78c
+index 0000000000000000000000000000000000000000..30ffbaa482d2bd419ea62e395df772814af14380
 --- /dev/null
 +++ b/native_client/src/shared/platform/build.scons
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,264 @@
 +# -*- python -*-
 +#
 +# Copyright (c) 2012 The Native Client Authors. All rights reserved.
@@ -33233,7 +32984,6 @@ index 0000000000000000000000000000000000000000..f2f5935b1ba554d74e3d7b951add3dd3
 +    'osx/nacl_clock.c',
 +    'osx/nacl_host_dir.c',
 +    'osx/nacl_semaphore.c',
-+    'osx/strnlen_osx.c',
 +    ]
 +  time_slop_args += [ '-s', '10' ]
 +
@@ -41587,38 +41337,12 @@ index 0000000000000000000000000000000000000000..24f3325130831027b955562b9be6e936
 +#endif  /* NACL_USE_NATIVE_SEMAPHORES */
 +
 +#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_OSX_NACL_SEMAPHORE_H_ */
-diff --git a/native_client/src/shared/platform/osx/strnlen_osx.c b/native_client/src/shared/platform/osx/strnlen_osx.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..159e4f432965fe168e9d2c0b4c07669e9812f207
---- /dev/null
-+++ b/native_client/src/shared/platform/osx/strnlen_osx.c
-@@ -0,0 +1,20 @@
-+/*
-+ * Copyright 2008 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+#include <sys/stat.h>
-+#include <sys/types.h>
-+
-+#include <fcntl.h>
-+#include <string.h>
-+#include <unistd.h>
-+
-+size_t strnlen(const char* string, size_t max);
-+
-+size_t strnlen(const char* string, size_t max) {
-+  const char* end = (const char*)memchr(string, '\0', max);
-+  return end ? (size_t)(end - string) : max;
-+}
 diff --git a/native_client/src/shared/platform/platform.gyp b/native_client/src/shared/platform/platform.gyp
 new file mode 100644
-index 0000000000000000000000000000000000000000..3e7e138cfd6699bb9c1cfa0bb0c73ba84ff46fdd
+index 0000000000000000000000000000000000000000..e7d8592c346d64ceb452be77f4b36fb7f96799ca
 --- /dev/null
 +++ b/native_client/src/shared/platform/platform.gyp
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,218 @@
 +# -*- python -*-
 +#
 +# Copyright (c) 2012 The Native Client Authors. All rights reserved.
@@ -41669,7 +41393,6 @@ index 0000000000000000000000000000000000000000..3e7e138cfd6699bb9c1cfa0bb0c73ba8
 +          'osx/nacl_clock.c',
 +          'osx/nacl_host_dir.c',
 +          'osx/nacl_semaphore.c',
-+          'osx/strnlen_osx.c',
 +        ],
 +      }],
 +      ['os_posix==1', {
@@ -68774,10 +68497,10 @@ index 0000000000000000000000000000000000000000..65993fbb32f004d566d915197c5b992b
 +#endif   /* __VALGRIND_H */
 diff --git a/native_client/src/tools/tls_edit/BUILD.gn b/native_client/src/tools/tls_edit/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..14b0ba421d3bc68fef0663de15479e12175cc3b1
+index 0000000000000000000000000000000000000000..cffb0c9eeca62f4a49c148bcab919cc61253edc5
 --- /dev/null
 +++ b/native_client/src/tools/tls_edit/BUILD.gn
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,16 @@
 +# Copyright (c) 2014 The Native ClientAuthors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -68789,6 +68512,7 @@ index 0000000000000000000000000000000000000000..14b0ba421d3bc68fef0663de15479e12
 +  deps = [
 +    "//build/config/nacl:nacl_base",
 +    "//build/config/sanitizers:deps",
++    "//build/win:default_exe_manifest",
 +    "//native_client/src/shared/platform:platform",
 +    "//native_client/src/trusted/validator_ragel:rdfa_validator",
 +  ]
@@ -70665,10 +70389,10 @@ index 0000000000000000000000000000000000000000..88b26e63ce3a93b5a5cf4fd9e43a5962
 +#endif /* NATIVE_CLIENT_SRC_TRUSTED_CPU_FEATURES_CPU_FEATURES_H_ */
 diff --git a/native_client/src/trusted/debug_stub/BUILD.gn b/native_client/src/trusted/debug_stub/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..f96cb90de3ce5a771cfaf5d9f497e4a4bdb0b7a1
+index 0000000000000000000000000000000000000000..2594c1f235c2b035bedbf56604cc5e5f02da5231
 --- /dev/null
 +++ b/native_client/src/trusted/debug_stub/BUILD.gn
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,52 @@
 +# Copyright (c) 2014 The Native ClientAuthors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -70717,6 +70441,7 @@ index 0000000000000000000000000000000000000000..f96cb90de3ce5a771cfaf5d9f497e4a4
 +
 +  deps = [
 +    "//build/config/nacl:nacl_base",
++    "//build/win:default_exe_manifest",
 +    ":debug_stub",
 +  ]
 +}
@@ -71398,10 +71123,10 @@ index 0000000000000000000000000000000000000000..77b96cb25b98897733d56e0516a7ed97
 +
 diff --git a/native_client/src/trusted/debug_stub/build.scons b/native_client/src/trusted/debug_stub/build.scons
 new file mode 100644
-index 0000000000000000000000000000000000000000..3e7c33bd35ea85d64df048273f6be8e9000c62e1
+index 0000000000000000000000000000000000000000..a36bcd982c55f3d2ce29833d5caca4e2a5b3dcb6
 --- /dev/null
 +++ b/native_client/src/trusted/debug_stub/build.scons
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,61 @@
 +# -*- python -*-
 +# Copyright 2010 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -71452,16 +71177,17 @@ index 0000000000000000000000000000000000000000..3e7c33bd35ea85d64df048273f6be8e9
 +node = env.CommandTest('gdb_rsp_unittest.out', command=[gdb_rsp_test_exe])
 +env.AddNodeToTestSuite(node, ['small_tests'], 'run_gdb_rsp_tests')
 +
-+gtest_env = env.MakeGTestEnv()
++if not env.Bit('windows'):
++  gtest_env = env.MakeGTestEnv()
 +
-+transport_ipc_test_exe = gtest_env.ComponentProgram(
-+    'transport_ipc_unittest',
-+    'transport_ipc_test.cc',
-+    EXTRA_LIBS=['debug_stub'])
++  transport_ipc_test_exe = gtest_env.ComponentProgram(
++      'transport_ipc_unittest',
++      'transport_ipc_test.cc',
++      EXTRA_LIBS=['debug_stub'])
 +
-+node = gtest_env.CommandTest('transport_ipc_unittest.out',
-+                             command=[transport_ipc_test_exe])
-+env.AddNodeToTestSuite(node, ['small_tests'], 'run_transport_ipc_test')
++  node = gtest_env.CommandTest('transport_ipc_unittest.out',
++                               command=[transport_ipc_test_exe])
++  env.AddNodeToTestSuite(node, ['small_tests'], 'run_transport_ipc_test')
 \ No newline at end of file
 diff --git a/native_client/src/trusted/debug_stub/debug_stub.cc b/native_client/src/trusted/debug_stub/debug_stub.cc
 new file mode 100644
@@ -75759,10 +75485,10 @@ index 0000000000000000000000000000000000000000..8756953ef441b911ebeb46151c511873
 +}  // namespace port
 diff --git a/native_client/src/trusted/debug_stub/transport_ipc.cc b/native_client/src/trusted/debug_stub/transport_ipc.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b18f0a9a66
+index 0000000000000000000000000000000000000000..d6a8824cb6b1393238991eb820179a158052af08
 --- /dev/null
 +++ b/native_client/src/trusted/debug_stub/transport_ipc.cc
-@@ -0,0 +1,390 @@
+@@ -0,0 +1,314 @@
 +/*
 + * Copyright (c) 2015 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -75783,9 +75509,6 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +#include "native_client/src/trusted/debug_stub/transport.h"
 +#include "native_client/src/trusted/service_runtime/sel_ldr.h"
 +
-+#if NACL_WINDOWS
-+#include <windows.h>
-+#endif
 +
 +namespace port {
 +
@@ -75801,6 +75524,9 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +// socket was disconnected and is awaiting a new connection.
 +// Once in a disconnected state any new incoming data will
 +// symbolize a new connection.
++
++// TODO(leslieb): implement for windows.
++#if NACL_LINUX || NACL_OSX
 +class TransportIPC : public ITransport {
 + public:
 +  TransportIPC()
@@ -75817,11 +75543,7 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +
 +  ~TransportIPC() {
 +    if (handle_ != NACL_INVALID_HANDLE) {
-+#if NACL_WINDOWS
-+      if (!CloseHandle(handle_))
-+#else
 +      if (::close(handle_))
-+#endif
 +        NaClLog(LOG_FATAL,
 +                "TransportIPC::Disconnect: Failed to close handle.\n");
 +    }
@@ -75847,11 +75569,11 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +    CHECK(ptr && len >= 0);
 +    const char *src = static_cast<const char *>(ptr);
 +    while (len > 0) {
-+      int result = WriteInternal(handle_, src, len);
-+      if (result >= 0) {
++      int result = ::write(handle_, src, len);
++      if (result > 0) {
 +        src += result;
 +        len -= result;
-+      } else {
++      } else if (result == 0 || errno != EINTR) {
 +        NaClLog(LOG_FATAL,
 +                "TransportIPC::Write: Pipe closed from other process.\n");
 +      }
@@ -75863,15 +75585,6 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +  virtual bool IsDataAvailable() {
 +    CHECK(IsConnected());
 +    if (unconsumed_bytes_ > 0) return true;
-+
-+#if NACL_WINDOWS
-+  DWORD available_bytes = 0;
-+  // Return true if the pipe has data or there is an error.
-+  if (PeekNamedPipe(handle_, NULL, 0, NULL, &available_bytes, NULL))
-+    return available_bytes > 0;
-+  else
-+    return true;
-+#else
 +    fd_set fds;
 +
 +    FD_ZERO(&fds);
@@ -75890,7 +75603,6 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +    if (cnt != 0) return true;
 +
 +    return false;
-+#endif
 +  }
 +
 +  void WaitForDebugStubEvent(struct NaClApp *nap,
@@ -75904,19 +75616,6 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +      wait = false;
 +    }
 +
-+#if NACL_WINDOWS
-+  HANDLE handles[2];
-+  handles[0] = nap->faulted_thread_event;
-+  handles[1] = handle_;
-+  int result = WaitForMultipleObjects(2, handles, FALSE,
-+                                      wait ? INFINITE : 0);
-+  if (result == WAIT_OBJECT_0 ||
-+      result == WAIT_OBJECT_0 + 1 ||
-+      result == WAIT_TIMEOUT)
-+    return;
-+  NaClLog(LOG_FATAL,
-+          "TransportIPC::WaitForDebugStubEvent: Wait for events failed.\n");
-+#else
 +    fd_set fds;
 +
 +    FD_ZERO(&fds);
@@ -75940,7 +75639,8 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +    }
 +    if (ret < 0) {
 +      NaClLog(LOG_FATAL,
-+              "TransportIPC::WaitForDebugStubEvent: Wait for events failed.\n");
++              "TransportIPC::WaitForDebugStubEvent: Failed to wait for "
++              "debug stub event.\n");
 +    }
 +
 +    if (ret > 0) {
@@ -75955,7 +75655,6 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +      if (FD_ISSET(handle_, &fds))
 +        FillBufferIfEmpty();
 +    }
-+#endif
 +  }
 +
 +  virtual void Disconnect() {
@@ -75978,16 +75677,6 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +  // server socket across the pipe got a new connection.
 +  virtual bool AcceptConnection() {
 +    CHECK(!IsConnected());
-+#if NACL_WINDOWS
-+  if (WaitForSingleObject(handle_, INFINITE) == WAIT_OBJECT_0) {
-+    // This marks ourself as connected.
-+    bytes_to_read_ = 0;
-+    return true;
-+  }
-+  NaClLog(LOG_FATAL,
-+          "TransportIPC::WaitForDebugStubEvent: Wait for events failed.\n");
-+  return false;
-+#else
 +    fd_set fds;
 +
 +    FD_ZERO(&fds);
@@ -76005,7 +75694,6 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +    }
 +
 +    return false;
-+#endif
 +  }
 +
 + private:
@@ -76054,12 +75742,12 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +        return false;
 +    }
 +
-+    int result = ReadInternal(handle_, buf_.get() + unconsumed_bytes_,
++    int result = ::read(handle_, buf_.get() + unconsumed_bytes_,
 +                        std::min(bytes_to_read_, kBufSize));
-+    if (result >= 0) {
++    if (result > 0) {
 +      unconsumed_bytes_ += result;
 +      bytes_to_read_ -= result;
-+    } else {
++    } else if (result == 0 || errno != EINTR) {
 +      NaClLog(LOG_FATAL,
 +              "TransportIPC::FillBufferIfEmpty: "
 +              "Pipe closed from other process.\n");
@@ -76071,65 +75759,20 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +    return true;
 +  }
 +
-+  // Block until you read len bytes. Return false on error.
++  // Block until you read len bytes.
++  // Return false on EOF or error, but retries EINTR.
 +  bool ReadNBytes(char *buf, uint32_t len) {
 +    uint32_t bytes_read = 0;
 +    while (len > 0) {
-+      int result = ReadInternal(handle_, buf + bytes_read, len);
-+      if (result >= 0) {
++      int result = ::read(handle_, buf + bytes_read, len);
++      if (result > 0) {
 +        bytes_read += result;
 +        len -= result;
-+      } else {
++      } else if (result == 0 || errno != EINTR) {
 +        return false;
 +      }
 +    }
 +    return true;
-+  }
-+
-+  // Platform independant read. Returns number of bytes read or
-+  // -1 on eof or error. Eof is treated as an error since the pipe
-+  // should never be closed on the other end. On posix EINTR will
-+  // return 0.
-+  static int ReadInternal(NaClHandle handle, char *buf, int len) {
-+#if NACL_WINDOWS
-+    DWORD bytes_read = 0;
-+
-+    if (!ReadFile(handle, buf, len, &bytes_read, NULL))
-+      return -1;
-+    else
-+      return static_cast<int>(bytes_read);
-+#else
-+    int result = ::read(handle, buf, len);
-+    if (result > 0)
-+      return result;
-+    else if (result == 0 || errno != EINTR)
-+      return -1;
-+    else
-+      return 0;
-+#endif
-+  }
-+
-+  // Platform independant write. Returns number of bytes read or
-+  // -1 on eof or error. Eof is treated as an error since the pipe
-+  // should never be closed on the other end. On posix EINTR will
-+  // return 0.
-+  static int WriteInternal(NaClHandle handle, const char *buf, int len) {
-+#if NACL_WINDOWS
-+    DWORD bytes_written = 0;
-+
-+    if (!WriteFile(handle, buf, len, &bytes_written, NULL))
-+      return -1;
-+    else
-+      return static_cast<int>(bytes_written);
-+#else
-+    int result = ::write(handle, buf, len);
-+    if (result > 0)
-+      return result;
-+    else if (result == 0 || errno != EINTR)
-+      return -1;
-+    else
-+      return 0;
-+#endif
 +  }
 +
 +  static const int kServerSocketDisconnect = -1;
@@ -76148,17 +75791,24 @@ index 0000000000000000000000000000000000000000..02457395a739242663a63bdfcb0e63b1
 +// under some optmizations or lack thereof it needs space.
 +const int TransportIPC::kBufSize;
 +
++#endif
++
 +ITransport *CreateTransportIPC(NaClHandle fd) {
++#if NACL_LINUX || NACL_OSX
 +  return new TransportIPC(fd);
++#else
++  // TODO(leslieb): implement for windows.
++  return NULL;
++#endif
 +}
 +
 +}  // namespace port
 diff --git a/native_client/src/trusted/debug_stub/transport_ipc_test.cc b/native_client/src/trusted/debug_stub/transport_ipc_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..a53005e6d773717072607bff0b91f6b923681b94
+index 0000000000000000000000000000000000000000..cee8cab4218ac1d485400e2525c6d18fb2edebdd
 --- /dev/null
 +++ b/native_client/src/trusted/debug_stub/transport_ipc_test.cc
-@@ -0,0 +1,329 @@
+@@ -0,0 +1,206 @@
 +/*
 + * Copyright (c) 2015 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -76168,17 +75818,12 @@ index 0000000000000000000000000000000000000000..a53005e6d773717072607bff0b91f6b9
 +#include "gtest/gtest.h"
 +
 +#include <errno.h>
-+
-+#include "native_client/src/include/build_config.h"
-+#include "native_client/src/trusted/debug_stub/transport.h"
-+
-+#if NACL_WINDOWS
-+#include <windows.h>
-+#else
 +#include <unistd.h>
 +#include <sys/types.h>
 +#include <sys/socket.h>
-+#endif
++
++#include "native_client/src/include/build_config.h"
++#include "native_client/src/trusted/debug_stub/transport.h"
 +
 +static const int kBufSize = 1024;
 +static const int kDisconnectFlag = -1;
@@ -76186,84 +75831,17 @@ index 0000000000000000000000000000000000000000..a53005e6d773717072607bff0b91f6b9
 +class TransportIPCTests : public ::testing::Test {
 + protected:
 +  port::ITransport *transport;
-+  NaClHandle fd[2];
++  int fd[2];
 +  char buf[kBufSize];
 +
 +  void SetUp() {
-+#if NACL_WINDOWS
-+    const char *PIPENAME = "\\\\.\\pipe\\TestTransportIPC";
-+
-+    // Windows named pipes act more like a server-client than pipes or
-+    // socket pairs on POSIX, therefore the server end of the pipe needs to
-+    // call connect while creating the client end of the pipe.
-+    //
-+    // Since this is happening on a single thread we make the server pipe
-+    // operations asynchronous. The main order of operations to mimic a
-+    // socketpair is as so:
-+    // 1. Create server pipe
-+    // 2. Wait for connections async
-+    // 3. Create client end synchronously
-+    // 4. Wait on async server connection object
-+    //
-+    // Async is handled using overlapped objects which can be read about on:
-+    // msdn.microsoft.com/en-us/library/windows/desktop/ms686358(v=vs.85).aspx
-+    fd[0] = CreateNamedPipe(PIPENAME,
-+                            PIPE_ACCESS_DUPLEX |
-+                              FILE_FLAG_FIRST_PIPE_INSTANCE |
-+                              FILE_FLAG_OVERLAPPED,
-+                            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE,
-+                            1,
-+                            kBufSize,
-+                            kBufSize,
-+                            5000,
-+                            NULL);
-+
-+    EXPECT_NE(INVALID_HANDLE_VALUE, fd[0]);
-+
-+    OVERLAPPED overlap;
-+
-+    // If these aren't set to 0 windows will complain.
-+    overlap.Offset = 0;
-+    overlap.OffsetHigh = 0;
-+
-+    // Create event used for async operations.
-+    overlap.hEvent = CreateEvent(NULL, TRUE, TRUE, NULL);
-+    EXPECT_NE(INVALID_HANDLE_VALUE, overlap.hEvent);
-+
-+    // Run connect operation asynchronously.
-+    EXPECT_FALSE(ConnectNamedPipe(fd[0], &overlap));
-+    EXPECT_EQ(ERROR_IO_PENDING, GetLastError());
-+
-+    // Connect file side of pipe.
-+    fd[1] = CreateFile(PIPENAME,
-+                       GENERIC_READ | GENERIC_WRITE,
-+                       0,
-+                       NULL,
-+                       OPEN_EXISTING,
-+                       SECURITY_SQOS_PRESENT | SECURITY_ANONYMOUS,
-+                       NULL);
-+
-+    EXPECT_NE(INVALID_HANDLE_VALUE, fd[1]);
-+
-+    DWORD bytes;
-+    // Wait for the connect operation to complete. Should already be done
-+    // given the above call to CreateFile().
-+    EXPECT_TRUE(GetOverlappedResult(fd[0], &overlap, &bytes, TRUE));
-+
-+    CloseHandle(overlap.hEvent);
-+#else
-+    EXPECT_EQ(0, socketpair(AF_UNIX, SOCK_STREAM, 0, fd));
-+#endif
++    EXPECT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fd), 0);
 +    transport = port::CreateTransportIPC(fd[1]);
 +    memset(buf, 0, kBufSize);
 +  }
 +
 +  void TearDown() {
-+#if NACL_WINDOWS
-+    CloseHandle(fd[0]);
-+#else
 +    close(fd[0]);
-+#endif
 +    delete transport;
 +  }
 +};
@@ -76284,86 +75862,34 @@ index 0000000000000000000000000000000000000000..a53005e6d773717072607bff0b91f6b9
 +
 +// Block until you read len bytes.
 +// Return false on EOF or error, but retries on EINTR.
-+bool ReadNBytes(NaClHandle handle, void *ptr, uint32_t len) {
++bool ReadNBytes(int fd, void *ptr, uint32_t len) {
 +  char *buf = reinterpret_cast<char *>(ptr);
 +  uint32_t bytes_read = 0;
 +  while (len > 0) {
-+    int result;
-+
-+#if NACL_WINDOWS
-+    DWORD num_bytes;
-+    OVERLAPPED overlap;
-+
-+    // If these aren't set to 0 windows will complain.
-+    overlap.Offset = 0;
-+    overlap.OffsetHigh = 0;
-+
-+    overlap.hEvent = CreateEvent(NULL, TRUE, TRUE, NULL);
-+
-+    if (!ReadFile(handle, buf, len, &num_bytes, &overlap)) {
-+      EXPECT_EQ(ERROR_IO_PENDING, GetLastError());
-+      if (!GetOverlappedResult(handle,
-+                               &overlap,
-+                               &num_bytes,
-+                               TRUE)) {
-+        return false;
-+      }
-+    }
-+
-+    result = static_cast<int>(num_bytes);
-+
-+    CloseHandle(overlap.hEvent);
-+#else
-+    result = ::read(handle, buf + bytes_read, len);
-+    if (result == 0 || (result == -1 && errno != EINTR))
++    int result = ::read(fd, buf + bytes_read, len);
++    if (result > 0) {
++      bytes_read += result;
++      len -= result;
++    } else if (result == 0 || errno != EINTR) {
 +      return false;
-+#endif
-+
-+    bytes_read += result;
-+    len -= result;
++    }
 +  }
 +  return true;
 +}
 +
 +// Keep trying until you write len bytes.
 +// Return false on EOF or error, but retries on EINTR.
-+bool WriteNBytes(NaClHandle handle, const void *ptr, uint32_t len) {
++bool WriteNBytes(int fd, const void *ptr, uint32_t len) {
 +  const char *buf = reinterpret_cast<const char *>(ptr);
-+  uint32_t bytes_written = 0;
++  uint32_t bytes_read = 0;
 +  while (len > 0) {
-+    int result;
-+
-+#if NACL_WINDOWS
-+    DWORD num_bytes;
-+    OVERLAPPED overlap;
-+
-+    // If these aren't set to 0 windows will complain.
-+    overlap.Offset = 0;
-+    overlap.OffsetHigh = 0;
-+
-+    overlap.hEvent = CreateEvent(NULL, TRUE, TRUE, NULL);
-+
-+    if (!WriteFile(handle, buf, len, &num_bytes, &overlap)) {
-+      EXPECT_EQ(ERROR_IO_PENDING, GetLastError());
-+      if (!GetOverlappedResult(handle,
-+                               &overlap,
-+                               &num_bytes,
-+                               TRUE)) {
-+        return false;
-+      }
-+    }
-+
-+    result = static_cast<int>(num_bytes);
-+
-+    CloseHandle(overlap.hEvent);
-+#else
-+    result = ::write(handle, buf + bytes_written, len);
-+    if (result == 0 || (result == -1 && errno != EINTR))
++    int result = ::write(fd, buf + bytes_read, len);
++    if (result > 0) {
++      bytes_read += result;
++      len -= result;
++    } else if (result == 0 || errno != EINTR) {
 +      return false;
-+#endif
-+
-+    bytes_written += result;
-+    len -= result;
++    }
 +  }
 +  return true;
 +}
@@ -76371,93 +75897,94 @@ index 0000000000000000000000000000000000000000..a53005e6d773717072607bff0b91f6b9
 +// Test accepting multiple connections in sequence.
 +TEST_F(TransportIPCTests, TestAcceptConnection) {
 +  // Write data so AcceptConnection() wont block.
-+  EXPECT_TRUE(WriteNBytes(fd[0], packet, sizeof(packet)));
++  EXPECT_EQ(WriteNBytes(fd[0], packet, sizeof(packet)), true);
 +
 +  // Since there is data this should return true without blocking.
-+  EXPECT_TRUE(transport->AcceptConnection());
++  EXPECT_EQ(transport->AcceptConnection(), true);
 +
 +  // Write -1 so transport marks itself as disconnected.
-+  EXPECT_TRUE(WriteNBytes(fd[0], &kDisconnectFlag, sizeof(kDisconnectFlag)));
++  EXPECT_EQ(WriteNBytes(fd[0], &kDisconnectFlag, sizeof(kDisconnectFlag)),
++            true);
 +
 +  // Read data sent and -1 flag.
-+  EXPECT_FALSE(transport->Read(buf, kBufSize));
++  EXPECT_EQ(transport->Read(buf, kBufSize), false);
 +
 +  // Try to establish new connection.
-+  EXPECT_TRUE(WriteNBytes(fd[0], packet, sizeof(packet)));
-+  EXPECT_TRUE(transport->AcceptConnection());
++  EXPECT_EQ(WriteNBytes(fd[0], packet, sizeof(packet)), true);
++  EXPECT_EQ(transport->AcceptConnection(), true);
 +}
 +
 +// Test reading multiple buffered packets at once.
 +TEST_F(TransportIPCTests, TestReadMultiplePacketsAtOnce) {
 +  // Write initial data and accept connection.
-+  EXPECT_TRUE(WriteNBytes(fd[0], packet, sizeof(packet)));
-+  EXPECT_TRUE(transport->AcceptConnection());
++  EXPECT_EQ(WriteNBytes(fd[0], packet, sizeof(packet)), true);
++  EXPECT_EQ(transport->AcceptConnection(), true);
 +
 +  // Write a second packet.
-+  EXPECT_TRUE(WriteNBytes(fd[0], packet2, sizeof(packet2)));
++  EXPECT_EQ(WriteNBytes(fd[0], packet2, sizeof(packet2)), true);
 +
 +  // Read both packets.
-+  EXPECT_TRUE(transport->Read(buf, 9 * sizeof(int)));
++  EXPECT_EQ(transport->Read(buf, 9 * sizeof(int)), true);
 +
 +  // Check if packets were both read properly.
 +  for (int i = 0; i < 9; i++) {
-+    EXPECT_EQ(i, reinterpret_cast<int*>(buf)[i]);
++    EXPECT_EQ(reinterpret_cast<int*>(buf)[i], i);
 +  }
 +}
 +
 +// Test reading single packet over multiple calls to read.
 +TEST_F(TransportIPCTests, TestReadSinglePacket) {
 +  // Write initial data and accept connection.
-+  EXPECT_TRUE(WriteNBytes(fd[0], packet, sizeof(packet)));
-+  EXPECT_TRUE(transport->AcceptConnection());
++  EXPECT_EQ(WriteNBytes(fd[0], packet, sizeof(packet)), true);
++  EXPECT_EQ(transport->AcceptConnection(), true);
 +
 +  // Read first half of the packet.
-+  EXPECT_TRUE(transport->Read(buf, 4 * sizeof(int)));
++  EXPECT_EQ(transport->Read(buf, 4 * sizeof(int)), true);
 +  // Read second half of the packet.
-+  EXPECT_TRUE(transport->Read(buf + 16, 4 * sizeof(int)));
++  EXPECT_EQ(transport->Read(buf + 16, 4 * sizeof(int)), true);
 +
 +  // Check if entire packets were both read properly.
 +  for (int i = 0; i < 8; i++) {
-+    EXPECT_EQ(i, reinterpret_cast<int*>(buf)[i]);
++    EXPECT_EQ(reinterpret_cast<int*>(buf)[i], i);
 +  }
 +}
 +
 +// Test IsDataAvailable()
 +TEST_F(TransportIPCTests, TestIsDataAvailable) {
 +  // Write initial data and accept connection.
-+  EXPECT_TRUE(WriteNBytes(fd[0], packet, sizeof(packet)));
-+  EXPECT_TRUE(transport->AcceptConnection());
++  EXPECT_EQ(WriteNBytes(fd[0], packet, sizeof(packet)), true);
++  EXPECT_EQ(transport->AcceptConnection(), true);
 +
 +  // Should be data available from initial write.
-+  EXPECT_TRUE(transport->IsDataAvailable());
++  EXPECT_EQ(transport->IsDataAvailable(), true);
 +
 +  // Read some of the data
-+  EXPECT_TRUE(transport->Read(buf, 4 * sizeof(int)));
++  EXPECT_EQ(transport->Read(buf, 4 * sizeof(int)), true);
 +
 +  // Should still be data available from initial write.
-+  EXPECT_TRUE(transport->IsDataAvailable());
++  EXPECT_EQ(transport->IsDataAvailable(), true);
 +
 +  // Read the rest of the data
-+  EXPECT_TRUE(transport->Read(buf, 4 * sizeof(int)));
++  EXPECT_EQ(transport->Read(buf, 4 * sizeof(int)), true);
 +
 +  // No more data.
-+  EXPECT_FALSE(transport->IsDataAvailable());
++  EXPECT_EQ(transport->IsDataAvailable(), false);
 +}
 +
 +// Test writing data.
 +TEST_F(TransportIPCTests, TestWrite) {
 +  // Write initial data and accept connection.
-+  EXPECT_TRUE(WriteNBytes(fd[0], packet, sizeof(packet)));
-+  EXPECT_TRUE(transport->AcceptConnection());
++  EXPECT_EQ(WriteNBytes(fd[0], packet, sizeof(packet)), true);
++  EXPECT_EQ(transport->AcceptConnection(), true);
 +
 +  // Write packet out.
-+  EXPECT_TRUE(transport->Write(out_packet, sizeof(out_packet)));
++  EXPECT_EQ(transport->Write(out_packet, sizeof(out_packet)), true);
 +
-+  EXPECT_TRUE(ReadNBytes(fd[0], buf, sizeof(out_packet)));
++  EXPECT_EQ(ReadNBytes(fd[0], buf, sizeof(out_packet)), true);
 +
 +  // Check if out packet was written properly.
 +  for (int i = 0; i < 4; i++) {
-+    EXPECT_EQ(i, reinterpret_cast<int*>(buf)[i]);
++    EXPECT_EQ(reinterpret_cast<int*>(buf)[i], i);
 +  }
 +}
 +
@@ -94062,4 +93589,299 @@ index 0000000000000000000000000000000000000000..cf2de2857f8c983606823b5d508451f6
 +    "//build/config/nacl:nacl_base",
 +    "//native_client/src/shared/platform:platform",
 +  ]
++}
+diff --git a/native_client/src/trusted/nacl_base/build.scons b/native_client/src/trusted/nacl_base/build.scons
+new file mode 100644
+index 0000000000000000000000000000000000000000..0ff772eacb3bb261712172b6d57061843222a5de
+--- /dev/null
++++ b/native_client/src/trusted/nacl_base/build.scons
+@@ -0,0 +1,95 @@
++# -*- python -*-
++# Copyright 2009 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++
++Import('env')
++
++# Do not run any of the compiles below when in built_elsewhere mode
++# because we cannot assume having a working compiler.
++if env.Bit('built_elsewhere'):
++  Return()
++
++nacl_base_lib_inputs = [
++  'nacl_refcount.c',
++]
++
++env.DualLibrary('nacl_base', nacl_base_lib_inputs,
++                EXTRA_LIBS=['platform'])
++
++nacl_base_test_exe = env.ComponentProgram('nacl_base_test',
++                                          ['nacl_base_test.c'])
++
++node = env.CommandTest(
++    'nacl_base_test.out',
++    command=[nacl_base_test_exe])
++env.AddNodeToTestSuite(node, ['small_tests'], 'run_nacl_base_test')
++
++def FailsGood(exit_status):
++  if exit_status:
++    return 0
++  else:
++    return 1
++
++# Compile-time failures in nacl_macros.h only work for gcc right now.
++if not env.Bit('windows'):
++  #
++  # fail_compile_c_env is a special build environment that succeeds
++  # iff there was a compile-time failure -- i.e., the various
++  # assertion macros made gcc notice that there was a problem.  Since
++  # the assertion macros should work for both C and C++ compiles (or
++  # there are two versions of the macros), we also build using
++  # fail_compile_cxx_env.  These environments and tests detect false
++  # negatives.  Because the macros could fail by generating build
++  # failures when none should occur (false positives), we also have
++  # the _ok tests, even those such false positives ought to be quickly
++  # detected in normal use.
++  #
++  fail_compile_c_env = env.Clone()
++  fail_compile_c_env['CCCOM'] = Action(fail_compile_c_env['CCCOM'],
++                                       exitstatfunc=FailsGood)
++
++  fail_compile_cxx_env = env.Clone()
++  fail_compile_cxx_env['CCCOM'] = Action(fail_compile_cxx_env['CXXCOM'],
++                                         exitstatfunc=FailsGood)
++
++  for build_env, name_modifier in [ (fail_compile_c_env, '_c'),
++                                    (fail_compile_cxx_env, '_cxx') ]:
++    for test_base in ['nacl_base_assert_is_array',
++                      'nacl_base_assert_is_pointer',
++                      'nacl_base_array_size']:
++      for env_to_use, ok in [(env, '_ok'), (build_env, '')]:
++
++        obj = env_to_use.ComponentObject(test_base + ok +
++                                         name_modifier + '_test',
++                                         [test_base + ok + '_test.c'])
++        env_to_use.AlwaysBuild(obj)
++        env_to_use.Alias('small_tests', obj)
++        env_to_use.Alias('compile_tests', obj)
++
++nacl_min_max_test_exe = env.ComponentProgram('nacl_min_max_test',
++                                             ['nacl_min_max_test.c'])
++
++node = env.CommandTest(
++    'nacl_min_max_test.out',
++    command=[nacl_min_max_test_exe])
++env.AddNodeToTestSuite(node, ['small_tests'], 'run_nacl_min_max_test')
++
++# build nacl_min_max_test.c as a C++ program to make sure that there
++# aren't weird operator precedence issues that would cause the min/max
++# macros to behave differently
++nacl_min_max_env = env.Clone()
++nacl_min_max_env['CCCOM'] = Action(nacl_min_max_env['CXXCOM'])
++if nacl_min_max_env.Bit('clang'):
++    nacl_min_max_env.Append(CXXFLAGS='-Wno-deprecated')
++nacl_min_max_cpp_test_obj = nacl_min_max_env.ComponentObject(
++    'nacl_min_max_cpp_test',
++    ['nacl_min_max_test.c'])
++nacl_min_max_cpp_test_exe = nacl_min_max_env.ComponentProgram(
++    'nacl_min_max_cpp_test',
++    nacl_min_max_cpp_test_obj)
++node = env.CommandTest(
++    'nacl_min_max_cpp_test.out',
++    command=[nacl_min_max_cpp_test_exe])
++env.AddNodeToTestSuite(node, ['small_tests'], 'run_nacl_min_max_cpp_test')
+diff --git a/native_client/src/trusted/nacl_base/nacl_base.gyp b/native_client/src/trusted/nacl_base/nacl_base.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..ccdd4bcaac6c515c4787b1a65124d3c435519305
+--- /dev/null
++++ b/native_client/src/trusted/nacl_base/nacl_base.gyp
+@@ -0,0 +1,60 @@
++# -*- python -*-
++#
++# Copyright 2010 The Native Client Authors.  All rights reserved.  Use
++# of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'includes': [
++    '../../../build/common.gypi',
++  ],
++  'target_defaults': {
++    'variables':{
++      'target_base': 'none',
++    },
++    'target_conditions': [
++      ['target_base=="nacl_base"', {
++        'sources': [
++          'nacl_refcount.h',
++          'nacl_refcount.c',
++        ],
++        'xcode_settings': {
++          'WARNING_CFLAGS': [
++            '-fno-strict-aliasing',
++            '-Wno-missing-field-initializers'
++          ]
++        },
++      },
++    ]],
++  },
++  'conditions': [
++    ['OS=="win" and target_arch=="ia32"', {
++      'targets': [
++        {
++          'target_name': 'nacl_base64',
++          'type': 'static_library',
++          'variables': {
++            'target_base': 'nacl_base',
++            'win_target': 'x64',
++          },
++          'dependencies': [
++            '<(DEPTH)/native_client/src/shared/imc/imc.gyp:imc64',
++            '<(DEPTH)/native_client/src/shared/platform/platform.gyp:platform64',
++          ],
++        },
++      ],
++    }],
++  ],
++  'targets': [
++    {
++      'target_name': 'nacl_base',
++      'type': 'static_library', # 'dynamic_library', ?!?
++      'variables': {
++        'target_base': 'nacl_base',
++      },
++      'dependencies': [
++        '<(DEPTH)/native_client/src/shared/platform/platform.gyp:platform',
++      ],
++    },
++  ],
++}
+diff --git a/native_client/src/trusted/nacl_base/nacl_base_array_size_ok_test.c b/native_client/src/trusted/nacl_base/nacl_base_array_size_ok_test.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..943faf1111b58f57d871f270249fe77bd3b20e5b
+--- /dev/null
++++ b/native_client/src/trusted/nacl_base/nacl_base_array_size_ok_test.c
+@@ -0,0 +1,26 @@
++/*
++ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/types.h>
++
++#include "native_client/src/include/portability.h"
++#include "native_client/src/include/nacl_macros.h"
++
++/*
++ * This file is compiled by the test infrastructure as both a C and a
++ * C++ program, since the nacl_macros used below have different
++ * definitions depending on the language.
++ */
++
++int main(void) {
++  char buffer[4096];
++
++  printf("#buffer = %"NACL_PRIuS"\n", NACL_ARRAY_SIZE(buffer));
++
++  return 0;
++}
+diff --git a/native_client/src/trusted/nacl_base/nacl_base_array_size_test.c b/native_client/src/trusted/nacl_base/nacl_base_array_size_test.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..9ece1056fec591c8e74b563ec519c7760ba98623
+--- /dev/null
++++ b/native_client/src/trusted/nacl_base/nacl_base_array_size_test.c
+@@ -0,0 +1,26 @@
++/*
++ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/types.h>
++
++#include "native_client/src/include/portability.h"
++#include "native_client/src/include/nacl_macros.h"
++
++/*
++ * This file is compiled by the test infrastructure as both a C and a
++ * C++ program, since the nacl_macros used below have different
++ * definitions depending on the language.
++ */
++
++int main(void) {
++  char *bufptr = NULL;
++
++  printf("#bufptr = %"NACL_PRIuS"\n", NACL_ARRAY_SIZE(bufptr));
++
++  return 0;
++}
+diff --git a/native_client/src/trusted/nacl_base/nacl_base_assert_is_array_ok_test.c b/native_client/src/trusted/nacl_base/nacl_base_assert_is_array_ok_test.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..31e0fd1f9cc93130e4a782d16531caddc7eb64a6
+--- /dev/null
++++ b/native_client/src/trusted/nacl_base/nacl_base_assert_is_array_ok_test.c
+@@ -0,0 +1,26 @@
++/*
++ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/types.h>
++
++#include "native_client/src/include/portability.h"
++#include "native_client/src/include/nacl_macros.h"
++
++/*
++ * This file is compiled by the test infrastructure as both a C and a
++ * C++ program, since the nacl_macros used below have different
++ * definitions depending on the language.
++ */
++
++int main(void) {
++  char buffer[4096];
++
++  NACL_ASSERT_IS_ARRAY(buffer);
++
++  return 0;
++}
+diff --git a/native_client/src/trusted/nacl_base/nacl_base_assert_is_array_test.c b/native_client/src/trusted/nacl_base/nacl_base_assert_is_array_test.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..08144417327f9f5e79e96b1897dc552825bb40e9
+--- /dev/null
++++ b/native_client/src/trusted/nacl_base/nacl_base_assert_is_array_test.c
+@@ -0,0 +1,26 @@
++/*
++ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/types.h>
++
++#include "native_client/src/include/portability.h"
++#include "native_client/src/include/nacl_macros.h"
++
++/*
++ * This file is compiled by the test infrastructure as both a C and a
++ * C++ program, since the nacl_macros used below have different
++ * definitions depending on the language.
++ */
++
++int main(void) {
++  char *bufptr = NULL;
++
++  NACL_ASSERT_IS_ARRAY(bufptr);
++
++  return 0;
 +}
