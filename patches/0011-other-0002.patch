@@ -1147,7 +1147,7 @@ index 0000000000000000000000000000000000000000..0d872ec2e21a6a2267284bf616508c4a
 +}
 diff --git a/breakpad/src/processor/microdump.cc b/breakpad/src/processor/microdump.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..06211e60bca2aa59b9d29847faed0ef99322e019
+index 0000000000000000000000000000000000000000..9073fe1015931fe6198aa664be895defc2d7bf81
 --- /dev/null
 +++ b/breakpad/src/processor/microdump.cc
 @@ -0,0 +1,381 @@
@@ -1257,7 +1257,7 @@ index 0000000000000000000000000000000000000000..06211e60bca2aa59b9d29847faed0ef9
 +
 +void MicrodumpModules::Add(const CodeModule* module) {
 +  linked_ptr<const CodeModule> module_ptr(module);
-+  if (!map_->StoreRange(module->base_address(), module->size(), module_ptr)) {
++  if (!map_.StoreRange(module->base_address(), module->size(), module_ptr)) {
 +    BPLOG(ERROR) << "Module " << module->code_file() <<
 +                    " could not be stored";
 +  }
@@ -1286,9 +1286,9 @@ index 0000000000000000000000000000000000000000..06211e60bca2aa59b9d29847faed0ef9
 +  valid_ = true;
 +}
 +
-+void MicrodumpContext::SetContextMIPS(MDRawContextMIPS* mips) {
++void MicrodumpContext::SetContextMIPS(MDRawContextMIPS* mips32) {
 +  DumpContext::SetContextFlags(MD_CONTEXT_MIPS);
-+  DumpContext::SetContextMIPS(mips);
++  DumpContext::SetContextMIPS(mips32);
 +  valid_ = true;
 +}
 +
@@ -1483,9 +1483,9 @@ index 0000000000000000000000000000000000000000..06211e60bca2aa59b9d29847faed0ef9
 +                    << std::endl;
 +          continue;
 +        }
-+        MDRawContextMIPS* mips = new MDRawContextMIPS();
-+        memcpy(mips, &cpu_state_raw[0], cpu_state_raw.size());
-+        context_->SetContextMIPS(mips);
++        MDRawContextMIPS* mips32 = new MDRawContextMIPS();
++        memcpy(mips32, &cpu_state_raw[0], cpu_state_raw.size());
++        context_->SetContextMIPS(mips32);
 +      } else if (strcmp(arch.c_str(), kMips64Architecture) == 0) {
 +        if (cpu_state_raw.size() != sizeof(MDRawContextMIPS)) {
 +          std::cerr << "Malformed CPU context. Got " << cpu_state_raw.size()
@@ -2181,10 +2181,10 @@ index 0000000000000000000000000000000000000000..a8b0e0df5ae1fcadf9c3d476fc7a3a3a
 +MICRODUMP_SUPPORTED_ARCHS="arm arm64"
 diff --git a/breakpad/src/processor/minidump.cc b/breakpad/src/processor/minidump.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..84f013d061a5f668c19886c72d5b1b2a3b621a6c
+index 0000000000000000000000000000000000000000..81c3d11a36e4a3aed11a6ebde8c66e393a00116b
 --- /dev/null
 +++ b/breakpad/src/processor/minidump.cc
-@@ -0,0 +1,4874 @@
+@@ -0,0 +1,4879 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -4859,7 +4859,8 @@ index 0000000000000000000000000000000000000000..84f013d061a5f668c19886c72d5b1b2a
 +  }
 +
 +  unsigned int module_index;
-+  if (!range_map_->RetrieveRange(address, &module_index, NULL, NULL)) {
++  if (!range_map_->RetrieveRange(address, &module_index, NULL /* base */,
++                                 NULL /* delta */, NULL /* size */)) {
 +    BPLOG(INFO) << "MinidumpModuleList has no module at " <<
 +                   HexString(address);
 +    return NULL;
@@ -4895,7 +4896,9 @@ index 0000000000000000000000000000000000000000..84f013d061a5f668c19886c72d5b1b2a
 +  }
 +
 +  unsigned int module_index;
-+  if (!range_map_->RetrieveRangeAtIndex(sequence, &module_index, NULL, NULL)) {
++  if (!range_map_->RetrieveRangeAtIndex(sequence, &module_index, 
++                                        NULL /* base */, NULL /* delta */,
++                                        NULL /* size */)) {
 +    BPLOG(ERROR) << "MinidumpModuleList has no module at sequence " << sequence;
 +    return NULL;
 +  }
@@ -5110,7 +5113,8 @@ index 0000000000000000000000000000000000000000..84f013d061a5f668c19886c72d5b1b2a
 +  }
 +
 +  unsigned int region_index;
-+  if (!range_map_->RetrieveRange(address, &region_index, NULL, NULL)) {
++  if (!range_map_->RetrieveRange(address, &region_index, NULL /* base */,
++                                 NULL /* delta */, NULL /* size */)) {
 +    BPLOG(INFO) << "MinidumpMemoryList has no memory region at " <<
 +                   HexString(address);
 +    return NULL;
@@ -6214,7 +6218,8 @@ index 0000000000000000000000000000000000000000..84f013d061a5f668c19886c72d5b1b2a
 +  }
 +
 +  unsigned int info_index;
-+  if (!range_map_->RetrieveRange(address, &info_index, NULL, NULL)) {
++  if (!range_map_->RetrieveRange(address, &info_index, NULL /* base */,
++                                 NULL /* delta */, NULL /* size */)) {
 +    BPLOG(INFO) << "MinidumpMemoryInfoList has no memory info at " <<
 +                   HexString(address);
 +    return NULL;
@@ -8890,7 +8895,7 @@ index 0000000000000000000000000000000000000000..06a8916d34fefec00280b6188e8e3068
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/processor/minidump_processor_unittest.cc b/breakpad/src/processor/minidump_processor_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..609a2a68039ad250393a5c563275ddd12f77858e
+index 0000000000000000000000000000000000000000..d43c1fc97a7e59073eaf967ed6db284d45a216a2
 --- /dev/null
 +++ b/breakpad/src/processor/minidump_processor_unittest.cc
 @@ -0,0 +1,645 @@
@@ -9310,7 +9315,7 @@ index 0000000000000000000000000000000000000000..609a2a68039ad250393a5c563275ddd1
 +  ASSERT_EQ(state.crash_reason(), "EXCEPTION_ACCESS_VIOLATION_WRITE");
 +  ASSERT_EQ(state.crash_address(), 0x45U);
 +  ASSERT_EQ(state.threads()->size(), size_t(1));
-+  EXPECT_EQ((*state.threads())[0]->tid(), 3060);
++  EXPECT_EQ((*state.threads())[0]->tid(), 3060U);
 +  ASSERT_EQ(state.requesting_thread(), 0);
 +  EXPECT_EQ(1171480435U, state.time_date_stamp());
 +  EXPECT_EQ(1171480435U, state.process_create_time());
@@ -13777,10 +13782,10 @@ index 0000000000000000000000000000000000000000..5a5cd7f62982fc666807de81faed958a
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/processor/processor.gyp b/breakpad/src/processor/processor.gyp
 new file mode 100644
-index 0000000000000000000000000000000000000000..3ef23d51b0350930894991bbd5b6359ea7636c42
+index 0000000000000000000000000000000000000000..083a3237f2d273bf7a60e71fa3eeae7350da0fcf
 --- /dev/null
 +++ b/breakpad/src/processor/processor.gyp
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,184 @@
 +# Copyright 2014 Google Inc. All rights reserved.
 +#
 +# Redistribution and use in source and binary forms, with or without
@@ -13860,7 +13865,7 @@ index 0000000000000000000000000000000000000000..3ef23d51b0350930894991bbd5b6359e
 +        'pathname_stripper.h',
 +        'postfix_evaluator-inl.h',
 +        'postfix_evaluator.h',
-+	'proc_maps_linux.cc',
++        'proc_maps_linux.cc',
 +        'process_state.cc',
 +        'range_map-inl.h',
 +        'range_map.h',
@@ -13937,6 +13942,7 @@ index 0000000000000000000000000000000000000000..3ef23d51b0350930894991bbd5b6359e
 +        'minidump_unittest.cc',
 +        'pathname_stripper_unittest.cc',
 +        'postfix_evaluator_unittest.cc',
++        'range_map_shrink_down_unittest.cc',
 +        'range_map_unittest.cc',
 +        'stackwalker_address_list_unittest.cc',
 +        'stackwalker_amd64_unittest.cc',
@@ -14271,10 +14277,10 @@ index 0000000000000000000000000000000000000000..d3e02dc3f46ce0222985e3bbf65dcd14
 +}
 diff --git a/breakpad/src/processor/range_map-inl.h b/breakpad/src/processor/range_map-inl.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a872f1d2e1
+index 0000000000000000000000000000000000000000..082733e173a333803e34e7d4e742fa1baedafd76
 --- /dev/null
 +++ b/breakpad/src/processor/range_map-inl.h
-@@ -0,0 +1,220 @@
+@@ -0,0 +1,267 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -14317,16 +14323,29 @@ index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a8
 +#include <assert.h>
 +
 +#include "processor/range_map.h"
++#include "processor/linked_ptr.h"
 +#include "processor/logging.h"
 +
 +
 +namespace google_breakpad {
 +
++template<typename AddressType, typename EntryType>
++void RangeMap<AddressType, EntryType>::SetEnableShrinkDown(
++    bool enable_shrink_down) {
++  enable_shrink_down_ = enable_shrink_down;
++}
 +
 +template<typename AddressType, typename EntryType>
 +bool RangeMap<AddressType, EntryType>::StoreRange(const AddressType &base,
 +                                                  const AddressType &size,
 +                                                  const EntryType &entry) {
++  return StoreRangeInternal(base, 0 /* delta */, size, entry);
++}
++
++template<typename AddressType, typename EntryType>
++bool RangeMap<AddressType, EntryType>::StoreRangeInternal(
++    const AddressType &base, const AddressType &delta,
++    const AddressType &size, const EntryType &entry) {
 +  AddressType high = base + (size - 1);
 +
 +  // Check for undersize or overflow.
@@ -14334,9 +14353,10 @@ index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a8
 +    // The processor will hit this case too frequently with common symbol
 +    // files in the size == 0 case, which is more suited to a DEBUG channel.
 +    // Filter those out since there's no DEBUG channel at the moment.
-+    BPLOG_IF(INFO, size != 0) << "StoreRange failed, " << HexString(base) <<
-+                                 "+" << HexString(size) << ", " <<
-+                                 HexString(high);
++    BPLOG_IF(INFO, size != 0) << "StoreRangeInternal failed, "
++                              << HexString(base) << "+" << HexString(size)
++                              << ", " << HexString(high)
++                              << ", delta: " << HexString(delta);
 +    return false;
 +  }
 +
@@ -14348,53 +14368,80 @@ index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a8
 +  if (iterator_base != iterator_high) {
 +    // Some other range begins in the space used by this range.  It may be
 +    // contained within the space used by this range, or it may extend lower.
-+    // Regardless, it is an error.
-+    // The processor hits this case too frequently with common symbol files.
-+    // This is most appropriate for a DEBUG channel, but since none exists now
-+    // simply comment out this logging.
-+    //
-+    // AddressType other_base = iterator_base->second.base();
-+    // AddressType other_size = iterator_base->first - other_base + 1;
-+    // BPLOG(INFO) << "StoreRange failed, an existing range is contained by or "
-+    //                "extends lower than the new range: new " <<
-+    //                 HexString(base) << "+" << HexString(size) <<
-+    //                 ", existing " << HexString(other_base) << "+" <<
-+    //                 HexString(other_size);
-+
-+    return false;
++    // If enable_shrink_down_ is true, shrink the current range down, otherwise
++    // this is an error.
++    if (enable_shrink_down_) {
++      AddressType additional_delta = iterator_base->first - base + 1;
++      return StoreRangeInternal(base + additional_delta,
++                                delta + additional_delta,
++                                size - additional_delta, entry);
++    } else {
++      // The processor hits this case too frequently with common symbol files. 
++      // This is most appropriate for a DEBUG channel, but since none exists
++      // now simply comment out this logging.
++      // AddressType other_base = iterator_base->second.base();
++      // AddressType other_size = iterator_base->first - other_base + 1;
++      // BPLOG(INFO) << "StoreRangeInternal failed, an existing range is "
++      //             << "overlapping with the new range: new "
++      //             << HexString(base) << "+" << HexString(size)
++      //             << ", existing " << HexString(other_base) << "+"
++      //             << HexString(other_size);
++      return false;
++    }
 +  }
 +
 +  if (iterator_high != map_.end()) {
 +    if (iterator_high->second.base() <= high) {
 +      // The range above this one overlaps with this one.  It may fully
 +      // contain this range, or it may begin within this range and extend
-+      // higher.  Regardless, it's an error.
-+      // The processor hits this case too frequently with common symbol files.
-+      // This is most appropriate for a DEBUG channel, but since none exists now
-+      // simply comment out this logging.
-+      //
-+      // AddressType other_base = iterator_high->second.base();
-+      // AddressType other_size = iterator_high->first - other_base + 1;
-+      // BPLOG(INFO) << "StoreRange failed, an existing range contains or "
-+      //                "extends higher than the new range: new " <<
-+      //                HexString(base) << "+" << HexString(size) <<
-+      //                ", existing " << HexString(other_base) << "+" <<
-+      //                HexString(other_size);
-+      return false;
++      // higher.  If enable_shrink_down_ is true, shrink the other range down,
++      // otherwise this is an error.
++      if (enable_shrink_down_ && iterator_high->first > high) {
++        // Shrink the other range down.
++        AddressType other_high = iterator_high->first;
++        AddressType additional_delta =
++            high - iterator_high->second.base() + 1;
++        EntryType other_entry;
++        AddressType other_base = AddressType();
++        AddressType other_size = AddressType();
++        AddressType other_delta = AddressType();
++        RetrieveRange(other_high, &other_entry, &other_base, &other_delta,
++                      &other_size);
++        map_.erase(iterator_high);
++        map_.insert(MapValue(other_high,
++                             Range(other_base + additional_delta,
++                                   other_delta + additional_delta,
++                                   other_entry)));
++        // Retry to store this range.
++        return StoreRangeInternal(base, delta, size, entry);
++      } else {
++        // The processor hits this case too frequently with common symbol files.
++        // This is most appropriate for a DEBUG channel, but since none exists
++        // now simply comment out this logging.
++        //
++        // AddressType other_base = iterator_high->second.base();
++        // AddressType other_size = iterator_high->first - other_base + 1;
++        // BPLOG(INFO) << "StoreRangeInternal failed, an existing range "
++        //             << "contains or extends higher than the new range: new "
++        //             << HexString(base) << "+" << HexString(size)
++        //             << ", existing " << HexString(other_base) << "+"
++        //             << HexString(other_size);
++        return false;
++      }
 +    }
 +  }
 +
 +  // Store the range in the map by its high address, so that lower_bound can
 +  // be used to quickly locate a range by address.
-+  map_.insert(MapValue(high, Range(base, entry)));
++  map_.insert(MapValue(high, Range(base, delta, entry)));
 +  return true;
 +}
 +
 +
 +template<typename AddressType, typename EntryType>
 +bool RangeMap<AddressType, EntryType>::RetrieveRange(
-+    const AddressType &address, EntryType *entry,
-+    AddressType *entry_base, AddressType *entry_size) const {
++    const AddressType &address, EntryType *entry, AddressType *entry_base,
++    AddressType *entry_delta, AddressType *entry_size) const {
 +  BPLOG_IF(ERROR, !entry) << "RangeMap::RetrieveRange requires |entry|";
 +  assert(entry);
 +
@@ -14413,6 +14460,8 @@ index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a8
 +  *entry = iterator->second.entry();
 +  if (entry_base)
 +    *entry_base = iterator->second.base();
++  if (entry_delta)
++    *entry_delta = iterator->second.delta();
 +  if (entry_size)
 +    *entry_size = iterator->first - iterator->second.base() + 1;
 +
@@ -14422,13 +14471,13 @@ index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a8
 +
 +template<typename AddressType, typename EntryType>
 +bool RangeMap<AddressType, EntryType>::RetrieveNearestRange(
-+    const AddressType &address, EntryType *entry,
-+    AddressType *entry_base, AddressType *entry_size) const {
++    const AddressType &address, EntryType *entry, AddressType *entry_base,
++    AddressType *entry_delta, AddressType *entry_size) const {
 +  BPLOG_IF(ERROR, !entry) << "RangeMap::RetrieveNearestRange requires |entry|";
 +  assert(entry);
 +
 +  // If address is within a range, RetrieveRange can handle it.
-+  if (RetrieveRange(address, entry, entry_base, entry_size))
++  if (RetrieveRange(address, entry, entry_base, entry_delta, entry_size))
 +    return true;
 +
 +  // upper_bound gives the first element whose key is greater than address,
@@ -14444,6 +14493,8 @@ index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a8
 +  *entry = iterator->second.entry();
 +  if (entry_base)
 +    *entry_base = iterator->second.base();
++  if (entry_delta)
++    *entry_delta = iterator->second.delta();
 +  if (entry_size)
 +    *entry_size = iterator->first - iterator->second.base() + 1;
 +
@@ -14453,8 +14504,8 @@ index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a8
 +
 +template<typename AddressType, typename EntryType>
 +bool RangeMap<AddressType, EntryType>::RetrieveRangeAtIndex(
-+    int index, EntryType *entry,
-+    AddressType *entry_base, AddressType *entry_size) const {
++    int index, EntryType *entry, AddressType *entry_base,
++    AddressType *entry_delta, AddressType *entry_size) const {
 +  BPLOG_IF(ERROR, !entry) << "RangeMap::RetrieveRangeAtIndex requires |entry|";
 +  assert(entry);
 +
@@ -14472,6 +14523,8 @@ index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a8
 +  *entry = iterator->second.entry();
 +  if (entry_base)
 +    *entry_base = iterator->second.base();
++  if (entry_delta)
++    *entry_delta = iterator->second.delta();
 +  if (entry_size)
 +    *entry_size = iterator->first - iterator->second.base() + 1;
 +
@@ -14497,10 +14550,10 @@ index 0000000000000000000000000000000000000000..25604080e31f63fef274c7cbd8cff0a8
 +#endif  // PROCESSOR_RANGE_MAP_INL_H__
 diff --git a/breakpad/src/processor/range_map.h b/breakpad/src/processor/range_map.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..2572e4927d85d15a747d07c268599360ed777961
+index 0000000000000000000000000000000000000000..985d992f991ac993e7bb177296ef97b2dc80248c
 --- /dev/null
 +++ b/breakpad/src/processor/range_map.h
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,160 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -14555,40 +14608,55 @@ index 0000000000000000000000000000000000000000..2572e4927d85d15a747d07c268599360
 +template<typename AddressType, typename EntryType>
 +class RangeMap {
 + public:
-+  RangeMap() : map_() {}
++  RangeMap() : enable_shrink_down_(false), map_() {}
++
++  // |enable_shrink_down| tells whether overlapping ranges can be shrunk down.
++  // If true, then adding a new range that overlaps with an existing one can
++  // be a successful operation.  The range which ends at the higher address
++  // will be shrunk down by moving its start position to a higher address so
++  // that it does not overlap anymore.
++  void SetEnableShrinkDown(bool enable_shrink_down);
 +
 +  // Inserts a range into the map.  Returns false for a parameter error,
 +  // or if the location of the range would conflict with a range already
-+  // stored in the map.
-+  bool StoreRange(const AddressType &base,
-+                  const AddressType &size,
++  // stored in the map.  If enable_shrink_down is true and there is an overlap
++  // between the current range and some other range (already in the map),
++  // shrink down the range which ends at a higher address.
++  bool StoreRange(const AddressType &base, const AddressType &size,
 +                  const EntryType &entry);
 +
-+  // Locates the range encompassing the supplied address.  If there is
-+  // no such range, returns false.  entry_base and entry_size, if non-NULL,
-+  // are set to the base and size of the entry's range.
++  // Locates the range encompassing the supplied address.  If there is no such
++  // range, returns false.  entry_base, entry_delta, and entry_size, if
++  // non-NULL, are set to the base, delta, and size of the entry's range.
++  // A positive entry delta (> 0) indicates that there was an overlap and the
++  // entry was shrunk down (original start address was increased by delta).
 +  bool RetrieveRange(const AddressType &address, EntryType *entry,
-+                     AddressType *entry_base, AddressType *entry_size) const;
++                     AddressType *entry_base, AddressType *entry_delta,
++                     AddressType *entry_size) const;
 +
 +  // Locates the range encompassing the supplied address, if one exists.
 +  // If no range encompasses the supplied address, locates the nearest range
 +  // to the supplied address that is lower than the address.  Returns false
-+  // if no range meets these criteria.  entry_base and entry_size, if
-+  // non-NULL, are set to the base and size of the entry's range.
++  // if no range meets these criteria.  entry_base, entry_delta, and entry_size,
++  // if non-NULL, are set to the base, delta, and size of the entry's range.
++  // A positive entry delta (> 0) indicates that there was an overlap and the
++  // entry was shrunk down (original start address was increased by delta).
 +  bool RetrieveNearestRange(const AddressType &address, EntryType *entry,
-+                            AddressType *entry_base, AddressType *entry_size)
-+                            const;
++                            AddressType *entry_base, AddressType *entry_delta,
++                            AddressType *entry_size) const;
 +
 +  // Treating all ranges as a list ordered by the address spaces that they
 +  // occupy, locates the range at the index specified by index.  Returns
-+  // false if index is larger than the number of ranges stored.  entry_base
-+  // and entry_size, if non-NULL, are set to the base and size of the entry's
-+  // range.
++  // false if index is larger than the number of ranges stored.  entry_base,
++  // entry_delta, and entry_size, if non-NULL, are set to the base, delta, and
++  // size of the entry's range.
++  // A positive entry delta (> 0) indicates that there was an overlap and the
++  // entry was shrunk down (original start address was increased by delta).
 +  //
 +  // RetrieveRangeAtIndex is not optimized for speedy operation.
 +  bool RetrieveRangeAtIndex(int index, EntryType *entry,
-+                            AddressType *entry_base, AddressType *entry_size)
-+                            const;
++                            AddressType *entry_base, AddressType *entry_delta,
++                            AddressType *entry_size) const;
 +
 +  // Returns the number of ranges stored in the RangeMap.
 +  int GetCount() const;
@@ -14602,18 +14670,28 @@ index 0000000000000000000000000000000000000000..2572e4927d85d15a747d07c268599360
 +  friend class ModuleComparer;
 +  friend class RangeMapSerializer<AddressType, EntryType>;
 +
++  // Same a StoreRange() with the only exception that the |delta| can be
++  // passed in.
++  bool StoreRangeInternal(const AddressType &base, const AddressType &delta,
++                          const AddressType &size, const EntryType &entry);
++
 +  class Range {
 +   public:
-+    Range(const AddressType &base, const EntryType &entry)
-+        : base_(base), entry_(entry) {}
++    Range(const AddressType &base, const AddressType &delta,
++          const EntryType &entry)
++        : base_(base), delta_(delta), entry_(entry) {}
 +
 +    AddressType base() const { return base_; }
++    AddressType delta() const { return delta_; }
 +    EntryType entry() const { return entry_; }
 +
 +   private:
 +    // The base address of the range.  The high address does not need to
 +    // be stored, because RangeMap uses it as the key to the map.
 +    const AddressType base_;
++
++    // The delta when the range is shrunk down.
++    const AddressType delta_;
 +
 +    // The entry corresponding to a range.
 +    const EntryType entry_;
@@ -14624,6 +14702,9 @@ index 0000000000000000000000000000000000000000..2572e4927d85d15a747d07c268599360
 +  typedef typename AddressToRangeMap::const_iterator MapConstIterator;
 +  typedef typename AddressToRangeMap::value_type MapValue;
 +
++  // Whether overlapping ranges can be shrunk down.
++  bool enable_shrink_down_;
++
 +  // Maps the high address of each range to a EntryType.
 +  AddressToRangeMap map_;
 +};
@@ -14633,12 +14714,373 @@ index 0000000000000000000000000000000000000000..2572e4927d85d15a747d07c268599360
 +
 +
 +#endif  // PROCESSOR_RANGE_MAP_H__
+diff --git a/breakpad/src/processor/range_map_shrink_down_unittest.cc b/breakpad/src/processor/range_map_shrink_down_unittest.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..8dd0e709b119b376469dd1120c17efc5a74acf22
+--- /dev/null
++++ b/breakpad/src/processor/range_map_shrink_down_unittest.cc
+@@ -0,0 +1,355 @@
++// Copyright (c) 2016, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE
++
++// range_map_shrink_down_unittest.cc: Unit tests for RangeMap that specifically
++// test shrink down when ranges overlap.
++//
++// Author: Ivan Penkov
++
++#include <limits.h>
++#include <stdio.h>
++
++#include "processor/range_map-inl.h"
++
++#include "breakpad_googletest_includes.h"
++#include "common/scoped_ptr.h"
++#include "processor/linked_ptr.h"
++#include "processor/logging.h"
++
++namespace {
++
++using google_breakpad::linked_ptr;
++using google_breakpad::scoped_ptr;
++using google_breakpad::RangeMap;
++
++// A CountedObject holds an int.  A global (not thread safe!) count of
++// allocated CountedObjects is maintained to help test memory management.
++class CountedObject {
++ public:
++  explicit CountedObject(int id) : id_(id) { ++count_; }
++  ~CountedObject() { --count_; }
++
++  static int count() { return count_; }
++  int id() const { return id_; }
++
++ private:
++  static int count_;
++  int id_;
++};
++
++int CountedObject::count_;
++
++typedef int AddressType;
++typedef RangeMap<AddressType, linked_ptr<CountedObject>> TestMap;
++
++// Same range cannot be stored wice.
++TEST(RangeMap, TestShinkDown_SameRange) {
++  TestMap range_map;
++  range_map.SetEnableShrinkDown(true);
++  linked_ptr<CountedObject> object_1(new CountedObject(1));
++  EXPECT_TRUE(range_map.StoreRange(0 /* base address */, 100 /* size */,
++                                   object_1));
++
++  // Same range cannot be stored wice.
++  linked_ptr<CountedObject> object_2(new CountedObject(2));
++  EXPECT_FALSE(range_map.StoreRange(0 /* base address */, 100 /* size */,
++                                    object_2));
++}
++
++// If a range is completely contained by another range, then the larger range
++// should be shrinked down.
++TEST(RangeMap, TestShinkDown_CompletelyContained) {
++  TestMap range_map;
++  range_map.SetEnableShrinkDown(true);
++  // Larger range is added first.
++  linked_ptr<CountedObject> object_1(new CountedObject(1));
++  EXPECT_TRUE(range_map.StoreRange(0 /* base address */, 100 /* size */,
++                                   object_1));
++  // Smaller (contained) range is added second.
++  linked_ptr<CountedObject> object_2(new CountedObject(2));
++  EXPECT_TRUE(range_map.StoreRange(10 /* base address */, 80 /* size */,
++                                   object_2));
++  linked_ptr<CountedObject> object;
++  AddressType retrieved_base = AddressType();
++  AddressType retrieved_delta = AddressType();
++  AddressType retrieved_size = AddressType();
++  // The first range contains the second, so the first range should have been
++  // shrunk to [90, 99].  Range [0, 9] should be free.
++  EXPECT_FALSE(range_map.RetrieveRange(0, &object, &retrieved_base,
++                                       &retrieved_delta, &retrieved_size));
++  EXPECT_FALSE(range_map.RetrieveRange(9, &object, &retrieved_base,
++                                       &retrieved_delta, &retrieved_size));
++  EXPECT_TRUE(range_map.RetrieveRange(90, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(1, object->id());
++  EXPECT_EQ(90, retrieved_base);
++  EXPECT_EQ(90, retrieved_delta);
++  EXPECT_EQ(10, retrieved_size);
++  // Validate the properties of the smaller range (should be untouched).
++  EXPECT_TRUE(range_map.RetrieveRange(10, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(2, object->id());
++  EXPECT_EQ(10, retrieved_base);
++  EXPECT_EQ(0, retrieved_delta);
++  EXPECT_EQ(80, retrieved_size);
++}
++
++// Same as the previous test, however the larger range is added second.
++TEST(RangeMap, TestShinkDown_CompletelyContained_LargerAddedSecond) {
++  TestMap range_map;
++  range_map.SetEnableShrinkDown(true);
++  // Smaller (contained) range is added first.
++  linked_ptr<CountedObject> object_1(new CountedObject(1));
++  EXPECT_TRUE(range_map.StoreRange(10 /* base address */, 80 /* size */,
++                                   object_1));
++  // Larger range is added second.
++  linked_ptr<CountedObject> object_2(new CountedObject(2));
++  EXPECT_TRUE(range_map.StoreRange(0 /* base address */, 100 /* size */,
++                                   object_2));
++  linked_ptr<CountedObject> object;
++  AddressType retrieved_base = AddressType();
++  AddressType retrieved_delta = AddressType();
++  AddressType retrieved_size = AddressType();
++  // The second range contains the first, so the second range should have been
++  // shrunk to [90, 99].  Range [0, 9] should be free.
++  EXPECT_FALSE(range_map.RetrieveRange(0, &object, &retrieved_base,
++                                       &retrieved_delta, &retrieved_size));
++  EXPECT_FALSE(range_map.RetrieveRange(9, &object, &retrieved_base,
++                                       &retrieved_delta, &retrieved_size));
++  EXPECT_TRUE(range_map.RetrieveRange(90, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(2, object->id());
++  EXPECT_EQ(90, retrieved_base);
++  EXPECT_EQ(90, retrieved_delta);
++  EXPECT_EQ(10, retrieved_size);
++  // Validate the properties of the smaller range (should be untouched).
++  EXPECT_TRUE(range_map.RetrieveRange(10, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(1, object->id());
++  EXPECT_EQ(10, retrieved_base);
++  EXPECT_EQ(0, retrieved_delta);
++  EXPECT_EQ(80, retrieved_size);
++}
++
++TEST(RangeMap, TestShinkDown_PartialOverlap_AtBeginning) {
++  TestMap range_map;
++  range_map.SetEnableShrinkDown(true);
++  linked_ptr<CountedObject> object_1(new CountedObject(1));
++  EXPECT_TRUE(range_map.StoreRange(0 /* base address */, 100 /* size */,
++                                   object_1));
++
++  // Partial overlap at the beginning of the new range.
++  linked_ptr<CountedObject> object_2(new CountedObject(2));
++  EXPECT_TRUE(range_map.StoreRange(90 /* base address */, 110 /* size */,
++                                   object_2));
++
++  linked_ptr<CountedObject> object;
++  AddressType retrieved_base = AddressType();
++  AddressType retrieved_delta = AddressType();
++  AddressType retrieved_size = AddressType();
++  // The second range is supposed to be shrunk down so the following address
++  // should resize in the first range.
++  EXPECT_TRUE(range_map.RetrieveRange(99, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(1, object->id());
++  EXPECT_EQ(0, retrieved_base);
++  EXPECT_EQ(0, retrieved_delta);
++  EXPECT_EQ(100, retrieved_size);
++  // Validate the properties of the shrunk down range.
++  EXPECT_TRUE(range_map.RetrieveRange(100, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(2, object->id());
++  EXPECT_EQ(100, retrieved_base);
++  EXPECT_EQ(10, retrieved_delta);
++  EXPECT_EQ(100, retrieved_size);
++}
++
++TEST(RangeMap, TestShinkDown_PartialOverlap_AtEnd) {
++  TestMap range_map;
++  range_map.SetEnableShrinkDown(true);
++  linked_ptr<CountedObject> object_1(new CountedObject(1));
++  EXPECT_TRUE(range_map.StoreRange(50 /* base address */, 50 /* size */,
++                                   object_1));
++
++  // Partial overlap at the end of the new range.
++  linked_ptr<CountedObject> object_2(new CountedObject(2));
++  EXPECT_TRUE(range_map.StoreRange(0 /* base address */, 70 /* size */,
++                                   object_2));
++
++  linked_ptr<CountedObject> object;
++  AddressType retrieved_base = AddressType();
++  AddressType retrieved_delta = AddressType();
++  AddressType retrieved_size = AddressType();
++  // The first range is supposed to be shrunk down so the following address
++  // should resize in the first range.
++  EXPECT_TRUE(range_map.RetrieveRange(69, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(2, object->id());
++  EXPECT_EQ(0, retrieved_base);
++  EXPECT_EQ(0, retrieved_delta);
++  EXPECT_EQ(70, retrieved_size);
++  // Validate the properties of the shrunk down range.
++  EXPECT_TRUE(range_map.RetrieveRange(70, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(1, object->id());
++  EXPECT_EQ(70, retrieved_base);
++  EXPECT_EQ(20, retrieved_delta);
++  EXPECT_EQ(30, retrieved_size);
++}
++
++// A new range is overlapped at both ends.  The new range and the range
++// that overlaps at the end should be shrink.  The range that overlaps at the
++// beginning should be left untouched.
++TEST(RangeMap, TestShinkDown_OverlapAtBothEnds) {
++  TestMap range_map;
++  range_map.SetEnableShrinkDown(true);
++  // This should overlap object_3 at the beginning.
++  linked_ptr<CountedObject> object_1(new CountedObject(1));
++  EXPECT_TRUE(range_map.StoreRange(0 /* base address */, 100 /* size */,
++                                   object_1));
++
++  // This should overlap object_3 at the end.
++  linked_ptr<CountedObject> object_2(new CountedObject(2));
++  EXPECT_TRUE(range_map.StoreRange(100 /* base address */, 100 /* size */,
++                                   object_2));
++
++  // This should be overlapped on both ends by object_1 and object_2.
++  linked_ptr<CountedObject> object_3(new CountedObject(3));
++  EXPECT_TRUE(range_map.StoreRange(50 /* base address */, 100 /* size */,
++                                   object_3));
++
++  linked_ptr<CountedObject> object;
++  AddressType retrieved_base = AddressType();
++  AddressType retrieved_delta = AddressType();
++  AddressType retrieved_size = AddressType();
++  // The first range should be intact.
++  EXPECT_TRUE(range_map.RetrieveRange(0, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(1, object->id());
++  EXPECT_EQ(0, retrieved_base);
++  EXPECT_EQ(0, retrieved_delta);
++  EXPECT_EQ(100, retrieved_size);
++  // The second range should be shrunk down by 50.
++  EXPECT_TRUE(range_map.RetrieveRange(150, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(2, object->id());
++  EXPECT_EQ(150, retrieved_base);
++  EXPECT_EQ(50, retrieved_delta);
++  EXPECT_EQ(50, retrieved_size);
++  // The third range (in the middle) should be shrunk down by 50.
++  EXPECT_TRUE(range_map.RetrieveRange(100, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(3, object->id());
++  EXPECT_EQ(100, retrieved_base);
++  EXPECT_EQ(50, retrieved_delta);
++  EXPECT_EQ(50, retrieved_size);
++}
++
++TEST(RangeMap, TestShinkDown_MultipleConflicts) {
++  TestMap range_map;
++  range_map.SetEnableShrinkDown(true);
++  // This should overlap with object_3.
++  linked_ptr<CountedObject> object_1(new CountedObject(1));
++  EXPECT_TRUE(range_map.StoreRange(10 /* base address */, 90 /* size */,
++                                   object_1));
++
++  // This should also overlap with object_3 but after object_1.
++  linked_ptr<CountedObject> object_2(new CountedObject(2));
++  EXPECT_TRUE(range_map.StoreRange(100 /* base address */, 100 /* size */,
++                                   object_2));
++
++  // This should be overlapped on both object_1 and object_2.  Since
++  // object_3 ends with the higher address it must be shrunk.
++  linked_ptr<CountedObject> object_3(new CountedObject(3));
++  EXPECT_TRUE(range_map.StoreRange(0 /* base address */, 300 /* size */,
++                                   object_3));
++
++  linked_ptr<CountedObject> object;
++  AddressType retrieved_base = AddressType();
++  AddressType retrieved_delta = AddressType();
++  AddressType retrieved_size = AddressType();
++  // The first range should be intact.
++  EXPECT_TRUE(range_map.RetrieveRange(99, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(1, object->id());
++  EXPECT_EQ(10, retrieved_base);
++  EXPECT_EQ(0, retrieved_delta);
++  EXPECT_EQ(90, retrieved_size);
++  // The second range should be intact.
++  EXPECT_TRUE(range_map.RetrieveRange(199, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(2, object->id());
++  EXPECT_EQ(100, retrieved_base);
++  EXPECT_EQ(0, retrieved_delta);
++  EXPECT_EQ(100, retrieved_size);
++  // The third range should be shrunk down by 200.
++  EXPECT_TRUE(range_map.RetrieveRange(299, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(3, object->id());
++  EXPECT_EQ(200, retrieved_base);
++  EXPECT_EQ(200, retrieved_delta);
++  EXPECT_EQ(100, retrieved_size);
++}
++
++// Adding two ranges without overlap should succeed and the ranges should
++// be left intact.
++TEST(RangeMap, TestShinkDown_NoConflicts) {
++  TestMap range_map;
++  range_map.SetEnableShrinkDown(true);
++  // Adding range 1.
++  linked_ptr<CountedObject> object_1(new CountedObject(1));
++  EXPECT_TRUE(range_map.StoreRange(10 /* base address */, 90 /* size */,
++                                   object_1));
++
++  // Adding range 2 - no overlap with range 1.
++  linked_ptr<CountedObject> object_2(new CountedObject(2));
++  EXPECT_TRUE(range_map.StoreRange(110 /* base address */, 90 /* size */,
++                                   object_2));
++
++  linked_ptr<CountedObject> object;
++  AddressType retrieved_base = AddressType();
++  AddressType retrieved_delta = AddressType();
++  AddressType retrieved_size = AddressType();
++  // The first range should be intact.
++  EXPECT_TRUE(range_map.RetrieveRange(99, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(1, object->id());
++  EXPECT_EQ(10, retrieved_base);
++  EXPECT_EQ(0, retrieved_delta);
++  EXPECT_EQ(90, retrieved_size);
++  // The second range should be intact.
++  EXPECT_TRUE(range_map.RetrieveRange(199, &object, &retrieved_base,
++                                      &retrieved_delta, &retrieved_size));
++  EXPECT_EQ(2, object->id());
++  EXPECT_EQ(110, retrieved_base);
++  EXPECT_EQ(0, retrieved_delta);
++  EXPECT_EQ(90, retrieved_size);
++}
++
++}  // namespace
 diff --git a/breakpad/src/processor/range_map_unittest.cc b/breakpad/src/processor/range_map_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..bf9b7279ad264f18d193958815704900a41c93cf
+index 0000000000000000000000000000000000000000..31b89e5de30f6dd4406eecb913aa14aa21c7812f
 --- /dev/null
 +++ b/breakpad/src/processor/range_map_unittest.cc
-@@ -0,0 +1,552 @@
+@@ -0,0 +1,559 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -14807,8 +15249,10 @@ index 0000000000000000000000000000000000000000..bf9b7279ad264f18d193958815704900
 +      linked_ptr<CountedObject> object;
 +      AddressType retrieved_base = AddressType();
 +      AddressType retrieved_size = AddressType();
++      AddressType retrieved_delta = AddressType();
 +      bool retrieved = range_map->RetrieveRange(address, &object,
 +                                                &retrieved_base,
++                                                &retrieved_delta,
 +                                                &retrieved_size);
 +
 +      bool observed_result = retrieved && object->id() == range_test->id;
@@ -14850,10 +15294,12 @@ index 0000000000000000000000000000000000000000..bf9b7279ad264f18d193958815704900
 +
 +      linked_ptr<CountedObject> nearest_object;
 +      AddressType nearest_base = AddressType();
++      AddressType nearest_delta = AddressType();
 +      AddressType nearest_size = AddressType();
 +      bool retrieved_nearest = range_map->RetrieveNearestRange(address,
 +                                                               &nearest_object,
 +                                                               &nearest_base,
++                                                               &nearest_delta,
 +                                                               &nearest_size);
 +
 +      // When checking one greater than the high side, RetrieveNearestRange
@@ -14915,7 +15361,8 @@ index 0000000000000000000000000000000000000000..bf9b7279ad264f18d193958815704900
 +  int object_count = range_map->GetCount();
 +  for (int object_index = 0; object_index < object_count; ++object_index) {
 +    AddressType base;
-+    if (!range_map->RetrieveRangeAtIndex(object_index, &object, &base, NULL)) {
++    if (!range_map->RetrieveRangeAtIndex(object_index, &object, &base,
++                                         NULL /* delta */, NULL /* size */)) {
 +      fprintf(stderr, "FAILED: RetrieveRangeAtIndex set %d index %d, "
 +              "expected success, observed failure\n",
 +              set, object_index);
@@ -14955,7 +15402,8 @@ index 0000000000000000000000000000000000000000..bf9b7279ad264f18d193958815704900
 +
 +  // Make sure that RetrieveRangeAtIndex doesn't allow lookups at indices that
 +  // are too high.
-+  if (range_map->RetrieveRangeAtIndex(object_count, &object, NULL, NULL)) {
++  if (range_map->RetrieveRangeAtIndex(object_count, &object, NULL /* base */,
++                                      NULL /* delta */, NULL /* size */)) {
 +    fprintf(stderr, "FAILED: RetrieveRangeAtIndex set %d index %d (too large), "
 +            "expected failure, observed success\n",
 +            set, object_count);
@@ -14984,7 +15432,8 @@ index 0000000000000000000000000000000000000000..bf9b7279ad264f18d193958815704900
 +  int object_count = range_map->GetCount();
 +  for (int object_index = 0; object_index < object_count; ++object_index) {
 +    AddressType base;
-+    if (!range_map->RetrieveRangeAtIndex(object_index, &object, &base, NULL)) {
++    if (!range_map->RetrieveRangeAtIndex(object_index, &object, &base,
++                                         NULL /* delta */, NULL /* size */)) {
 +      fprintf(stderr, "FAILED: RetrieveAtIndexTest2 index %d, "
 +              "expected success, observed failure\n", object_index);
 +      return false;
@@ -274084,7 +274533,7 @@ index 0000000000000000000000000000000000000000..9ff571d5c5c40a1add9a0377f3c5db94
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_TOKENIZE_H_
 diff --git a/breakpad/src/processor/windows_frame_info.h b/breakpad/src/processor/windows_frame_info.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..c92c610c7d8b56dcc8f11b16589e91bc5b236bc5
+index 0000000000000000000000000000000000000000..f96e0a438c8b34a9ec55cc4fcf9f3600b73417c7
 --- /dev/null
 +++ b/breakpad/src/processor/windows_frame_info.h
 @@ -0,0 +1,209 @@
@@ -274208,7 +274657,7 @@ index 0000000000000000000000000000000000000000..c92c610c7d8b56dcc8f11b16589e91bc
 +                                           uint64_t &code_size) {
 +    // The format of a STACK WIN record is documented at:
 +    //
-+    // http://code.google.com/p/google-breakpad/wiki/SymbolFiles
++    // https://chromium.googlesource.com/breakpad/breakpad/+/master/docs/symbol_files.md
 +
 +    std::vector<char>  buffer;
 +    StringToVector(string, buffer);
@@ -307010,7 +307459,7 @@ index 0000000000000000000000000000000000000000..3556120868d5927ed828f3f083f17d5d
 +}
 diff --git a/breakpad/src/tools/python/filter_syms.py b/breakpad/src/tools/python/filter_syms.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..738cb3e9fc7806fbd275511d98d774851494e728
+index 0000000000000000000000000000000000000000..abddf7893e093128b2000fc7095bce87c758dba3
 --- /dev/null
 +++ b/breakpad/src/tools/python/filter_syms.py
 @@ -0,0 +1,204 @@
@@ -307070,7 +307519,7 @@ index 0000000000000000000000000000000000000000..738cb3e9fc7806fbd275511d98d77485
 +  """Parser for Breakpad symbol files.
 +
 +  The format of these files is documented at
-+  https://code.google.com/p/google-breakpad/wiki/SymbolFiles
++  https://chromium.googlesource.com/breakpad/breakpad/+/master/docs/symbol_files.md
 +  """
 +
 +  def __init__(self, input_stream, output_stream, ignored_prefixes=None,
@@ -358128,7 +358577,7 @@ index cbf354387f6e23391c749b9e57d25f59f69c3898..033a1610ee3425bd9b5cc26887b53419
  EXPORTS
    IsBlacklistInitialized
 diff --git a/chrome_elf/chrome_elf.gyp b/chrome_elf/chrome_elf.gyp
-index 034476a6568d865848c9ab957e793ab99fa4c2c8..d165e433d78330ec26ab0bd15572355b25a69972 100644
+index 7a49fe8518c49e6f86ff59f94cc784c69e3c6925..1f84d296a85b12c483574e296b957035525ce185 100644
 --- a/chrome_elf/chrome_elf.gyp
 +++ b/chrome_elf/chrome_elf.gyp
 @@ -17,7 +17,7 @@
@@ -358157,7 +358606,7 @@ index 78f890e7ece7dc50b0ce3bb7784b88bc53bd7792..4c3c51d2be91a116f2df34ac9778c65a
 -ORIGINAL_FILENAME=chrome_elf.dll
 +ORIGINAL_FILENAME=vivaldi_elf.dll
 diff --git a/chrome_elf/elf_imports_unittest.cc b/chrome_elf/elf_imports_unittest.cc
-index 8c3527a13858f5c2e476b3efbfb3655e400ea7d9..132bcf1a405b36f315a547da1cbcf0cd1cef15ce 100644
+index 016398965ddb10a404efe5668d3e464a24c725e2..efdc053b645ea84e2c6ab5050c03245f96933178 100644
 --- a/chrome_elf/elf_imports_unittest.cc
 +++ b/chrome_elf/elf_imports_unittest.cc
 @@ -66,7 +66,7 @@ class ELFImportsTest : public testing::Test {
@@ -358169,7 +358618,7 @@ index 8c3527a13858f5c2e476b3efbfb3655e400ea7d9..132bcf1a405b36f315a547da1cbcf0cd
  
    std::vector<std::string> elf_imports;
    GetImports(dll, &elf_imports);
-@@ -114,7 +114,7 @@ TEST_F(ELFImportsTest, ChromeExeSanityCheck) {
+@@ -130,7 +130,7 @@ TEST_F(ELFImportsTest, ChromeExeSanityCheck) {
  
    base::FilePath exe;
    ASSERT_TRUE(PathService::Get(base::DIR_EXE, &exe));
@@ -358178,7 +358627,7 @@ index 8c3527a13858f5c2e476b3efbfb3655e400ea7d9..132bcf1a405b36f315a547da1cbcf0cd
    GetImports(exe, &exe_imports);
  
    // Check that chrome.exe has imports.
-@@ -122,7 +122,7 @@ TEST_F(ELFImportsTest, ChromeExeSanityCheck) {
+@@ -138,7 +138,7 @@ TEST_F(ELFImportsTest, ChromeExeSanityCheck) {
      "target was built, instead of chrome_elf_unittests.exe";
  
    // Chrome.exe's first import must be ELF.
@@ -358188,10 +358637,10 @@ index 8c3527a13858f5c2e476b3efbfb3655e400ea7d9..132bcf1a405b36f315a547da1cbcf0cd
        "target was built, instead of just chrome_elf_unittests.exe)";
  }
 diff --git a/crypto/encryptor.cc b/crypto/encryptor.cc
-index a9f9a9d5dcea15fe2e9341e14138da45f8467ba3..6ed71aad04be82437c8847565a5bb9054f2d0cee 100644
+index 06bf00cce94bc608bf2a79aa14f4565177bd942d..35661b2fc1b5bc059e492f3f0e552fed34846467 100644
 --- a/crypto/encryptor.cc
 +++ b/crypto/encryptor.cc
-@@ -15,16 +15,28 @@
+@@ -15,17 +15,29 @@
  #include "crypto/openssl_util.h"
  #include "crypto/symmetric_key.h"
  
@@ -358210,7 +358659,8 @@ index a9f9a9d5dcea15fe2e9341e14138da45f8467ba3..6ed71aad04be82437c8847565a5bb905
    switch (key->key().length()) {
      case 16: return EVP_aes_128_cbc();
      case 32: return EVP_aes_256_cbc();
-     default: return NULL;
+     default:
+       return nullptr;
    }
 +  case SymmetricKey::DES_EDE3:
 +    return EVP_des_ede3_cbc();
@@ -358220,7 +358670,7 @@ index a9f9a9d5dcea15fe2e9341e14138da45f8467ba3..6ed71aad04be82437c8847565a5bb905
  }
  
  // On destruction this class will cleanup the ctx, and also clear the OpenSSL
-@@ -95,19 +107,32 @@ Encryptor::~Encryptor() {
+@@ -93,19 +105,32 @@ Encryptor::~Encryptor() {
  bool Encryptor::Init(SymmetricKey* key,
                       Mode mode,
                       const base::StringPiece& iv) {
@@ -358244,7 +358694,7 @@ index a9f9a9d5dcea15fe2e9341e14138da45f8467ba3..6ed71aad04be82437c8847565a5bb905
 +  if (mode == CBC && raw_iv_len != block_size)
      return false;
  
-   if (GetCipherForKey(key) == NULL)
+   if (GetCipherForKey(key) == nullptr)
      return false;
  
 +  DCHECK(raw_iv);
@@ -358270,7 +358720,7 @@ index 4b6745ef0fd278535213867f23385d56f9c6ed98..3319e6e88e6454fe9d3f3125d6fce3da
    // Encrypts |plaintext| into |ciphertext|.  |plaintext| may only be empty if
    // the mode is CBC.
 diff --git a/crypto/encryptor_unittest.cc b/crypto/encryptor_unittest.cc
-index 547b7469dabb3de763df8cd8eac0a97722caf765..dce1325dcbf7cec22d0df6336d1089edd7b5432a 100644
+index 7166c74f6e6baf1f6e721389a49f2eaabbdad0a7..a7817bd98372f6c5cceb855ab27e99afce1ef042 100644
 --- a/crypto/encryptor_unittest.cc
 +++ b/crypto/encryptor_unittest.cc
 @@ -14,6 +14,30 @@
@@ -358305,13 +358755,13 @@ index 547b7469dabb3de763df8cd8eac0a97722caf765..dce1325dcbf7cec22d0df6336d1089ed
    std::unique_ptr<crypto::SymmetricKey> key(
        crypto::SymmetricKey::DeriveKeyFromPassword(
 diff --git a/crypto/symmetric_key.cc b/crypto/symmetric_key.cc
-index 4da8bd8662f85490a9148c62fb7879044ffdbc05..f5ee9dcaf6d5990c511269499e9b42c32ba4cded 100644
+index e3ecf624bcd28fd4d19d464d4c691ff6ed76a3d4..deae4f995338c7c3df3ca753d71cc7b2eeeda29c 100644
 --- a/crypto/symmetric_key.cc
 +++ b/crypto/symmetric_key.cc
-@@ -25,12 +25,14 @@ SymmetricKey::~SymmetricKey() {
- // static
- SymmetricKey* SymmetricKey::GenerateRandomKey(Algorithm algorithm,
-                                               size_t key_size_in_bits) {
+@@ -26,13 +26,15 @@ SymmetricKey::~SymmetricKey() {
+ std::unique_ptr<SymmetricKey> SymmetricKey::GenerateRandomKey(
+     Algorithm algorithm,
+     size_t key_size_in_bits) {
 -  DCHECK_EQ(AES, algorithm);
 +  DCHECK_LT(ENC_ALG_START, algorithm);
 +  DCHECK_GT(ENC_ALG_END, algorithm);
@@ -358320,12 +358770,14 @@ index 4da8bd8662f85490a9148c62fb7879044ffdbc05..f5ee9dcaf6d5990c511269499e9b42c3
    // algorithms available in NSS but not BoringSSL and vice
    // versa. Note that BoringSSL does not support AES-192.
 -  if (key_size_in_bits != 128 && key_size_in_bits != 256)
+-    return nullptr;
 +  if (algorithm == AES &&
 +      key_size_in_bits != 128 && key_size_in_bits != 256)
-     return NULL;
++    return NULL;
  
    size_t key_size_in_bytes = key_size_in_bits / 8;
-@@ -41,6 +43,7 @@ SymmetricKey* SymmetricKey::GenerateRandomKey(Algorithm algorithm,
+   DCHECK_EQ(key_size_in_bits, key_size_in_bytes * 8);
+@@ -42,6 +44,7 @@ std::unique_ptr<SymmetricKey> SymmetricKey::GenerateRandomKey(
  
    OpenSSLErrStackTracer err_tracer(FROM_HERE);
    std::unique_ptr<SymmetricKey> key(new SymmetricKey);
@@ -358333,16 +358785,16 @@ index 4da8bd8662f85490a9148c62fb7879044ffdbc05..f5ee9dcaf6d5990c511269499e9b42c3
    uint8_t* key_data = reinterpret_cast<uint8_t*>(
        base::WriteInto(&key->key_, key_size_in_bytes + 1));
  
-@@ -54,7 +57,7 @@ SymmetricKey* SymmetricKey::DeriveKeyFromPassword(Algorithm algorithm,
-                                                   const std::string& salt,
-                                                   size_t iterations,
-                                                   size_t key_size_in_bits) {
+@@ -56,7 +59,7 @@ std::unique_ptr<SymmetricKey> SymmetricKey::DeriveKeyFromPassword(
+     const std::string& salt,
+     size_t iterations,
+     size_t key_size_in_bits) {
 -  DCHECK(algorithm == AES || algorithm == HMAC_SHA1);
 +  DCHECK(algorithm == AES || algorithm == HMAC_SHA1 || algorithm == DES_EDE3);
  
    if (algorithm == AES) {
      // Whitelist supported key sizes to avoid accidentaly relying on
-@@ -72,6 +75,7 @@ SymmetricKey* SymmetricKey::DeriveKeyFromPassword(Algorithm algorithm,
+@@ -74,6 +77,7 @@ std::unique_ptr<SymmetricKey> SymmetricKey::DeriveKeyFromPassword(
  
    OpenSSLErrStackTracer err_tracer(FROM_HERE);
    std::unique_ptr<SymmetricKey> key(new SymmetricKey);
@@ -358350,17 +358802,17 @@ index 4da8bd8662f85490a9148c62fb7879044ffdbc05..f5ee9dcaf6d5990c511269499e9b42c3
    uint8_t* key_data = reinterpret_cast<uint8_t*>(
        base::WriteInto(&key->key_, key_size_in_bytes + 1));
    int rv = PKCS5_PBKDF2_HMAC_SHA1(
-@@ -85,16 +89,26 @@ SymmetricKey* SymmetricKey::DeriveKeyFromPassword(Algorithm algorithm,
+@@ -87,16 +91,26 @@ std::unique_ptr<SymmetricKey> SymmetricKey::DeriveKeyFromPassword(
  // static
- SymmetricKey* SymmetricKey::Import(Algorithm algorithm,
-                                    const std::string& raw_key) {
+ std::unique_ptr<SymmetricKey> SymmetricKey::Import(Algorithm algorithm,
+                                                    const std::string& raw_key) {
 +return Import(algorithm,
 +  reinterpret_cast<unsigned char*>(const_cast<char *>(raw_key.data())),
 +      raw_key.size());
 +}
 +
 +// static
-+SymmetricKey* SymmetricKey::Import(Algorithm algorithm,
++std::unique_ptr<SymmetricKey> SymmetricKey::Import(Algorithm algorithm,
 +                                   const unsigned char *raw_key,
 +                                   unsigned int raw_key_len) {
    if (algorithm == AES) {
@@ -358368,22 +358820,22 @@ index 4da8bd8662f85490a9148c62fb7879044ffdbc05..f5ee9dcaf6d5990c511269499e9b42c3
      // algorithms available in NSS but not BoringSSL and vice
      // versa. Note that BoringSSL does not support AES-192.
 -    if (raw_key.size() != 128/8 && raw_key.size() != 256/8)
-+    if (raw_key_len != 128/8 && raw_key_len != 256/8)
-       return NULL;
++    if (raw_key == NULL || (raw_key_len != 128/8 && raw_key_len != 256/8))
+       return nullptr;
    }
  
    std::unique_ptr<SymmetricKey> key(new SymmetricKey);
 -  key->key_ = raw_key;
 +  key->key_.assign((const char *) raw_key, raw_key_len);
 +  key->algorithm_ = algorithm;
-   return key.release();
+   return key;
  }
  
 diff --git a/crypto/symmetric_key.h b/crypto/symmetric_key.h
-index 2b2e2ce304fbb3c8f066cbf586663766ec063852..5f17b7497573e5604bb6cd95df03b247fcc4daae 100644
+index 7494634b5ef5ad25693d87e82323234d6d05b853..b3976a0045959f39bd33a4f749d47fe867579190 100644
 --- a/crypto/symmetric_key.h
 +++ b/crypto/symmetric_key.h
-@@ -22,8 +22,12 @@ class CRYPTO_EXPORT SymmetricKey {
+@@ -23,8 +23,12 @@ class CRYPTO_EXPORT SymmetricKey {
    // Defines the algorithm that a key will be used with. See also
    // classs Encrptor.
    enum Algorithm {
@@ -358396,30 +358848,31 @@ index 2b2e2ce304fbb3c8f066cbf586663766ec063852..5f17b7497573e5604bb6cd95df03b247
    };
  
    virtual ~SymmetricKey();
-@@ -50,6 +54,9 @@ class CRYPTO_EXPORT SymmetricKey {
-   // GetRawKey, or via another compatible method. The key must be of suitable
+@@ -54,6 +58,9 @@ class CRYPTO_EXPORT SymmetricKey {
    // size for use with |algorithm|. The caller owns the returned SymmetricKey.
-   static SymmetricKey* Import(Algorithm algorithm, const std::string& raw_key);
-+  static SymmetricKey* Import(Algorithm algorithm,
+   static std::unique_ptr<SymmetricKey> Import(Algorithm algorithm,
+                                               const std::string& raw_key);
++  static std::unique_ptr<SymmetricKey> Import(Algorithm algorithm,
 +                              const unsigned char *raw_key,
 +                              unsigned int raw_key_len);
  
    const std::string& key() { return key_; }
  
-@@ -58,9 +65,11 @@ class CRYPTO_EXPORT SymmetricKey {
+@@ -62,10 +69,12 @@ class CRYPTO_EXPORT SymmetricKey {
    // carefully.
    bool GetRawKey(std::string* raw_key);
  
 +  Algorithm algorithm() {return algorithm_;}
   private:
-   SymmetricKey() {}
+   SymmetricKey();
+ 
    std::string key_;
 +  Algorithm algorithm_;
  
    DISALLOW_COPY_AND_ASSIGN(SymmetricKey);
  };
 diff --git a/crypto/symmetric_key_unittest.cc b/crypto/symmetric_key_unittest.cc
-index 7cd47cd73c196a717e9c7709e7f2dda5e60da882..139365ee0aac35f9edabcb7f334be126e4c3a42a 100644
+index d954761d75a561efe5203e697f0576b37da3df9c..64a754a166d546b8e09f410b4e6569a3f396bf02 100644
 --- a/crypto/symmetric_key_unittest.cc
 +++ b/crypto/symmetric_key_unittest.cc
 @@ -12,10 +12,16 @@
@@ -358435,7 +358888,7 @@ index 7cd47cd73c196a717e9c7709e7f2dda5e60da882..139365ee0aac35f9edabcb7f334be126
 +
    std::unique_ptr<crypto::SymmetricKey> key(
        crypto::SymmetricKey::GenerateRandomKey(crypto::SymmetricKey::AES, 256));
-   ASSERT_TRUE(NULL != key.get());
+   ASSERT_TRUE(key);
 -  std::string raw_key;
    EXPECT_TRUE(key->GetRawKey(&raw_key));
    EXPECT_EQ(32U, raw_key.size());
@@ -358457,10 +358910,10 @@ index 94446dfbde079026b1b5065c13da5ea12069403b..c3331fd001d8e1e3073b8c6220c01260
              'grit_grd_file': 'bluetooth_strings.grd',
            },
 diff --git a/ipc/ipc_message_start.h b/ipc/ipc_message_start.h
-index 453a4bddd1516ce65240bd068b5895a2e52bb82d..cca7528066407ec907f42cae0f41a966296fa3cd 100644
+index 5ee4fe1486ae94953490f1ca28a977912ff6aa78..22a0e8b3edaf84ef56fbc572946efac078ce6c3a 100644
 --- a/ipc/ipc_message_start.h
 +++ b/ipc/ipc_message_start.h
-@@ -79,6 +79,7 @@ enum IPCMessageStart {
+@@ -77,6 +77,7 @@ enum IPCMessageStart {
    WebSocketMsgStart,
    NaClHostMsgStart,
    WebRTCIdentityMsgStart,
@@ -358468,19 +358921,19 @@ index 453a4bddd1516ce65240bd068b5895a2e52bb82d..cca7528066407ec907f42cae0f41a966
    PowerMonitorMsgStart,
    EncryptedMediaMsgStart,
    CacheStorageMsgStart,
-@@ -132,6 +133,7 @@ enum IPCMessageStart {
-   DWriteFontProxyMsgStart,
-   MediaPlayerDelegateMsgStart,
+@@ -130,6 +131,7 @@ enum IPCMessageStart {
    SurfaceViewManagerMsgStart,
+   ExtensionWorkerMsgStart,
+   SubresourceFilterMsgStart,
 +  VivaldiMsgStart,
    LastIPCMsgStart  // Must come last.
  };
  
 diff --git a/ipc/ipc_message_utils.cc b/ipc/ipc_message_utils.cc
-index f31add1da14805c95f4ece9a445da88304fbab1f..292f4900ae7d6e9b67a7d78b6e3093806d44b186 100644
+index 60c12ab60f96f879259612c993acf89d0c749cd0..d5a0b7c8fe6647e57ed549fa9698f55fcebe066e 100644
 --- a/ipc/ipc_message_utils.cc
 +++ b/ipc/ipc_message_utils.cc
-@@ -423,7 +423,8 @@ void ParamTraits<unsigned int>::Log(const param_type& p, std::string* l) {
+@@ -424,7 +424,8 @@ void ParamTraits<unsigned int>::Log(const param_type& p, std::string* l) {
  }
  
  #if defined(OS_WIN) || defined(OS_LINUX) || \
@@ -358717,7 +359170,7 @@ index 0000000000000000000000000000000000000000..1941a11f8ce94389160b458927a29ba2
 +OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 diff --git a/native_client/DEPS b/native_client/DEPS
 new file mode 100644
-index 0000000000000000000000000000000000000000..e70efd140e4e815a80cb34e2f6aa15143c65d801
+index 0000000000000000000000000000000000000000..eb0353230171a641f0f59f8217bf538052964d78
 --- /dev/null
 +++ b/native_client/DEPS
 @@ -0,0 +1,267 @@
@@ -358731,13 +359184,13 @@ index 0000000000000000000000000000000000000000..e70efd140e4e815a80cb34e2f6aa1514
 +  # directories contain commits at each revision, you will need to select
 +  # revisions at latest revision up to a high watermark from each slice.
 +  # Document the high watermark here:
-+  # chrome_rev: 391106
-+  "build_rev": "2d2c819fe089c3e31f3dd9d3c69c5ec24318dc78", # from cr commit position 391106
-+  "binutils_rev": "3a125b5a41761bc85d71aa4a478f88d667712267", # from cr commit position 378721
++  # chrome_rev: 396528
++  "build_rev": "a3802f0af222b2bcce4925e8df9b019f5a7f0263", # from cr commit position 396479
++  "binutils_rev": "8d77853bc9415bcb7bb4206fa2901de7603387db", # from cr commit position 392828
 +  "libcxx_static_rev": "fd8f9a82862aa40dab0c5bcdea6e498715284f5a", # from cr commit position 369150
 +  # NOTE: be sure to update clang_lib_version in SConstruct whenever
 +  # updating this clang_rev (e.g., if LLVM changes from version 3.7 to 3.8).
-+  "clang_rev": "a14766ac344d97871f75e60c4dd39385a6cd2865", # from cr commit position 390875
++  "clang_rev": "ef8e028ea0f0fdf3be7be6e817e5c26c8ba7aebe", # from cr commit position 396388
 +
 +  # NOTE!  These five should be kept up to date with their counterparts in
 +  # chromium/src/DEPS.
@@ -358746,12 +359199,12 @@ index 0000000000000000000000000000000000000000..e70efd140e4e815a80cb34e2f6aa1514
 +  # in the build that goes into Chromium.  But we might as well update it too.)
 +  # You should now use the roll-dep script in depot_tools to do this update.
 +  "gtest_rev": "6f8a66431cb592dad629028a50b3dd418a408c87",
-+  "gyp_rev": "e24c83726b7294179f479a683eeb351568fcc4ee",
++  "gyp_rev": "bce1c7793010574d88d7915e2d55395213ac63d1",
 +  "breakpad_rev": "a4eb2e302cefff9908ec955e761fef5d813d1b00", # from svn revision 1416
 +  # Three lines of non-changing comments so that
 +  # the commit queue can handle CLs rolling build tools
 +  # and whatever else without interference from each other.
-+  'buildtools_revision': 'b4232ffa4e00eb04cb76deffe9a0c19e9b2e0e65',
++  'buildtools_revision': '06e80a0e17319868d4a9b13f9bb6a248dc8d8b20',
 +  # Three lines of non-changing comments so that
 +  # the commit queue can handle CLs rolling lss
 +  # and whatever else without interference from each other.
@@ -412453,7 +412906,7 @@ index 0000000000000000000000000000000000000000..c036d610c5ffbe4bd9f462cf77ea42af
 +This directory contains configuration files for infra services.
 diff --git a/native_client/infra/config/cq.cfg b/native_client/infra/config/cq.cfg
 new file mode 100644
-index 0000000000000000000000000000000000000000..fddd42d00f05a9375d07bdf4cbc0f7af3b1ac7c3
+index 0000000000000000000000000000000000000000..19c1481c7d2039ec2b61cd84efea4496b3408346
 --- /dev/null
 +++ b/native_client/infra/config/cq.cfg
 @@ -0,0 +1,59 @@
@@ -412480,7 +412933,7 @@ index 0000000000000000000000000000000000000000..fddd42d00f05a9375d07bdf4cbc0f7af
 +
 +  try_job {
 +    buckets {
-+      name: "tryserver.nacl"
++      name: "master.tryserver.nacl"
 +      builders { name: "nacl-arm_opt_panda" }
 +      builders { name: "nacl-arm_perf_panda" }
 +      builders { name: "nacl-mac_arm_newlib_opt" }
@@ -414782,10 +415235,10 @@ index 0000000000000000000000000000000000000000..81b654bd2c5e195f185f9ba0e04e78fb
 +TempFiles = TempFileHandler()
 diff --git a/native_client/pnacl/driver/driver_tools.py b/native_client/pnacl/driver/driver_tools.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..0cb1701d10731dc43435d11a7709e5152a815c72
+index 0000000000000000000000000000000000000000..1bdb943c8230d488c18e6b8d38ba6033f03e4206
 --- /dev/null
 +++ b/native_client/pnacl/driver/driver_tools.py
-@@ -0,0 +1,889 @@
+@@ -0,0 +1,891 @@
 +#!/usr/bin/python
 +# Copyright (c) 2012 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -415148,6 +415601,8 @@ index 0000000000000000000000000000000000000000..0cb1701d10731dc43435d11a7709e515
 +  while i < len(argv):
 +    if ShouldExpandCommandFile(argv[i]):
 +      argv = DoExpandCommandFile(argv, i)
++      if i >= len(argv):
++        break
 +    num_matched, action, groups = MatchOne(argv, i, patternlist)
 +    if num_matched == 0:
 +      unmatched.append(argv[i])
@@ -420230,65 +420685,3 @@ index 0000000000000000000000000000000000000000..0abbff235451220cc3cab8a55c679192
 +[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 1d8592cc9f02cc9aeaef992c296376a8fd4c8761
 +[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 84c8183a55ddc46a4c2be03eef840cceb83d6bcb
 +[GIT] https://chromium.googlesource.com/native_client/nacl-newlib.git: 4e25c2883f51b43758f44ffcc6abb31b8680fb7c
-diff --git a/native_client/pnacl/driver/tests/default_output_filename_test.py b/native_client/pnacl/driver/tests/default_output_filename_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..22c8525c028172aad5ba365dffb2d95cee1a87c8
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/default_output_filename_test.py
-@@ -0,0 +1,56 @@
-+#!/usr/bin/python
-+# Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Tests of the pnacl driver.
-+
-+Test that the driver is able to pick a default filename if "-o" is not given.
-+"""
-+
-+import os
-+import tempfile
-+import unittest
-+
-+from driver_env import env
-+import driver_test_utils
-+import driver_tools
-+pnacl_driver = __import__("pnacl-driver")
-+
-+
-+class TestDefaultOutputFilename(driver_test_utils.DriverTesterCommon):
-+
-+  def setUp(self):
-+    super(TestDefaultOutputFilename, self).setUp()
-+    driver_test_utils.ApplyTestEnvOverrides(env)
-+    env.set('SHARED', '0')
-+    # Driver mode flags to test.  Having no mode flag at all is expected to
-+    # generate an a.out file, but that is currently hard to test
-+    # without actually running clang, the bitcode linker, pnacl-llc, then
-+    # the native linker.
-+    self.driver_flags = ['-E', '-S', '-c']
-+
-+  def test_bitcode_result(self):
-+    """ Test the default output filename when generating bitcode. """
-+    # Output filename should only take the basename, which will end up
-+    # dumping the output to the PWD instead of the directory of the source.
-+    # Thus the result for |base| should be the same as for |in_dir|.
-+    base = 'foo.c'
-+    in_dir = '/tmp/bar/foo.c'
-+    # Expected results for each of self.driver_flags.
-+    # -E is the only one that prints to stdout, via a '-'.
-+    expected_results = ['-', 'foo.ll', 'foo.o']
-+    for f, exp in zip(self.driver_flags, expected_results):
-+      outtype = pnacl_driver.DriverOutputTypes(f, False)
-+      self.assertTrue(driver_tools.DefaultOutputName(base, outtype) == exp)
-+      self.assertTrue(driver_tools.DefaultOutputName(in_dir, outtype) == exp)
-+
-+  def test_native_result(self):
-+    """ Test the default output filename when generating native code. """
-+    base = 'foo.c'
-+    in_dir = '/tmp/bar/foo.c'
-+    expected_results = ['-', 'foo.s', 'foo.o']
-+    for f, exp in zip(self.driver_flags, expected_results):
-+      outtype = pnacl_driver.DriverOutputTypes(f, True)
-+      self.assertTrue(driver_tools.DefaultOutputName(base, outtype) == exp)
-+      self.assertTrue(driver_tools.DefaultOutputName(in_dir, outtype) == exp)
