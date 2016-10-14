@@ -1,8 +1,8 @@
 diff --git a/extensions/browser/api/app_window/app_window_api.cc b/extensions/browser/api/app_window/app_window_api.cc
-index e5dd713972400fee3538a8dbe2bb5fc589249f38..9e3c7b8316708633ee6c07920c56d0221fb2236d 100644
+index 05650e924e8f17ebe468697cd3f1086f71742b17..2b29868e9b3f144ecb0e00ed04b0fa3076c18f3b 100644
 --- a/extensions/browser/api/app_window/app_window_api.cc
 +++ b/extensions/browser/api/app_window/app_window_api.cc
-@@ -153,6 +153,12 @@ bool AppWindowCreateFunction::RunAsync() {
+@@ -156,6 +156,12 @@ bool AppWindowCreateFunction::RunAsync() {
    AppWindow::CreateParams create_params;
    app_window::CreateWindowOptions* options = params->options.get();
    if (options) {
@@ -15,9 +15,9 @@ index e5dd713972400fee3538a8dbe2bb5fc589249f38..9e3c7b8316708633ee6c07920c56d022
      if (options->id.get()) {
        // TODO(mek): use URL if no id specified?
        // Limit length of id to 256 characters.
-@@ -195,6 +201,12 @@ bool AppWindowCreateFunction::RunAsync() {
+@@ -199,6 +205,12 @@ bool AppWindowCreateFunction::RunAsync() {
            result->Set("frameId", new base::FundamentalValue(frame_id));
-           existing_window->GetSerializedState(result);
+           existing_window->GetSerializedState(result.get());
            result->SetBoolean("existingWindow", true);
 +
 +          if (options->ext_data.get()) {
@@ -25,43 +25,43 @@ index e5dd713972400fee3538a8dbe2bb5fc589249f38..9e3c7b8316708633ee6c07920c56d022
 +                        new base::StringValue(*options->ext_data.get()));
 +          }
 +
-           SetResult(result);
+           SetResult(std::move(result));
            SendResponse(true);
            return true;
-@@ -368,6 +380,10 @@ bool AppWindowCreateFunction::RunAsync() {
-     return true;
-   }
- 
+@@ -362,6 +374,9 @@ bool AppWindowCreateFunction::RunAsync() {
+   result->Set("frameId", new base::FundamentalValue(frame_id));
+   result->Set("id", new base::StringValue(app_window->window_key()));
+   app_window->GetSerializedState(result.get());
 +  if (options && options->ext_data.get()) {
 +    result->Set("extData", new base::StringValue(*options->ext_data.get()));
 +  }
+   SetResult(std::move(result));
+ 
+   if (AppWindowRegistry::Get(browser_context())
+@@ -372,6 +387,7 @@ bool AppWindowCreateFunction::RunAsync() {
+     return true;
+   }
+ 
 +
    // PlzNavigate: delay sending the response until the newly created window has
    // been told to navigate, and blink has been correctly initialized in the
    // renderer.
 diff --git a/extensions/browser/api/guest_view/guest_view_internal_api.cc b/extensions/browser/api/guest_view/guest_view_internal_api.cc
-index cfd2d0ea65e8fd309f1ec5503a73d718b4bdb396..b2c40e284696dd2029a686779ba775cd234281e7 100644
+index bc02ed97f3340902b97ce7a35c0d8fe895f7de9b..523d87a04e110db762f4bcf5b7a469bbba169555 100644
 --- a/extensions/browser/api/guest_view/guest_view_internal_api.cc
 +++ b/extensions/browser/api/guest_view/guest_view_internal_api.cc
-@@ -4,6 +4,8 @@
- 
- #include "extensions/browser/api/guest_view/guest_view_internal_api.h"
- 
-+#include "chrome/browser/extensions/extension_tab_util.h"
-+#include "chrome/browser/profiles/profile.h"
- #include "components/guest_view/browser/guest_view_base.h"
- #include "components/guest_view/browser/guest_view_manager.h"
- #include "components/guest_view/browser/guest_view_manager_delegate.h"
-@@ -14,6 +16,8 @@
+@@ -16,6 +16,10 @@
  #include "extensions/common/api/guest_view_internal.h"
  #include "extensions/common/permissions/permissions_data.h"
  
 +#include "app/vivaldi_apptools.h"
++#include "chrome/browser/extensions/extension_tab_util.h"
++#include "chrome/browser/profiles/profile.h"
 +
  using guest_view::GuestViewBase;
  using guest_view::GuestViewManager;
  using guest_view::GuestViewManagerDelegate;
-@@ -57,6 +61,24 @@ bool GuestViewInternalCreateGuestFunction::RunAsync() {
+@@ -59,6 +63,24 @@ bool GuestViewInternalCreateGuestFunction::RunAsync() {
    // in logical units.
    create_params->SetBoolean(guest_view::kElementSizeIsLogical, true);
  
@@ -86,7 +86,7 @@ index cfd2d0ea65e8fd309f1ec5503a73d718b4bdb396..b2c40e284696dd2029a686779ba775cd
    guest_view_manager->CreateGuest(view_type,
                                    sender_web_contents,
                                    *create_params,
-@@ -70,8 +92,11 @@ void GuestViewInternalCreateGuestFunction::CreateGuestCallback(
+@@ -72,8 +94,11 @@ void GuestViewInternalCreateGuestFunction::CreateGuestCallback(
    int content_window_id = MSG_ROUTING_NONE;
    if (guest_web_contents) {
      GuestViewBase* guest = GuestViewBase::FromWebContents(guest_web_contents);
@@ -98,7 +98,7 @@ index cfd2d0ea65e8fd309f1ec5503a73d718b4bdb396..b2c40e284696dd2029a686779ba775cd
    }
    std::unique_ptr<base::DictionaryValue> return_params(
        new base::DictionaryValue());
-@@ -95,6 +120,14 @@ bool GuestViewInternalDestroyGuestFunction::RunAsync() {
+@@ -97,6 +122,15 @@ bool GuestViewInternalDestroyGuestFunction::RunAsync() {
    EXTENSION_FUNCTION_VALIDATE(params.get());
    GuestViewBase* guest = GuestViewBase::From(
        render_frame_host()->GetProcess()->GetID(), params->instance_id);
@@ -107,6 +107,7 @@ index cfd2d0ea65e8fd309f1ec5503a73d718b4bdb396..b2c40e284696dd2029a686779ba775cd
 +    // In Vivaldi guests share the |WebContents| with the tabstrip, and
 +    // can be destroyed when the WebContentsDestroyed is called. So this
 +    // is not an error.
++    SendResponse(true);
 +    return true;
 +  }
 +
@@ -114,10 +115,10 @@ index cfd2d0ea65e8fd309f1ec5503a73d718b4bdb396..b2c40e284696dd2029a686779ba775cd
      return false;
    guest->Destroy();
 diff --git a/extensions/browser/api/guest_view/web_view/web_view_internal_api.cc b/extensions/browser/api/guest_view/web_view/web_view_internal_api.cc
-index f1ffb063ee9225ada095a54848bff22fe3be6e3c..2fbd1449727c469152fc62a5e9cfd45e2e527f10 100644
+index 3b5507924683c1683bb1d7957c695d4857c4d6fc..9d8878d604c960f243941706eb5021e84943702b 100644
 --- a/extensions/browser/api/guest_view/web_view/web_view_internal_api.cc
 +++ b/extensions/browser/api/guest_view/web_view/web_view_internal_api.cc
-@@ -254,6 +254,10 @@ bool WebViewInternalExtensionFunction::RunAsync() {
+@@ -255,6 +255,10 @@ bool LegacyWebViewInternalExtensionFunction::RunAsync() {
        render_frame_host()->GetProcess()->GetID(), instance_id);
    if (!guest)
      return false;
@@ -128,17 +129,17 @@ index f1ffb063ee9225ada095a54848bff22fe3be6e3c..2fbd1449727c469152fc62a5e9cfd45e
  
    return RunAsyncSafe(guest);
  }
-@@ -328,7 +332,8 @@ bool WebViewInternalNavigateFunction::RunAsyncSafe(WebViewGuest* guest) {
+@@ -344,7 +348,8 @@ ExtensionFunction::ResponseAction WebViewInternalNavigateFunction::Run() {
        web_view_internal::Navigate::Params::Create(*args_));
    EXTENSION_FUNCTION_VALIDATE(params.get());
    std::string src = params->src;
--  guest->NavigateGuest(src, true /* force_navigation */);
+-  guest_->NavigateGuest(src, true /* force_navigation */);
 +  bool wasTyped = *params->was_typed;
-+  guest->NavigateGuest(src, true /* force_navigation */, wasTyped);
-   return true;
++  guest_->NavigateGuest(src, true /* force_navigation */, wasTyped);
+   return RespondNow(NoArguments());
  }
  
-@@ -358,6 +363,8 @@ bool WebViewInternalExecuteCodeFunction::Init() {
+@@ -373,6 +378,8 @@ bool WebViewInternalExecuteCodeFunction::Init() {
    // which will result in the usual LOAD_ABORT event in the case where
    // the URL is invalid.
    guest_src_ = GURL(src);
@@ -148,7 +149,7 @@ index f1ffb063ee9225ada095a54848bff22fe3be6e3c..2fbd1449727c469152fc62a5e9cfd45e
    base::DictionaryValue* details_value = NULL;
    if (!args_->GetDictionary(2, &details_value))
 diff --git a/extensions/browser/api/management/management_api.cc b/extensions/browser/api/management/management_api.cc
-index a1695195ab598e9f5e21203d3055dad04754d9ef..4ba9e2e71bcf1f3652b3f5485cf83a7398dff79c 100644
+index 7c690102b877f3f09991450eef20e7ce89d0543a..9087a149c545a6ee2de97f12a97a2c9a5f20a02c 100644
 --- a/extensions/browser/api/management/management_api.cc
 +++ b/extensions/browser/api/management/management_api.cc
 @@ -9,6 +9,7 @@
@@ -159,7 +160,7 @@ index a1695195ab598e9f5e21203d3055dad04754d9ef..4ba9e2e71bcf1f3652b3f5485cf83a73
  #include "base/bind.h"
  #include "base/json/json_writer.h"
  #include "base/lazy_instance.h"
-@@ -397,7 +398,8 @@ bool ManagementLaunchAppFunction::RunSync() {
+@@ -401,7 +402,8 @@ bool ManagementLaunchAppFunction::RunSync() {
          ErrorUtils::FormatErrorMessage(keys::kNoExtensionError, params->id);
      return false;
    }
@@ -170,7 +171,7 @@ index a1695195ab598e9f5e21203d3055dad04754d9ef..4ba9e2e71bcf1f3652b3f5485cf83a73
      return false;
    }
 diff --git a/extensions/browser/api/storage/storage_frontend.cc b/extensions/browser/api/storage/storage_frontend.cc
-index 1e60c44b74743ec05e356c301c4c89d1c3089eaa..57e9e47298eb6c8dc34f9b3e45fc2e6d117d5b42 100644
+index 0f1ceed3dcafb014dabdf3b6325b3ec3696eacc8..82ce1741b1b0718dd4db5e706a60f242dd861af1 100644
 --- a/extensions/browser/api/storage/storage_frontend.cc
 +++ b/extensions/browser/api/storage/storage_frontend.cc
 @@ -49,6 +49,9 @@ class DefaultObserver : public SettingsObserver {
@@ -180,14 +181,14 @@ index 1e60c44b74743ec05e356c301c4c89d1c3089eaa..57e9e47298eb6c8dc34f9b3e45fc2e6d
 +    if (*(args->begin()) == NULL)
 +      args->Set(0,base::JSONReader::Read("{}"));
 +
-     args->Append(new base::StringValue(settings_namespace::ToString(
-         settings_namespace)));
+     args->AppendString(settings_namespace::ToString(settings_namespace));
      std::unique_ptr<Event> event(new Event(events::STORAGE_ON_CHANGED,
+                                            api::storage::OnChanged::kEventName,
 diff --git a/extensions/browser/api/web_contents_capture_client.cc b/extensions/browser/api/web_contents_capture_client.cc
-index 97b8436f495be99036efc386c83d0640072a4a62..5e2f0553e0d0964082288e3e0e112b4a6a80559d 100644
+index 04f7c96e1cb974d07fb132731e6b8c2f5c54f60d..af4521bf5ff0af4f29dfce397af4ee7c4a841512 100644
 --- a/extensions/browser/api/web_contents_capture_client.cc
 +++ b/extensions/browser/api/web_contents_capture_client.cc
-@@ -21,6 +21,9 @@ using content::RenderWidgetHost;
+@@ -22,6 +22,9 @@ using content::RenderWidgetHost;
  using content::RenderWidgetHostView;
  using content::WebContents;
  
@@ -197,7 +198,7 @@ index 97b8436f495be99036efc386c83d0640072a4a62..5e2f0553e0d0964082288e3e0e112b4a
  namespace extensions {
  
  using api::extension_types::ImageDetails;
-@@ -57,7 +60,22 @@ bool WebContentsCaptureClient::CaptureAsync(
+@@ -58,7 +61,22 @@ bool WebContentsCaptureClient::CaptureAsync(
      OnCaptureFailure(FAILURE_REASON_VIEW_INVISIBLE);
      return false;
    }
@@ -221,7 +222,7 @@ index 97b8436f495be99036efc386c83d0640072a4a62..5e2f0553e0d0964082288e3e0e112b4a
    // By default, the requested bitmap size is the view size in screen
    // coordinates.  However, if there's more pixel detail available on the
    // current system, increase the requested bitmap size to capture it all.
-@@ -72,6 +90,7 @@ bool WebContentsCaptureClient::CaptureAsync(
+@@ -73,6 +91,7 @@ bool WebContentsCaptureClient::CaptureAsync(
  
    host->CopyFromBackingStore(gfx::Rect(view_size), bitmap_size, callback,
                               kN32_SkColorType);
@@ -257,10 +258,10 @@ index 72b1376af4b73f8c596a6b5fca14825b7be43bb6..669bfda95e939be629497e676badcf11
    return event.type == blink::WebGestureEvent::GesturePinchBegin ||
           event.type == blink::WebGestureEvent::GesturePinchUpdate ||
 diff --git a/extensions/browser/app_window/app_window.cc b/extensions/browser/app_window/app_window.cc
-index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd7223600c 100644
+index f3d2b98a37d92fd51fdf2eec21ceb2bd973fddbe..45562e2e933f0573891e7ad4bed3ed5fb6b0d2ff 100644
 --- a/extensions/browser/app_window/app_window.cc
 +++ b/extensions/browser/app_window/app_window.cc
-@@ -19,6 +19,11 @@
+@@ -20,6 +20,11 @@
  #include "base/threading/thread_task_runner_handle.h"
  #include "base/values.h"
  #include "build/build_config.h"
@@ -268,11 +269,11 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
 +#include "chrome/browser/ui/tabs/tab_utils.h"
 +#include "components/guest_view/browser/guest_view_base.h"
 +#include "components/guest_view/browser/guest_view_event.h"
-+#include "components/ui/zoom/zoom_controller.h"
++#include "components/zoom/zoom_controller.h"
  #include "components/web_modal/web_contents_modal_dialog_manager.h"
  #include "content/public/browser/browser_context.h"
  #include "content/public/browser/invalidate_type.h"
-@@ -41,6 +46,7 @@
+@@ -42,6 +47,7 @@
  #include "extensions/browser/extension_system.h"
  #include "extensions/browser/extension_web_contents_observer.h"
  #include "extensions/browser/extensions_browser_client.h"
@@ -280,7 +281,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
  #include "extensions/browser/notification_types.h"
  #include "extensions/browser/process_manager.h"
  #include "extensions/browser/suggest_permission_util.h"
-@@ -51,6 +57,7 @@
+@@ -52,6 +58,7 @@
  #include "extensions/common/permissions/permissions_data.h"
  #include "extensions/common/switches.h"
  #include "extensions/grit/extensions_browser_resources.h"
@@ -288,7 +289,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
  #include "third_party/skia/include/core/SkRegion.h"
  #include "ui/base/resource/resource_bundle.h"
  #include "ui/display/display.h"
-@@ -62,6 +69,15 @@
+@@ -63,6 +70,15 @@
  #include "extensions/browser/pref_names.h"
  #endif
  
@@ -304,7 +305,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
  using content::BrowserContext;
  using content::ConsoleMessageLevel;
  using content::WebContents;
-@@ -250,6 +266,7 @@ AppWindow::AppWindow(BrowserContext* context,
+@@ -251,6 +267,7 @@ AppWindow::AppWindow(BrowserContext* context,
        has_been_shown_(false),
        can_send_events_(false),
        is_hidden_(false),
@@ -312,13 +313,13 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
        delayed_show_type_(SHOW_ACTIVE),
        cached_always_on_top_(false),
        requested_alpha_enabled_(false),
-@@ -282,12 +299,41 @@ void AppWindow::Init(const GURL& url,
+@@ -283,12 +300,41 @@ void AppWindow::Init(const GURL& url,
    web_contents()->SetDelegate(this);
    WebContentsModalDialogManager::FromWebContents(web_contents())
        ->SetDelegate(this);
 +  if (vivaldi::IsVivaldiRunning()) {
 +    extensions::VivaldiAppHelper::CreateForWebContents(web_contents());
-+    ui_zoom::ZoomController::CreateForWebContents(web_contents());
++    zoom::ZoomController::CreateForWebContents(web_contents());
 +  }
  
    // Initialize the window
@@ -354,7 +355,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
    // Windows cannot be always-on-top in fullscreen mode for security reasons.
    cached_always_on_top_ = new_params.always_on_top;
    if (new_params.state == ui::SHOW_STATE_FULLSCREEN)
-@@ -307,10 +353,29 @@ void AppWindow::Init(const GURL& url,
+@@ -308,10 +354,29 @@ void AppWindow::Init(const GURL& url,
    UpdateExtensionAppIcon();
    AppWindowRegistry::Get(browser_context_)->AddAppWindow(this);
  
@@ -384,7 +385,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
    } else {
      // Panels are not activated by default.
      Show(window_type_is_panel() || !new_params.focused ? SHOW_INACTIVE
-@@ -515,6 +580,10 @@ void AppWindow::OnNativeWindowChanged() {
+@@ -523,6 +588,10 @@ void AppWindow::OnNativeWindowChanged() {
    }
  #endif
  
@@ -395,7 +396,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
    if (app_window_contents_)
      app_window_contents_->NativeWindowChanged(native_app_window_.get());
  }
-@@ -692,6 +761,13 @@ void AppWindow::Show(ShowType show_type) {
+@@ -700,6 +769,13 @@ void AppWindow::Show(ShowType show_type) {
      }
    }
  
@@ -409,7 +410,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
    switch (show_type) {
      case SHOW_ACTIVE:
        GetBaseWindow()->Show();
-@@ -704,6 +780,8 @@ void AppWindow::Show(ShowType show_type) {
+@@ -712,6 +788,8 @@ void AppWindow::Show(ShowType show_type) {
  
    has_been_shown_ = true;
    SendOnWindowShownIfShown();
@@ -418,7 +419,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
  }
  
  void AppWindow::Hide() {
-@@ -1001,6 +1079,10 @@ void AppWindow::SetWebContentsBlocked(content::WebContents* web_contents,
+@@ -1009,6 +1087,10 @@ void AppWindow::SetWebContentsBlocked(content::WebContents* web_contents,
  }
  
  bool AppWindow::IsWebContentsVisible(content::WebContents* web_contents) {
@@ -429,7 +430,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
    return app_delegate_->IsWebContentsVisible(web_contents);
  }
  
-@@ -1065,6 +1147,10 @@ AppWindow::CreateParams AppWindow::LoadDefaults(CreateParams params)
+@@ -1073,6 +1155,10 @@ AppWindow::CreateParams AppWindow::LoadDefaults(CreateParams params)
        params.window_spec.bounds.height() == 0) {
      params.content_spec.bounds.set_height(kDefaultHeight);
    }
@@ -441,7 +442,7 @@ index 491332212f3c2810cb5af51245e3395684e8e0fe..6ce9b9334225052dd86cc29e786a51cd
    // If left and top are left undefined, the native app window will center
    // the window on the main screen in a platform-defined manner.
 diff --git a/extensions/browser/app_window/app_window.h b/extensions/browser/app_window/app_window.h
-index e503669ab1f476586879c380811416416f0bf060..6ea5dd3a495a1ef3988e56ecb2c335237bf8f837 100644
+index 52c9034ad52ca0f1e4d6b1c56cf4a9945112a3a0..b3253c9b4f030eeebd41acfa121ee52eec172839 100644
 --- a/extensions/browser/app_window/app_window.h
 +++ b/extensions/browser/app_window/app_window.h
 @@ -45,6 +45,7 @@ class AppWebContentsHelper;
@@ -467,7 +468,7 @@ index e503669ab1f476586879c380811416416f0bf060..6ea5dd3a495a1ef3988e56ecb2c33523
      // The API enables developers to specify content or window bounds. This
      // function combines them into a single, constrained window size.
      gfx::Rect GetInitialWindowBounds(const gfx::Insets& frame_insets) const;
-@@ -551,6 +560,8 @@ class AppWindow : public content::WebContentsDelegate,
+@@ -554,6 +563,8 @@ class AppWindow : public content::WebContentsDelegate,
    // hidden, are considered hidden.
    bool is_hidden_;
  
@@ -477,11 +478,11 @@ index e503669ab1f476586879c380811416416f0bf060..6ea5dd3a495a1ef3988e56ecb2c33523
    ShowType delayed_show_type_;
  
 diff --git a/extensions/browser/extension_event_histogram_value.h b/extensions/browser/extension_event_histogram_value.h
-index cb2b38f2be05ce572828dcb064397377cd0139fa..a9fec98308bb4c386b57e9a1090192d96fe4ef65 100644
+index c4eed8f652a9341ef418863ed5100c47ec1d2e98..73e5ce1787e7fd21eb29a19e265848c46e4a3fe6 100644
 --- a/extensions/browser/extension_event_histogram_value.h
 +++ b/extensions/browser/extension_event_histogram_value.h
-@@ -422,6 +422,10 @@ enum HistogramValue {
-   ACCESSIBILITY_PRIVATE_ON_ACCESSIBILITY_GESTURE,
+@@ -423,6 +423,10 @@ enum HistogramValue {
+   QUICK_UNLOCK_PRIVATE_ON_ACTIVE_MODES_CHANGED,
    // Last entry: Add new entries above, then run:
    // python tools/metrics/histograms/update_extension_histograms.py
 +
@@ -492,18 +493,18 @@ index cb2b38f2be05ce572828dcb064397377cd0139fa..a9fec98308bb4c386b57e9a1090192d9
  };
  
 diff --git a/extensions/browser/extension_function.cc b/extensions/browser/extension_function.cc
-index fd7bae96ceb8a557067d7079a91341d16c8b4a91..1ca33ca839f03e547d0f5a94b5677e4ec67f8b37 100644
+index 8f737df200df1c93f460422afb50ebb1464137aa..86e8377fa2d20194ce4f3e72eeb4a71d4b6d151e 100644
 --- a/extensions/browser/extension_function.cc
 +++ b/extensions/browser/extension_function.cc
-@@ -12,6 +12,7 @@
- #include "base/memory/singleton.h"
+@@ -13,6 +13,7 @@
  #include "base/metrics/histogram_macros.h"
+ #include "base/metrics/sparse_histogram.h"
  #include "base/synchronization/lock.h"
 +#include "chrome/common/url_constants.h"
  #include "content/public/browser/notification_source.h"
  #include "content/public/browser/notification_types.h"
  #include "content/public/browser/render_frame_host.h"
-@@ -243,6 +244,12 @@ IOThreadExtensionFunction* ExtensionFunction::AsIOThreadExtensionFunction() {
+@@ -290,6 +291,12 @@ IOThreadExtensionFunction* ExtensionFunction::AsIOThreadExtensionFunction() {
  }
  
  bool ExtensionFunction::HasPermission() {
@@ -517,11 +518,11 @@ index fd7bae96ceb8a557067d7079a91341d16c8b4a91..1ca33ca839f03e547d0f5a94b5677e4e
        ExtensionAPI::GetSharedInstance()->IsAvailable(
            name_, extension_.get(), source_context_type_, source_url());
 diff --git a/extensions/browser/extension_function_histogram_value.h b/extensions/browser/extension_function_histogram_value.h
-index 1884272d3b407265a2c8398a7660e7596b55664b..9ac1af57ce9b5f8d5e2c26424c29bfcc0bd7e2ef 100644
+index a1331f8f0b28b24b27ba2c7f08a1d9e06442001e..11c6ddb187a7fd9d8a242f5855a8ded16a7ba4b3 100644
 --- a/extensions/browser/extension_function_histogram_value.h
 +++ b/extensions/browser/extension_function_histogram_value.h
-@@ -1190,6 +1190,10 @@ enum HistogramValue {
-   BLUETOOTHLOWENERGY_REMOVESERVICE,
+@@ -1203,6 +1203,10 @@ enum HistogramValue {
+   QUICKUNLOCKPRIVATE_GETAVAILABLEMODES,
    // Last entry: Add new entries above, then run:
    // python tools/metrics/histograms/update_extension_histograms.py
 +
@@ -723,7 +724,7 @@ index 3e30c9abcf81ef75c414f4460e3594c5ff19df80..d5432412d748b8d41c67cdbce56e1ccf
    // this through the host_contents because we want to deal with the pending
    // host, so we can send messages to it before it finishes loading.
 diff --git a/extensions/browser/extension_protocols.cc b/extensions/browser/extension_protocols.cc
-index c97f172607acbc2650537d6895a60a5704da4208..142fa88ae446bc7ce9c4fb925fc605146472057e 100644
+index cd222be43f5063309a1d16f9b491b9bbcf6a0b68..2ce08c87ce7461e42b47e484b9bdb7027be51653 100644
 --- a/extensions/browser/extension_protocols.cc
 +++ b/extensions/browser/extension_protocols.cc
 @@ -11,6 +11,7 @@
@@ -734,7 +735,7 @@ index c97f172607acbc2650537d6895a60a5704da4208..142fa88ae446bc7ce9c4fb925fc60514
  #include "base/base64.h"
  #include "base/compiler_specific.h"
  #include "base/files/file_path.h"
-@@ -344,7 +345,8 @@ bool AllowExtensionResourceLoad(net::URLRequest* request,
+@@ -345,7 +346,8 @@ bool AllowExtensionResourceLoad(net::URLRequest* request,
      return true;
    }
  
@@ -745,7 +746,7 @@ index c97f172607acbc2650537d6895a60a5704da4208..142fa88ae446bc7ce9c4fb925fc60514
      return false;
    }
 diff --git a/extensions/browser/guest_view/extensions_guest_view_manager_delegate.cc b/extensions/browser/guest_view/extensions_guest_view_manager_delegate.cc
-index 8c73d37391da5e247d7113eaa0385b1f68c448bc..d0ea9f796bf21a3f2865acaf839a1ff3cdf2154a 100644
+index 49461b052b5bd3469f3896def332d3c3846c5e59..e14df54bf82036195e38d973fb92f9a92f2e3ce6 100644
 --- a/extensions/browser/guest_view/extensions_guest_view_manager_delegate.cc
 +++ b/extensions/browser/guest_view/extensions_guest_view_manager_delegate.cc
 @@ -57,10 +57,15 @@ void ExtensionsGuestViewManagerDelegate::DispatchEvent(
@@ -779,7 +780,7 @@ index 8e8c739d9723cd42b74917a1202c337fe6b18456..c9ccd2bbd109f157574688b457ef98bd
      for (const auto& name_and_value : names_and_values) {
        values_[name_and_value.name] = name_and_value.value;
 diff --git a/extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.cc b/extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.cc
-index ec15087dcc9d52779e7f90c11dda94dfa0fea1fd..e18336cd0c4d8ff62a3d2d31c9c6940e21fdb7ec 100644
+index 13f7dc39ac68a7086a992370ec7dfc80beecd830..b6b8bfec92545eb34fb58d4eefd362c77794abed 100644
 --- a/extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.cc
 +++ b/extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.cc
 @@ -181,7 +181,8 @@ void MimeHandlerViewGuest::NavigationStateChanged(
@@ -807,7 +808,7 @@ index 6b82c19297de98284afb03ce801bdd9c7283c05e..561dec530138b0f035ffa311e1704542
  
  // Attributes.
 diff --git a/extensions/browser/guest_view/web_view/web_view_guest.cc b/extensions/browser/guest_view/web_view/web_view_guest.cc
-index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb4613a88ad0 100644
+index 2335be015dcd37ca5c2769198fbd46432a68c90d..dcec37d6d8aa9411633ec48a11249ca0e172ad77 100644
 --- a/extensions/browser/guest_view/web_view/web_view_guest.cc
 +++ b/extensions/browser/guest_view/web_view/web_view_guest.cc
 @@ -13,6 +13,9 @@
@@ -820,7 +821,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  #include "components/browsing_data/storage_partition_http_cache_data_remover.h"
  #include "components/guest_view/browser/guest_view_event.h"
  #include "components/guest_view/browser/guest_view_manager.h"
-@@ -64,6 +67,17 @@
+@@ -64,6 +67,20 @@
  #include "ui/events/keycodes/keyboard_codes.h"
  #include "url/url_constants.h"
  
@@ -833,21 +834,15 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
 +#include "components/web_modal/web_contents_modal_dialog_manager.h"
 +#include "extensions/api/extension_action_utils/extension_action_utils_api.h"
 +#include "prefs/vivaldi_pref_names.h"
++
++using vivaldi::IsVivaldiApp;
++using vivaldi::IsVivaldiRunning;
 +#endif // VIVALDI_BUILD
 +
  using base::UserMetricsAction;
  using content::GlobalRequestID;
  using content::RenderFrameHost;
-@@ -75,6 +89,8 @@ using guest_view::GuestViewBase;
- using guest_view::GuestViewEvent;
- using guest_view::GuestViewManager;
- using ui_zoom::ZoomController;
-+using vivaldi::IsVivaldiApp;
-+using vivaldi::IsVivaldiRunning;
- 
- namespace extensions {
- 
-@@ -117,6 +133,8 @@ std::string WindowOpenDispositionToString(
+@@ -117,6 +134,8 @@ std::string WindowOpenDispositionToString(
        return "new_window";
      case NEW_POPUP:
        return "new_popup";
@@ -856,7 +851,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
      default:
        NOTREACHED() << "Unknown Window Open Disposition";
        return "ignore";
-@@ -338,12 +356,21 @@ void WebViewGuest::CreateWebContents(
+@@ -338,12 +357,21 @@ void WebViewGuest::CreateWebContents(
    std::string url_encoded_partition = net::EscapeQueryParamValue(
        storage_partition_id, false);
    std::string partition_domain = GetOwnerSiteURL().host();
@@ -879,7 +874,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
    // If we already have a webview tag in the same app using the same storage
    // partition, we should use the same SiteInstance so the existing tag and
    // the new tag can script each other.
-@@ -362,11 +389,99 @@ void WebViewGuest::CreateWebContents(
+@@ -362,11 +390,101 @@ void WebViewGuest::CreateWebContents(
        owner_render_process_host->GetBrowserContext(),
        std::move(guest_site_instance));
    params.guest_delegate = this;
@@ -921,8 +916,6 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
 +
 +        newcontents = WebContents::Create(params);
 +
-+        newcontents->GetController().SetBrowserContext(params.browser_context);
-+
 +        // copy extdata, tab-tiling information, tab id etc.
 +        newcontents->SetExtData(tabstrip_contents->GetExtData());
 +
@@ -958,7 +951,11 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
 +    WebContents::CreateParams params =
 +        GetWebContentsCreateParams(context, guest_site);
 +    newcontents = WebContents::Create(params);
-+    newcontents->GetController().SetBrowserContext(context);
++    // NOTE(andre@vivaldi.com): This is to set up loading when the webview is
++    // attached.
++    if (!new_url.empty()) {
++      newcontents->set_delayed_open_url(new std::string(new_url));
++    }
 +  }
 +  if (owner_web_contents()->IsAudioMuted()) {
 +    // NOTE(pettern@vivaldi.com): If the owner is muted it means the webcontents
@@ -980,7 +977,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  }
  
  void WebViewGuest::DidDropLink(const GURL& url) {
-@@ -388,11 +503,30 @@ void WebViewGuest::DidInitialize(const base::DictionaryValue& create_params) {
+@@ -388,11 +506,30 @@ void WebViewGuest::DidInitialize(const base::DictionaryValue& create_params) {
                                content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
                                content::Source<WebContents>(web_contents()));
  
@@ -1011,7 +1008,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
    rules_registry_id_ = GetOrGenerateRulesRegistryID(
        owner_web_contents()->GetRenderProcessHost()->GetID(),
        view_instance_id());
-@@ -448,14 +582,34 @@ int WebViewGuest::GetTaskPrefix() const {
+@@ -448,14 +585,34 @@ int WebViewGuest::GetTaskPrefix() const {
  }
  
  void WebViewGuest::GuestDestroyed() {
@@ -1046,7 +1043,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
    // We don't want to accidentally set the opacity of an interstitial page.
    // WebContents::GetRenderWidgetHostView will return the RWHV of an
    // interstitial page if one is showing at this time. We only want opacity
-@@ -480,8 +634,14 @@ void WebViewGuest::GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
+@@ -480,8 +637,14 @@ void WebViewGuest::GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
    std::unique_ptr<base::DictionaryValue> args(new base::DictionaryValue());
    args->SetInteger(webview::kOldHeight, old_size.height());
    args->SetInteger(webview::kOldWidth, old_size.width());
@@ -1063,7 +1060,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
    DispatchEventToView(base::WrapUnique(
        new GuestViewEvent(webview::kEventSizeChanged, std::move(args))));
  }
-@@ -505,6 +665,9 @@ void WebViewGuest::GuestZoomChanged(double old_zoom_level,
+@@ -505,6 +668,9 @@ void WebViewGuest::GuestZoomChanged(double old_zoom_level,
  void WebViewGuest::WillDestroy() {
    if (!attached() && GetOpener())
      GetOpener()->pending_new_windows_.erase(this);
@@ -1073,7 +1070,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  }
  
  bool WebViewGuest::AddMessageToConsole(WebContents* source,
-@@ -573,11 +736,14 @@ bool WebViewGuest::PreHandleGestureEvent(WebContents* source,
+@@ -573,11 +739,14 @@ bool WebViewGuest::PreHandleGestureEvent(WebContents* source,
  }
  
  void WebViewGuest::LoadProgressChanged(WebContents* source, double progress) {
@@ -1088,7 +1085,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  }
  
  void WebViewGuest::LoadAbort(bool is_top_level,
-@@ -610,6 +776,25 @@ void WebViewGuest::CreateNewGuestWebViewWindow(
+@@ -610,6 +779,25 @@ void WebViewGuest::CreateNewGuestWebViewWindow(
        GetStoragePartitionIdFromSiteURL(site_url);
    base::DictionaryValue create_params;
    create_params.SetString(webview::kStoragePartitionId, storage_partition_id);
@@ -1114,7 +1111,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  
    guest_manager->CreateGuest(WebViewGuest::Type,
                               embedder_web_contents(),
-@@ -780,6 +965,10 @@ WebViewGuest::WebViewGuest(WebContents* owner_web_contents)
+@@ -779,6 +967,10 @@ WebViewGuest::WebViewGuest(WebContents* owner_web_contents)
        is_embedder_fullscreen_(false),
        last_fullscreen_permission_was_allowed_by_embedder_(false),
        pending_zoom_factor_(0.0),
@@ -1125,7 +1122,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
        weak_ptr_factory_(this) {
    web_view_guest_delegate_.reset(
        ExtensionsAPIClient::Get()->CreateWebViewGuestDelegate(this));
-@@ -913,7 +1102,10 @@ void WebViewGuest::PushWebViewStateToIOThread() {
+@@ -912,7 +1104,10 @@ void WebViewGuest::PushWebViewStateToIOThread() {
    bool in_memory;
    if (!GetGuestPartitionConfigForSite(
            site_url, &partition_domain, &partition_id, &in_memory)) {
@@ -1137,7 +1134,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
      return;
    }
  
-@@ -924,6 +1116,7 @@ void WebViewGuest::PushWebViewStateToIOThread() {
+@@ -923,6 +1118,7 @@ void WebViewGuest::PushWebViewStateToIOThread() {
    web_view_info.partition_id = partition_id;
    web_view_info.owner_host = owner_host();
    web_view_info.rules_registry_id = rules_registry_id_;
@@ -1145,7 +1142,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  
    // Get content scripts IDs added by the guest.
    WebViewContentScriptManager* manager =
-@@ -973,8 +1166,11 @@ bool WebViewGuest::CheckMediaAccessPermission(WebContents* source,
+@@ -972,8 +1168,11 @@ bool WebViewGuest::CheckMediaAccessPermission(WebContents* source,
  void WebViewGuest::CanDownload(
      const GURL& url,
      const std::string& request_method,
@@ -1159,7 +1156,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  }
  
  void WebViewGuest::RequestPointerLockPermission(
-@@ -1015,12 +1211,17 @@ content::JavaScriptDialogManager* WebViewGuest::GetJavaScriptDialogManager(
+@@ -1014,12 +1213,17 @@ content::JavaScriptDialogManager* WebViewGuest::GetJavaScriptDialogManager(
  }
  
  void WebViewGuest::NavigateGuest(const std::string& src,
@@ -1178,7 +1175,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
    // We wait for all the content scripts to load and then navigate the guest
    // if the navigation is embedder-initiated. For browser-initiated navigations,
    // content scripts will be ready.
-@@ -1028,24 +1229,34 @@ void WebViewGuest::NavigateGuest(const std::string& src,
+@@ -1027,24 +1231,34 @@ void WebViewGuest::NavigateGuest(const std::string& src,
      SignalWhenReady(
          base::Bind(&WebViewGuest::LoadURLWithParams,
                     weak_ptr_factory_.GetWeakPtr(), url, content::Referrer(),
@@ -1216,7 +1213,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
    // If the user hits the escape key without any modifiers then unlock the
    // mouse if necessary.
    if ((event.windowsKeyCode == ui::VKEY_ESCAPE) &&
-@@ -1132,12 +1343,30 @@ void WebViewGuest::ApplyAttributes(const base::DictionaryValue& params) {
+@@ -1131,12 +1345,30 @@ void WebViewGuest::ApplyAttributes(const base::DictionaryValue& params) {
      }
    }
  
@@ -1247,7 +1244,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  }
  
  void WebViewGuest::ShowContextMenu(int request_id) {
-@@ -1261,6 +1490,7 @@ WebContents* WebViewGuest::OpenURLFromTab(
+@@ -1260,6 +1492,7 @@ WebContents* WebViewGuest::OpenURLFromTab(
    // These can be passed to the embedder's WebContentsDelegate so that the
    // browser performs the action for the <webview>. Navigations to a new
    // tab, etc., are also handled by the WebContentsDelegate.
@@ -1255,7 +1252,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
    if (!params.is_renderer_initiated &&
        (!content::ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
             params.url.scheme()) ||
-@@ -1270,6 +1500,7 @@ WebContents* WebViewGuest::OpenURLFromTab(
+@@ -1269,6 +1502,7 @@ WebContents* WebViewGuest::OpenURLFromTab(
      return owner_web_contents()->GetDelegate()->OpenURLFromTab(
          owner_web_contents(), params);
    }
@@ -1263,7 +1260,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  
    if (!attached()) {
      WebViewGuest* opener = GetOpener();
-@@ -1287,6 +1518,12 @@ WebContents* WebViewGuest::OpenURLFromTab(
+@@ -1286,6 +1520,12 @@ WebContents* WebViewGuest::OpenURLFromTab(
        NewWindowInfo new_window_info(params.url, info.name);
        new_window_info.changed = new_window_info.url != info.url;
        it->second = new_window_info;
@@ -1276,7 +1273,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
        return nullptr;
      }
    }
-@@ -1344,10 +1581,12 @@ void WebViewGuest::EnterFullscreenModeForTab(WebContents* web_contents,
+@@ -1343,10 +1583,12 @@ void WebViewGuest::EnterFullscreenModeForTab(WebContents* web_contents,
    // Calling SetFullscreenState(true) once the embedder allowed the request.
    // Otherwise we would cancel renderer/ fullscreen if the embedder denied.
    SetFullscreenState(true);
@@ -1289,7 +1286,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  }
  
  bool WebViewGuest::IsFullscreenForTabOrPending(
-@@ -1373,6 +1612,16 @@ void WebViewGuest::LoadURLWithParams(
+@@ -1372,6 +1614,16 @@ void WebViewGuest::LoadURLWithParams(
         !url.SchemeIs(url::kAboutScheme)) ||
        url.SchemeIs(url::kJavaScriptScheme);
  
@@ -1306,16 +1303,15 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
    // Do not allow navigating a guest to schemes other than known safe schemes.
    // This will block the embedder trying to load unwanted schemes, e.g.
    // chrome://.
-@@ -1407,16 +1656,40 @@ void WebViewGuest::LoadURLWithParams(
+@@ -1406,16 +1658,40 @@ void WebViewGuest::LoadURLWithParams(
  }
  
  void WebViewGuest::RequestNewWindowPermission(WindowOpenDisposition disposition,
 -                                              const gfx::Rect& initial_bounds,
 +                                              const gfx::Rect &initial_bounds,
                                                bool user_gesture,
--                                              WebContents* new_contents) {
-+                                              WebContents *new_contents) {
-   auto guest = WebViewGuest::FromWebContents(new_contents);
+                                               WebContents* new_contents) {
+   auto* guest = WebViewGuest::FromWebContents(new_contents);
    if (!guest)
      return;
    auto it = pending_new_windows_.find(guest);
@@ -1352,7 +1348,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  
    // Retrieve the opener partition info if we have it.
    const GURL& site_url = new_contents->GetSiteInstance()->GetSiteURL();
-@@ -1436,6 +1709,7 @@ void WebViewGuest::RequestNewWindowPermission(WindowOpenDisposition disposition,
+@@ -1435,6 +1711,7 @@ void WebViewGuest::RequestNewWindowPermission(WindowOpenDisposition disposition,
    request_info.Set(
        webview::kWindowOpenDisposition,
        new base::StringValue(WindowOpenDispositionToString(disposition)));
@@ -1360,7 +1356,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  
    web_view_permission_helper_->
        RequestPermission(WEB_VIEW_PERMISSION_TYPE_NEW_WINDOW,
-@@ -1468,8 +1742,25 @@ void WebViewGuest::OnWebViewNewWindowResponse(
+@@ -1467,8 +1744,25 @@ void WebViewGuest::OnWebViewNewWindowResponse(
    if (!guest)
      return;
  
@@ -1388,7 +1384,7 @@ index 3da0024b090e53eb2b7c5ada1fd220700f409ccc..64c98e0d3ad22a6aabe238631b9ecb46
  
  void WebViewGuest::OnFullscreenPermissionDecided(
 diff --git a/extensions/browser/guest_view/web_view/web_view_guest.h b/extensions/browser/guest_view/web_view/web_view_guest.h
-index 88d0f103d3c70b174c376c4ea2c5c3eb00b8d1eb..60f3f115951f0d5338e901d0da77d5da965faeca 100644
+index f7d686913588e38a24801ab5de415c0b1e4454ae..ec63bf0d67d01fdb763773af47ba4d7dabaefe45 100644
 --- a/extensions/browser/guest_view/web_view/web_view_guest.h
 +++ b/extensions/browser/guest_view/web_view/web_view_guest.h
 @@ -15,6 +15,7 @@
@@ -1411,7 +1407,7 @@ index 88d0f103d3c70b174c376c4ea2c5c3eb00b8d1eb..60f3f115951f0d5338e901d0da77d5da
  struct WebFindOptions;
  }  // namespace blink
 @@ -84,7 +89,9 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest>,
-   ui_zoom::ZoomController::ZoomMode GetZoomMode();
+   zoom::ZoomController::ZoomMode GetZoomMode();
  
    // Request navigating the guest to the provided |src| URL.
 -  void NavigateGuest(const std::string& src, bool force_navigation);
@@ -1457,10 +1453,10 @@ index 88d0f103d3c70b174c376c4ea2c5c3eb00b8d1eb..60f3f115951f0d5338e901d0da77d5da
    // destroyed.
    base::WeakPtrFactory<WebViewGuest> weak_ptr_factory_;
 diff --git a/extensions/browser/guest_view/web_view/web_view_permission_helper.cc b/extensions/browser/guest_view/web_view/web_view_permission_helper.cc
-index 281424109741bbe5e98ddb4060ad24de51380509..1c7c988b84e1411276617f51eceaa653d0982bed 100644
+index 57ff170aa1cf7f286a9b37556471cf046f4ad7a7..ad5013dd68694b7937b2f00897bf5616fbc4a433 100644
 --- a/extensions/browser/guest_view/web_view/web_view_permission_helper.cc
 +++ b/extensions/browser/guest_view/web_view/web_view_permission_helper.cc
-@@ -17,6 +17,15 @@
+@@ -20,6 +20,15 @@
  #include "extensions/browser/guest_view/web_view/web_view_permission_helper_delegate.h"
  #include "extensions/browser/guest_view/web_view/web_view_permission_types.h"
  
@@ -1476,7 +1472,7 @@ index 281424109741bbe5e98ddb4060ad24de51380509..1c7c988b84e1411276617f51eceaa653
  using content::BrowserPluginGuestDelegate;
  using content::RenderViewHost;
  using guest_view::GuestViewEvent;
-@@ -34,6 +43,8 @@ static std::string PermissionTypeToString(WebViewPermissionType type) {
+@@ -37,6 +46,8 @@ static std::string PermissionTypeToString(WebViewPermissionType type) {
        return webview::kPermissionTypeFullscreen;
      case WEB_VIEW_PERMISSION_TYPE_GEOLOCATION:
        return webview::kPermissionTypeGeolocation;
@@ -1485,7 +1481,7 @@ index 281424109741bbe5e98ddb4060ad24de51380509..1c7c988b84e1411276617f51eceaa653
      case WEB_VIEW_PERMISSION_TYPE_JAVASCRIPT_DIALOG:
        return webview::kPermissionTypeDialog;
      case WEB_VIEW_PERMISSION_TYPE_LOAD_PLUGIN:
-@@ -155,6 +166,16 @@ WebViewPermissionHelper::WebViewPermissionHelper(WebViewGuest* web_view_guest)
+@@ -158,6 +169,16 @@ WebViewPermissionHelper::WebViewPermissionHelper(WebViewGuest* web_view_guest)
                this));
  }
  
@@ -1502,7 +1498,7 @@ index 281424109741bbe5e98ddb4060ad24de51380509..1c7c988b84e1411276617f51eceaa653
  WebViewPermissionHelper::~WebViewPermissionHelper() {
  }
  
-@@ -173,9 +194,19 @@ WebViewPermissionHelper* WebViewPermissionHelper::FromFrameID(
+@@ -176,9 +197,19 @@ WebViewPermissionHelper* WebViewPermissionHelper::FromFrameID(
  // static
  WebViewPermissionHelper* WebViewPermissionHelper::FromWebContents(
        content::WebContents* web_contents) {
@@ -1524,7 +1520,7 @@ index 281424109741bbe5e98ddb4060ad24de51380509..1c7c988b84e1411276617f51eceaa653
    return web_view_guest->web_view_permission_helper_.get();
  }
  
-@@ -196,6 +227,58 @@ void WebViewPermissionHelper::RequestMediaAccessPermission(
+@@ -199,6 +230,58 @@ void WebViewPermissionHelper::RequestMediaAccessPermission(
      content::WebContents* source,
      const content::MediaStreamRequest& request,
      const content::MediaResponseCallback& callback) {
@@ -1583,7 +1579,7 @@ index 281424109741bbe5e98ddb4060ad24de51380509..1c7c988b84e1411276617f51eceaa653
    base::DictionaryValue request_info;
    request_info.SetString(guest_view::kUrl, request.security_origin.spec());
    RequestPermission(
-@@ -228,6 +311,31 @@ void WebViewPermissionHelper::OnMediaPermissionResponse(
+@@ -231,6 +314,31 @@ void WebViewPermissionHelper::OnMediaPermissionResponse(
      const content::MediaResponseCallback& callback,
      bool allow,
      const std::string& user_input) {
@@ -1615,7 +1611,7 @@ index 281424109741bbe5e98ddb4060ad24de51380509..1c7c988b84e1411276617f51eceaa653
    if (!allow) {
      callback.Run(content::MediaStreamDevices(),
                   content::MEDIA_DEVICE_PERMISSION_DENIED,
-@@ -252,9 +360,12 @@ void WebViewPermissionHelper::OnMediaPermissionResponse(
+@@ -255,9 +363,12 @@ void WebViewPermissionHelper::OnMediaPermissionResponse(
  void WebViewPermissionHelper::CanDownload(
      const GURL& url,
      const std::string& request_method,
@@ -1630,7 +1626,7 @@ index 281424109741bbe5e98ddb4060ad24de51380509..1c7c988b84e1411276617f51eceaa653
  }
  
  void WebViewPermissionHelper::RequestPointerLockPermission(
-@@ -279,6 +390,21 @@ void WebViewPermissionHelper::CancelGeolocationPermissionRequest(
+@@ -282,6 +393,21 @@ void WebViewPermissionHelper::CancelGeolocationPermissionRequest(
        bridge_id);
  }
  
@@ -1894,7 +1890,7 @@ index c1c92427abd73c7e28b0cd459e3bf52d6735c90f..c5d5ac25c0faed16a6b5f1e66c4f2a33
    void AddGuest(int render_process_host_id, int routing_id,
                  const WebViewInfo& web_view_info);
 diff --git a/extensions/browser/process_manager.cc b/extensions/browser/process_manager.cc
-index a71b4c9d89fdb29a9494bf4d2694316f60299a7f..05ce70a530f50c869149a3fb4c4fe2467d5fdd4b 100644
+index a5fec8a4e1b0a88b8fb8439698de796a34b2a2de..248b6a6bb89448c9df42d92dd6781f23844675c0 100644
 --- a/extensions/browser/process_manager.cc
 +++ b/extensions/browser/process_manager.cc
 @@ -6,6 +6,7 @@
@@ -1903,9 +1899,9 @@ index a71b4c9d89fdb29a9494bf4d2694316f60299a7f..05ce70a530f50c869149a3fb4c4fe246
  
 +#include "app/vivaldi_constants.h"
  #include "base/bind.h"
+ #include "base/location.h"
  #include "base/logging.h"
- #include "base/macros.h"
-@@ -821,6 +822,9 @@ void ProcessManager::OnKeepaliveImpulseCheck() {
+@@ -832,6 +833,9 @@ void ProcessManager::OnKeepaliveImpulseCheck() {
  
  void ProcessManager::OnLazyBackgroundPageIdle(const std::string& extension_id,
                                                uint64_t sequence_id) {
@@ -1930,10 +1926,10 @@ index ba922f6d3de485b3a2f1c8f0db6f91cb2e64f944..530d54773248ae79527643f84d050634
    },
    "app.background": {
 diff --git a/extensions/common/api/_permission_features.json b/extensions/common/api/_permission_features.json
-index 14fbf181d75ec726b72d9476fb69b5b3db9a3971..4742bf2f0a4d17645b923540131c960611207a78 100644
+index 18d3b30fd16d14e7dc17de1e731c8bf321d9e9c6..606861f1242b058253caee50920ea5a905b225e7 100644
 --- a/extensions/common/api/_permission_features.json
 +++ b/extensions/common/api/_permission_features.json
-@@ -169,8 +169,8 @@
+@@ -170,8 +170,8 @@
      ]
    },
    "declarativeWebRequest": {
@@ -1944,7 +1940,7 @@ index 14fbf181d75ec726b72d9476fb69b5b3db9a3971..4742bf2f0a4d17645b923540131c9606
    },
    "diagnostics": [
      {
-@@ -471,21 +471,13 @@
+@@ -472,21 +472,13 @@
      "extension_types": ["extension", "platform_app"],
      "platforms": ["chromeos"]
    },
@@ -2043,10 +2039,10 @@ index 492f283231cbf11646e6cff379ddaaca87058250..082f72ace6a02b7085b1286ad7c2c1f2
      // but don't fail.
      DLOG(WARNING) << base::StringPrintf("Supplied locale %s is not supported.",
 diff --git a/extensions/common/extension_messages.h b/extensions/common/extension_messages.h
-index 91192213b43c266092aee117ad16aa7b4ff7756c..485a6044a427abf389c596bca4cd9d480bbaf211 100644
+index 6e94d79f46faa1e195e6dfe9f2a1f7282723b2e6..1258cfd40d8b1f81fe6bb6ea7e7580d712c08f8b 100644
 --- a/extensions/common/extension_messages.h
 +++ b/extensions/common/extension_messages.h
-@@ -503,6 +503,10 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_UpdateBrowserWindowId,
+@@ -511,6 +511,10 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_UpdateBrowserWindowId,
  IPC_MESSAGE_ROUTED1(ExtensionMsg_SetTabId,
                      int /* id of tab */)
  
@@ -2121,7 +2117,7 @@ index b9f8073a020ea0d7b0028ded400f033ac75d699e..dff9d27333162d34e2ff8f70b29f6681
    // manifest.
    Availability IsAvailableToManifest(const std::string& extension_id,
 diff --git a/extensions/common/features/simple_feature.cc b/extensions/common/features/simple_feature.cc
-index 7caf62425bbbd0eb89ffc1eeb8f20dff83502042..1d564ba14cca9b2d94861896fa4388a6d675eb13 100644
+index 9abc1b4f39224eed5f27a682b50d65fa06c18f43..0f0e982df7f07535142ae537eb8480ec1b5bfe87 100644
 --- a/extensions/common/features/simple_feature.cc
 +++ b/extensions/common/features/simple_feature.cc
 @@ -9,6 +9,7 @@
@@ -2132,7 +2128,7 @@ index 7caf62425bbbd0eb89ffc1eeb8f20dff83502042..1d564ba14cca9b2d94861896fa4388a6
  #include "base/bind.h"
  #include "base/command_line.h"
  #include "base/macros.h"
-@@ -285,7 +286,9 @@ SimpleFeature::SimpleFeature()
+@@ -286,7 +287,9 @@ SimpleFeature::SimpleFeature()
      : location_(UNSPECIFIED_LOCATION),
        min_manifest_version_(0),
        max_manifest_version_(0),
@@ -2143,7 +2139,7 @@ index 7caf62425bbbd0eb89ffc1eeb8f20dff83502042..1d564ba14cca9b2d94861896fa4388a6
  
  SimpleFeature::~SimpleFeature() {}
  
-@@ -312,7 +315,26 @@ std::string SimpleFeature::Parse(const base::DictionaryValue* dictionary) {
+@@ -313,7 +316,26 @@ std::string SimpleFeature::Parse(const base::DictionaryValue* dictionary) {
      } else if (key == "blacklist") {
        ParseVector(value, &blacklist_);
      } else if (key == "whitelist") {
@@ -2170,7 +2166,7 @@ index 7caf62425bbbd0eb89ffc1eeb8f20dff83502042..1d564ba14cca9b2d94861896fa4388a6
      } else if (key == "dependencies") {
        ParseVector(value, &dependencies_);
      } else if (key == "extension_types") {
-@@ -341,6 +363,8 @@ std::string SimpleFeature::Parse(const base::DictionaryValue* dictionary) {
+@@ -342,6 +364,8 @@ std::string SimpleFeature::Parse(const base::DictionaryValue* dictionary) {
      }
    }
  
@@ -2179,7 +2175,7 @@ index 7caf62425bbbd0eb89ffc1eeb8f20dff83502042..1d564ba14cca9b2d94861896fa4388a6
    // NOTE: ideally we'd sanity check that "matches" can be specified if and
    // only if there's a "web_page" or "webui" context, but without
    // (Simple)Features being aware of their own heirarchy this is impossible.
-@@ -562,6 +586,10 @@ bool SimpleFeature::IsInternal() const {
+@@ -567,6 +591,10 @@ bool SimpleFeature::IsInternal() const {
    return false;
  }
  
@@ -2450,10 +2446,10 @@ index fa35ef0141a39e09c6a8d4f9f9023c8a6ad02737..5679d7305589b1ce836f65768119a2b2
  };
  
 diff --git a/extensions/extensions.gypi b/extensions/extensions.gypi
-index 90fa39718ae0a8db564a755f36df18b817469d2e..dcedbd6325f0ceec2782fd9ebbb157b4ef10fe4d 100644
+index 580c31f08d54167834a18dbfd0de10016144c766..63d8a4bfd242bbb0977a004c249600147016b630 100644
 --- a/extensions/extensions.gypi
 +++ b/extensions/extensions.gypi
-@@ -986,7 +986,7 @@
+@@ -992,7 +992,7 @@
        'renderer/resources/guest_view/extension_view/extension_view.js',
        'renderer/resources/guest_view/web_view/web_view.js',
        'renderer/resources/guest_view/web_view/web_view_events.js',
@@ -2484,18 +2480,19 @@ index 69f87ff2a2275a11e21e1b495e5fcefa89e1a5e8..98e2216693d9c65f454c07391e2bab5a
              'grit_grd_file': 'extensions_strings.grd',
            },
 diff --git a/extensions/renderer/dispatcher.cc b/extensions/renderer/dispatcher.cc
-index f78382297e1c39fe5935a3bbb5078202decf166b..0e455e31c2d7b0bbdc25d7b14ebf9a6c963f48ac 100644
+index 6cf18be12e440bd1fe859a43cbce5ad6aece53b2..c8635ed8badf8ecbe99ccf56b90b64ee35ef981d 100644
 --- a/extensions/renderer/dispatcher.cc
 +++ b/extensions/renderer/dispatcher.cc
-@@ -95,6 +95,7 @@
- #include "extensions/renderer/v8_helpers.h"
- #include "extensions/renderer/wake_event_page.h"
- #include "extensions/renderer/worker_script_context_set.h"
+@@ -115,6 +115,8 @@
+ #include "ui/base/resource/resource_bundle.h"
+ #include "v8/include/v8.h"
+ 
 +#include "extensions/vivaldi_script_dispatcher.h"
- #include "grit/extensions_renderer_resources.h"
- #include "mojo/public/js/constants.h"
- #include "third_party/WebKit/public/platform/WebString.h"
-@@ -153,6 +154,23 @@ v8::Local<v8::Value> GetOrCreateChrome(ScriptContext* context) {
++
+ using base::UserMetricsAction;
+ using blink::WebDataSource;
+ using blink::WebDocument;
+@@ -156,6 +158,23 @@ v8::Local<v8::Value> GetOrCreateChrome(ScriptContext* context) {
    return chrome;
  }
  
@@ -2519,7 +2516,7 @@ index f78382297e1c39fe5935a3bbb5078202decf166b..0e455e31c2d7b0bbdc25d7b14ebf9a6c
  // Returns |value| cast to an object if possible, else an empty handle.
  v8::Local<v8::Object> AsObjectOrEmpty(v8::Local<v8::Value> value) {
    return value->IsObject() ? value.As<v8::Object>() : v8::Local<v8::Object>();
-@@ -199,6 +217,22 @@ class ChromeNativeHandler : public ObjectBackedNativeHandler {
+@@ -201,6 +220,22 @@ class ChromeNativeHandler : public ObjectBackedNativeHandler {
  base::LazyInstance<WorkerScriptContextSet> g_worker_script_context_set =
      LAZY_INSTANCE_INITIALIZER;
  
@@ -2542,7 +2539,7 @@ index f78382297e1c39fe5935a3bbb5078202decf166b..0e455e31c2d7b0bbdc25d7b14ebf9a6c
  }  // namespace
  
  // Note that we can't use Blink public APIs in the constructor becase Blink
-@@ -808,6 +842,8 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
+@@ -842,6 +877,8 @@ std::vector<std::pair<std::string, int> > Dispatcher::GetJsResources() {
        std::make_pair("media_router_bindings", IDR_MEDIA_ROUTER_BINDINGS_JS));
  #endif  // defined(ENABLE_MEDIA_ROUTER)
  
@@ -2551,7 +2548,7 @@ index f78382297e1c39fe5935a3bbb5078202decf166b..0e455e31c2d7b0bbdc25d7b14ebf9a6c
    return resources;
  }
  
-@@ -818,6 +854,9 @@ void Dispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
+@@ -852,6 +889,9 @@ void Dispatcher::RegisterNativeHandlers(ModuleSystem* module_system,
                                          Dispatcher* dispatcher,
                                          RequestSender* request_sender,
                                          V8SchemaRegistry* v8_schema_registry) {
@@ -2561,7 +2558,7 @@ index f78382297e1c39fe5935a3bbb5078202decf166b..0e455e31c2d7b0bbdc25d7b14ebf9a6c
    module_system->RegisterNativeHandler(
        "chrome",
        std::unique_ptr<NativeHandler>(new ChromeNativeHandler(context)));
-@@ -1534,6 +1573,9 @@ v8::Local<v8::Object> Dispatcher::GetOrCreateBindObjectIfAvailable(
+@@ -1592,6 +1632,9 @@ v8::Local<v8::Object> Dispatcher::GetOrCreateBindObjectIfAvailable(
    std::string ancestor_name;
    bool only_ancestor_available = false;
  
@@ -2571,7 +2568,7 @@ index f78382297e1c39fe5935a3bbb5078202decf166b..0e455e31c2d7b0bbdc25d7b14ebf9a6c
    for (size_t i = 0; i < split.size() - 1; ++i) {
      ancestor_name += (i ? "." : "") + split[i];
      if (api_feature_provider->GetFeature(ancestor_name) &&
-@@ -1544,7 +1586,9 @@ v8::Local<v8::Object> Dispatcher::GetOrCreateBindObjectIfAvailable(
+@@ -1602,7 +1645,9 @@ v8::Local<v8::Object> Dispatcher::GetOrCreateBindObjectIfAvailable(
      }
  
      if (bind_object.IsEmpty()) {
@@ -2582,7 +2579,7 @@ index f78382297e1c39fe5935a3bbb5078202decf166b..0e455e31c2d7b0bbdc25d7b14ebf9a6c
        if (bind_object.IsEmpty())
          return v8::Local<v8::Object>();
      }
-@@ -1557,8 +1601,10 @@ v8::Local<v8::Object> Dispatcher::GetOrCreateBindObjectIfAvailable(
+@@ -1615,8 +1660,10 @@ v8::Local<v8::Object> Dispatcher::GetOrCreateBindObjectIfAvailable(
    if (bind_name)
      *bind_name = split.back();
  
@@ -2595,7 +2592,7 @@ index f78382297e1c39fe5935a3bbb5078202decf166b..0e455e31c2d7b0bbdc25d7b14ebf9a6c
  }
  
  void Dispatcher::RequireGuestViewModules(ScriptContext* context) {
-@@ -1612,6 +1658,8 @@ void Dispatcher::RequireGuestViewModules(ScriptContext* context) {
+@@ -1666,6 +1713,8 @@ void Dispatcher::RequireGuestViewModules(ScriptContext* context) {
    if (context_type == Feature::BLESSED_EXTENSION_CONTEXT) {
      module_system->Require("guestViewDeny");
    }
@@ -2605,7 +2602,7 @@ index f78382297e1c39fe5935a3bbb5078202decf166b..0e455e31c2d7b0bbdc25d7b14ebf9a6c
  
  }  // namespace extensions
 diff --git a/extensions/renderer/extension_helper.cc b/extensions/renderer/extension_helper.cc
-index 4d3bd2711dc58d0465f69f5db1605b055fdffa8a..4fc1a027cf35a595c6a48ae3b5ae6a0109d4db81 100644
+index f1371fb27c3824a0db41dfc53d49fdb613497510..6b543951faee68f393e978e4217b19c8c947fb76 100644
 --- a/extensions/renderer/extension_helper.cc
 +++ b/extensions/renderer/extension_helper.cc
 @@ -16,6 +16,9 @@
@@ -2628,7 +2625,7 @@ index 4d3bd2711dc58d0465f69f5db1605b055fdffa8a..4fc1a027cf35a595c6a48ae3b5ae6a01
      IPC_MESSAGE_UNHANDLED(handled = false)
    IPC_END_MESSAGE_MAP()
    return handled;
-@@ -61,6 +67,12 @@ void ExtensionHelper::OnSetFrameName(const std::string& name) {
+@@ -65,6 +71,12 @@ void ExtensionHelper::OnSetFrameName(const std::string& name) {
      web_view->mainFrame()->setName(blink::WebString::fromUTF8(name));
  }
  
@@ -2641,7 +2638,7 @@ index 4d3bd2711dc58d0465f69f5db1605b055fdffa8a..4fc1a027cf35a595c6a48ae3b5ae6a01
  void ExtensionHelper::OnAppWindowClosed() {
    v8::HandleScope scope(v8::Isolate::GetCurrent());
    v8::Local<v8::Context> v8_context =
-@@ -73,4 +85,10 @@ void ExtensionHelper::OnAppWindowClosed() {
+@@ -77,4 +89,10 @@ void ExtensionHelper::OnAppWindowClosed() {
                                                      "onAppWindowClosed");
  }
  
@@ -2653,7 +2650,7 @@ index 4d3bd2711dc58d0465f69f5db1605b055fdffa8a..4fc1a027cf35a595c6a48ae3b5ae6a01
 +
  }  // namespace extensions
 diff --git a/extensions/renderer/extension_helper.h b/extensions/renderer/extension_helper.h
-index a25a0a3f4ca2d57fcfdbde39d7e1b75b307bd635..3699e345d6d373afb80b89c4cf2dc8e6b46e7e48 100644
+index 7cb3a2d31c84315d1ce46ad02f84ecf510fb48bc..2b78bae408e606e07270667c7bb762c880deab4e 100644
 --- a/extensions/renderer/extension_helper.h
 +++ b/extensions/renderer/extension_helper.h
 @@ -8,6 +8,7 @@
@@ -2664,9 +2661,9 @@ index a25a0a3f4ca2d57fcfdbde39d7e1b75b307bd635..3699e345d6d373afb80b89c4cf2dc8e6
  #include "content/public/renderer/render_view_observer.h"
  
  namespace extensions {
-@@ -24,9 +25,17 @@ class ExtensionHelper : public content::RenderViewObserver {
-   bool OnMessageReceived(const IPC::Message& message) override;
+@@ -25,9 +26,17 @@ class ExtensionHelper : public content::RenderViewObserver {
    void DraggableRegionsChanged(blink::WebFrame* frame) override;
+   void OnDestruct() override;
  
 +  void OnZoomVivaldiUI(double zoom_factor);
 +  void OnUpdateBrowserWindowId(int window_id);
@@ -2683,7 +2680,7 @@ index a25a0a3f4ca2d57fcfdbde39d7e1b75b307bd635..3699e345d6d373afb80b89c4cf2dc8e6
  
    DISALLOW_COPY_AND_ASSIGN(ExtensionHelper);
 diff --git a/extensions/renderer/guest_view/guest_view_internal_custom_bindings.cc b/extensions/renderer/guest_view/guest_view_internal_custom_bindings.cc
-index ee7c11e6dd8237c69ab666b45d482010dde2bf36..380b474481ab618e15e298dc34d827497c6a18ce 100644
+index e63c434ac44a3ccf8733072d7237adb9a241cfa2..e9ba833ece7d5d7c5c89e1bc8224d1b5d58f4b7e 100644
 --- a/extensions/renderer/guest_view/guest_view_internal_custom_bindings.cc
 +++ b/extensions/renderer/guest_view/guest_view_internal_custom_bindings.cc
 @@ -29,6 +29,8 @@
@@ -2749,7 +2746,7 @@ index b0ae54f4a7b3e8bef8de664864edcc8d6bdfd008..2cd94e122ee148ba915209adcf66d8b2
  
    if (oldData.alphaEnabled !== update.alphaEnabled)
 diff --git a/extensions/renderer/resources/guest_view/web_view/web_view.js b/extensions/renderer/resources/guest_view/web_view/web_view.js
-index b5d08c19ad5447364bcd79fa80d85a6a03a06117..d8a04227a42c6b74dc5683b77980470b51ce2f10 100644
+index 6dd4faeb9c042820c1bde349e480cb0a66d06a93..a1ff42baaf93fbc3d01316fcf75009babeb4857d 100644
 --- a/extensions/renderer/resources/guest_view/web_view/web_view.js
 +++ b/extensions/renderer/resources/guest_view/web_view/web_view.js
 @@ -12,6 +12,7 @@ var GuestViewContainer = require('guestViewContainer').GuestViewContainer;
@@ -2768,9 +2765,9 @@ index b5d08c19ad5447364bcd79fa80d85a6a03a06117..d8a04227a42c6b74dc5683b77980470b
 +    apiMethods = apiMethods.concat(WebViewImpl.getApiMethodsPrivate());
 +  }
  
-   // Add the experimental API methods, if available.
-   var experimentalApiMethods = WebViewImpl.maybeGetExperimentalApiMethods();
-@@ -140,7 +144,18 @@ WebViewImpl.prototype.onSizeChanged = function(webViewEvent) {
+   // Create default implementations for undefined API methods.
+   var createDefaultApiMethod = function(m) {
+@@ -136,7 +140,18 @@ WebViewImpl.prototype.onSizeChanged = function(webViewEvent) {
  };
  
  WebViewImpl.prototype.createGuest = function() {
@@ -3100,7 +3097,7 @@ index 26aa5e8ed3e4b30bae4ccde6ab0dddaad5583671..d30ffddcd697fdd49aba2a9d7a2d41ec
      });
    }
 diff --git a/extensions/shell/app_shell.gyp b/extensions/shell/app_shell.gyp
-index 7a334f242a00b83ffec31a0fbc17650a0e6f233e..e415227c8851f0ba6c02bec0af446f5ba87f0560 100644
+index de66e9efdc40309d5f824abe174a9abb6c546df9..dbd12339af1efd9927bad038ed9fbddaf43b7951 100644
 --- a/extensions/shell/app_shell.gyp
 +++ b/extensions/shell/app_shell.gyp
 @@ -310,7 +310,8 @@
