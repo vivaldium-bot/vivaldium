@@ -1,3 +1,1801 @@
+diff --git a/tools/gyp/test/generator-output/gyptest-rules.py b/tools/gyp/test/generator-output/gyptest-rules.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..a3ff8bd858ab8ef67f6f63c134da8e87fb07c8b7
+--- /dev/null
++++ b/tools/gyp/test/generator-output/gyptest-rules.py
+@@ -0,0 +1,58 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies --generator-output= behavior when using rules.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++test.writable(test.workpath('rules'), False)
++
++test.run_gyp('rules.gyp',
++             '--generator-output=' + test.workpath('gypfiles'),
++             chdir='rules')
++
++test.writable(test.workpath('rules'), True)
++
++test.relocate('rules', 'relocate/rules')
++test.relocate('gypfiles', 'relocate/gypfiles')
++
++test.writable(test.workpath('relocate/rules'), False)
++
++test.writable(test.workpath('relocate/rules/build'), True)
++test.writable(test.workpath('relocate/rules/subdir1/build'), True)
++test.writable(test.workpath('relocate/rules/subdir2/build'), True)
++test.writable(test.workpath('relocate/rules/subdir2/rules-out'), True)
++
++test.build('rules.gyp', test.ALL, chdir='relocate/gypfiles')
++
++expect = """\
++Hello from program.c
++Hello from function1.in1
++Hello from function2.in1
++Hello from define3.in0
++Hello from define4.in0
++"""
++
++if test.format == 'xcode':
++  chdir = 'relocate/rules/subdir1'
++else:
++  chdir = 'relocate/gypfiles'
++test.run_built_executable('program', chdir=chdir, stdout=expect)
++
++test.must_match('relocate/rules/subdir2/rules-out/file1.out',
++                "Hello from file1.in0\n")
++test.must_match('relocate/rules/subdir2/rules-out/file2.out',
++                "Hello from file2.in0\n")
++test.must_match('relocate/rules/subdir2/rules-out/file3.out',
++                "Hello from file3.in1\n")
++test.must_match('relocate/rules/subdir2/rules-out/file4.out',
++                "Hello from file4.in1\n")
++
++test.pass_test()
+diff --git a/tools/gyp/test/generator-output/gyptest-subdir2-deep.py b/tools/gyp/test/generator-output/gyptest-subdir2-deep.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..ec7862ddd91e2ec7f2a406334b4722d8c373dba8
+--- /dev/null
++++ b/tools/gyp/test/generator-output/gyptest-subdir2-deep.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies building a target from a .gyp file a few subdirectories
++deep when the --generator-output= option is used to put the build
++configuration files in a separate directory tree.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++test.writable(test.workpath('src'), False)
++
++test.writable(test.workpath('src/subdir2/deeper/build'), True)
++
++test.run_gyp('deeper.gyp',
++             '-Dset_symroot=1',
++             '--generator-output=' + test.workpath('gypfiles'),
++             chdir='src/subdir2/deeper')
++
++test.build('deeper.gyp', test.ALL, chdir='gypfiles')
++
++chdir = 'gypfiles'
++
++if test.format == 'xcode':
++  chdir = 'src/subdir2/deeper'
++test.run_built_executable('deeper',
++                          chdir=chdir,
++                          stdout="Hello from deeper.c\n")
++
++test.pass_test()
+diff --git a/tools/gyp/test/generator-output/gyptest-symlink.py b/tools/gyp/test/generator-output/gyptest-symlink.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..8b29b348c275cf458ee8f738b482cb9ffd2b3a32
+--- /dev/null
++++ b/tools/gyp/test/generator-output/gyptest-symlink.py
+@@ -0,0 +1,42 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies building a target when the --generator-output= option is used to put
++the build configuration files in a separate directory tree referenced by a
++symlink.
++"""
++
++import TestGyp
++import os
++
++test = TestGyp.TestGyp()
++if not hasattr(os, 'symlink'):
++  test.skip_test('Missing os.symlink -- skipping test.\n')
++
++test.writable(test.workpath('src'), False)
++
++test.writable(test.workpath('src/subdir2/deeper/build'), True)
++
++test.subdir(test.workpath('build'))
++test.subdir(test.workpath('build/deeper'))
++test.symlink('build/deeper', test.workpath('symlink'))
++
++test.writable(test.workpath('build/deeper'), True)
++test.run_gyp('deeper.gyp',
++             '-Dset_symroot=2',
++             '--generator-output=' + test.workpath('symlink'),
++             chdir='src/subdir2/deeper')
++
++chdir = 'symlink'
++test.build('deeper.gyp', test.ALL, chdir=chdir)
++
++if test.format == 'xcode':
++  chdir = 'src/subdir2/deeper'
++test.run_built_executable('deeper',
++                          chdir=chdir,
++                          stdout="Hello from deeper.c\n")
++test.pass_test()
+diff --git a/tools/gyp/test/generator-output/gyptest-top-all.py b/tools/gyp/test/generator-output/gyptest-top-all.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..b1776776ead76ad00e19d21fc7c0e565ff1deee6
+--- /dev/null
++++ b/tools/gyp/test/generator-output/gyptest-top-all.py
+@@ -0,0 +1,53 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies building a project hierarchy created when the --generator-output=
++option is used to put the build configuration files in a separate
++directory tree.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++test.writable(test.workpath('src'), False)
++
++test.run_gyp('prog1.gyp',
++             '-Dset_symroot=1',
++             '--generator-output=' + test.workpath('gypfiles'),
++             chdir='src')
++
++test.writable(test.workpath('src/build'), True)
++test.writable(test.workpath('src/subdir2/build'), True)
++test.writable(test.workpath('src/subdir3/build'), True)
++
++test.build('prog1.gyp', test.ALL, chdir='gypfiles')
++
++chdir = 'gypfiles'
++
++expect = """\
++Hello from %s
++Hello from inc.h
++Hello from inc1/include1.h
++Hello from inc2/include2.h
++Hello from inc3/include3.h
++Hello from subdir2/deeper/deeper.h
++"""
++
++if test.format == 'xcode':
++  chdir = 'src'
++test.run_built_executable('prog1', chdir=chdir, stdout=expect % 'prog1.c')
++
++if test.format == 'xcode':
++  chdir = 'src/subdir2'
++test.run_built_executable('prog2', chdir=chdir, stdout=expect % 'prog2.c')
++
++if test.format == 'xcode':
++  chdir = 'src/subdir3'
++test.run_built_executable('prog3', chdir=chdir, stdout=expect % 'prog3.c')
++
++test.pass_test()
+diff --git a/tools/gyp/test/generator-output/mac-bundle/Info.plist b/tools/gyp/test/generator-output/mac-bundle/Info.plist
+new file mode 100644
+index 0000000000000000000000000000000000000000..8cb142e9f5aa52091f9af7abb5eacc8cc6159de7
+--- /dev/null
++++ b/tools/gyp/test/generator-output/mac-bundle/Info.plist
+@@ -0,0 +1,32 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>English</string>
++	<key>CFBundleExecutable</key>
++	<string>${EXECUTABLE_NAME}</string>
++	<key>CFBundleIconFile</key>
++	<string></string>
++	<key>CFBundleIdentifier</key>
++	<string>com.google.${PRODUCT_NAME}</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundleName</key>
++	<string>${PRODUCT_NAME}</string>
++	<key>CFBundlePackageType</key>
++	<string>APPL</string>
++	<key>CFBundleShortVersionString</key>
++	<string>1.0</string>
++	<key>CFBundleSignature</key>
++	<string>ause</string>
++	<key>CFBundleVersion</key>
++	<string>1</string>
++	<key>LSMinimumSystemVersion</key>
++	<string>${MACOSX_DEPLOYMENT_TARGET}</string>
++	<key>NSMainNibFile</key>
++	<string>MainMenu</string>
++	<key>NSPrincipalClass</key>
++	<string>NSApplication</string>
++</dict>
++</plist>
+diff --git a/tools/gyp/test/generator-output/mac-bundle/app.order b/tools/gyp/test/generator-output/mac-bundle/app.order
+new file mode 100644
+index 0000000000000000000000000000000000000000..4eb9e89d39c8b5ccd7521b445ac896ab050181c4
+--- /dev/null
++++ b/tools/gyp/test/generator-output/mac-bundle/app.order
+@@ -0,0 +1 @@
++_main
+diff --git a/tools/gyp/test/generator-output/mac-bundle/header.h b/tools/gyp/test/generator-output/mac-bundle/header.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..7ed777512290417bcbd91b14c2c91f6a3f58da0e
+--- /dev/null
++++ b/tools/gyp/test/generator-output/mac-bundle/header.h
+@@ -0,0 +1 @@
++int f();
+diff --git a/tools/gyp/test/generator-output/mac-bundle/main.c b/tools/gyp/test/generator-output/mac-bundle/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..237c8ce181774d991a9dbdd8cacf1a5fb9f199f1
+--- /dev/null
++++ b/tools/gyp/test/generator-output/mac-bundle/main.c
+@@ -0,0 +1 @@
++int main() {}
+diff --git a/tools/gyp/test/generator-output/mac-bundle/resource.sb b/tools/gyp/test/generator-output/mac-bundle/resource.sb
+new file mode 100644
+index 0000000000000000000000000000000000000000..731befc4570d2078bfe60b5ebe5b5fad6373dd00
+--- /dev/null
++++ b/tools/gyp/test/generator-output/mac-bundle/resource.sb
+@@ -0,0 +1 @@
++A text file.
+diff --git a/tools/gyp/test/generator-output/mac-bundle/test.gyp b/tools/gyp/test/generator-output/mac-bundle/test.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..35ac674f6d7d83c1491b9296100ff6898fb77863
+--- /dev/null
++++ b/tools/gyp/test/generator-output/mac-bundle/test.gyp
+@@ -0,0 +1,25 @@
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++{
++  'targets': [
++    {
++      'target_name': 'test_app',
++      'product_name': 'Test App Gyp',
++      'type': 'executable',
++      'mac_bundle': 1,
++      'sources': [
++        'main.c',
++      ],
++      'mac_bundle_resources': [
++        'resource.sb',
++      ],
++      'xcode_settings': {
++        'INFOPLIST_FILE': 'Info.plist',
++        'ORDER_FILE': 'app.order',
++        'GCC_PREFIX_HEADER': 'header.h',
++        'GCC_PRECOMPILE_PREFIX_HEADER': 'YES',
++      },
++    },
++  ],
++}
+diff --git a/tools/gyp/test/generator-output/rules/build/README.txt b/tools/gyp/test/generator-output/rules/build/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..1b052c9a245463103ff6c45b86ae9e93d5cc4260
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/build/README.txt
+@@ -0,0 +1,4 @@
++A place-holder for this Xcode build output directory, so that the
++test script can verify that .xcodeproj files are not created in
++their normal location by making the src/ read-only, and then
++selectively making this build directory writable.
+diff --git a/tools/gyp/test/generator-output/rules/copy-file.py b/tools/gyp/test/generator-output/rules/copy-file.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..938c336adb01e500fbab51a96ded33827a436057
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/copy-file.py
+@@ -0,0 +1,12 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++contents = open(sys.argv[1], 'r').read()
++open(sys.argv[2], 'wb').write(contents)
++
++sys.exit(0)
+diff --git a/tools/gyp/test/generator-output/rules/rules.gyp b/tools/gyp/test/generator-output/rules/rules.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..dded59aff3e34f0e46137b1abddbfe0558e6d226
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/rules.gyp
+@@ -0,0 +1,16 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'pull_in_all_actions',
++      'type': 'none',
++      'dependencies': [
++        'subdir1/executable.gyp:*',
++        'subdir2/none.gyp:*',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/generator-output/rules/subdir1/build/README.txt b/tools/gyp/test/generator-output/rules/subdir1/build/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..1b052c9a245463103ff6c45b86ae9e93d5cc4260
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir1/build/README.txt
+@@ -0,0 +1,4 @@
++A place-holder for this Xcode build output directory, so that the
++test script can verify that .xcodeproj files are not created in
++their normal location by making the src/ read-only, and then
++selectively making this build directory writable.
+diff --git a/tools/gyp/test/generator-output/rules/subdir1/define3.in0 b/tools/gyp/test/generator-output/rules/subdir1/define3.in0
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc29c643f397ce496395f4f4f956325b29c3e3ec
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir1/define3.in0
+@@ -0,0 +1 @@
++#define STRING3 "Hello from define3.in0\n"
+diff --git a/tools/gyp/test/generator-output/rules/subdir1/define4.in0 b/tools/gyp/test/generator-output/rules/subdir1/define4.in0
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9b0467b3287f165b9634435d4911206aa8fc813
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir1/define4.in0
+@@ -0,0 +1 @@
++#define STRING4 "Hello from define4.in0\n"
+diff --git a/tools/gyp/test/generator-output/rules/subdir1/executable.gyp b/tools/gyp/test/generator-output/rules/subdir1/executable.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..42bee4d7467f3e2997088b738ce1d2ded8ae533d
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir1/executable.gyp
+@@ -0,0 +1,59 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'program',
++      'type': 'executable',
++      'msvs_cygwin_shell': 0,
++      'sources': [
++        'program.c',
++        'function1.in1',
++        'function2.in1',
++        'define3.in0',
++        'define4.in0',
++      ],
++      'include_dirs': [
++        '<(INTERMEDIATE_DIR)',
++      ],
++      'rules': [
++        {
++          'rule_name': 'copy_file_0',
++          'extension': 'in0',
++          'inputs': [
++            '../copy-file.py',
++          ],
++          'outputs': [
++            # TODO:  fix Make to support generated files not
++            # in a variable-named path like <(INTERMEDIATE_DIR)
++            #'<(RULE_INPUT_ROOT).c',
++            '<(INTERMEDIATE_DIR)/<(RULE_INPUT_ROOT).h',
++          ],
++          'action': [
++            'python', '<(_inputs)', '<(RULE_INPUT_PATH)', '<@(_outputs)',
++          ],
++          'process_outputs_as_sources': 0,
++        },
++        {
++          'rule_name': 'copy_file_1',
++          'extension': 'in1',
++          'inputs': [
++            '../copy-file.py',
++          ],
++          'outputs': [
++            # TODO:  fix Make to support generated files not
++            # in a variable-named path like <(INTERMEDIATE_DIR)
++            #'<(RULE_INPUT_ROOT).c',
++            '<(INTERMEDIATE_DIR)/<(RULE_INPUT_ROOT).c',
++          ],
++          'action': [
++            'python', '<(_inputs)', '<(RULE_INPUT_PATH)', '<@(_outputs)',
++          ],
++          'process_outputs_as_sources': 1,
++        },
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/generator-output/rules/subdir1/function1.in1 b/tools/gyp/test/generator-output/rules/subdir1/function1.in1
+new file mode 100644
+index 0000000000000000000000000000000000000000..545e7ca16bb273559563aef109fac976891bf65c
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir1/function1.in1
+@@ -0,0 +1,6 @@
++#include <stdio.h>
++
++void function1(void)
++{
++  printf("Hello from function1.in1\n");
++}
+diff --git a/tools/gyp/test/generator-output/rules/subdir1/function2.in1 b/tools/gyp/test/generator-output/rules/subdir1/function2.in1
+new file mode 100644
+index 0000000000000000000000000000000000000000..6bad43f9cf45b25b83437c4c6b1c764ff62ec3ae
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir1/function2.in1
+@@ -0,0 +1,6 @@
++#include <stdio.h>
++
++void function2(void)
++{
++  printf("Hello from function2.in1\n");
++}
+diff --git a/tools/gyp/test/generator-output/rules/subdir1/program.c b/tools/gyp/test/generator-output/rules/subdir1/program.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..56b320632a75cb4cfaded48ba28a941df0c1c130
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir1/program.c
+@@ -0,0 +1,18 @@
++#include <stdio.h>
++#include "define3.h"
++#include "define4.h"
++
++extern void function1(void);
++extern void function2(void);
++extern void function3(void);
++extern void function4(void);
++
++int main(void)
++{
++  printf("Hello from program.c\n");
++  function1();
++  function2();
++  printf("%s", STRING3);
++  printf("%s", STRING4);
++  return 0;
++}
+diff --git a/tools/gyp/test/generator-output/rules/subdir2/build/README.txt b/tools/gyp/test/generator-output/rules/subdir2/build/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..1b052c9a245463103ff6c45b86ae9e93d5cc4260
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir2/build/README.txt
+@@ -0,0 +1,4 @@
++A place-holder for this Xcode build output directory, so that the
++test script can verify that .xcodeproj files are not created in
++their normal location by making the src/ read-only, and then
++selectively making this build directory writable.
+diff --git a/tools/gyp/test/generator-output/rules/subdir2/file1.in0 b/tools/gyp/test/generator-output/rules/subdir2/file1.in0
+new file mode 100644
+index 0000000000000000000000000000000000000000..7aca64f4ce0fb883446dd73c61523cd938600dbd
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir2/file1.in0
+@@ -0,0 +1 @@
++Hello from file1.in0
+diff --git a/tools/gyp/test/generator-output/rules/subdir2/file2.in0 b/tools/gyp/test/generator-output/rules/subdir2/file2.in0
+new file mode 100644
+index 0000000000000000000000000000000000000000..80a281a2a9a19d038aec3a227a4d727071f6e6d0
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir2/file2.in0
+@@ -0,0 +1 @@
++Hello from file2.in0
+diff --git a/tools/gyp/test/generator-output/rules/subdir2/file3.in1 b/tools/gyp/test/generator-output/rules/subdir2/file3.in1
+new file mode 100644
+index 0000000000000000000000000000000000000000..60ae2e7931136d63e8a6b43805e915a72ac94ed5
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir2/file3.in1
+@@ -0,0 +1 @@
++Hello from file3.in1
+diff --git a/tools/gyp/test/generator-output/rules/subdir2/file4.in1 b/tools/gyp/test/generator-output/rules/subdir2/file4.in1
+new file mode 100644
+index 0000000000000000000000000000000000000000..5a3c30720e7af0b1e430db65c0102b1d9adcbb70
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir2/file4.in1
+@@ -0,0 +1 @@
++Hello from file4.in1
+diff --git a/tools/gyp/test/generator-output/rules/subdir2/none.gyp b/tools/gyp/test/generator-output/rules/subdir2/none.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..664cbd9cb75f6c904aeb97cfa4c5f9b005696bdd
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir2/none.gyp
+@@ -0,0 +1,49 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'files',
++      'type': 'none',
++      'msvs_cygwin_shell': 0,
++      'sources': [
++        'file1.in0',
++        'file2.in0',
++        'file3.in1',
++        'file4.in1',
++      ],
++      'rules': [
++        {
++          'rule_name': 'copy_file_0',
++          'extension': 'in0',
++          'inputs': [
++            '../copy-file.py',
++          ],
++          'outputs': [
++            'rules-out/<(RULE_INPUT_ROOT).out',
++          ],
++          'action': [
++            'python', '<(_inputs)', '<(RULE_INPUT_PATH)', '<@(_outputs)',
++          ],
++          'process_outputs_as_sources': 0,
++        },
++        {
++          'rule_name': 'copy_file_1',
++          'extension': 'in1',
++          'inputs': [
++            '../copy-file.py',
++          ],
++          'outputs': [
++            'rules-out/<(RULE_INPUT_ROOT).out',
++          ],
++          'action': [
++            'python', '<(_inputs)', '<(RULE_INPUT_PATH)', '<@(_outputs)',
++          ],
++          'process_outputs_as_sources': 1,
++        },
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/generator-output/rules/subdir2/rules-out/README.txt b/tools/gyp/test/generator-output/rules/subdir2/rules-out/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..1b052c9a245463103ff6c45b86ae9e93d5cc4260
+--- /dev/null
++++ b/tools/gyp/test/generator-output/rules/subdir2/rules-out/README.txt
+@@ -0,0 +1,4 @@
++A place-holder for this Xcode build output directory, so that the
++test script can verify that .xcodeproj files are not created in
++their normal location by making the src/ read-only, and then
++selectively making this build directory writable.
+diff --git a/tools/gyp/test/generator-output/src/build/README.txt b/tools/gyp/test/generator-output/src/build/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..90ef886193148535de226dcf1205e63acb04a316
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/build/README.txt
+@@ -0,0 +1,4 @@
++A place-holder for this Xcode build output directory, so that the
++test script can verify that .xcodeproj files are not created in
++their normal location by making the src/ read-only, and then
++selectively making this build directory writable.
+diff --git a/tools/gyp/test/generator-output/src/inc.h b/tools/gyp/test/generator-output/src/inc.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..57aa1a5a7443fbd2aa74a3ad918705e249d20d10
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/inc.h
+@@ -0,0 +1 @@
++#define INC_STRING      "inc.h"
+diff --git a/tools/gyp/test/generator-output/src/inc1/include1.h b/tools/gyp/test/generator-output/src/inc1/include1.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..1d59065fc90a7215403665417f0b59b64bd5494a
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/inc1/include1.h
+@@ -0,0 +1 @@
++#define INCLUDE1_STRING "inc1/include1.h"
+diff --git a/tools/gyp/test/generator-output/src/prog1.c b/tools/gyp/test/generator-output/src/prog1.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..bf7c2a17bd3a8fd051302709f9a0c894cc5f519b
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/prog1.c
+@@ -0,0 +1,18 @@
++#include <stdio.h>
++
++#include "inc.h"
++#include "include1.h"
++#include "include2.h"
++#include "include3.h"
++#include "deeper.h"
++
++int main(void)
++{
++  printf("Hello from prog1.c\n");
++  printf("Hello from %s\n", INC_STRING);
++  printf("Hello from %s\n", INCLUDE1_STRING);
++  printf("Hello from %s\n", INCLUDE2_STRING);
++  printf("Hello from %s\n", INCLUDE3_STRING);
++  printf("Hello from %s\n", DEEPER_STRING);
++  return 0;
++}
+diff --git a/tools/gyp/test/generator-output/src/prog1.gyp b/tools/gyp/test/generator-output/src/prog1.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..d50e6fb0a7edd71a1989cdd425db8b27454fffbb
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/prog1.gyp
+@@ -0,0 +1,28 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'includes': [
++    'symroot.gypi',
++  ],
++  'targets': [
++    {
++      'target_name': 'prog1',
++      'type': 'executable',
++      'dependencies': [
++        'subdir2/prog2.gyp:prog2',
++      ],
++      'include_dirs': [
++        '.',
++        'inc1',
++        'subdir2/inc2',
++        'subdir3/inc3',
++        'subdir2/deeper',
++      ],
++      'sources': [
++        'prog1.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/generator-output/src/subdir2/build/README.txt b/tools/gyp/test/generator-output/src/subdir2/build/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..90ef886193148535de226dcf1205e63acb04a316
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir2/build/README.txt
+@@ -0,0 +1,4 @@
++A place-holder for this Xcode build output directory, so that the
++test script can verify that .xcodeproj files are not created in
++their normal location by making the src/ read-only, and then
++selectively making this build directory writable.
+diff --git a/tools/gyp/test/generator-output/src/subdir2/deeper/build/README.txt b/tools/gyp/test/generator-output/src/subdir2/deeper/build/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..90ef886193148535de226dcf1205e63acb04a316
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir2/deeper/build/README.txt
+@@ -0,0 +1,4 @@
++A place-holder for this Xcode build output directory, so that the
++test script can verify that .xcodeproj files are not created in
++their normal location by making the src/ read-only, and then
++selectively making this build directory writable.
+diff --git a/tools/gyp/test/generator-output/src/subdir2/deeper/deeper.c b/tools/gyp/test/generator-output/src/subdir2/deeper/deeper.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..843505cd11cd8bd0c5ffb1667ab225e6befda5dc
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir2/deeper/deeper.c
+@@ -0,0 +1,7 @@
++#include <stdio.h>
++
++int main(void)
++{
++  printf("Hello from deeper.c\n");
++  return 0;
++}
+diff --git a/tools/gyp/test/generator-output/src/subdir2/deeper/deeper.gyp b/tools/gyp/test/generator-output/src/subdir2/deeper/deeper.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..8648770872377094cd570a368ad784c11be0e038
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir2/deeper/deeper.gyp
+@@ -0,0 +1,18 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'includes': [
++    '../../symroot.gypi',
++  ],
++  'targets': [
++    {
++      'target_name': 'deeper',
++      'type': 'executable',
++      'sources': [
++        'deeper.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/generator-output/src/subdir2/deeper/deeper.h b/tools/gyp/test/generator-output/src/subdir2/deeper/deeper.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6484a0fe58666c7e4ed7d742a410dac4f76f33a
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir2/deeper/deeper.h
+@@ -0,0 +1 @@
++#define DEEPER_STRING   "subdir2/deeper/deeper.h"
+diff --git a/tools/gyp/test/generator-output/src/subdir2/inc2/include2.h b/tools/gyp/test/generator-output/src/subdir2/inc2/include2.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..1ccfa5dea79fea3d5229544717ecc673c00597b2
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir2/inc2/include2.h
+@@ -0,0 +1 @@
++#define INCLUDE2_STRING "inc2/include2.h"
+diff --git a/tools/gyp/test/generator-output/src/subdir2/prog2.c b/tools/gyp/test/generator-output/src/subdir2/prog2.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..d80d8719843767ac5caa2c855616f83fba7e6d53
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir2/prog2.c
+@@ -0,0 +1,18 @@
++#include <stdio.h>
++
++#include "inc.h"
++#include "include1.h"
++#include "include2.h"
++#include "include3.h"
++#include "deeper.h"
++
++int main(void)
++{
++  printf("Hello from prog2.c\n");
++  printf("Hello from %s\n", INC_STRING);
++  printf("Hello from %s\n", INCLUDE1_STRING);
++  printf("Hello from %s\n", INCLUDE2_STRING);
++  printf("Hello from %s\n", INCLUDE3_STRING);
++  printf("Hello from %s\n", DEEPER_STRING);
++  return 0;
++}
+diff --git a/tools/gyp/test/generator-output/src/subdir2/prog2.gyp b/tools/gyp/test/generator-output/src/subdir2/prog2.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..7176ed8be74ef1f796366a9ea67a8b21f7749795
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir2/prog2.gyp
+@@ -0,0 +1,28 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'includes': [
++    '../symroot.gypi',
++  ],
++  'targets': [
++    {
++      'target_name': 'prog2',
++      'type': 'executable',
++      'include_dirs': [
++        '..',
++        '../inc1',
++        'inc2',
++        '../subdir3/inc3',
++        'deeper',
++      ],
++      'dependencies': [
++        '../subdir3/prog3.gyp:prog3',
++      ],
++      'sources': [
++        'prog2.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/generator-output/src/subdir3/build/README.txt b/tools/gyp/test/generator-output/src/subdir3/build/README.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..90ef886193148535de226dcf1205e63acb04a316
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir3/build/README.txt
+@@ -0,0 +1,4 @@
++A place-holder for this Xcode build output directory, so that the
++test script can verify that .xcodeproj files are not created in
++their normal location by making the src/ read-only, and then
++selectively making this build directory writable.
+diff --git a/tools/gyp/test/generator-output/src/subdir3/inc3/include3.h b/tools/gyp/test/generator-output/src/subdir3/inc3/include3.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..bf53bf1f0070d9a6cccdee4a47c736103afc8630
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir3/inc3/include3.h
+@@ -0,0 +1 @@
++#define INCLUDE3_STRING "inc3/include3.h"
+diff --git a/tools/gyp/test/generator-output/src/subdir3/prog3.c b/tools/gyp/test/generator-output/src/subdir3/prog3.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..c72233da193ca234723f093ff3052dfc140304e6
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir3/prog3.c
+@@ -0,0 +1,18 @@
++#include <stdio.h>
++
++#include "inc.h"
++#include "include1.h"
++#include "include2.h"
++#include "include3.h"
++#include "deeper.h"
++
++int main(void)
++{
++  printf("Hello from prog3.c\n");
++  printf("Hello from %s\n", INC_STRING);
++  printf("Hello from %s\n", INCLUDE1_STRING);
++  printf("Hello from %s\n", INCLUDE2_STRING);
++  printf("Hello from %s\n", INCLUDE3_STRING);
++  printf("Hello from %s\n", DEEPER_STRING);
++  return 0;
++}
+diff --git a/tools/gyp/test/generator-output/src/subdir3/prog3.gyp b/tools/gyp/test/generator-output/src/subdir3/prog3.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..46c5e000a272472e67bf4432559340df8af2112a
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/subdir3/prog3.gyp
+@@ -0,0 +1,25 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'includes': [
++    '../symroot.gypi',
++  ],
++  'targets': [
++    {
++      'target_name': 'prog3',
++      'type': 'executable',
++      'include_dirs': [
++        '..',
++        '../inc1',
++        '../subdir2/inc2',
++        'inc3',
++        '../subdir2/deeper',
++      ],
++      'sources': [
++        'prog3.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/generator-output/src/symroot.gypi b/tools/gyp/test/generator-output/src/symroot.gypi
+new file mode 100644
+index 0000000000000000000000000000000000000000..519916427c9f134b81079de4d338cb81bb4bbeb2
+--- /dev/null
++++ b/tools/gyp/test/generator-output/src/symroot.gypi
+@@ -0,0 +1,16 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'variables': {
++    'set_symroot%': 0,
++  },
++  'conditions': [
++    ['set_symroot == 1', {
++      'xcode_settings': {
++        'SYMROOT': '<(DEPTH)/build',
++      },
++    }],
++  ],
++}
+diff --git a/tools/gyp/test/gyp-defines/defines.gyp b/tools/gyp/test/gyp-defines/defines.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..f59bbd20d299a5fef80c12a809c11400d3724925
+--- /dev/null
++++ b/tools/gyp/test/gyp-defines/defines.gyp
+@@ -0,0 +1,26 @@
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'test_target',
++      'type': 'none',
++      'actions': [
++        {
++          'action_name': 'test_action',
++          'inputs': [],
++          'outputs': [ 'action.txt' ],
++          'action': [
++            'python',
++            'echo.py',
++            '<(key)',
++            '<(_outputs)',
++          ],
++          'msvs_cygwin_shell': 0,
++        }
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/gyp-defines/echo.py b/tools/gyp/test/gyp-defines/echo.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b85add12f68b3a6940387a7f7b3126e52ed00760
+--- /dev/null
++++ b/tools/gyp/test/gyp-defines/echo.py
+@@ -0,0 +1,11 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++f = open(sys.argv[2], 'w+')
++f.write(sys.argv[1])
++f.close()
+diff --git a/tools/gyp/test/gyp-defines/gyptest-multiple-values.py b/tools/gyp/test/gyp-defines/gyptest-multiple-values.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..67735cce6a872bad15bee733263434e41540ea75
+--- /dev/null
++++ b/tools/gyp/test/gyp-defines/gyptest-multiple-values.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that when multiple values are supplied for a gyp define, the last one
++is used.
++"""
++
++import os
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++os.environ['GYP_DEFINES'] = 'key=value1 key=value2 key=value3'
++test.run_gyp('defines.gyp')
++
++test.build('defines.gyp')
++test.must_contain('action.txt', 'value3')
++
++# The last occurrence of a repeated set should take precedence over other
++# values.
++os.environ['GYP_DEFINES'] = 'key=repeated_value key=value1 key=repeated_value'
++test.run_gyp('defines.gyp')
++
++if test.format == 'msvs' and not test.uses_msbuild:
++  # msvs versions before 2010 don't detect build rule changes not reflected
++  # in file system timestamps. Rebuild to see differences.
++  test.build('defines.gyp', rebuild=True)
++else:
++  test.build('defines.gyp')
++test.must_contain('action.txt', 'repeated_value')
++
++test.pass_test()
+diff --git a/tools/gyp/test/gyp-defines/gyptest-regyp.py b/tools/gyp/test/gyp-defines/gyptest-regyp.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..0895d81d4f559e5849cf1724f679ebda5811b7ab
+--- /dev/null
++++ b/tools/gyp/test/gyp-defines/gyptest-regyp.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that when the same value is repeated for a gyp define, duplicates are
++stripped from the regeneration rule.
++"""
++
++import os
++import TestGyp
++
++# Regenerating build files when a gyp file changes is currently only supported
++# by the make generator.
++test = TestGyp.TestGyp(formats=['make'])
++
++os.environ['GYP_DEFINES'] = 'key=repeated_value key=value1 key=repeated_value'
++test.run_gyp('defines.gyp')
++test.build('defines.gyp')
++
++# The last occurrence of a repeated set should take precedence over other
++# values. See gyptest-multiple-values.py.
++test.must_contain('action.txt', 'repeated_value')
++
++# So the regeneration rule needs to use the correct order.
++test.must_not_contain(
++    'Makefile', '"-Dkey=repeated_value" "-Dkey=value1" "-Dkey=repeated_value"')
++test.must_contain('Makefile', '"-Dkey=value1" "-Dkey=repeated_value"')
++
++# Sleep so that the changed gyp file will have a newer timestamp than the
++# previously generated build files.
++test.sleep()
++os.utime("defines.gyp", None)
++
++test.build('defines.gyp')
++test.must_contain('action.txt', 'repeated_value')
++
++test.pass_test()
+diff --git a/tools/gyp/test/hard_dependency/gyptest-exported-hard-dependency.py b/tools/gyp/test/hard_dependency/gyptest-exported-hard-dependency.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..ba51528800419985d0aa57116a33fa532cf13da8
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/gyptest-exported-hard-dependency.py
+@@ -0,0 +1,37 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verify that a hard_dependency that is exported is pulled in as a dependency
++for a target if the target is a static library and if the generator will
++remove dependencies between static libraries.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++if test.format == 'dump_dependency_json':
++  test.skip_test('Skipping test; dependency JSON does not adjust ' \
++                 'static libraries.\n')
++
++test.run_gyp('hard_dependency.gyp', chdir='src')
++
++chdir = 'relocate/src'
++test.relocate('src', chdir)
++
++test.build('hard_dependency.gyp', 'c', chdir=chdir)
++
++# The 'a' static library should be built, as it has actions with side-effects
++# that are necessary to compile 'c'. Even though 'c' does not directly depend
++# on 'a', because 'a' is a hard_dependency that 'b' exports, 'c' should import
++# it as a hard_dependency and ensure it is built before building 'c'.
++test.built_file_must_exist('a', type=test.STATIC_LIB, chdir=chdir)
++test.built_file_must_not_exist('b', type=test.STATIC_LIB, chdir=chdir)
++test.built_file_must_exist('c', type=test.STATIC_LIB, chdir=chdir)
++test.built_file_must_not_exist('d', type=test.STATIC_LIB, chdir=chdir)
++
++test.pass_test()
+diff --git a/tools/gyp/test/hard_dependency/gyptest-no-exported-hard-dependency.py b/tools/gyp/test/hard_dependency/gyptest-no-exported-hard-dependency.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..10774ca2a0025fd583629dddd31a094d9f0042fd
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/gyptest-no-exported-hard-dependency.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verify that a hard_dependency that is not exported is not pulled in as a
++dependency for a target if the target does not explicitly specify a dependency
++and none of its dependencies export the hard_dependency.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++if test.format == 'dump_dependency_json':
++  test.skip_test('Skipping test; dependency JSON does not adjust ' \
++                 'static libaries.\n')
++
++test.run_gyp('hard_dependency.gyp', chdir='src')
++
++chdir = 'relocate/src'
++test.relocate('src', chdir)
++
++test.build('hard_dependency.gyp', 'd', chdir=chdir)
++
++# Because 'c' does not export a hard_dependency, only the target 'd' should
++# be built. This is because the 'd' target does not need the generated headers
++# in order to be compiled.
++test.built_file_must_not_exist('a', type=test.STATIC_LIB, chdir=chdir)
++test.built_file_must_not_exist('b', type=test.STATIC_LIB, chdir=chdir)
++test.built_file_must_not_exist('c', type=test.STATIC_LIB, chdir=chdir)
++test.built_file_must_exist('d', type=test.STATIC_LIB, chdir=chdir)
++
++test.pass_test()
+diff --git a/tools/gyp/test/hard_dependency/src/a.c b/tools/gyp/test/hard_dependency/src/a.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..0fa0223c979c9646868d8463e6adf220b7cb56af
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/src/a.c
+@@ -0,0 +1,9 @@
++/* Copyright (c) 2011 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#include "a.h"
++
++int funcA() {
++  return 42;
++}
+diff --git a/tools/gyp/test/hard_dependency/src/a.h b/tools/gyp/test/hard_dependency/src/a.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..854a06504ad3d062d256212790f0069595e9f3db
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/src/a.h
+@@ -0,0 +1,12 @@
++/* Copyright (c) 2009 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#ifndef A_H_
++#define A_H_
++
++#include "generated.h"
++
++int funcA();
++
++#endif  // A_H_
+diff --git a/tools/gyp/test/hard_dependency/src/b.c b/tools/gyp/test/hard_dependency/src/b.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..0baace929e95b99bc7f36b20d98a2276f0c932ff
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/src/b.c
+@@ -0,0 +1,9 @@
++/* Copyright (c) 2011 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#include "a.h"
++
++int funcB() {
++  return funcA();
++}
+diff --git a/tools/gyp/test/hard_dependency/src/b.h b/tools/gyp/test/hard_dependency/src/b.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..22b48cefe206ff8813f790bd723098cdfa8eaf22
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/src/b.h
+@@ -0,0 +1,12 @@
++/* Copyright (c) 2011 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#ifndef B_H_
++#define B_H_
++
++#include "a.h"
++
++int funcB();
++
++#endif  // B_H_
+diff --git a/tools/gyp/test/hard_dependency/src/c.c b/tools/gyp/test/hard_dependency/src/c.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..7d0068208ec64b40af9629bb1adadd5d5fa08133
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/src/c.c
+@@ -0,0 +1,10 @@
++/* Copyright (c) 2011 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#include "b.h"
++#include "c.h"
++
++int funcC() {
++  return funcB();
++}
+diff --git a/tools/gyp/test/hard_dependency/src/c.h b/tools/gyp/test/hard_dependency/src/c.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f4ea7fefa2beb58a183e33a20605c96cfaeb97e0
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/src/c.h
+@@ -0,0 +1,10 @@
++/* Copyright (c) 2011 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#ifndef C_H_
++#define C_H_
++
++int funcC();
++
++#endif  // C_H_
+diff --git a/tools/gyp/test/hard_dependency/src/d.c b/tools/gyp/test/hard_dependency/src/d.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..d016c3ce71899f8f6f629301fac98187a630612e
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/src/d.c
+@@ -0,0 +1,9 @@
++/* Copyright (c) 2009 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#include "c.h"
++
++int funcD() {
++  return funcC();
++}
+diff --git a/tools/gyp/test/hard_dependency/src/emit.py b/tools/gyp/test/hard_dependency/src/emit.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..2df74b79a12c561129f397c7b676378dbb96a6ba
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/src/emit.py
+@@ -0,0 +1,11 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2011 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++f = open(sys.argv[1], 'wb')
++f.write('/* Hello World */\n')
++f.close()
+diff --git a/tools/gyp/test/hard_dependency/src/hard_dependency.gyp b/tools/gyp/test/hard_dependency/src/hard_dependency.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..4479c5f0452e15c35ebc6ad1028e5b12ecbd6564
+--- /dev/null
++++ b/tools/gyp/test/hard_dependency/src/hard_dependency.gyp
+@@ -0,0 +1,78 @@
++# Copyright (c) 2011 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'a',
++      'type': 'static_library',
++      'sources': [
++        'a.c',
++        'a.h',
++      ],
++      'hard_dependency': 1,
++      'actions': [
++        {
++          'action_name': 'generate_headers',
++          'inputs': [
++            'emit.py'
++          ],
++          'outputs': [
++            '<(SHARED_INTERMEDIATE_DIR)/generated.h'
++          ],
++          'action': [
++            'python',
++            'emit.py',
++            '<(SHARED_INTERMEDIATE_DIR)/generated.h',
++          ],
++          # Allows the test to run without hermetic cygwin on windows.
++          'msvs_cygwin_shell': 0,
++        },
++      ],
++      'include_dirs': [
++        '<(SHARED_INTERMEDIATE_DIR)',
++      ],
++      'direct_dependent_settings': {
++        'include_dirs': [
++          '<(SHARED_INTERMEDIATE_DIR)',
++        ],
++      },
++    },
++    {
++      'target_name': 'b',
++      'type': 'static_library',
++      'sources': [
++        'b.c',
++        'b.h',
++      ],
++      'dependencies': [
++        'a',
++      ],
++      'export_dependent_settings': [
++        'a',
++      ],
++    },
++    {
++      'target_name': 'c',
++      'type': 'static_library',
++      'sources': [
++        'c.c',
++        'c.h',
++      ],
++      'dependencies': [
++        'b',
++      ],
++    },
++    {
++      'target_name': 'd',
++      'type': 'static_library',
++      'sources': [
++        'd.c',
++      ],
++      'dependencies': [
++        'c',
++      ],
++    }
++  ],
++}
+diff --git a/tools/gyp/test/hello/gyptest-all.py b/tools/gyp/test/hello/gyptest-all.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..1739b6886e9fb0955ce2163ebe94de75ef1e5b9b
+--- /dev/null
++++ b/tools/gyp/test/hello/gyptest-all.py
+@@ -0,0 +1,24 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies simplest-possible build of a "Hello, world!" program
++using an explicit build target of 'all'.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp(workdir='workarea_all')
++
++test.run_gyp('hello.gyp')
++
++test.build('hello.gyp', test.ALL)
++
++test.run_built_executable('hello', stdout="Hello, world!\n")
++
++test.up_to_date('hello.gyp', test.ALL)
++
++test.pass_test()
+diff --git a/tools/gyp/test/hello/gyptest-default.py b/tools/gyp/test/hello/gyptest-default.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..22377e7ac50433fd6995a5d7bb68796749fc09c9
+--- /dev/null
++++ b/tools/gyp/test/hello/gyptest-default.py
+@@ -0,0 +1,24 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies simplest-possible build of a "Hello, world!" program
++using the default build target.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp(workdir='workarea_default')
++
++test.run_gyp('hello.gyp')
++
++test.build('hello.gyp')
++
++test.run_built_executable('hello', stdout="Hello, world!\n")
++
++test.up_to_date('hello.gyp', test.DEFAULT)
++
++test.pass_test()
+diff --git a/tools/gyp/test/hello/gyptest-disable-regyp.py b/tools/gyp/test/hello/gyptest-disable-regyp.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..1e4b306674862c3e13cc562091060538d7bed904
+--- /dev/null
++++ b/tools/gyp/test/hello/gyptest-disable-regyp.py
+@@ -0,0 +1,32 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that Makefiles don't get rebuilt when a source gyp file changes and
++the disable_regeneration generator flag is set.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++test.run_gyp('hello.gyp', '-Gauto_regeneration=0')
++
++test.build('hello.gyp', test.ALL)
++
++test.run_built_executable('hello', stdout="Hello, world!\n")
++
++# Sleep so that the changed gyp file will have a newer timestamp than the
++# previously generated build files.
++test.sleep()
++test.write('hello.gyp', test.read('hello2.gyp'))
++
++test.build('hello.gyp', test.ALL)
++
++# Should still be the old executable, as regeneration was disabled.
++test.run_built_executable('hello', stdout="Hello, world!\n")
++
++test.pass_test()
+diff --git a/tools/gyp/test/hello/gyptest-regyp-output.py b/tools/gyp/test/hello/gyptest-regyp-output.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..fd88a85503a2703a5686e17040ee02e48f980b2b
+--- /dev/null
++++ b/tools/gyp/test/hello/gyptest-regyp-output.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that Makefiles get rebuilt when a source gyp file changes and
++--generator-output is used.
++"""
++
++import TestGyp
++
++# Regenerating build files when a gyp file changes is currently only supported
++# by the make generator, and --generator-output is not supported by ninja, so we
++# can only test for make.
++test = TestGyp.TestGyp(formats=['make'])
++
++CHDIR='generator-output'
++
++test.run_gyp('hello.gyp', '--generator-output=%s' % CHDIR)
++
++test.build('hello.gyp', test.ALL, chdir=CHDIR)
++
++test.run_built_executable('hello', stdout="Hello, world!\n", chdir=CHDIR)
++
++# Sleep so that the changed gyp file will have a newer timestamp than the
++# previously generated build files.
++test.sleep()
++test.write('hello.gyp', test.read('hello2.gyp'))
++
++test.build('hello.gyp', test.ALL, chdir=CHDIR)
++
++test.run_built_executable('hello', stdout="Hello, two!\n", chdir=CHDIR)
++
++test.pass_test()
+diff --git a/tools/gyp/test/hello/gyptest-regyp.py b/tools/gyp/test/hello/gyptest-regyp.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..b513edcd07cda6919d2ff95b129a060a541eaa45
+--- /dev/null
++++ b/tools/gyp/test/hello/gyptest-regyp.py
+@@ -0,0 +1,32 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that Makefiles get rebuilt when a source gyp file changes.
++"""
++
++import TestGyp
++
++# Regenerating build files when a gyp file changes is currently only supported
++# by the make generator.
++test = TestGyp.TestGyp(formats=['make'])
++
++test.run_gyp('hello.gyp')
++
++test.build('hello.gyp', test.ALL)
++
++test.run_built_executable('hello', stdout="Hello, world!\n")
++
++# Sleep so that the changed gyp file will have a newer timestamp than the
++# previously generated build files.
++test.sleep()
++test.write('hello.gyp', test.read('hello2.gyp'))
++
++test.build('hello.gyp', test.ALL)
++
++test.run_built_executable('hello', stdout="Hello, two!\n")
++
++test.pass_test()
+diff --git a/tools/gyp/test/hello/gyptest-target.py b/tools/gyp/test/hello/gyptest-target.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..1abaf7057bf8ffc1da9437fd5adb17412000a6d7
+--- /dev/null
++++ b/tools/gyp/test/hello/gyptest-target.py
+@@ -0,0 +1,24 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies simplest-possible build of a "Hello, world!" program
++using an explicit build target of 'hello'.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp(workdir='workarea_target')
++
++test.run_gyp('hello.gyp')
++
++test.build('hello.gyp', 'hello')
++
++test.run_built_executable('hello', stdout="Hello, world!\n")
++
++test.up_to_date('hello.gyp', 'hello')
++
++test.pass_test()
+diff --git a/tools/gyp/test/hello/hello.c b/tools/gyp/test/hello/hello.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..0a4c806019e86416cad8dda7ee87a6bcad66f888
+--- /dev/null
++++ b/tools/gyp/test/hello/hello.c
+@@ -0,0 +1,11 @@
++/* Copyright (c) 2009 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#include <stdio.h>
++
++int main(void)
++{
++  printf("Hello, world!\n");
++  return 0;
++}
+diff --git a/tools/gyp/test/hello/hello.gyp b/tools/gyp/test/hello/hello.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..1974d51ccd1934cfc0841f26e7118448b2fb1c98
+--- /dev/null
++++ b/tools/gyp/test/hello/hello.gyp
+@@ -0,0 +1,15 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'hello',
++      'type': 'executable',
++      'sources': [
++        'hello.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/hello/hello2.c b/tools/gyp/test/hello/hello2.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..b14299cae0d4589033c6d15dcfe847df6adb6354
+--- /dev/null
++++ b/tools/gyp/test/hello/hello2.c
+@@ -0,0 +1,11 @@
++/* Copyright (c) 2009 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file. */
++
++#include <stdio.h>
++
++int main(void)
++{
++  printf("Hello, two!\n");
++  return 0;
++}
+diff --git a/tools/gyp/test/hello/hello2.gyp b/tools/gyp/test/hello/hello2.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..25b08caf3cad0ebe0bfc5eceff247996652e113f
+--- /dev/null
++++ b/tools/gyp/test/hello/hello2.gyp
+@@ -0,0 +1,15 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'hello',
++      'type': 'executable',
++      'sources': [
++        'hello2.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/home_dot_gyp/gyptest-home-includes-config-arg.py b/tools/gyp/test/home_dot_gyp/gyptest-home-includes-config-arg.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..82e39f9d073a419263abb5635c95e534a5e4858c
+--- /dev/null
++++ b/tools/gyp/test/home_dot_gyp/gyptest-home-includes-config-arg.py
+@@ -0,0 +1,31 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies inclusion of $HOME/.gyp/include.gypi works when --config-dir is
++specified.
++"""
++
++import os
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++os.environ['HOME'] = os.path.abspath('home2')
++
++test.run_gyp('all.gyp', '--config-dir=~/.gyp_new', chdir='src')
++
++# After relocating, we should still be able to build (build file shouldn't
++# contain relative reference to ~/.gyp/include.gypi)
++test.relocate('src', 'relocate/src')
++
++test.build('all.gyp', test.ALL, chdir='relocate/src')
++
++test.run_built_executable('printfoo',
++                          chdir='relocate/src',
++                          stdout='FOO is fromhome3\n')
++
++test.pass_test()
+diff --git a/tools/gyp/test/home_dot_gyp/gyptest-home-includes-config-env.py b/tools/gyp/test/home_dot_gyp/gyptest-home-includes-config-env.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..6f4b299ede4c743922daf7989001898901b5c753
+--- /dev/null
++++ b/tools/gyp/test/home_dot_gyp/gyptest-home-includes-config-env.py
+@@ -0,0 +1,33 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies inclusion of $HOME/.gyp_new/include.gypi works when GYP_CONFIG_DIR
++is set.
++"""
++
++import os
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++os.environ['HOME'] = os.path.abspath('home')
++os.environ['GYP_CONFIG_DIR'] = os.path.join(os.path.abspath('home2'),
++                                            '.gyp_new')
++
++test.run_gyp('all.gyp', chdir='src')
++
++# After relocating, we should still be able to build (build file shouldn't
++# contain relative reference to ~/.gyp_new/include.gypi)
++test.relocate('src', 'relocate/src')
++
++test.build('all.gyp', test.ALL, chdir='relocate/src')
++
++test.run_built_executable('printfoo',
++                          chdir='relocate/src',
++                          stdout='FOO is fromhome3\n')
++
++test.pass_test()
+diff --git a/tools/gyp/test/home_dot_gyp/gyptest-home-includes-regyp.py b/tools/gyp/test/home_dot_gyp/gyptest-home-includes-regyp.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..fdf8b144648380b6a3378aea3ce2fcdb5ea3c195
+--- /dev/null
++++ b/tools/gyp/test/home_dot_gyp/gyptest-home-includes-regyp.py
+@@ -0,0 +1,44 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies inclusion of $HOME/.gyp/include.gypi works properly with relocation
++and with regeneration.
++"""
++
++import os
++import TestGyp
++
++# Regenerating build files when a gyp file changes is currently only supported
++# by the make generator.
++test = TestGyp.TestGyp(formats=['make'])
++
++os.environ['HOME'] = os.path.abspath('home')
++
++test.run_gyp('all.gyp', chdir='src')
++
++# After relocating, we should still be able to build (build file shouldn't
++# contain relative reference to ~/.gyp/include.gypi)
++test.relocate('src', 'relocate/src')
++
++test.build('all.gyp', test.ALL, chdir='relocate/src')
++
++test.run_built_executable('printfoo',
++                          chdir='relocate/src',
++                          stdout='FOO is fromhome\n')
++
++# Building should notice any changes to ~/.gyp/include.gypi and regyp.
++test.sleep()
++
++test.write('home/.gyp/include.gypi', test.read('home2/.gyp/include.gypi'))
++
++test.build('all.gyp', test.ALL, chdir='relocate/src')
++
++test.run_built_executable('printfoo',
++                          chdir='relocate/src',
++                          stdout='FOO is fromhome2\n')
++
++test.pass_test()
+diff --git a/tools/gyp/test/home_dot_gyp/gyptest-home-includes.py b/tools/gyp/test/home_dot_gyp/gyptest-home-includes.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..8ad52556becc0f1e112ad91231a4b8f548e96022
+--- /dev/null
++++ b/tools/gyp/test/home_dot_gyp/gyptest-home-includes.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2011 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies inclusion of $HOME/.gyp/include.gypi works.
++"""
++
++import os
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++os.environ['HOME'] = os.path.abspath('home')
++
++test.run_gyp('all.gyp', chdir='src')
++
++# After relocating, we should still be able to build (build file shouldn't
++# contain relative reference to ~/.gyp/include.gypi)
++test.relocate('src', 'relocate/src')
++
++test.build('all.gyp', test.ALL, chdir='relocate/src')
++
++test.run_built_executable('printfoo',
++                          chdir='relocate/src',
++                          stdout='FOO is fromhome\n')
++
++test.pass_test()
+diff --git a/tools/gyp/test/home_dot_gyp/home/.gyp/include.gypi b/tools/gyp/test/home_dot_gyp/home/.gyp/include.gypi
+new file mode 100644
+index 0000000000000000000000000000000000000000..fcfb39befd841c0ef8db7472e41fe17a39492f21
+--- /dev/null
++++ b/tools/gyp/test/home_dot_gyp/home/.gyp/include.gypi
+@@ -0,0 +1,5 @@
++{
++  'variables': {
++    'foo': '"fromhome"',
++  },
++}
 diff --git a/tools/gyp/test/home_dot_gyp/home2/.gyp/include.gypi b/tools/gyp/test/home_dot_gyp/home2/.gyp/include.gypi
 new file mode 100644
 index 0000000000000000000000000000000000000000..f0d84b31ad50a4e7bb2d3e28367c722f554650b3
@@ -6344,10 +8142,10 @@ index 0000000000000000000000000000000000000000..2f526a6e3d729e82b9ca6915137b9da5
 +# vim: set expandtab tabstop=4 shiftwidth=4:
 diff --git a/tools/gyp/test/lib/TestGyp.py b/tools/gyp/test/lib/TestGyp.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..f42ee40dbd73ed901312bdf5229cea9613bd874d
+index 0000000000000000000000000000000000000000..fc7b135817791c9c1bbd125f0f1bdab4ff6313fb
 --- /dev/null
 +++ b/tools/gyp/test/lib/TestGyp.py
-@@ -0,0 +1,1191 @@
+@@ -0,0 +1,1193 @@
 +# Copyright (c) 2012 Google Inc. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -7400,7 +9198,9 @@ index 0000000000000000000000000000000000000000..f42ee40dbd73ed901312bdf5229cea96
 +          expected = expected.split('\n')
 +        actual = [a for a in actual
 +                    if 'No recorder, buildTask: <Xcode3BuildTask:' not in a and
-+                       'Beginning test session' not in a]
++                       'Beginning test session' not in a and
++                       'Writing diagnostic log' not in a and
++                       'Logs/Test/' not in a]
 +      return match(actual, expected)
 +    kw['match'] = match_filter_xcode
 +
@@ -22038,4227 +23838,3 @@ index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2
 diff --git a/tools/gyp/test/mac/xcode-env-order/file.ext2 b/tools/gyp/test/mac/xcode-env-order/file.ext2
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/mac/xcode-env-order/file.ext3 b/tools/gyp/test/mac/xcode-env-order/file.ext3
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/mac/xcode-env-order/main.c b/tools/gyp/test/mac/xcode-env-order/main.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..1bf4b2a11abd99b0655222eb96624b9abed72423
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-env-order/main.c
-@@ -0,0 +1,7 @@
-+// Copyright (c) 2011 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+int main() {
-+  return 0;
-+}
-diff --git a/tools/gyp/test/mac/xcode-env-order/test.gyp b/tools/gyp/test/mac/xcode-env-order/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..8f975f7d6b17feabd001f0c5f5ee55846f0f7124
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-env-order/test.gyp
-@@ -0,0 +1,121 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'targets': [
-+    {
-+      'target_name': 'test_app',
-+      'product_name': 'Test',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'sources': [
-+        'main.c',
-+        'file.ext1',
-+        'file.ext2',
-+        'file.ext3',
-+      ],
-+      # Env vars in copies.
-+      'copies': [
-+        {
-+          'destination': '<(PRODUCT_DIR)/${PRODUCT_NAME}-copy-brace',
-+          'files': [ 'main.c', ],  # ${SOURCE_ROOT} doesn't work with xcode
-+        },
-+        {
-+          'destination': '<(PRODUCT_DIR)/$(PRODUCT_NAME)-copy-paren',
-+          'files': [ '$(SOURCE_ROOT)/main.c', ],
-+        },
-+        {
-+          'destination': '<(PRODUCT_DIR)/$PRODUCT_NAME-copy-bare',
-+          'files': [ 'main.c', ],  # $SOURCE_ROOT doesn't work with xcode
-+        },
-+      ],
-+      # Env vars in actions. The $FOO's are here to test that env vars that
-+      # aren't defined are handled in some way that doesn't break the build.
-+      'actions': [
-+        {
-+          'action_name': 'Action copy braces ${PRODUCT_NAME} ${FOO}',
-+          'description': 'Action copy braces ${PRODUCT_NAME} ${FOO}',
-+          'inputs': [ '${SOURCE_ROOT}/main.c' ],
-+          # Referencing ${PRODUCT_NAME} in action outputs doesn't work with
-+          # the Xcode generator (PRODUCT_NAME expands to "Test Support").
-+          'outputs': [ '<(PRODUCT_DIR)/action-copy-brace.txt' ],
-+          'action': [ 'cp', '${SOURCE_ROOT}/main.c',
-+                      '<(PRODUCT_DIR)/action-copy-brace.txt' ],
-+        },
-+        {
-+          'action_name': 'Action copy parens $(PRODUCT_NAME) $(FOO)',
-+          'description': 'Action copy parens $(PRODUCT_NAME) $(FOO)',
-+          'inputs': [ '$(SOURCE_ROOT)/main.c' ],
-+          # Referencing $(PRODUCT_NAME) in action outputs doesn't work with
-+          # the Xcode generator (PRODUCT_NAME expands to "Test Support").
-+          'outputs': [ '<(PRODUCT_DIR)/action-copy-paren.txt' ],
-+          'action': [ 'cp', '$(SOURCE_ROOT)/main.c',
-+                      '<(PRODUCT_DIR)/action-copy-paren.txt' ],
-+        },
-+        {
-+          'action_name': 'Action copy bare $PRODUCT_NAME $FOO',
-+          'description': 'Action copy bare $PRODUCT_NAME $FOO',
-+          'inputs': [ '$SOURCE_ROOT/main.c' ],
-+          # Referencing $PRODUCT_NAME in action outputs doesn't work with
-+          # the Xcode generator (PRODUCT_NAME expands to "Test Support").
-+          'outputs': [ '<(PRODUCT_DIR)/action-copy-bare.txt' ],
-+          'action': [ 'cp', '$SOURCE_ROOT/main.c',
-+                      '<(PRODUCT_DIR)/action-copy-bare.txt' ],
-+        },
-+      ],
-+      # Env vars in xcode_settings.
-+      'xcode_settings': {
-+        'INFOPLIST_FILE': 'Info.plist',
-+        'STRING_KEY': '/Source/Project',
-+
-+        'BRACE_DEPENDENT_KEY2': '${STRING_KEY}/${PRODUCT_NAME}',
-+        'BRACE_DEPENDENT_KEY1': 'D:${BRACE_DEPENDENT_KEY2}',
-+        'BRACE_DEPENDENT_KEY3': '${PRODUCT_TYPE}:${BRACE_DEPENDENT_KEY1}',
-+
-+        'PAREN_DEPENDENT_KEY2': '$(STRING_KEY)/$(PRODUCT_NAME)',
-+        'PAREN_DEPENDENT_KEY1': 'D:$(PAREN_DEPENDENT_KEY2)',
-+        'PAREN_DEPENDENT_KEY3': '$(PRODUCT_TYPE):$(PAREN_DEPENDENT_KEY1)',
-+
-+        'BARE_DEPENDENT_KEY2': '$STRING_KEY/$PRODUCT_NAME',
-+        'BARE_DEPENDENT_KEY1': 'D:$BARE_DEPENDENT_KEY2',
-+        'BARE_DEPENDENT_KEY3': '$PRODUCT_TYPE:$BARE_DEPENDENT_KEY1',
-+
-+        'MIXED_DEPENDENT_KEY': '${STRING_KEY}:$(PRODUCT_NAME):$MACH_O_TYPE',
-+      },
-+      # Env vars in rules. The $FOO's are here to test that env vars that
-+      # aren't defined are handled in some way that doesn't break the build.
-+      'rules': [
-+        {
-+          'rule_name': 'brace_rule',
-+          'message': 'Rule braces ${PRODUCT_NAME} ${FOO} <(RULE_INPUT_NAME)',
-+          'extension': 'ext1',
-+          'inputs': [ '${SOURCE_ROOT}/main.c' ],
-+          'outputs': [ '<(PRODUCT_DIR)/rule-copy-brace.txt' ],
-+          'action': [ 'cp', '${SOURCE_ROOT}/main.c',
-+                      '<(PRODUCT_DIR)/rule-copy-brace.txt' ],
-+        },
-+        {
-+          'rule_name': 'paren_rule',
-+          'message': 'Rule parens $(PRODUCT_NAME) $(FOO) <(RULE_INPUT_NAME)',
-+          'extension': 'ext2',
-+          'inputs': [ '$(SOURCE_ROOT)/main.c' ],
-+          'outputs': [ '<(PRODUCT_DIR)/rule-copy-paren.txt' ],
-+          'action': [ 'cp', '$(SOURCE_ROOT)/main.c',
-+                      '<(PRODUCT_DIR)/rule-copy-paren.txt' ],
-+        },
-+        # TODO: Fails in xcode. Looks like a bug in the xcode generator though
-+        #       (which uses makefiles for rules, and thinks $PRODUCT_NAME is
-+        #       $(P)RODUCT_NAME).
-+        #{
-+        #  'rule_name': 'bare_rule',
-+        #  'message': 'Rule copy bare $PRODUCT_NAME $FOO',
-+        #  'extension': 'ext3',
-+        #  'inputs': [ '$SOURCE_ROOT/main.c' ],
-+        #  'outputs': [ '<(PRODUCT_DIR)/rule-copy-bare.txt' ],
-+        #  'action': [ 'cp', '$SOURCE_ROOT/main.c',
-+        #              '<(PRODUCT_DIR)/rule-copy-bare.txt' ],
-+        #},
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/aliasing.cc b/tools/gyp/test/mac/xcode-gcc/aliasing.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..16a41efb15cc331f9f666444c35d5ea962d164ab
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/aliasing.cc
-@@ -0,0 +1,13 @@
-+#include <stdio.h>
-+
-+void check(int* h, long* k) {
-+  *h = 1;
-+  *k = 0;
-+  printf("%d\n", *h);
-+}
-+
-+int main(void) {
-+  long k;
-+  check((int*)&k, &k);
-+  return 0;
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/test-clang.gyp b/tools/gyp/test/mac/xcode-gcc/test-clang.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..9f4a98ae73fce423ef234dd2dcf0f752a7226b88
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/test-clang.gyp
-@@ -0,0 +1,42 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'make_global_settings': [
-+    ['CC', '/usr/bin/clang'],
-+    ['CXX', '/usr/bin/clang++'],
-+  ],
-+
-+  'targets': [
-+    {
-+      'target_name': 'aliasing_yes',
-+      'type': 'executable',
-+      'sources': [ 'aliasing.cc', ],
-+      'xcode_settings': {
-+        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-+        'GCC_STRICT_ALIASING': 'YES',
-+        'GCC_OPTIMIZATION_LEVEL': 2,
-+      },
-+    },
-+    {
-+      'target_name': 'aliasing_no',
-+      'type': 'executable',
-+      'sources': [ 'aliasing.cc', ],
-+      'xcode_settings': {
-+        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-+        'GCC_STRICT_ALIASING': 'NO',
-+        'GCC_OPTIMIZATION_LEVEL': 2,
-+      },
-+    },
-+    {
-+      'target_name': 'aliasing_default',
-+      'type': 'executable',
-+      'sources': [ 'aliasing.cc', ],
-+      'xcode_settings': {
-+        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-+        'GCC_OPTIMIZATION_LEVEL': 2,
-+      },
-+    },
-+  ],
-+}
-+
-diff --git a/tools/gyp/test/mac/xcode-gcc/test.gyp b/tools/gyp/test/mac/xcode-gcc/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..1ca8b215d8763f0b8ebe0acf2ccdf4350fc0a89c
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/test.gyp
-@@ -0,0 +1,60 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'target_defaults': {
-+    'xcode_settings': {
-+      'GCC_TREAT_WARNINGS_AS_ERRORS': 'YES',
-+    },
-+  },
-+
-+  'variables': {
-+    # Non-failing tests should check that these trivial files in every language
-+    # still compile correctly.
-+    'valid_sources': [
-+      'valid_c.c',
-+      'valid_cc.cc',
-+      'valid_m.m',
-+      'valid_mm.mm',
-+    ],
-+  },
-+
-+  # Targets come in pairs: 'foo' and 'foo-fail', with the former building with
-+  # no warnings and the latter not.
-+  'targets': [
-+    # GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO (default: YES):
-+    {
-+      'target_name': 'warn_about_invalid_offsetof_macro',
-+      'type': 'executable',
-+      'sources': [
-+        'warn_about_invalid_offsetof_macro.cc',
-+        '<@(valid_sources)',
-+      ],
-+      'xcode_settings': {
-+        'GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO': 'NO',
-+      },
-+    },
-+    {
-+      'target_name': 'warn_about_invalid_offsetof_macro-fail',
-+      'type': 'executable',
-+      'sources': [ 'warn_about_invalid_offsetof_macro.cc', ],
-+    },
-+    # GCC_WARN_ABOUT_MISSING_NEWLINE (default: NO):
-+    {
-+      'target_name': 'warn_about_missing_newline',
-+      'type': 'executable',
-+      'sources': [
-+        'warn_about_missing_newline.c',
-+        '<@(valid_sources)',
-+      ],
-+    },
-+    {
-+      'target_name': 'warn_about_missing_newline-fail',
-+      'type': 'executable',
-+      'sources': [ 'warn_about_missing_newline.c', ],
-+      'xcode_settings': {
-+        'GCC_WARN_ABOUT_MISSING_NEWLINE': 'YES',
-+      },
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/valid_c.c b/tools/gyp/test/mac/xcode-gcc/valid_c.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..2b10ac3ed75818842adab67419edb300841ac795
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/valid_c.c
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+// This file exists to test that valid C files compile correctly.
-+
-+void FunctionInCFile(void) {
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/valid_cc.cc b/tools/gyp/test/mac/xcode-gcc/valid_cc.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..31cddc3c9cc37dbeeed13a9db7c166c3e4b1f13c
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/valid_cc.cc
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+// This file exists to test that valid C++ files compile correctly.
-+
-+void FunctionInCCFile() {
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/valid_m.m b/tools/gyp/test/mac/xcode-gcc/valid_m.m
-new file mode 100644
-index 0000000000000000000000000000000000000000..95bddb27238fd0ce995e3900d11453e800cd552e
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/valid_m.m
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+// This file exists to test that valid Objective-C files compile correctly.
-+
-+void FunctionInMFile(void) {
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/valid_mm.mm b/tools/gyp/test/mac/xcode-gcc/valid_mm.mm
-new file mode 100644
-index 0000000000000000000000000000000000000000..a7db7e3ad6de74464570fd02333620d192552488
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/valid_mm.mm
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+// This file exists to test that valid Objective-C++ files compile correctly.
-+
-+void FunctionInMMFile() {
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/warn_about_invalid_offsetof_macro.cc b/tools/gyp/test/mac/xcode-gcc/warn_about_invalid_offsetof_macro.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..4a4612be0dc9edfbea46521768edc9a593da013a
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/warn_about_invalid_offsetof_macro.cc
-@@ -0,0 +1,15 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#define offsetof(st, m) ((unsigned)((char*)&((st*)0)->m - (char*)0))
-+
-+struct MyStruct {
-+  virtual void MyFunc() = 0;
-+  int my_member;
-+};
-+
-+int main() {
-+  unsigned x = offsetof(MyStruct, my_member);
-+  return x ? 0 : 1;
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/warn_about_missing_newline.c b/tools/gyp/test/mac/xcode-gcc/warn_about_missing_newline.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..6faf0895dbb686f04276c8784eed9378a4701064
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/warn_about_missing_newline.c
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2012 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+// Important: Don't terminate this file with a newline.
-+int main() {
-+  return 0;
-+}
-\ No newline at end of file
-diff --git a/tools/gyp/test/mac/xcode-support-actions/source.c b/tools/gyp/test/mac/xcode-support-actions/source.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/mac/xcode-support-actions/test.gyp b/tools/gyp/test/mac/xcode-support-actions/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..ad81b8c456c120a9c27603d2182f14cf2ad785a9
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-support-actions/test.gyp
-@@ -0,0 +1,26 @@
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'targets': [
-+    {
-+      'target_name': 'target',
-+      'product_name': 'Product',
-+      'type': 'shared_library',
-+      'mac_bundle': 1,
-+      'sources': [
-+        '<(PRODUCT_DIR)/copy.c',
-+      ],
-+      'actions': [
-+        {
-+          'action_name': 'Helper',
-+          'description': 'Helps',
-+          'inputs': [ 'source.c' ],
-+          'outputs': [ '<(PRODUCT_DIR)/copy.c' ],
-+          'action': [ 'cp', '${SOURCE_ROOT}/source.c',
-+                      '<(PRODUCT_DIR)/copy.c' ],
-+        },
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/mac/xctest/MyClass.h b/tools/gyp/test/mac/xctest/MyClass.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..dde13aa33d75a0fc8df6b68b0c6df77e188d0d05
---- /dev/null
-+++ b/tools/gyp/test/mac/xctest/MyClass.h
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#import <Foundation/Foundation.h>
-+
-+@interface MyClass : NSObject
-+@end
-diff --git a/tools/gyp/test/mac/xctest/MyClass.m b/tools/gyp/test/mac/xctest/MyClass.m
-new file mode 100644
-index 0000000000000000000000000000000000000000..df11471b075b79e38b3aa5d4a75a0a71be502f1a
---- /dev/null
-+++ b/tools/gyp/test/mac/xctest/MyClass.m
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#import "MyClass.h"
-+
-+@implementation MyClass
-+@end
-diff --git a/tools/gyp/test/mac/xctest/TestCase.m b/tools/gyp/test/mac/xctest/TestCase.m
-new file mode 100644
-index 0000000000000000000000000000000000000000..36846a1fda24b27c8dd10f497be91228b5ae0672
---- /dev/null
-+++ b/tools/gyp/test/mac/xctest/TestCase.m
-@@ -0,0 +1,16 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#import <XCTest/XCTest.h>
-+#import "MyClass.h"
-+
-+@interface TestCase : XCTestCase
-+@end
-+
-+@implementation TestCase
-+- (void)testFoo {
-+  MyClass *foo = [[MyClass alloc] init];
-+  XCTAssertNotNil(foo, @"expected non-nil object");
-+}
-+@end
-diff --git a/tools/gyp/test/mac/xctest/resource.txt b/tools/gyp/test/mac/xctest/resource.txt
-new file mode 100644
-index 0000000000000000000000000000000000000000..257cc5642cb1a054f08cc83f2d943e56fd3ebe99
---- /dev/null
-+++ b/tools/gyp/test/mac/xctest/resource.txt
-@@ -0,0 +1 @@
-+foo
-diff --git a/tools/gyp/test/mac/xctest/test.gyp b/tools/gyp/test/mac/xctest/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..ac25656b3561d3f3206bbd5494425bc7fb5837c1
---- /dev/null
-+++ b/tools/gyp/test/mac/xctest/test.gyp
-@@ -0,0 +1,47 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'classes',
-+      'type': 'static_library',
-+      'sources': [
-+        'MyClass.h',
-+        'MyClass.m',
-+      ],
-+      'link_settings': {
-+        'libraries': [
-+          '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
-+        ],
-+      },
-+    },
-+    {
-+      'target_name': 'tests',
-+      'type': 'loadable_module',
-+      'mac_xctest_bundle': 1,
-+      'sources': [
-+        'TestCase.m',
-+      ],
-+      'dependencies': [
-+        'classes',
-+      ],
-+      'mac_bundle_resources': [
-+        'resource.txt',
-+      ],
-+      'xcode_settings': {
-+        'WRAPPER_EXTENSION': 'xctest',
-+        'FRAMEWORK_SEARCH_PATHS': [
-+          '$(inherited)',
-+          '$(DEVELOPER_FRAMEWORKS_DIR)',
-+        ],
-+        'OTHER_LDFLAGS': [
-+          '$(inherited)',
-+          '-ObjC',
-+        ],
-+      },
-+    },
-+  ],
-+}
-+
-diff --git a/tools/gyp/test/mac/xctest/test.xcodeproj/xcshareddata/xcschemes/classes.xcscheme b/tools/gyp/test/mac/xctest/test.xcodeproj/xcshareddata/xcschemes/classes.xcscheme
-new file mode 100644
-index 0000000000000000000000000000000000000000..6bd1bb9696df345e5671a250e3d762cde0155d32
---- /dev/null
-+++ b/tools/gyp/test/mac/xctest/test.xcodeproj/xcshareddata/xcschemes/classes.xcscheme
-@@ -0,0 +1,69 @@
-+<?xml version="1.0" encoding="UTF-8"?>
-+<Scheme
-+   LastUpgradeVersion = "0500"
-+   version = "1.3">
-+   <BuildAction
-+      parallelizeBuildables = "YES"
-+      buildImplicitDependencies = "YES">
-+      <BuildActionEntries>
-+         <BuildActionEntry
-+            buildForTesting = "YES"
-+            buildForRunning = "YES"
-+            buildForProfiling = "YES"
-+            buildForArchiving = "YES"
-+            buildForAnalyzing = "YES">
-+            <BuildableReference
-+               BuildableIdentifier = "primary"
-+               BlueprintIdentifier = "D3B79173B4570A3C70A902FF"
-+               BuildableName = "libclasses.a"
-+               BlueprintName = "classes"
-+               ReferencedContainer = "container:test.xcodeproj">
-+            </BuildableReference>
-+         </BuildActionEntry>
-+      </BuildActionEntries>
-+   </BuildAction>
-+   <TestAction
-+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
-+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-+      shouldUseLaunchSchemeArgsEnv = "YES"
-+      buildConfiguration = "Default">
-+      <Testables>
-+         <TestableReference
-+            skipped = "NO">
-+            <BuildableReference
-+               BuildableIdentifier = "primary"
-+               BlueprintIdentifier = "2ACDAB234B9E5D65CACBCF9C"
-+               BuildableName = "tests.xctest"
-+               BlueprintName = "tests"
-+               ReferencedContainer = "container:test.xcodeproj">
-+            </BuildableReference>
-+         </TestableReference>
-+      </Testables>
-+   </TestAction>
-+   <LaunchAction
-+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
-+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-+      launchStyle = "0"
-+      useCustomWorkingDirectory = "NO"
-+      buildConfiguration = "Default"
-+      ignoresPersistentStateOnLaunch = "NO"
-+      debugDocumentVersioning = "YES"
-+      allowLocationSimulation = "YES">
-+      <AdditionalOptions>
-+      </AdditionalOptions>
-+   </LaunchAction>
-+   <ProfileAction
-+      shouldUseLaunchSchemeArgsEnv = "YES"
-+      savedToolIdentifier = ""
-+      useCustomWorkingDirectory = "NO"
-+      buildConfiguration = "Default"
-+      debugDocumentVersioning = "YES">
-+   </ProfileAction>
-+   <AnalyzeAction
-+      buildConfiguration = "Default">
-+   </AnalyzeAction>
-+   <ArchiveAction
-+      buildConfiguration = "Default"
-+      revealArchiveInOrganizer = "YES">
-+   </ArchiveAction>
-+</Scheme>
-diff --git a/tools/gyp/test/mac/xcuitest/Info.plist b/tools/gyp/test/mac/xcuitest/Info.plist
-new file mode 100644
-index 0000000000000000000000000000000000000000..ae8852b8360897f5dd163fadadcc38138669948e
---- /dev/null
-+++ b/tools/gyp/test/mac/xcuitest/Info.plist
-@@ -0,0 +1,28 @@
-+<?xml version="1.0" encoding="UTF-8"?>
-+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-+<plist version="1.0">
-+<dict>
-+	<key>CFBundleDevelopmentRegion</key>
-+	<string>English</string>
-+	<key>CFBundleExecutable</key>
-+	<string>${EXECUTABLE_NAME}</string>
-+	<key>CFBundleIconFile</key>
-+	<string></string>
-+	<key>CFBundleIdentifier</key>
-+	<string>com.yourcompany.${PRODUCT_NAME}</string>
-+	<key>CFBundleInfoDictionaryVersion</key>
-+	<string>6.0</string>
-+	<key>CFBundleName</key>
-+	<string>${PRODUCT_NAME}</string>
-+	<key>CFBundlePackageType</key>
-+	<string>BNDL</string>
-+	<key>CFBundleShortVersionString</key>
-+	<string>1.0</string>
-+	<key>CFBundleSignature</key>
-+	<string>????</string>
-+	<key>CFBundleVersion</key>
-+	<string>1</string>
-+	<key>NSPrincipalClass</key>
-+	<string></string>
-+</dict>
-+</plist>
-diff --git a/tools/gyp/test/mac/xcuitest/MyAppDelegate.h b/tools/gyp/test/mac/xcuitest/MyAppDelegate.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..445be2cb427e27e5bdd1d167c9058c3b6710acf7
---- /dev/null
-+++ b/tools/gyp/test/mac/xcuitest/MyAppDelegate.h
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#import <UIKit/UIKit.h>
-+
-+@interface MyAppDelegate : NSObject<UIApplicationDelegate>
-+@end
-diff --git a/tools/gyp/test/mac/xcuitest/MyAppDelegate.m b/tools/gyp/test/mac/xcuitest/MyAppDelegate.m
-new file mode 100644
-index 0000000000000000000000000000000000000000..6ad60fa9d4f64f70f8056a6e4d27d000796bef41
---- /dev/null
-+++ b/tools/gyp/test/mac/xcuitest/MyAppDelegate.m
-@@ -0,0 +1,19 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#import "MyAppDelegate.h"
-+
-+
-+@implementation MyAppDelegate
-+@synthesize window;
-+
-+- (BOOL)application:(UIApplication *)application
-+    didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-+  self.window = [[UIWindow alloc] init];
-+  self.window.rootViewController = [[UIViewController alloc] init];
-+  [self.window makeKeyAndVisible];
-+  return YES;
-+}
-+
-+@end
-diff --git a/tools/gyp/test/mac/xcuitest/TestCase.m b/tools/gyp/test/mac/xcuitest/TestCase.m
-new file mode 100644
-index 0000000000000000000000000000000000000000..1f32b7af7457095cd08adda6d2d30d9e09a63476
---- /dev/null
-+++ b/tools/gyp/test/mac/xcuitest/TestCase.m
-@@ -0,0 +1,15 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#import <XCTest/XCTest.h>
-+
-+@interface TestCase : XCTestCase
-+@end
-+
-+@implementation TestCase
-+- (void)testFoo {
-+  XCUIApplication *foo = [[XCUIApplication alloc] init];
-+  XCTAssertNotNil(foo, @"expected non-nil object");
-+}
-+@end
-diff --git a/tools/gyp/test/mac/xcuitest/main.m b/tools/gyp/test/mac/xcuitest/main.m
-new file mode 100644
-index 0000000000000000000000000000000000000000..e7cb62e6394627f125870a3043d19ce0a3ccac38
---- /dev/null
-+++ b/tools/gyp/test/mac/xcuitest/main.m
-@@ -0,0 +1,15 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#import <UIKit/UIKit.h>
-+
-+#import "MyAppDelegate.h"
-+
-+int main(int argc, char * argv[]) {
-+  @autoreleasepool {
-+    UIApplicationMain(argc, argv,
-+                      nil, NSStringFromClass([MyAppDelegate class]));
-+  }
-+  return 1;
-+}
-diff --git a/tools/gyp/test/mac/xcuitest/resource.txt b/tools/gyp/test/mac/xcuitest/resource.txt
-new file mode 100644
-index 0000000000000000000000000000000000000000..257cc5642cb1a054f08cc83f2d943e56fd3ebe99
---- /dev/null
-+++ b/tools/gyp/test/mac/xcuitest/resource.txt
-@@ -0,0 +1 @@
-+foo
-diff --git a/tools/gyp/test/mac/xcuitest/test.gyp b/tools/gyp/test/mac/xcuitest/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..80cdf9032d095ccd36a22d5e9f578c4c81575a9d
---- /dev/null
-+++ b/tools/gyp/test/mac/xcuitest/test.gyp
-@@ -0,0 +1,69 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'target_defaults': {
-+    'xcode_settings': {
-+      'SDKROOT': 'iphoneos',
-+      'FRAMEWORK_SEARCH_PATHS': [
-+        '$(inherited)',
-+        '$(DEVELOPER_FRAMEWORKS_DIR)',
-+      ],
-+      'OTHER_LDFLAGS': [
-+        '$(inherited)',
-+        '-ObjC',
-+      ],
-+      'GCC_PREFIX_HEADER': '',
-+      'CLANG_ENABLE_OBJC_ARC': 'YES',
-+      'INFOPLIST_FILE': 'Info.plist',
-+    },
-+  },
-+  'targets': [
-+    {
-+      'target_name': 'testApp',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'sources': [
-+        'MyAppDelegate.h',
-+        'MyAppDelegate.m',
-+        'main.m',
-+      ],
-+      'link_settings': {
-+        'libraries': [
-+          '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
-+          '$(SDKROOT)/System/Library/Frameworks/UIKit.framework',
-+        ],
-+      },
-+    },
-+    {
-+      'target_name': 'tests',
-+      'type': 'loadable_module',
-+      'mac_bundle': 1,
-+      'mac_xcuitest_bundle': 1,
-+      'sources': [
-+        'TestCase.m',
-+      ],
-+      'dependencies': [
-+        'testApp',
-+      ],
-+      'mac_bundle_resources': [
-+        'resource.txt',
-+      ],
-+      'variables': {
-+        # This must *not* be set for xctest ui tests.
-+        'xctest_host': '',
-+      },
-+      'link_settings': {
-+        'libraries': [
-+          '$(SDKROOT)/System/Library/Frameworks/XCTest.framework',
-+        ]
-+      },
-+      'xcode_settings': {
-+        'WRAPPER_EXTENSION': 'xctest',
-+        'TEST_TARGET_NAME': 'testApp',
-+      },
-+    },
-+  ],
-+}
-+
-diff --git a/tools/gyp/test/make/dependencies.gyp b/tools/gyp/test/make/dependencies.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..e2bee24fcefd9fbf36cab32f8d0253454aed3dde
---- /dev/null
-+++ b/tools/gyp/test/make/dependencies.gyp
-@@ -0,0 +1,15 @@
-+# Copyright (c) 2009 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'main',
-+      'type': 'executable',
-+      'sources': [
-+        'main.cc',
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/make/gyptest-dependencies.py b/tools/gyp/test/make/gyptest-dependencies.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..d215f7678252141c37cc21fc58117bc984d2f28e
---- /dev/null
-+++ b/tools/gyp/test/make/gyptest-dependencies.py
-@@ -0,0 +1,26 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies that .d files and all.deps are properly generated.
-+"""
-+
-+import TestGyp
-+
-+# .d files are only used by the make build.
-+test = TestGyp.TestGyp(formats=['make'])
-+
-+test.run_gyp('dependencies.gyp')
-+
-+test.build('dependencies.gyp', test.ALL)
-+
-+deps_file = test.built_file_path(".deps/out/Default/obj.target/main/main.o.d")
-+test.must_contain(deps_file, "main.h")
-+
-+# Build a second time to make sure we generate all.deps.
-+test.build('dependencies.gyp', test.ALL)
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/make/gyptest-noload.py b/tools/gyp/test/make/gyptest-noload.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..1f5103315cfcc1ca2ef6519e65bec1ed8ccd2730
---- /dev/null
-+++ b/tools/gyp/test/make/gyptest-noload.py
-@@ -0,0 +1,57 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2010 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Tests the use of the NO_LOAD flag which makes loading sub .mk files
-+optional.
-+"""
-+
-+# Python 2.5 needs this for the with statement.
-+from __future__ import with_statement
-+
-+import os
-+import TestGyp
-+
-+test = TestGyp.TestGyp(formats=['make'])
-+
-+test.run_gyp('all.gyp', chdir='noload')
-+
-+test.relocate('noload', 'relocate/noload')
-+
-+test.build('build/all.gyp', test.ALL, chdir='relocate/noload')
-+test.run_built_executable('exe', chdir='relocate/noload',
-+                          stdout='Hello from shared.c.\n')
-+
-+# Just sanity test that NO_LOAD=lib doesn't break anything.
-+test.build('build/all.gyp', test.ALL, chdir='relocate/noload',
-+           arguments=['NO_LOAD=lib'])
-+test.run_built_executable('exe', chdir='relocate/noload',
-+                          stdout='Hello from shared.c.\n')
-+test.build('build/all.gyp', test.ALL, chdir='relocate/noload',
-+           arguments=['NO_LOAD=z'])
-+test.run_built_executable('exe', chdir='relocate/noload',
-+                          stdout='Hello from shared.c.\n')
-+
-+# Make sure we can rebuild without reloading the sub .mk file.
-+with open('relocate/noload/main.c', 'a') as src_file:
-+  src_file.write("\n")
-+test.build('build/all.gyp', test.ALL, chdir='relocate/noload',
-+           arguments=['NO_LOAD=lib'])
-+test.run_built_executable('exe', chdir='relocate/noload',
-+                          stdout='Hello from shared.c.\n')
-+
-+# Change shared.c, but verify that it doesn't get rebuild if we don't load it.
-+with open('relocate/noload/lib/shared.c', 'w') as shared_file:
-+  shared_file.write(
-+      '#include "shared.h"\n'
-+      'const char kSharedStr[] = "modified";\n'
-+  )
-+test.build('build/all.gyp', test.ALL, chdir='relocate/noload',
-+           arguments=['NO_LOAD=lib'])
-+test.run_built_executable('exe', chdir='relocate/noload',
-+                          stdout='Hello from shared.c.\n')
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/make/main.cc b/tools/gyp/test/make/main.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..3b9a705c2434445ac50a1ddd2b56e69673636b09
---- /dev/null
-+++ b/tools/gyp/test/make/main.cc
-@@ -0,0 +1,12 @@
-+/* Copyright (c) 2009 Google Inc. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file. */
-+
-+#include <stdio.h>
-+
-+#include "main.h"
-+
-+int main(void) {
-+  printf("hello world\n");
-+  return 0;
-+}
-diff --git a/tools/gyp/test/make/main.h b/tools/gyp/test/make/main.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/make/noload/all.gyp b/tools/gyp/test/make/noload/all.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..1617a9e97c94929dd8f6e2db3c2f3b2705d06d57
---- /dev/null
-+++ b/tools/gyp/test/make/noload/all.gyp
-@@ -0,0 +1,18 @@
-+# Copyright (c) 2010 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'exe',
-+      'type': 'executable',
-+      'sources': [
-+        'main.c',
-+      ],
-+      'dependencies': [
-+        'lib/shared.gyp:shared',
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/make/noload/lib/shared.c b/tools/gyp/test/make/noload/lib/shared.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..51776c5acfab6d16bc1ec35297e6140a7688c199
---- /dev/null
-+++ b/tools/gyp/test/make/noload/lib/shared.c
-@@ -0,0 +1,3 @@
-+#include "shared.h"
-+
-+const char kSharedStr[] = "shared.c";
-diff --git a/tools/gyp/test/make/noload/lib/shared.gyp b/tools/gyp/test/make/noload/lib/shared.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..8a8841b3a06e82fd9fd2b8b419641a0823b05641
---- /dev/null
-+++ b/tools/gyp/test/make/noload/lib/shared.gyp
-@@ -0,0 +1,16 @@
-+# Copyright (c) 2009 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'shared',
-+      'type': 'shared_library',
-+      'sources': [
-+        'shared.c',
-+        'shared.h',
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/make/noload/lib/shared.h b/tools/gyp/test/make/noload/lib/shared.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..a21da7538bf08bf54b1fa35cd6f2bf04c17d61d9
---- /dev/null
-+++ b/tools/gyp/test/make/noload/lib/shared.h
-@@ -0,0 +1 @@
-+extern const char kSharedStr[];
-diff --git a/tools/gyp/test/make/noload/main.c b/tools/gyp/test/make/noload/main.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..26ec1889ad3501aea652b80fc528acc787da3fd1
---- /dev/null
-+++ b/tools/gyp/test/make/noload/main.c
-@@ -0,0 +1,9 @@
-+#include <stdio.h>
-+
-+#include "lib/shared.h"
-+
-+int main(void)
-+{
-+  printf("Hello from %s.\n", kSharedStr);
-+  return 0;
-+}
-diff --git a/tools/gyp/test/make_global_settings/ar/gyptest-make_global_settings_ar.py b/tools/gyp/test/make_global_settings/ar/gyptest-make_global_settings_ar.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..e6676de6bdd08690c9fa0134afcd902a0f73ae00
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/ar/gyptest-make_global_settings_ar.py
-@@ -0,0 +1,126 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies 'AR' in make_global_settings.
-+"""
-+
-+import os
-+import sys
-+import TestGyp
-+
-+def resolve_path(test, path):
-+  if path is None:
-+    return None
-+  elif test.format == 'make':
-+    return '$(abspath %s)' % path
-+  elif test.format in ['ninja', 'xcode-ninja']:
-+    return os.path.join('..', '..', path)
-+  else:
-+    test.fail_test()
-+
-+
-+def verify_ar_target(test, ar=None, rel_path=False):
-+  if rel_path:
-+    ar_expected = resolve_path(test, ar)
-+  else:
-+    ar_expected = ar
-+  # Resolve default values
-+  if ar_expected is None:
-+    if test.format == 'make':
-+      # Make generator hasn't set the default value for AR.
-+      # You can remove the following assertion as long as it doesn't
-+      # break existing projects.
-+      test.must_not_contain('Makefile', 'AR ?= ')
-+      return
-+    elif test.format in ['ninja', 'xcode-ninja']:
-+      if sys.platform == 'win32':
-+        ar_expected = 'lib.exe'
-+      else:
-+        ar_expected = 'ar'
-+  if test.format == 'make':
-+    test.must_contain('Makefile', 'AR ?= %s' % ar_expected)
-+  elif test.format in ['ninja', 'xcode-ninja']:
-+    test.must_contain('out/Default/build.ninja', 'ar = %s' % ar_expected)
-+  else:
-+    test.fail_test()
-+
-+
-+def verify_ar_host(test, ar=None, rel_path=False):
-+  if rel_path:
-+    ar_expected = resolve_path(test, ar)
-+  else:
-+    ar_expected = ar
-+  # Resolve default values
-+  if ar_expected is None:
-+    if sys.platform == 'win32':
-+      ar_expected = 'lib.exe'
-+    else:
-+      ar_expected = 'ar'
-+  if test.format == 'make':
-+    test.must_contain('Makefile', 'AR.host ?= %s' % ar_expected)
-+  elif test.format in ['ninja', 'xcode-ninja']:
-+    test.must_contain('out/Default/build.ninja', 'ar_host = %s' % ar_expected)
-+  else:
-+    test.fail_test()
-+
-+
-+test_format = ['ninja']
-+if sys.platform in ('linux2', 'darwin'):
-+  test_format += ['make']
-+
-+test = TestGyp.TestGyp(formats=test_format)
-+
-+# Check default values
-+test.run_gyp('make_global_settings_ar.gyp')
-+verify_ar_target(test)
-+
-+
-+# Check default values with GYP_CROSSCOMPILE enabled.
-+with TestGyp.LocalEnv({'GYP_CROSSCOMPILE': '1'}):
-+  test.run_gyp('make_global_settings_ar.gyp')
-+verify_ar_target(test)
-+verify_ar_host(test)
-+
-+
-+# Test 'AR' in 'make_global_settings'.
-+with TestGyp.LocalEnv({'GYP_CROSSCOMPILE': '1'}):
-+  test.run_gyp('make_global_settings_ar.gyp', '-Dcustom_ar_target=my_ar')
-+verify_ar_target(test, ar='my_ar', rel_path=True)
-+
-+
-+# Test 'AR'/'AR.host' in 'make_global_settings'.
-+with TestGyp.LocalEnv({'GYP_CROSSCOMPILE': '1'}):
-+  test.run_gyp('make_global_settings_ar.gyp',
-+               '-Dcustom_ar_target=my_ar_target1',
-+               '-Dcustom_ar_host=my_ar_host1')
-+verify_ar_target(test, ar='my_ar_target1', rel_path=True)
-+verify_ar_host(test, ar='my_ar_host1', rel_path=True)
-+
-+
-+# Test $AR and $AR_host environment variables.
-+with TestGyp.LocalEnv({'AR': 'my_ar_target2',
-+                       'AR_host': 'my_ar_host2'}):
-+  test.run_gyp('make_global_settings_ar.gyp')
-+# Ninja generator resolves $AR in gyp phase. Make generator doesn't.
-+if test.format == 'ninja':
-+  if sys.platform == 'win32':
-+    # TODO(yukawa): Make sure if this is an expected result or not.
-+    verify_ar_target(test, ar='lib.exe', rel_path=False)
-+  else:
-+    verify_ar_target(test, ar='my_ar_target2', rel_path=False)
-+verify_ar_host(test, ar='my_ar_host2', rel_path=False)
-+
-+
-+# Test 'AR' in 'make_global_settings' with $AR_host environment variable.
-+with TestGyp.LocalEnv({'AR_host': 'my_ar_host3'}):
-+  test.run_gyp('make_global_settings_ar.gyp',
-+               '-Dcustom_ar_target=my_ar_target3')
-+verify_ar_target(test, ar='my_ar_target3', rel_path=True)
-+verify_ar_host(test, ar='my_ar_host3', rel_path=False)
-+
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/make_global_settings/ar/make_global_settings_ar.gyp b/tools/gyp/test/make_global_settings/ar/make_global_settings_ar.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..3430d82a517aec983ecfefec1595399982f3dfb6
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/ar/make_global_settings_ar.gyp
-@@ -0,0 +1,29 @@
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style licence that can be
-+# found in the LICENSE file.
-+
-+{
-+  'variables': {
-+    'custom_ar_target%': '',
-+    'custom_ar_host%': '',
-+  },
-+  'conditions': [
-+    ['"<(custom_ar_target)"!=""', {
-+      'make_global_settings': [
-+        ['AR', '<(custom_ar_target)'],
-+      ],
-+    }],
-+    ['"<(custom_ar_host)"!=""', {
-+      'make_global_settings': [
-+        ['AR.host', '<(custom_ar_host)'],
-+      ],
-+    }],
-+  ],
-+  'targets': [
-+    {
-+      'target_name': 'make_global_settings_ar_test',
-+      'type': 'static_library',
-+      'sources': [ 'foo.c' ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/make_global_settings/basics/gyptest-make_global_settings.py b/tools/gyp/test/make_global_settings/basics/gyptest-make_global_settings.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..63d1d0af90facb6f6db39932edf5d297bfe68ce4
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/basics/gyptest-make_global_settings.py
-@@ -0,0 +1,46 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies make_global_settings.
-+"""
-+
-+import os
-+import sys
-+import TestGyp
-+
-+test_format = ['ninja']
-+if sys.platform in ('linux2', 'darwin'):
-+  test_format += ['make']
-+
-+test = TestGyp.TestGyp(formats=test_format)
-+
-+test.run_gyp('make_global_settings.gyp')
-+
-+if test.format == 'make':
-+  cc_expected = """ifneq (,$(filter $(origin CC), undefined default))
-+  CC = $(abspath clang)
-+endif
-+"""
-+  if sys.platform == 'linux2':
-+    link_expected = """
-+LINK ?= $(abspath clang)
-+"""
-+  elif sys.platform == 'darwin':
-+    link_expected = """
-+LINK ?= $(abspath clang)
-+"""
-+  test.must_contain('Makefile', cc_expected)
-+  test.must_contain('Makefile', link_expected)
-+if test.format == 'ninja':
-+  cc_expected = 'cc = ' + os.path.join('..', '..', 'clang')
-+  ld_expected = 'ld = $cc'
-+  if sys.platform == 'win32':
-+    ld_expected = 'link.exe'
-+  test.must_contain('out/Default/build.ninja', cc_expected)
-+  test.must_contain('out/Default/build.ninja', ld_expected)
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/make_global_settings/basics/make_global_settings.gyp b/tools/gyp/test/make_global_settings/basics/make_global_settings.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..47dbc8570fe7dc57e76687971cd03edfad72ed38
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/basics/make_global_settings.gyp
-@@ -0,0 +1,17 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style licence that can be
-+# found in the LICENSE file.
-+
-+{
-+  'make_global_settings': [
-+    ['CC', 'clang'],
-+    ['LINK', 'clang'],
-+  ],
-+  'targets': [
-+    {
-+      'target_name': 'test',
-+      'type': 'static_library',
-+      'sources': [ 'foo.c' ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/make_global_settings/env-wrapper/gyptest-wrapper.py b/tools/gyp/test/make_global_settings/env-wrapper/gyptest-wrapper.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..70d6906ccaac8133dc1a48a5a827d2966eb2eb6f
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/env-wrapper/gyptest-wrapper.py
-@@ -0,0 +1,46 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies *_wrapper in environment.
-+"""
-+
-+import os
-+import sys
-+import TestGyp
-+
-+test_format = ['ninja']
-+
-+os.environ['CC_wrapper'] = 'distcc'
-+os.environ['LINK_wrapper'] = 'distlink'
-+os.environ['CC.host_wrapper'] = 'ccache'
-+
-+test = TestGyp.TestGyp(formats=test_format)
-+
-+old_env = dict(os.environ)
-+os.environ['GYP_CROSSCOMPILE'] = '1'
-+test.run_gyp('wrapper.gyp')
-+os.environ.clear()
-+os.environ.update(old_env)
-+
-+if test.format == 'ninja':
-+  cc_expected = ('cc = ' + os.path.join('..', '..', 'distcc') + ' ' +
-+                 os.path.join('..', '..', 'clang'))
-+  cc_host_expected = ('cc_host = ' + os.path.join('..', '..', 'ccache') + ' ' +
-+                      os.path.join('..', '..', 'clang'))
-+  ld_expected = 'ld = ../../distlink $cc'
-+  if sys.platform != 'win32':
-+    ldxx_expected = 'ldxx = ../../distlink $cxx'
-+
-+  if sys.platform == 'win32':
-+     ld_expected = 'link.exe'
-+  test.must_contain('out/Default/build.ninja', cc_expected)
-+  test.must_contain('out/Default/build.ninja', cc_host_expected)
-+  test.must_contain('out/Default/build.ninja', ld_expected)
-+  if sys.platform != 'win32':
-+    test.must_contain('out/Default/build.ninja', ldxx_expected)
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/make_global_settings/env-wrapper/wrapper.gyp b/tools/gyp/test/make_global_settings/env-wrapper/wrapper.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..1698d71dd4a0c9d88478ba277d70706381ab0191
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/env-wrapper/wrapper.gyp
-@@ -0,0 +1,17 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'make_global_settings': [
-+    ['CC', 'clang'],
-+    ['CC.host', 'clang'],
-+  ],
-+  'targets': [
-+    {
-+      'target_name': 'test',
-+      'type': 'static_library',
-+      'sources': [ 'foo.c' ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/make_global_settings/full-toolchain/bar.cc b/tools/gyp/test/make_global_settings/full-toolchain/bar.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..afb422ba1a86542c24371f48e9f4ae807c24733d
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/full-toolchain/bar.cc
-@@ -0,0 +1 @@
-+#error Not a real source file
-diff --git a/tools/gyp/test/make_global_settings/full-toolchain/foo.c b/tools/gyp/test/make_global_settings/full-toolchain/foo.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..afb422ba1a86542c24371f48e9f4ae807c24733d
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/full-toolchain/foo.c
-@@ -0,0 +1 @@
-+#error Not a real source file
-diff --git a/tools/gyp/test/make_global_settings/full-toolchain/gyptest-make_global_settings.py b/tools/gyp/test/make_global_settings/full-toolchain/gyptest-make_global_settings.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..eebda7d49797a922ad4e4b0c430ac2971796fd92
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/full-toolchain/gyptest-make_global_settings.py
-@@ -0,0 +1,48 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies make_global_settings works with the full toolchain.
-+"""
-+
-+import os
-+import sys
-+import TestGyp
-+
-+if sys.platform == 'win32':
-+  # cross compiling not supported by ninja on windows
-+  # and make not supported on windows at all.
-+  sys.exit(0)
-+
-+test = TestGyp.TestGyp(formats=['ninja'])
-+# Must set the test format to something with a flavor (the part after the '-')
-+# in order to test the desired behavior. Since we want to run a non-host
-+# toolchain, we have to set the flavor to something that the ninja generator
-+# doesn't know about, so it doesn't default to the host-specific tools (e.g.,
-+# 'otool' on mac to generate the .TOC).
-+#
-+# Note that we can't just pass format=['ninja-some_toolchain'] to the
-+# constructor above, because then this test wouldn't be recognized as a ninja
-+# format test.
-+test.formats = ['ninja-my_flavor' if f == 'ninja' else f for f in test.formats]
-+
-+gyp_file = 'make_global_settings.gyp'
-+
-+test.run_gyp(gyp_file,
-+             # Teach the .gyp file about the location of my_nm.py and
-+             # my_readelf.py, and the python executable.
-+             '-Dworkdir=%s' % test.workdir,
-+             '-Dpython=%s' % sys.executable)
-+test.build(gyp_file,
-+           arguments=['-v'] if test.format == 'ninja-my_flavor' else [])
-+
-+expected = ['MY_CC', 'MY_CXX']
-+test.must_contain_all_lines(test.stdout(), expected)
-+
-+test.must_contain(test.built_file_path('RAN_MY_NM'), 'RAN_MY_NM')
-+test.must_contain(test.built_file_path('RAN_MY_READELF'), 'RAN_MY_READELF')
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/make_global_settings/full-toolchain/make_global_settings.gyp b/tools/gyp/test/make_global_settings/full-toolchain/make_global_settings.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..2c3266322d4f7690361863d510d4a0e4c4ed4948
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/full-toolchain/make_global_settings.gyp
-@@ -0,0 +1,22 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style licence that can be
-+# found in the LICENSE file.
-+
-+{
-+  'make_global_settings': [
-+    ['CC', '/bin/echo MY_CC'],
-+    ['CXX', '/bin/echo MY_CXX'],
-+    ['NM', '<(python) <(workdir)/my_nm.py'],
-+    ['READELF', '<(python) <(workdir)/my_readelf.py'],
-+  ],
-+  'targets': [
-+    {
-+      'target_name': 'test',
-+      'type': 'shared_library',
-+      'sources': [
-+        'foo.c',
-+        'bar.cc',
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/make_global_settings/full-toolchain/my_nm.py b/tools/gyp/test/make_global_settings/full-toolchain/my_nm.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..f0f1efcf73bd7c341765c6b41f0f5db85427eb75
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/full-toolchain/my_nm.py
-@@ -0,0 +1,8 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+import sys
-+print sys.argv
-+with open('RAN_MY_NM', 'w') as f:
-+  f.write('RAN_MY_NM')
-diff --git a/tools/gyp/test/make_global_settings/full-toolchain/my_readelf.py b/tools/gyp/test/make_global_settings/full-toolchain/my_readelf.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..40e303cd76f74e4b73d59e5b07097a0b7822288e
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/full-toolchain/my_readelf.py
-@@ -0,0 +1,8 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+import sys
-+print sys.argv
-+with open('RAN_MY_READELF', 'w') as f:
-+  f.write('RAN_MY_READELF')
-diff --git a/tools/gyp/test/make_global_settings/ld/gyptest-make_global_settings_ld.py b/tools/gyp/test/make_global_settings/ld/gyptest-make_global_settings_ld.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..c5a2e96422a9c18b3d197c7a2485a6cbf5079268
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/ld/gyptest-make_global_settings_ld.py
-@@ -0,0 +1,130 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies 'LD' in make_global_settings.
-+"""
-+
-+import os
-+import sys
-+import TestGyp
-+
-+def resolve_path(test, path):
-+  if path is None:
-+    return None
-+  elif test.format == 'make':
-+    return '$(abspath %s)' % path
-+  elif test.format in ['ninja', 'xcode-ninja']:
-+    return os.path.join('..', '..', path)
-+  else:
-+    test.fail_test()
-+
-+
-+def verify_ld_target(test, ld=None, rel_path=False):
-+  if rel_path:
-+    ld_expected = resolve_path(test, ld)
-+  else:
-+    ld_expected = ld
-+  # Resolve default values
-+  if ld_expected is None:
-+    if test.format == 'make':
-+      # Make generator hasn't set the default value for LD.
-+      # You can remove the following assertion as long as it doesn't
-+      # break existing projects.
-+      test.must_not_contain('Makefile', 'LD ?= ')
-+      return
-+    elif test.format in ['ninja', 'xcode-ninja']:
-+      if sys.platform == 'win32':
-+        ld_expected = 'link.exe'
-+      else:
-+        ld_expected = '$cc'
-+  if test.format == 'make':
-+    test.must_contain('Makefile', 'LD ?= %s' % ld_expected)
-+  elif test.format in ['ninja', 'xcode-ninja']:
-+    test.must_contain('out/Default/build.ninja', 'ld = %s' % ld_expected)
-+  else:
-+    test.fail_test()
-+
-+
-+def verify_ld_host(test, ld=None, rel_path=False):
-+  if rel_path:
-+    ld_expected = resolve_path(test, ld)
-+  else:
-+    ld_expected = ld
-+  # Resolve default values
-+  if ld_expected is None:
-+    if test.format == 'make':
-+      # Make generator hasn't set the default value for LD.host.
-+      # You can remove the following assertion as long as it doesn't
-+      # break existing projects.
-+      test.must_not_contain('Makefile', 'LD.host ?= ')
-+      return
-+    elif test.format in ['ninja', 'xcode-ninja']:
-+      if sys.platform == 'win32':
-+        ld_expected = '$ld'
-+      else:
-+        ld_expected = '$cc_host'
-+  if test.format == 'make':
-+    test.must_contain('Makefile', 'LD.host ?= %s' % ld_expected)
-+  elif test.format in ['ninja', 'xcode-ninja']:
-+    test.must_contain('out/Default/build.ninja', 'ld_host = %s' % ld_expected)
-+  else:
-+    test.fail_test()
-+
-+
-+test_format = ['ninja']
-+if sys.platform in ('linux2', 'darwin'):
-+  test_format += ['make']
-+
-+test = TestGyp.TestGyp(formats=test_format)
-+
-+# Check default values
-+test.run_gyp('make_global_settings_ld.gyp')
-+verify_ld_target(test)
-+
-+
-+# Check default values with GYP_CROSSCOMPILE enabled.
-+with TestGyp.LocalEnv({'GYP_CROSSCOMPILE': '1'}):
-+  test.run_gyp('make_global_settings_ld.gyp')
-+verify_ld_target(test)
-+verify_ld_host(test)
-+
-+
-+# Test 'LD' in 'make_global_settings'.
-+with TestGyp.LocalEnv({'GYP_CROSSCOMPILE': '1'}):
-+  test.run_gyp('make_global_settings_ld.gyp', '-Dcustom_ld_target=my_ld')
-+verify_ld_target(test, ld='my_ld', rel_path=True)
-+
-+
-+# Test 'LD'/'LD.host' in 'make_global_settings'.
-+with TestGyp.LocalEnv({'GYP_CROSSCOMPILE': '1'}):
-+  test.run_gyp('make_global_settings_ld.gyp',
-+               '-Dcustom_ld_target=my_ld_target1',
-+               '-Dcustom_ld_host=my_ld_host1')
-+verify_ld_target(test, ld='my_ld_target1', rel_path=True)
-+verify_ld_host(test, ld='my_ld_host1', rel_path=True)
-+
-+
-+# Unlike other environment variables such as $AR/$AR_host, $CC/$CC_host,
-+# and $CXX/$CXX_host, neither Make generator nor Ninja generator recognizes
-+# $LD/$LD_host environment variables as of r1935. This may or may not be
-+# intentional, but here we leave a test case to verify this behavior just for
-+# the record.
-+# If you want to support $LD/$LD_host, please revise the following test case as
-+# well as the generator.
-+with TestGyp.LocalEnv({'GYP_CROSSCOMPILE': '1',
-+                       'LD': 'my_ld_target2',
-+                       'LD_host': 'my_ld_host2'}):
-+  test.run_gyp('make_global_settings_ld.gyp')
-+if test.format == 'make':
-+  test.must_not_contain('Makefile', 'my_ld_target2')
-+  test.must_not_contain('Makefile', 'my_ld_host2')
-+elif test.format == 'ninja':
-+  test.must_not_contain('out/Default/build.ninja', 'my_ld_target2')
-+  test.must_not_contain('out/Default/build.ninja', 'my_ld_host2')
-+
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/make_global_settings/ld/make_global_settings_ld.gyp b/tools/gyp/test/make_global_settings/ld/make_global_settings_ld.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..6837c77326153c3afdee418404127c1527af27cf
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/ld/make_global_settings_ld.gyp
-@@ -0,0 +1,29 @@
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style licence that can be
-+# found in the LICENSE file.
-+
-+{
-+  'variables': {
-+    'custom_ld_target%': '',
-+    'custom_ld_host%': '',
-+  },
-+  'conditions': [
-+    ['"<(custom_ld_target)"!=""', {
-+      'make_global_settings': [
-+        ['LD', '<(custom_ld_target)'],
-+      ],
-+    }],
-+    ['"<(custom_ld_host)"!=""', {
-+      'make_global_settings': [
-+        ['LD.host', '<(custom_ld_host)'],
-+      ],
-+    }],
-+  ],
-+  'targets': [
-+    {
-+      'target_name': 'make_global_settings_ld_test',
-+      'type': 'static_library',
-+      'sources': [ 'foo.c' ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/make_global_settings/wrapper/gyptest-wrapper.py b/tools/gyp/test/make_global_settings/wrapper/gyptest-wrapper.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..eb1ebfd5a9629b7a79b5048faf79f83dfd8b3a98
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/wrapper/gyptest-wrapper.py
-@@ -0,0 +1,47 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies *_wrapper in make_global_settings.
-+"""
-+
-+import os
-+import sys
-+import TestGyp
-+
-+test_format = ['ninja']
-+if sys.platform in ('linux2', 'darwin'):
-+  test_format += ['make']
-+
-+test = TestGyp.TestGyp(formats=test_format)
-+
-+old_env = dict(os.environ)
-+os.environ['GYP_CROSSCOMPILE'] = '1'
-+test.run_gyp('wrapper.gyp')
-+os.environ.clear()
-+os.environ.update(old_env)
-+
-+if test.format == 'make':
-+  cc_expected = """ifneq (,$(filter $(origin CC), undefined default))
-+  CC = $(abspath distcc) $(abspath clang)
-+endif
-+"""
-+  link_expected = 'LINK ?= $(abspath distlink) $(abspath clang++)'
-+  test.must_contain('Makefile', cc_expected)
-+  test.must_contain('Makefile', link_expected)
-+if test.format == 'ninja':
-+  cc_expected = ('cc = ' + os.path.join('..', '..', 'distcc') + ' ' +
-+                 os.path.join('..', '..', 'clang'))
-+  cc_host_expected = ('cc_host = ' + os.path.join('..', '..', 'ccache') + ' ' +
-+                      os.path.join('..', '..', 'clang'))
-+  ld_expected = 'ld = ../../distlink $cc'
-+  if sys.platform == 'win32':
-+     ld_expected = 'link.exe'
-+  test.must_contain('out/Default/build.ninja', cc_expected)
-+  test.must_contain('out/Default/build.ninja', cc_host_expected)
-+  test.must_contain('out/Default/build.ninja', ld_expected)
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/make_global_settings/wrapper/wrapper.gyp b/tools/gyp/test/make_global_settings/wrapper/wrapper.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..3d4cd04b164532e1eb448f34632b3b69f2564764
---- /dev/null
-+++ b/tools/gyp/test/make_global_settings/wrapper/wrapper.gyp
-@@ -0,0 +1,21 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'make_global_settings': [
-+    ['CC', 'clang'],
-+    ['CC_wrapper', 'distcc'],
-+    ['LINK', 'clang++'],
-+    ['LINK_wrapper', 'distlink'],
-+    ['CC.host', 'clang'],
-+    ['CC.host_wrapper', 'ccache'],
-+  ],
-+  'targets': [
-+    {
-+      'target_name': 'test',
-+      'type': 'static_library',
-+      'sources': [ 'foo.c' ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/many-actions/file0 b/tools/gyp/test/many-actions/file0
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/many-actions/file1 b/tools/gyp/test/many-actions/file1
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/many-actions/file2 b/tools/gyp/test/many-actions/file2
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/many-actions/file3 b/tools/gyp/test/many-actions/file3
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/many-actions/file4 b/tools/gyp/test/many-actions/file4
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/many-actions/gyptest-many-actions-unsorted.py b/tools/gyp/test/many-actions/gyptest-many-actions-unsorted.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..90d3c92e4c2d51394813287c7daf2559dc1e33f7
---- /dev/null
-+++ b/tools/gyp/test/many-actions/gyptest-many-actions-unsorted.py
-@@ -0,0 +1,41 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Make sure lots of actions in the same target don't cause exceeding command
-+line length.
-+"""
-+
-+import sys
-+
-+if sys.platform == 'win32':
-+  print "This test is currently disabled: https://crbug.com/483696."
-+  sys.exit(0)
-+
-+import TestGyp
-+
-+test = TestGyp.TestGyp()
-+
-+test.run_gyp('many-actions-unsorted.gyp')
-+
-+test.build('many-actions-unsorted.gyp', test.ALL)
-+for i in range(15):
-+  test.built_file_must_exist('generated_%d.h' % i)
-+
-+# Make sure the optimized cygwin setup doesn't cause problems for incremental
-+# builds.
-+test.touch('file1')
-+test.build('many-actions-unsorted.gyp', test.ALL)
-+
-+test.touch('file0')
-+test.build('many-actions-unsorted.gyp', test.ALL)
-+
-+test.touch('file2')
-+test.touch('file3')
-+test.touch('file4')
-+test.build('many-actions-unsorted.gyp', test.ALL)
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/many-actions/gyptest-many-actions.py b/tools/gyp/test/many-actions/gyptest-many-actions.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..f2e719bb7017b32bff27ce845a26f892b29bb130
---- /dev/null
-+++ b/tools/gyp/test/many-actions/gyptest-many-actions.py
-@@ -0,0 +1,27 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Make sure lots of actions in the same target don't cause exceeding command
-+line length.
-+"""
-+
-+import sys
-+
-+if sys.platform == 'win32':
-+  print "This test is currently disabled: https://crbug.com/483696."
-+  sys.exit(0)
-+
-+
-+import TestGyp
-+
-+test = TestGyp.TestGyp()
-+
-+test.run_gyp('many-actions.gyp')
-+test.build('many-actions.gyp', test.ALL)
-+for i in range(200):
-+  test.built_file_must_exist('generated_%d.h' % i)
-+test.pass_test()
-diff --git a/tools/gyp/test/many-actions/many-actions-unsorted.gyp b/tools/gyp/test/many-actions/many-actions-unsorted.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..eec79fe8d8570ce96804ef4c7c3393e62c4d42fd
---- /dev/null
-+++ b/tools/gyp/test/many-actions/many-actions-unsorted.gyp
-@@ -0,0 +1,154 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'target_defaults': {
-+    'msvs_cygwin_dirs': ['../../../../<(DEPTH)/third_party/cygwin'],
-+  },
-+  'targets': [
-+    {
-+      'target_name': 'a',
-+      'type': 'none',
-+      'actions': [
-+        # Notice that the inputs go 0, 1, ..., 0, 1, .... This is to test
-+        # a regression in the msvs generator in _AddActions.
-+        {
-+          'action_name': 'do_0',
-+          'inputs': ['file0'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_0.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_0.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_1',
-+          'inputs': ['file1'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_1.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_1.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_2',
-+          'inputs': ['file2'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_2.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_2.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_3',
-+          'inputs': ['file3'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_3.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_3.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_4',
-+          'inputs': ['file4'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_4.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_4.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_5',
-+          'inputs': ['file0'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_5.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_5.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_6',
-+          'inputs': ['file1'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_6.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_6.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_7',
-+          'inputs': ['file2'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_7.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_7.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_8',
-+          'inputs': ['file3'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_8.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_8.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_9',
-+          'inputs': ['file4'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_9.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_9.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_10',
-+          'inputs': ['file0'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_10.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_10.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_11',
-+          'inputs': ['file1'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_11.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_11.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_12',
-+          'inputs': ['file2'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_12.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_12.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_13',
-+          'inputs': ['file3'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_13.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_13.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_14',
-+          'inputs': ['file4'],
-+          'outputs': ['<(PRODUCT_DIR)/generated_14.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_14.h',
-+          ],
-+        },
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/many-actions/many-actions.gyp b/tools/gyp/test/many-actions/many-actions.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..38545d2d88565a228d49203eb36a270f62906780
---- /dev/null
-+++ b/tools/gyp/test/many-actions/many-actions.gyp
-@@ -0,0 +1,1817 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'target_defaults': {
-+    'msvs_cygwin_dirs': ['../../../../<(DEPTH)/third_party/cygwin'],
-+  },
-+  'targets': [
-+    {
-+      'target_name': 'a',
-+      'type': 'none',
-+      'actions': [
-+        {
-+          'action_name': 'do_0',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_0.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_0.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_1',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_1.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_1.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_2',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_2.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_2.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_3',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_3.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_3.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_4',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_4.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_4.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_5',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_5.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_5.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_6',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_6.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_6.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_7',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_7.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_7.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_8',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_8.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_8.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_9',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_9.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_9.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_10',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_10.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_10.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_11',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_11.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_11.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_12',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_12.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_12.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_13',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_13.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_13.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_14',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_14.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_14.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_15',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_15.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_15.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_16',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_16.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_16.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_17',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_17.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_17.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_18',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_18.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_18.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_19',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_19.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_19.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_20',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_20.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_20.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_21',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_21.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_21.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_22',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_22.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_22.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_23',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_23.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_23.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_24',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_24.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_24.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_25',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_25.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_25.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_26',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_26.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_26.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_27',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_27.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_27.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_28',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_28.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_28.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_29',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_29.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_29.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_30',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_30.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_30.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_31',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_31.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_31.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_32',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_32.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_32.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_33',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_33.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_33.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_34',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_34.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_34.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_35',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_35.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_35.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_36',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_36.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_36.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_37',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_37.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_37.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_38',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_38.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_38.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_39',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_39.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_39.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_40',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_40.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_40.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_41',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_41.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_41.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_42',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_42.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_42.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_43',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_43.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_43.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_44',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_44.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_44.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_45',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_45.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_45.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_46',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_46.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_46.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_47',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_47.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_47.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_48',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_48.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_48.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_49',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_49.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_49.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_50',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_50.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_50.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_51',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_51.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_51.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_52',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_52.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_52.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_53',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_53.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_53.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_54',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_54.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_54.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_55',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_55.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_55.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_56',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_56.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_56.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_57',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_57.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_57.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_58',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_58.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_58.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_59',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_59.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_59.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_60',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_60.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_60.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_61',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_61.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_61.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_62',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_62.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_62.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_63',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_63.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_63.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_64',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_64.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_64.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_65',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_65.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_65.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_66',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_66.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_66.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_67',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_67.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_67.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_68',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_68.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_68.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_69',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_69.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_69.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_70',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_70.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_70.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_71',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_71.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_71.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_72',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_72.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_72.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_73',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_73.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_73.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_74',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_74.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_74.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_75',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_75.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_75.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_76',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_76.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_76.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_77',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_77.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_77.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_78',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_78.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_78.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_79',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_79.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_79.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_80',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_80.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_80.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_81',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_81.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_81.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_82',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_82.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_82.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_83',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_83.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_83.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_84',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_84.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_84.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_85',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_85.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_85.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_86',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_86.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_86.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_87',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_87.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_87.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_88',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_88.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_88.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_89',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_89.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_89.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_90',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_90.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_90.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_91',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_91.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_91.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_92',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_92.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_92.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_93',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_93.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_93.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_94',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_94.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_94.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_95',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_95.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_95.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_96',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_96.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_96.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_97',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_97.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_97.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_98',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_98.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_98.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_99',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_99.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_99.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_100',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_100.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_100.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_101',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_101.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_101.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_102',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_102.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_102.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_103',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_103.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_103.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_104',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_104.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_104.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_105',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_105.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_105.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_106',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_106.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_106.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_107',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_107.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_107.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_108',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_108.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_108.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_109',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_109.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_109.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_110',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_110.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_110.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_111',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_111.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_111.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_112',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_112.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_112.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_113',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_113.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_113.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_114',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_114.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_114.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_115',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_115.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_115.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_116',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_116.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_116.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_117',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_117.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_117.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_118',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_118.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_118.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_119',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_119.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_119.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_120',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_120.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_120.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_121',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_121.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_121.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_122',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_122.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_122.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_123',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_123.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_123.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_124',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_124.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_124.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_125',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_125.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_125.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_126',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_126.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_126.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_127',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_127.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_127.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_128',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_128.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_128.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_129',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_129.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_129.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_130',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_130.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_130.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_131',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_131.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_131.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_132',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_132.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_132.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_133',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_133.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_133.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_134',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_134.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_134.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_135',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_135.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_135.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_136',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_136.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_136.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_137',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_137.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_137.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_138',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_138.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_138.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_139',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_139.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_139.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_140',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_140.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_140.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_141',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_141.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_141.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_142',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_142.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_142.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_143',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_143.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_143.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_144',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_144.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_144.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_145',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_145.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_145.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_146',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_146.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_146.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_147',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_147.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_147.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_148',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_148.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_148.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_149',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_149.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_149.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_150',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_150.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_150.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_151',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_151.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_151.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_152',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_152.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_152.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_153',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_153.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_153.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_154',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_154.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_154.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_155',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_155.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_155.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_156',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_156.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_156.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_157',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_157.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_157.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_158',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_158.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_158.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_159',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_159.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_159.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_160',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_160.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_160.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_161',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_161.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_161.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_162',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_162.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_162.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_163',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_163.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_163.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_164',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_164.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_164.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_165',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_165.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_165.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_166',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_166.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_166.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_167',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_167.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_167.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_168',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_168.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_168.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_169',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_169.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_169.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_170',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_170.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_170.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_171',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_171.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_171.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_172',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_172.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_172.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_173',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_173.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_173.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_174',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_174.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_174.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_175',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_175.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_175.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_176',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_176.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_176.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_177',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_177.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_177.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_178',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_178.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_178.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_179',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_179.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_179.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_180',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_180.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_180.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_181',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_181.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_181.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_182',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_182.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_182.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_183',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_183.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_183.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_184',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_184.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_184.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_185',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_185.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_185.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_186',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_186.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_186.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_187',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_187.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_187.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_188',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_188.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_188.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_189',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_189.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_189.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_190',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_190.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_190.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_191',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_191.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_191.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_192',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_192.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_192.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_193',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_193.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_193.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_194',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_194.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_194.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_195',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_195.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_195.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_196',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_196.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_196.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_197',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_197.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_197.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_198',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_198.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_198.h',
-+          ],
-+        },
-+        {
-+          'action_name': 'do_199',
-+          'inputs': [],
-+          'outputs': ['<(PRODUCT_DIR)/generated_199.h'],
-+          'action': [
-+            'touch',
-+            '<(PRODUCT_DIR)/generated_199.h',
-+          ],
-+        },
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/module/gyptest-default.py b/tools/gyp/test/module/gyptest-default.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..7fecf3ca4d2b2ad8a444b720545d9c7c62f8ea6c
---- /dev/null
-+++ b/tools/gyp/test/module/gyptest-default.py
-@@ -0,0 +1,28 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies simple build of a "Hello, world!" program with loadable modules. The
-+default for all platforms should be to output the loadable modules to the same
-+path as the executable.
-+"""
-+
-+import TestGyp
-+
-+test = TestGyp.TestGyp()
-+
-+test.run_gyp('module.gyp', chdir='src')
-+
-+test.build('module.gyp', test.ALL, chdir='src')
-+
-+expect = """\
-+Hello from program.c
-+Hello from lib1.c
-+Hello from lib2.c
-+"""
-+test.run_built_executable('program', chdir='src', stdout=expect)
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/module/src/lib1.c b/tools/gyp/test/module/src/lib1.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..8de0e94bee70508485202df3f628c00b670df808
---- /dev/null
-+++ b/tools/gyp/test/module/src/lib1.c
-@@ -0,0 +1,10 @@
-+#include <stdio.h>
-+
-+#ifdef _WIN32
-+__declspec(dllexport)
-+#endif
-+void module_main(void)
-+{
-+  fprintf(stdout, "Hello from lib1.c\n");
-+  fflush(stdout);
-+}
-diff --git a/tools/gyp/test/module/src/lib2.c b/tools/gyp/test/module/src/lib2.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..266396dc91cc3f6d94f60054e27fed0a13d1b221
---- /dev/null
-+++ b/tools/gyp/test/module/src/lib2.c
-@@ -0,0 +1,10 @@
-+#include <stdio.h>
-+
-+#ifdef _WIN32
-+__declspec(dllexport)
-+#endif
-+void module_main(void)
-+{
-+  fprintf(stdout, "Hello from lib2.c\n");
-+  fflush(stdout);
-+}
-diff --git a/tools/gyp/test/module/src/module.gyp b/tools/gyp/test/module/src/module.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..2bc398bb3bf6b57d9d274cd21131c4073bcccd04
---- /dev/null
-+++ b/tools/gyp/test/module/src/module.gyp
-@@ -0,0 +1,53 @@
-+# Copyright (c) 2009 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'target_defaults': {
-+    'conditions': [
-+      ['OS=="win"', {
-+        'defines': ['PLATFORM_WIN'],
-+      }],
-+      ['OS=="mac" or OS=="ios"', {
-+        'defines': ['PLATFORM_MAC'],
-+      }],
-+      ['OS=="linux"', {
-+        'defines': ['PLATFORM_LINUX'],
-+        # Support 64-bit shared libs (also works fine for 32-bit).
-+        'cflags': ['-fPIC'],
-+        'libraries': ['-ldl'],
-+      }],
-+    ],
-+  },
-+  'targets': [
-+    {
-+      'target_name': 'program',
-+      'type': 'executable',
-+      'dependencies': [
-+        'lib1',
-+        'lib2',
-+      ],
-+      'sources': [
-+        'program.c',
-+      ],
-+    },
-+    {
-+      'target_name': 'lib1',
-+      'type': 'loadable_module',
-+      'product_name': 'lib1',
-+      'product_prefix': '',
-+      'sources': [
-+        'lib1.c',
-+      ],
-+    },
-+    {
-+      'target_name': 'lib2',
-+      'product_name': 'lib2',
-+      'product_prefix': '',
-+      'type': 'loadable_module',
-+      'sources': [
-+        'lib2.c',
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/module/src/program.c b/tools/gyp/test/module/src/program.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..7cc3dd34663f77d170a7f2f64693bdb936c12987
---- /dev/null
-+++ b/tools/gyp/test/module/src/program.c
-@@ -0,0 +1,111 @@
-+#include <stdio.h>
-+#include <stdlib.h>
-+
-+#if defined(PLATFORM_WIN)
-+#include <windows.h>
-+#elif defined(PLATFORM_MAC) || defined(PLATFORM_LINUX)
-+#include <dlfcn.h>
-+#include <libgen.h>
-+#include <string.h>
-+#include <sys/param.h>
-+#define MAX_PATH PATH_MAX
-+#endif
-+
-+#if defined(PLATFORM_WIN)
-+#define MODULE_SUFFIX ".dll"
-+#elif defined(PLATFORM_MAC)
-+#define MODULE_SUFFIX ".so"
-+#elif defined(PLATFORM_LINUX)
-+#define MODULE_SUFFIX ".so"
-+#endif
-+
-+typedef void (*module_symbol)(void);
-+char bin_path[MAX_PATH + 1];
-+
-+
-+void CallModule(const char* module) {
-+  char module_path[MAX_PATH + 1];
-+  const char* module_function = "module_main";
-+  module_symbol funcptr;
-+#if defined(PLATFORM_WIN)
-+  HMODULE dl;
-+  char drive[_MAX_DRIVE];
-+  char dir[_MAX_DIR];
-+
-+  if (_splitpath_s(bin_path, drive, _MAX_DRIVE, dir, _MAX_DIR,
-+                    NULL, 0, NULL, 0)) {
-+    fprintf(stderr, "Failed to split executable path.\n");
-+    return;
-+  }
-+  if (_makepath_s(module_path, MAX_PATH, drive, dir, module, MODULE_SUFFIX)) {
-+    fprintf(stderr, "Failed to calculate module path.\n");
-+    return;
-+  }
-+
-+  dl = LoadLibrary(module_path);
-+  if (!dl) {
-+    fprintf(stderr, "Failed to open module: %s\n", module_path);
-+    return;
-+  }
-+
-+  funcptr = (module_symbol) GetProcAddress(dl, module_function);
-+  if (!funcptr) {
-+    fprintf(stderr, "Failed to find symbol: %s\n", module_function);
-+    return;
-+  }
-+  funcptr();
-+
-+  FreeLibrary(dl);
-+#elif defined(PLATFORM_MAC) || defined(PLATFORM_LINUX)
-+  void* dl;
-+  char* path_copy = strdup(bin_path);
-+  char* bin_dir = dirname(path_copy);
-+  int path_size = snprintf(module_path, MAX_PATH, "%s/%s%s", bin_dir, module,
-+                           MODULE_SUFFIX);
-+  free(path_copy);
-+  if (path_size < 0 || path_size > MAX_PATH) {
-+    fprintf(stderr, "Failed to calculate module path.\n");
-+    return;
-+  }
-+  module_path[path_size] = 0;
-+
-+  dl = dlopen(module_path, RTLD_LAZY);
-+  if (!dl) {
-+    fprintf(stderr, "Failed to open module: %s\n", module_path);
-+    return;
-+  }
-+
-+  funcptr = dlsym(dl, module_function);
-+  if (!funcptr) {
-+    fprintf(stderr, "Failed to find symbol: %s\n", module_function);
-+    return;
-+  }
-+  funcptr();
-+
-+  dlclose(dl);
-+#endif
-+}
-+
-+int main(int argc, char *argv[])
-+{
-+  fprintf(stdout, "Hello from program.c\n");
-+  fflush(stdout);
-+
-+#if defined(PLATFORM_WIN)
-+  if (!GetModuleFileName(NULL, bin_path, MAX_PATH)) {
-+    fprintf(stderr, "Failed to determine executable path.\n");
-+    return 1;
-+  }
-+#elif defined(PLATFORM_MAC) || defined(PLATFORM_LINUX)
-+  // Using argv[0] should be OK here since we control how the tests run, and
-+  // can avoid exec and such issues that make it unreliable.
-+  if (!realpath(argv[0], bin_path)) {
-+    fprintf(stderr, "Failed to determine executable path (%s).\n", argv[0]);
-+    return 1;
-+  }
-+#endif
-+
-+  CallModule("lib1");
-+  CallModule("lib2");
-+  return 0;
-+}
-diff --git a/tools/gyp/test/msvs/buildevents/buildevents.gyp b/tools/gyp/test/msvs/buildevents/buildevents.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..e0304dd5c617186f217879569028c0e7f688fc94
---- /dev/null
-+++ b/tools/gyp/test/msvs/buildevents/buildevents.gyp
-@@ -0,0 +1,14 @@
-+# Copyright (c) 2011 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'targets': [
-+    {
-+      'target_name': 'main',
-+      'type': 'executable',
-+      'sources': [ 'main.cc', ],
-+      'msvs_prebuild': r'echo starting',
-+      'msvs_postbuild': r'echo finished',
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/msvs/buildevents/gyptest-msbuild-supports-prepostbuild.py b/tools/gyp/test/msvs/buildevents/gyptest-msbuild-supports-prepostbuild.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..208f43456041319de5002345b9662ec03441f761
---- /dev/null
-+++ b/tools/gyp/test/msvs/buildevents/gyptest-msbuild-supports-prepostbuild.py
-@@ -0,0 +1,24 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2011 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies that msvs_prebuild and msvs_postbuild can be specified in both
-+VS 2008 and 2010.
-+"""
-+
-+import TestGyp
-+
-+test = TestGyp.TestGyp(formats=['msvs'], workdir='workarea_all')
-+
-+test.run_gyp('buildevents.gyp', '-G', 'msvs_version=2008')
-+test.must_contain('main.vcproj', 'Name="VCPreBuildEventTool"')
-+test.must_contain('main.vcproj', 'Name="VCPostBuildEventTool"')
-+
-+test.run_gyp('buildevents.gyp', '-G', 'msvs_version=2010')
-+test.must_contain('main.vcxproj', '<PreBuildEvent>')
-+test.must_contain('main.vcxproj', '<PostBuildEvent>')
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/msvs/buildevents/gyptest-ninja-warnings.py b/tools/gyp/test/msvs/buildevents/gyptest-ninja-warnings.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..be4ec9921ac20a3b2336140f76d7bee7570c57b2
---- /dev/null
-+++ b/tools/gyp/test/msvs/buildevents/gyptest-ninja-warnings.py
-@@ -0,0 +1,29 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies that ninja errors out when encountering msvs_prebuild/msvs_postbuild.
-+"""
-+
-+import sys
-+import TestCmd
-+import TestGyp
-+
-+
-+if sys.platform == 'win32':
-+  test = TestGyp.TestGyp(formats=['ninja'])
-+
-+  test.run_gyp('buildevents.gyp',
-+      status=1,
-+      stderr=r'.*msvs_prebuild not supported \(target main\).*',
-+      match=TestCmd.match_re_dotall)
-+
-+  test.run_gyp('buildevents.gyp',
-+      status=1,
-+      stderr=r'.*msvs_postbuild not supported \(target main\).*',
-+      match=TestCmd.match_re_dotall)
-+
-+  test.pass_test()
-diff --git a/tools/gyp/test/msvs/buildevents/main.cc b/tools/gyp/test/msvs/buildevents/main.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..03c0285a6cc856103f8adad4d35dc76e42a51042
---- /dev/null
-+++ b/tools/gyp/test/msvs/buildevents/main.cc
-@@ -0,0 +1,5 @@
-+// Copyright (c) 2014 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+int main() {}
-diff --git a/tools/gyp/test/msvs/config_attrs/gyptest-config_attrs.py b/tools/gyp/test/msvs/config_attrs/gyptest-config_attrs.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..d5603744dbbf63805778cd80daac5fdc6f68551a
---- /dev/null
-+++ b/tools/gyp/test/msvs/config_attrs/gyptest-config_attrs.py
-@@ -0,0 +1,39 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies that msvs_configuration_attributes and
-+msbuild_configuration_attributes are applied by using
-+them to set the OutputDirectory.
-+"""
-+
-+import TestGyp
-+import os
-+
-+import sys
-+
-+if sys.platform == 'win32':
-+  print "This test is currently disabled: https://crbug.com/483696."
-+  sys.exit(0)
-+
-+
-+
-+test = TestGyp.TestGyp(workdir='workarea_all',formats=['msvs'])
-+
-+vc_version = 'VC90'
-+
-+if os.getenv('GYP_MSVS_VERSION'):
-+  vc_version = ['VC90','VC100'][int(os.getenv('GYP_MSVS_VERSION')) >= 2010]
-+
-+expected_exe_file = os.path.join(test.workdir, vc_version, 'hello.exe')
-+
-+test.run_gyp('hello.gyp')
-+
-+test.build('hello.gyp')
-+
-+test.must_exist(expected_exe_file)
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/msvs/config_attrs/hello.c b/tools/gyp/test/msvs/config_attrs/hello.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..faadc75e2c0a5975e50cc6e9a8ee1c83e2c248bb
---- /dev/null
-+++ b/tools/gyp/test/msvs/config_attrs/hello.c
-@@ -0,0 +1,11 @@
-+/* Copyright (c) 2012 Google Inc. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file. */
-+
-+#include <stdio.h>
-+
-+int main(void)
-+{
-+  printf("Hello, world!\n");
-+  return 0;
-+}
-diff --git a/tools/gyp/test/msvs/config_attrs/hello.gyp b/tools/gyp/test/msvs/config_attrs/hello.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..810a80edd8034c363f63ff2be29b4da22d4f1cf3
---- /dev/null
-+++ b/tools/gyp/test/msvs/config_attrs/hello.gyp
-@@ -0,0 +1,21 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'hello',
-+      'type': 'executable',
-+      'sources': [
-+        'hello.c',
-+      ],
-+      'msvs_configuration_attributes': {
-+        'OutputDirectory':'$(SolutionDir)VC90/'
-+      },
-+      'msbuild_configuration_attributes': {
-+        'OutputDirectory':'$(SolutionDir)VC100/',
-+      },
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/msvs/express/base/base.gyp b/tools/gyp/test/msvs/express/base/base.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..b7c9fc6d81f1e9ee487d7d76c2940ac3ad132cea
---- /dev/null
-+++ b/tools/gyp/test/msvs/express/base/base.gyp
-@@ -0,0 +1,22 @@
-+# Copyright (c) 2009 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'a',
-+      'type': 'static_library',
-+      'sources': [
-+        'a.c',
-+      ],
-+    },
-+    {
-+      'target_name': 'b',
-+      'type': 'static_library',
-+      'sources': [
-+        'b.c',
-+      ],
-+    },
-+  ],
-+}
