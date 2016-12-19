@@ -1,3 +1,121 @@
+diff --git a/third_party/cld_2/src/internal/tote.h b/third_party/cld_2/src/internal/tote.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..cd45592ec1cbb2df1cf967502996eca8ceb4b14d
+--- /dev/null
++++ b/third_party/cld_2/src/internal/tote.h
+@@ -0,0 +1,112 @@
++// Copyright 2013 Google Inc. All Rights Reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++//
++// Author: dsites@google.com (Dick Sites)
++//
++
++#ifndef I18N_ENCODINGS_CLD2_INTERNAL_TOTE_H_
++#define I18N_ENCODINGS_CLD2_INTERNAL_TOTE_H_
++
++#include <stdio.h>
++#include "integral_types.h"        // for uint8 etc
++
++namespace CLD2 {
++
++
++// Take a set of <key, score> pairs and tote them up.
++// Key is an 8-bit per-script language
++// After explicitly sorting, retrieve top key, score pairs
++// Normal use is key=per-script language
++// The main data structure is an array of 256 uint16 counts. We normally
++// expect this to be initialized, added-to about 60 times, then the top three
++// items found. The reduce the initial and final time, we also keep a bit vector
++// of unused (and uninitialized) parts, each of 64 bits covering four keys.
++class Tote {
++ public:
++  Tote();
++  ~Tote();
++  void Reinit();
++  void AddScoreCount();
++  void Add(uint8 ikey, int idelta);
++  void AddBytes(int ibytes) {byte_count_ += ibytes;}
++  void CurrentTopThreeKeys(int* key3) const;
++  int GetScoreCount() const {return score_count_;}
++  int GetByteCount() const {return byte_count_;}
++  int GetScore(int i) const {return score_[i];}
++  void SetScoreCount(uint16 v) {score_count_ = v;}
++  void SetScore(int i, int v) {score_[i] = v;}
++
++ private:
++  uint64 in_use_mask_;      // 64 bits, one for each group of 4 scores.
++                            //    0 = not initialized,not used
++  int byte_count_;          // Bytes of text scored
++  int score_count_;         // Number of quadgrams/etc. scored
++  union {
++    uint64 gscore_[64];     // For alignment and clearing quickly
++    uint16 score_[256];     // Probability score sum
++  };
++
++};
++
++
++// Take a set of <key, score, reliability> triples and tote them up.
++// Key is a 16-bit full language
++// After explicitly sorting, retrieve top key, score, reliability triples
++class DocTote {
++ public:
++  DocTote();
++  ~DocTote();
++  void Reinit();
++  void Add(uint16 ikey, int ibytes, int score, int ireliability);
++  int Find(uint16 ikey);
++  void AddClosePair(int subscr, int val) {closepair_[subscr] += val;}
++  int CurrentTopKey();
++  Tote* RunningScore() {return &runningscore_;}
++  void Sort(int n);
++  void Dump(FILE* f);
++
++  int GetIncrCount() const {return incr_count_;}
++  int GetClosePair(int subscr) const {return closepair_[subscr];}
++  int MaxSize() const {return kMaxSize_;}
++  uint16 Key(int i) const {return key_[i];}
++  int Value(int i) const {return value_[i];}      // byte count
++  int Score(int i) const {return score_[i];}      // sum lg prob
++  int Reliability(int i) const {return reliability_[i];}
++  void SetKey(int i, int v) {key_[i] = v;}
++  void SetValue(int i, int v) {value_[i] = v;}
++  void SetScore(int i, int v) {score_[i] = v;}
++  void SetReliability(int i, int v) {reliability_[i] = v;}
++
++  static const uint16 kUnusedKey = 0xFFFF;
++
++ private:
++  static const int kMaxSize_ = 24;
++  static const int kMaxClosePairSize_ = 8;
++
++  int incr_count_;         // Number of Add calls
++  int sorted_;             // Contents have been sorted, cannot Add
++  Tote runningscore_;      // Top lang scores across entire doc, for
++                           // helping resolve close pairs
++  // Align at multiple of 8 bytes
++  int closepair_[kMaxClosePairSize_];
++  uint16 key_[kMaxSize_];   // Lang unassigned = 0xFFFF, valid = 1..1023
++  int value_[kMaxSize_];    // Bytecount this lang
++  int score_[kMaxSize_];    // Probability score sum
++  int reliability_[kMaxSize_];  // Percentage 0..100
++};
++
++}       // End namespace CLD2
++
++#endif  // I18N_ENCODINGS_CLD2_INTERNAL_TOTE_H_
 diff --git a/third_party/cld_2/src/internal/unittest_data.h b/third_party/cld_2/src/internal/unittest_data.h
 new file mode 100644
 index 0000000000000000000000000000000000000000..0cdafc5d252dc3f8305f024a60f9a71305b9e065
@@ -7126,536 +7244,1181 @@ index 0000000000000000000000000000000000000000..1eb8f0a1518eff7a7045b6db26497178
 +#endif  // I18N_ENCODINGS_CLD2_PUBLIC_ENCODINGS_H__
 +
 +
-diff --git a/third_party/colorama/src/.gitignore b/third_party/colorama/src/.gitignore
+diff --git a/third_party/cld_3/src/CONTRIBUTING.md b/third_party/cld_3/src/CONTRIBUTING.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..888499b429c93590ff3dd598c7bf16d38c22e269
+index 0000000000000000000000000000000000000000..ade29dbfc344f5405e43aea448f5b2f013978f89
 --- /dev/null
-+++ b/third_party/colorama/src/.gitignore
-@@ -0,0 +1,7 @@
-+*.pyc
-+*.egg-info
-+MANIFEST
-+dist
-+tags
-+virtualenv
++++ b/third_party/cld_3/src/CONTRIBUTING.md
+@@ -0,0 +1,26 @@
++Want to contribute? Great! First, read this page (including the small print at
++the end).
 +
-diff --git a/third_party/colorama/src/CHANGELOG.rst b/third_party/colorama/src/CHANGELOG.rst
++### Before you contribute
++Before we can use your code, you must sign the
++[Google Individual Contributor License Agreement](https://cla.developers.google.com/about/google-individual)
++(CLA), which you can do online. The CLA is necessary mainly because you own the
++copyright to your changes, even after your contribution becomes part of our
++codebase, so we need your permission to use and distribute your code. We also
++need to be sure of various other things—for instance that you'll tell us if you
++know that your code infringes on other people's patents. You don't have to sign
++the CLA until after you've submitted your code for review and a member has
++approved it, but you must do it before we can put your code into our codebase.
++Before you start working on a larger contribution, you should get in touch with
++us first through the issue tracker with your idea so that we can help out and
++possibly guide you. Coordinating up front makes it much easier to avoid
++frustration later on.
++
++### Code reviews
++All submissions, including submissions by project members, require review. We
++use Github pull requests for this purpose.
++
++### The small print
++Contributions made by corporations are covered by a different agreement than
++the one above, the
++[Software Grant and Corporate Contributor License Agreement](https://cla.developers.google.com/about/google-corporate).
+diff --git a/third_party/cld_3/src/LICENSE b/third_party/cld_3/src/LICENSE
 new file mode 100644
-index 0000000000000000000000000000000000000000..bbd59348f08506bef3401938d5896f9414c1805f
+index 0000000000000000000000000000000000000000..c5899b26febde1d80fadd24c32254e70c68544ae
 --- /dev/null
-+++ b/third_party/colorama/src/CHANGELOG.rst
-@@ -0,0 +1,103 @@
-+0.3.1
-+  * Fixed crash on exit with closed stdout, with thanks to Marc Abramowitz.
-+  * Now uses setuptools if available, and falls back to distutils if not.
-+  * setup.py no longer imports anything from colorama source.
-+0.3.0
-+  * Move repository to Git, https://github.com/tartley/colorama. (My Mercurial
-+    repo seemed to be corrupted, I couldn't commit nor view patches of old
-+    commits, even on fresh checkouts.)
-+  * Fix always-crash on non-Windows platforms, reported by Matt McCormick.
-+  * Fix issue #47, incompatible with pyreadline.
-+0.2.7
-+    Fix problem under 64-bit windows due to ctypes HANDLE size.
-+    Submitted by the rather magnificent Ben Hoyt.
-+    This fixes issue 43 (http://code.google.com/p/colorama/issues/detail?id=43)
-+0.2.6
-+    Add copyright & licensing info to every file, as requested by a large
-+    downstream project which has problems making sure that all 3rd party
-+    contributions have appropriate license.
-+0.2.5
-+    Severeral documentation & demo fixes.
-+0.2.4
-+    Fix to work on Windows 7.
-+    Python 3 compatibility in docs and demos.
-+    Add handling for 'cursor up' and 'get position' ANSI codes.
-+0.2.3
-+	Split changelog out into separate file.
-+0.2.2
-+    Fix bug which caused init() to raise, introduced in 0.2.1.
-+    Remove asserts which cause problems in various circumstances. At least
-+    some users saw asserts fail on 'success' returned from win32 functions,
-+    even though the win32 functions appear to have worked correctly.
-+0.2.1
-+    Completely broken: I added a bug which caused init() to raise.
-+    Added some documentation for cursor positioning and clear screen to README.
-+    Add 'reinit' and 'deinit' functions, as suggested by Charles FOL and
-+    Romanov DA.
-+0.2
-+    Merge in changes from Daniel Griffith: Add ANSI cursor positioning &
-+    partial support for clear screen. Patch submitted by Oscar Lester, don't
-+    send RESET_ALL to non-tty. Demos split into separate files and moved into
-+    their own directory. Tweak sys.path in demos so they run against local
-+    source, not installed version of Colorama.
-+0.1.18
-+    Fix README (no such attr as Fore.DEFAULT, etc), kindly reported by nodakai.
-+0.1.17
-+    Prevent printing of garbage ANSI codes upon installing with pip
-+0.1.16
-+    Re-upload to fix previous error. Make clean now removes old MANIFEST.
-+0.1.15
-+    Completely broken. Distribution was empty due to leftover invalid MANIFEST
-+    file from building on a different platform.
-+    Fix python3 incompatibility kindly reported by G |uumlaut| nter Kolousek
-+0.1.14
-+    Fix hard-coded reset to white-on-black colors. Fore.RESET, Back.RESET
-+    and Style.RESET_ALL now revert to the colors as they were when init()
-+    was called. Some lessons hopefully learned about testing prior to release.
-+0.1.13
-+    Completely broken: barfed when installed using pip.
-+0.1.12
-+    Completely broken: contained no source code. double oops.
-+0.1.11
-+    Completely broken: fatal import errors on Ubuntu. oops.
-+0.1.10
-+    Stop emulating 'bright' text with bright backgrounds.
-+    Display 'normal' text using win32 normal foreground instead of bright.
-+    Drop support for 'dim' text.
-+0.1.9
-+    Fix incompatibility with Python 2.5 and earlier.
-+    Remove setup.py dependency on setuptools, now uses stdlib distutils.
-+0.1.8
-+    Fix ghastly errors all over the place on Ubuntu.
-+    Add init kwargs 'convert' and 'strip', which supercede the old 'wrap'.
-+0.1.7
-+    Python 3 compatible.
-+    Fix: Now strips ansi on windows without necessarily converting it to
-+    win32 calls (eg. if output is not a tty.)
-+    Fix: Flaky interaction of interleaved ansi sent to stdout and stderr.
-+    Improved demo.sh (hg checkout only.)
-+0.1.6
-+    Fix ansi sequences with no params now default to parmlist of [0].
-+    Fix flaky behaviour of autoreset and reset_all atexit.
-+    Fix stacking of repeated atexit calls - now just called once.
-+    Fix ghastly import problems while running tests.
-+    'demo.py' (hg checkout only) now demonstrates autoreset and reset atexit.
-+    Provide colorama.VERSION, used by setup.py.
-+    Tests defanged so they no longer actually change terminal color when run.
-+0.1.5
-+    Now works on Ubuntu.
-+0.1.4
-+    Implemented RESET_ALL on application exit
-+0.1.3
-+    Implemented init(wrap=False)
-+0.1.2
-+    Implemented init(autoreset=True)
-+0.1.1
-+    Minor tidy
-+0.1
-+    Works on Windows for foreground color, background color, bright or dim
++++ b/third_party/cld_3/src/LICENSE
+@@ -0,0 +1,203 @@
++Copyright 2016 Google Inc.  All rights reserved.
 +
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
 +
-+.. |uumlaut| unicode:: U+00FC .. u with umlaut
-+   :trim:
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 +
-diff --git a/third_party/colorama/src/LICENSE.txt b/third_party/colorama/src/LICENSE.txt
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright 2016, Google Inc.
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/third_party/cld_3/src/README.md b/third_party/cld_3/src/README.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..5f567799f395f33acd05abbc5d409dd126ce0dc8
+index 0000000000000000000000000000000000000000..16daddc984c14fae38a52ac08deaf5ce9396b69c
 --- /dev/null
-+++ b/third_party/colorama/src/LICENSE.txt
-@@ -0,0 +1,28 @@
-+Copyright (c) 2010 Jonathan Hartley
-+All rights reserved.
++++ b/third_party/cld_3/src/README.md
+@@ -0,0 +1,67 @@
++# Compact Language Detector v3 (CLD3)
 +
-+Redistribution and use in source and binary forms, with or without
-+modification, are permitted provided that the following conditions are met:
++* [Model](#model)
++* [Installation](#installation)
++* [Contact](#contact)
++* [Credits](#credits)
 +
-+* Redistributions of source code must retain the above copyright notice, this
-+  list of conditions and the following disclaimer.
++### Model
 +
-+* Redistributions in binary form must reproduce the above copyright notice,
-+  this list of conditions and the following disclaimer in the documentation
-+  and/or other materials provided with the distribution.
++CLD3 is a neural network model for language identification. This package
++ contains the inference code and a trained model. The inference code
++ extracts character ngrams from the input text and computes the fraction
++ of times each of them appears. For example, as shown in the figure below,
++ if the input text is "banana", then one of the extracted trigrams is "ana"
++ and the corresponding fraction is 2/4. The ngrams are hashed down to an id
++ within a small range, and each id is represented by a dense embedding vector
++ estimated during training.
 +
-+* Neither the name of the copyright holders, nor those of its contributors
-+  may be used to endorse or promote products derived from this software without
-+  specific prior written permission.
++The model averages the embeddings corresponding to each ngram type according
++ to the fractions, and the averaged embeddings are concatenated to produce
++ the embedding layer. The remaining components of the network are a hidden
++ (Rectified linear) layer and a softmax layer.
 +
-+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++To get a language prediction for the input text, we simply perform a forward
++ pass through the network.
 +
-diff --git a/third_party/colorama/src/MANIFEST.in b/third_party/colorama/src/MANIFEST.in
++![Figure](model.png "CLD3")
++
++### Installation
++CLD3 is designed to run in the Chrome browser, so it relies on code in
++[Chromium](http://www.chromium.org/).
++The steps for building and running the language detection model are:
++
++- [check out](http://www.chromium.org/developers/how-tos/get-the-code) the
++  Chromium repository.
++- copy the code to `//third_party/cld_3`
++- build and run the model using the commands:
++
++```shell
++gn gen out/Default
++ninja -C out/Default third_party/cld_3/src:language_identifier_main
++out/Default/language_identifier_main
++```
++### Contact
++
++To ask questions or report issues please contact cld3-users@google.com.
++
++### Credits
++
++Original authors of the code in this package include (in alphabetical order):
++
++* Alex Salcianu
++* Andy Golding
++* Anton Bakalov
++* Chris Alberti
++* Daniel Andor
++* David Weiss
++* Emily Pitler
++* Greg Coppola
++* Jason Riesa
++* Kuzman Ganchev
++* Michael Ringgaard
++* Nan Hua
++* Ryan McDonald
++* Slav Petrov
++* Stefan Istrate
++* Terry Koo
+diff --git a/third_party/cld_3/src/model.png b/third_party/cld_3/src/model.png
 new file mode 100644
-index 0000000000000000000000000000000000000000..b7f36646e3d1d2678bea3f332c5e640bef4e203a
---- /dev/null
-+++ b/third_party/colorama/src/MANIFEST.in
-@@ -0,0 +1,3 @@
-+include LICENSE.txt CHANGELOG.rst
-+recursive-include demos *.py *.bat *.sh
-+
-diff --git a/third_party/colorama/src/Makefile b/third_party/colorama/src/Makefile
+index 0000000000000000000000000000000000000000..87f0f14db0bfd58c23189de070ed03285c8c17bf
+GIT binary patch
+literal 39276
+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
+N4mKp~YD?eb{{b+&kgNaz
+
+literal 0
+HcmV?d00001
+
+diff --git a/third_party/cld_3/src/src/BUILD.gn b/third_party/cld_3/src/src/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..20c5602af96036ce3df187c18a4291c5b561aff6
+index 0000000000000000000000000000000000000000..068d959c1c6cd31777bda6aa52fe7d7ef1e8244e
 --- /dev/null
-+++ b/third_party/colorama/src/Makefile
-@@ -0,0 +1,33 @@
-+# Copyright Jonathan Hartley 2013. BSD 3-Clause license, see LICENSE file.
++++ b/third_party/cld_3/src/src/BUILD.gn
+@@ -0,0 +1,129 @@
++# Copyright 2016 Google Inc. All Rights Reserved.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#==============================================================================
 +
-+# This makefile is just a cheatsheet to remind me of some commonly used
-+# commands. I generally am executing these commands on Ubuntu, or on WindowsXP
-+# with Cygwin binaries at the start of the PATH.
++import("//third_party/protobuf/proto_library.gni")
 +
-+NAME=colorama
++proto_library("protos") {
++  sources = [
++    "feature_extractor.proto",
++    "sentence.proto",
++    "task_spec.proto",
++  ]
++  proto_out_dir = "cld_3/protos"
++}
 +
-+clean:
-+	-rm -rf build dist MANIFEST colorama.egg-info
-+	-find . -name '*.py[oc]' -exec rm {} \;
-+.PHONY: clean
++static_library("cld_3") {
++  sources = [
++    "base.cc",
++    "base.h",
++    "casts.h",
++    "embedding_feature_extractor.cc",
++    "embedding_feature_extractor.h",
++    "embedding_network.cc",
++    "embedding_network.h",
++    "embedding_network_params.h",
++    "feature_extractor.cc",
++    "feature_extractor.h",
++    "feature_types.cc",
++    "feature_types.h",
++    "float16.h",
++    "fml_parser.cc",
++    "fml_parser.h",
++    "language_identifier_features.cc",
++    "language_identifier_features.h",
++    "lang_id_nn_params.cc",
++    "lang_id_nn_params.h",
++    "nnet_language_identifier.cc",
++    "nnet_language_identifier.h",
++    "registry.cc",
++    "registry.h",
++    "sentence_features.cc",
++    "sentence_features.h",
++    "simple_adder.h",
++    "script_span/fixunicodevalue.cc",
++    "script_span/fixunicodevalue.h",
++    "script_span/generated_entities.cc",
++    "script_span/generated_ulscript.cc",
++    "script_span/generated_ulscript.h",
++    "script_span/getonescriptspan.cc",
++    "script_span/getonescriptspan.h",
++    "script_span/integral_types.h",
++    "script_span/offsetmap.cc",
++    "script_span/offsetmap.h",
++    "script_span/port.h",
++    "script_span/utf8acceptinterchange.h",
++    "script_span/utf8prop_lettermarkscriptnum.h",
++    "script_span/utf8scannot_lettermarkspecial.h",
++    "script_span/utf8statetable.cc",
++    "script_span/utf8statetable.h",
++    "script_span/stringpiece.h",
++    "script_span/text_processing.cc",
++    "script_span/text_processing.h",
++    "task_context.cc",
++    "task_context.h",
++    "task_context_params.cc",
++    "task_context_params.h",
++    "utils.cc",
++    "utils.h",
++    "workspace.cc",
++    "workspace.h",
++  ]
++  public_deps = [
++    "//third_party/protobuf:protobuf_lite",
++  ]
++  deps = [
++    ":protos",
++  ]
++}
 +
-+sdist: clean
-+	python setup.py sdist --formats=zip,gztar
-+.PHONY: sdist
++# The executables below are functional. Uncomment to use.
 +
-+register: clean
-+	python setup.py sdist --formats=zip,gztar register 
-+.PHONY: release
++#executable("language_identifier_main") {
++#  sources = [
++#    "language_identifier_main.cc",
++#  ]
++#  deps = [
++#    ":cld_3",
++#  ]
++#}
 +
-+upload: clean
-+	python setup.py sdist --formats=zip,gztar register upload
-+.PHONY: release
++#executable("getonescriptspan_test") {
++#  sources = [
++#    "script_span/getonescriptspan_test.cc",
++#  ]
++#  deps = [
++#    ":cld_3",
++#  ]
++#}
 +
-+test:
-+	python -m unittest discover -p *_test.py
-+.PHONY: test
++#executable("language_identifier_features_test") {
++#  sources = [
++#    "language_identifier_features_test.cc",
++#  ]
++#  deps = [
++#    ":cld_3",
++#  ]
++#}
 +
-+tags:
-+	ctags -R ${NAME}
-+.PHONY: tags
-+
-diff --git a/third_party/colorama/src/README.txt b/third_party/colorama/src/README.txt
++#executable("nnet_lang_id_test") {
++#  sources = [
++#    "nnet_lang_id_test.cc",
++#    "nnet_lang_id_test_data.cc",
++#    "nnet_lang_id_test_data.h",
++#  ]
++#  deps = [
++#    ":cld_3",
++#  ]
++#}
+diff --git a/third_party/cld_3/src/src/DEPS b/third_party/cld_3/src/src/DEPS
 new file mode 100644
-index 0000000000000000000000000000000000000000..a87e16a789143f298ed85238867a51bea0beea48
+index 0000000000000000000000000000000000000000..e00022d82b957e0b782e65b0b83e7756b942f754
 --- /dev/null
-+++ b/third_party/colorama/src/README.txt
-@@ -0,0 +1,310 @@
-+Download and docs:
-+    http://pypi.python.org/pypi/colorama
-+Development:
-+    https://github.com/tartley/colorama
-+Discussion group:
-+     https://groups.google.com/forum/#!forum/python-colorama
-+
-+Description
-+===========
-+
-+Makes ANSI escape character sequences for producing colored terminal text and
-+cursor positioning work under MS Windows.
-+
-+ANSI escape character sequences have long been used to produce colored terminal
-+text and cursor positioning on Unix and Macs. Colorama makes this work on
-+Windows, too, by wrapping stdout, stripping ANSI sequences it finds (which
-+otherwise show up as gobbledygook in your output), and converting them into the
-+appropriate win32 calls to modify the state of the terminal. On other platforms,
-+Colorama does nothing.
-+
-+Colorama also provides some shortcuts to help generate ANSI sequences
-+but works fine in conjunction with any other ANSI sequence generation library,
-+such as Termcolor (http://pypi.python.org/pypi/termcolor.)
-+
-+This has the upshot of providing a simple cross-platform API for printing
-+colored terminal text from Python, and has the happy side-effect that existing
-+applications or libraries which use ANSI sequences to produce colored output on
-+Linux or Macs can now also work on Windows, simply by calling
-+``colorama.init()``.
-+
-+An alternative approach is to install 'ansi.sys' on Windows machines, which
-+provides the same behaviour for all applications running in terminals. Colorama
-+is intended for situations where that isn't easy (e.g. maybe your app doesn't
-+have an installer.)
-+
-+Demo scripts in the source code repository prints some colored text using
-+ANSI sequences. Compare their output under Gnome-terminal's built in ANSI
-+handling, versus on Windows Command-Prompt using Colorama:
-+
-+.. image:: https://github.com/tartley/colorama/raw/master/screenshots/ubuntu-demo.png
-+    :width: 661
-+    :height: 357
-+    :alt: ANSI sequences on Ubuntu under gnome-terminal.
-+
-+.. image:: https://github.com/tartley/colorama/raw/master/screenshots/windows-demo.png
-+    :width: 668
-+    :height: 325
-+    :alt: Same ANSI sequences on Windows, using Colorama.
-+
-+These screengrabs show that Colorama on Windows does not support ANSI 'dim
-+text': it looks the same as 'normal text'.
-+
-+
-+License
-+=======
-+
-+Copyright Jonathan Hartley 2013. BSD 3-Clause license, see LICENSE file.
-+
-+
-+Dependencies
-+============
-+
-+None, other than Python. Tested on Python 2.5.5, 2.6.5, 2.7, 3.1.2, and 3.2
-+
-+Usage
-+=====
-+
-+Initialisation
-+--------------
-+
-+Applications should initialise Colorama using::
-+
-+    from colorama import init
-+    init()
-+
-+If you are on Windows, the call to ``init()`` will start filtering ANSI escape
-+sequences out of any text sent to stdout or stderr, and will replace them with
-+equivalent Win32 calls.
-+
-+Calling ``init()`` has no effect on other platforms (unless you request other
-+optional functionality, see keyword args below.) The intention is that
-+applications can call ``init()`` unconditionally on all platforms, after which
-+ANSI output should just work.
-+
-+To stop using colorama before your program exits, simply call ``deinit()``.
-+This will restore stdout and stderr to their original values, so that Colorama
-+is disabled. To start using Colorama again, call ``reinit()``, which wraps
-+stdout and stderr again, but is cheaper to call than doing ``init()`` all over
-+again.
-+
-+
-+Colored Output
-+--------------
-+
-+Cross-platform printing of colored text can then be done using Colorama's
-+constant shorthand for ANSI escape sequences::
-+
-+    from colorama import Fore, Back, Style
-+    print(Fore.RED + 'some red text')
-+    print(Back.GREEN + 'and with a green background')
-+    print(Style.DIM + 'and in dim text')
-+    print(Fore.RESET + Back.RESET + Style.RESET_ALL)
-+    print('back to normal now')
-+
-+or simply by manually printing ANSI sequences from your own code::
-+
-+    print('/033[31m' + 'some red text')
-+    print('/033[30m' # and reset to default color)
-+
-+or Colorama can be used happily in conjunction with existing ANSI libraries
-+such as Termcolor::
-+
-+    from colorama import init
-+    from termcolor import colored
-+
-+    # use Colorama to make Termcolor work on Windows too
-+    init()
-+
-+    # then use Termcolor for all colored text output
-+    print(colored('Hello, World!', 'green', 'on_red'))
-+
-+Available formatting constants are::
-+
-+    Fore: BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, RESET.
-+    Back: BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, RESET.
-+    Style: DIM, NORMAL, BRIGHT, RESET_ALL
-+
-+Style.RESET_ALL resets foreground, background and brightness. Colorama will
-+perform this reset automatically on program exit.
-+
-+
-+Cursor Positioning
-+------------------
-+
-+ANSI codes to reposition the cursor are supported. See demos/demo06.py for
-+an example of how to generate them.
-+
-+
-+Init Keyword Args
-+-----------------
-+
-+``init()`` accepts some kwargs to override default behaviour.
-+
-+init(autoreset=False):
-+    If you find yourself repeatedly sending reset sequences to turn off color
-+    changes at the end of every print, then ``init(autoreset=True)`` will
-+    automate that::
-+
-+        from colorama import init
-+        init(autoreset=True)
-+        print(Fore.RED + 'some red text')
-+        print('automatically back to default color again')
-+
-+init(strip=None):
-+    Pass ``True`` or ``False`` to override whether ansi codes should be
-+    stripped from the output. The default behaviour is to strip if on Windows.
-+
-+init(convert=None):
-+    Pass ``True`` or ``False`` to override whether to convert ansi codes in the
-+    output into win32 calls. The default behaviour is to convert if on Windows
-+    and output is to a tty (terminal).
-+
-+init(wrap=True):
-+    On Windows, colorama works by replacing ``sys.stdout`` and ``sys.stderr``
-+    with proxy objects, which override the .write() method to do their work. If
-+    this wrapping causes you problems, then this can be disabled by passing
-+    ``init(wrap=False)``. The default behaviour is to wrap if autoreset or
-+    strip or convert are True.
-+
-+    When wrapping is disabled, colored printing on non-Windows platforms will
-+    continue to work as normal. To do cross-platform colored output, you can
-+    use Colorama's ``AnsiToWin32`` proxy directly::
-+
-+        import sys
-+        from colorama import init, AnsiToWin32
-+        init(wrap=False)
-+        stream = AnsiToWin32(sys.stderr).stream
-+
-+        # Python 2
-+        print >>stream, Fore.BLUE + 'blue text on stderr'
-+
-+        # Python 3
-+        print(Fore.BLUE + 'blue text on stderr', file=stream)
-+
-+
-+Status & Known Problems
-+=======================
-+
-+I've personally only tested it on WinXP (CMD, Console2), Ubuntu
-+(gnome-terminal, xterm), and OSX.
-+
-+Some presumably valid ANSI sequences aren't recognised (see details below)
-+but to my knowledge nobody has yet complained about this. Puzzling.
-+
-+See outstanding issues and wishlist, still on Google code for the time being:
-+http://code.google.com/p/colorama/issues/list
-+
-+If anything doesn't work for you, or doesn't do what you expected or hoped for,
-+I'd love to hear about it on that issues list, would be delighted by patches,
-+and would be happy to grant commit access to anyone who submits a working patch
-+or two.
-+
-+
-+Recognised ANSI Sequences
-+=========================
-+
-+ANSI sequences generally take the form:
-+
-+    ESC [ <param> ; <param> ... <command>
-+
-+Where <param> is an integer, and <command> is a single letter. Zero or more
-+params are passed to a <command>. If no params are passed, it is generally
-+synonymous with passing a single zero. No spaces exist in the sequence, they
-+have just been inserted here to make it easy to read.
-+
-+The only ANSI sequences that colorama converts into win32 calls are::
-+
-+    ESC [ 0 m       # reset all (colors and brightness)
-+    ESC [ 1 m       # bright
-+    ESC [ 2 m       # dim (looks same as normal brightness)
-+    ESC [ 22 m      # normal brightness
-+
-+    # FOREGROUND:
-+    ESC [ 30 m      # black
-+    ESC [ 31 m      # red
-+    ESC [ 32 m      # green
-+    ESC [ 33 m      # yellow
-+    ESC [ 34 m      # blue
-+    ESC [ 35 m      # magenta
-+    ESC [ 36 m      # cyan
-+    ESC [ 37 m      # white
-+    ESC [ 39 m      # reset
-+
-+    # BACKGROUND
-+    ESC [ 40 m      # black
-+    ESC [ 41 m      # red
-+    ESC [ 42 m      # green
-+    ESC [ 43 m      # yellow
-+    ESC [ 44 m      # blue
-+    ESC [ 45 m      # magenta
-+    ESC [ 46 m      # cyan
-+    ESC [ 47 m      # white
-+    ESC [ 49 m      # reset
-+
-+    # cursor positioning
-+    ESC [ y;x H     # position cursor at x across, y down
-+
-+    # clear the screen
-+    ESC [ mode J    # clear the screen. Only mode 2 (clear entire screen)
-+                    # is supported. It should be easy to add other modes,
-+                    # let me know if that would be useful.
-+
-+Multiple numeric params to the 'm' command can be combined into a single
-+sequence, eg::
-+
-+    ESC [ 36 ; 45 ; 1 m     # bright cyan text on magenta background
-+
-+All other ANSI sequences of the form ``ESC [ <param> ; <param> ... <command>``
-+are silently stripped from the output on Windows.
-+
-+Any other form of ANSI sequence, such as single-character codes or alternative
-+initial characters, are not recognised nor stripped. It would be cool to add
-+them though. Let me know if it would be useful for you, via the issues on
-+google code.
-+
-+
-+Development
-+===========
-+
-+Help and fixes welcome! Ask Jonathan for commit rights, you'll get them.
-+
-+Running tests requires:
-+
-+- Michael Foord's 'mock' module to be installed.
-+- Tests are written using the 2010 era updates to 'unittest', and require to
-+  be run either using Python2.7 or greater, or else to have Michael Foord's
-+  'unittest2' module installed.
-+
-+To run tests::
-+
-+   python -m unittest discover -p *_test.py 
-+
-+This, like a few other handy commands, is captured in a Makefile.
-+
-+If using nose to run the tests, pass the -s flag required because 'nosetests'
-+otherwise applies a proxy of its own to stdout, which confuses the unit tests.
-+
-+
-+Contact
-+=======
-+
-+Created by Jonathan Hartley, tartley@tartley.com
-+
-+
-+Thanks
-+======
-+| Marc Abramowitz, for reporting and fixing a crash on exit with closed stdout.
-+|   and for providing a solution to issue #7's setuptools/distutils debate.
-+| User 'eryksun', for guidance on correctly instantiating ctypes.windll.
-+| Matthew McCormick for politely pointing out a longstanding crash on non-Win.
-+| Ben Hoyt, for a magnificent fix under 64-bit Windows.
-+| Jesse@EmptySquare for submitting a fix for examples in the README.
-+| User 'jamessp', an observant documentation fix for cursor positioning.
-+| User 'vaal1239', Dave Mckee & Lackner Kristof for a tiny but much-needed Win7 fix.
-+| Julien Stuyck, for wisely suggesting Python3 compatible updates to README.
-+| Daniel Griffith for multiple fabulous patches.
-+| Oscar Lesta for valuable fix to stop ANSI chars being sent to non-tty output.
-+| Roger Binns, for many suggestions, valuable feedback, & bug reports.
-+| Tim Golden for thought and much appreciated feedback on the initial idea.
-+
-diff --git a/third_party/colorama/src/colorama/__init__.py b/third_party/colorama/src/colorama/__init__.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..0856986fab5d503a83fdff6d4a1302a629026b31
---- /dev/null
-+++ b/third_party/colorama/src/colorama/__init__.py
-@@ -0,0 +1,7 @@
-+# Copyright Jonathan Hartley 2013. BSD 3-Clause license, see LICENSE file.
-+from .initialise import init, deinit, reinit
-+from .ansi import Fore, Back, Style
-+from .ansitowin32 import AnsiToWin32
-+
-+__version__ = '0.3.1'
-+
++++ b/third_party/cld_3/src/src/DEPS
+@@ -0,0 +1,4 @@
++include_rules = [
++  '+cld_3',
++  '+script_span',
++]
+\ No newline at end of file
