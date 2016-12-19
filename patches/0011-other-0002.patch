@@ -1147,10 +1147,10 @@ index 0000000000000000000000000000000000000000..0d872ec2e21a6a2267284bf616508c4a
 +}
 diff --git a/breakpad/src/processor/microdump.cc b/breakpad/src/processor/microdump.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..9073fe1015931fe6198aa664be895defc2d7bf81
+index 0000000000000000000000000000000000000000..4af62f56f0c6c04978f97ddb65947dcd55eeee8d
 --- /dev/null
 +++ b/breakpad/src/processor/microdump.cc
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,385 @@
 +// Copyright (c) 2014 Google Inc.
 +// All rights reserved.
 +//
@@ -1263,6 +1263,9 @@ index 0000000000000000000000000000000000000000..9073fe1015931fe6198aa664be895def
 +  }
 +}
 +
++void MicrodumpModules::SetEnableModuleShrink(bool is_enabled) {
++  map_.SetEnableShrinkDown(is_enabled);
++}
 +
 +//
 +// MicrodumpContext
@@ -1415,6 +1418,7 @@ index 0000000000000000000000000000000000000000..9073fe1015931fe6198aa664be895def
 +      } else if (os_id == "A") {
 +        system_info_->os = "Android";
 +        system_info_->os_short = "android";
++        modules_->SetEnableModuleShrink(true);
 +      }
 +
 +      // OS line also contains release and version for future use.
@@ -1640,7 +1644,7 @@ index 0000000000000000000000000000000000000000..366e3f30aa97acb7d1edf1bef1523a0d
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/processor/microdump_processor_unittest.cc b/breakpad/src/processor/microdump_processor_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..898b65b2977054cb61a2c35317d27051bc006783
+index 0000000000000000000000000000000000000000..af897f7dacb92ab6cd404c46803b7a65f390fe80
 --- /dev/null
 +++ b/breakpad/src/processor/microdump_processor_unittest.cc
 @@ -0,0 +1,273 @@
@@ -1847,7 +1851,7 @@ index 0000000000000000000000000000000000000000..898b65b2977054cb61a2c35317d27051
 +  AnalyzeDump("microdump-x86.dmp", false /* omit_symbols */,
 +              4 /* expected_cpu_count */, &state);
 +
-+  ASSERT_EQ(105U, state.modules()->module_count());
++  ASSERT_EQ(124U, state.modules()->module_count());
 +  ASSERT_EQ("x86", state.system_info()->cpu);
 +  ASSERT_EQ("asus/WW_Z00A/Z00A:5.0/LRX21V/2.19.40.22_20150627_5104_user:user/"
 +      "release-keys", state.system_info()->os_version);
@@ -1862,11 +1866,11 @@ index 0000000000000000000000000000000000000000..898b65b2977054cb61a2c35317d27051
 +  ProcessState state;
 +  AnalyzeDump("microdump-multiple.dmp", false /* omit_symbols */,
 +              6 /* expected_cpu_count */, &state);
-+  ASSERT_EQ(133U, state.modules()->module_count());
++  ASSERT_EQ(156U, state.modules()->module_count());
 +  ASSERT_EQ("arm", state.system_info()->cpu);
 +  ASSERT_EQ("lge/p1_tmo_us/p1:6.0/MRA58K/1603210524c8d:user/release-keys",
 +            state.system_info()->os_version);
-+  ASSERT_EQ(2U, state.threads()->at(0)->frames()->size());
++  ASSERT_EQ(5U, state.threads()->at(0)->frames()->size());
 +}
 +
 +TEST_F(MicrodumpProcessorTest, TestProcessMips) {
@@ -1895,7 +1899,7 @@ index 0000000000000000000000000000000000000000..898b65b2977054cb61a2c35317d27051
 +  AnalyzeDump("microdump-mips64.dmp", false /* omit_symbols */,
 +              1 /* expected_cpu_count */, &state);
 +
-+  ASSERT_EQ(7U, state.modules()->module_count());
++  ASSERT_EQ(8U, state.modules()->module_count());
 +  ASSERT_EQ("mips64", state.system_info()->cpu);
 +  ASSERT_EQ("3.10.0-gf185e20 #112 PREEMPT Mon Oct 5 11:12:49 PDT 2015",
 +        state.system_info()->os_version);
@@ -2181,10 +2185,10 @@ index 0000000000000000000000000000000000000000..a8b0e0df5ae1fcadf9c3d476fc7a3a3a
 +MICRODUMP_SUPPORTED_ARCHS="arm arm64"
 diff --git a/breakpad/src/processor/minidump.cc b/breakpad/src/processor/minidump.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..81c3d11a36e4a3aed11a6ebde8c66e393a00116b
+index 0000000000000000000000000000000000000000..f94a409a3121e5ffcc1b83b70fd277ef0424b9c9
 --- /dev/null
 +++ b/breakpad/src/processor/minidump.cc
-@@ -0,0 +1,4879 @@
+@@ -0,0 +1,4916 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -4296,8 +4300,18 @@ index 0000000000000000000000000000000000000000..81c3d11a36e4a3aed11a6ebde8c66e39
 +}
 +
 +
-+const CodeModule* MinidumpModule::Copy() const {
++CodeModule* MinidumpModule::Copy() const {
 +  return new BasicCodeModule(this);
++}
++
++
++uint64_t MinidumpModule::shrink_down_delta() const {
++  return 0;
++}
++
++void MinidumpModule::SetShrinkDownDelta(uint64_t shrink_down_delta) {
++  // Not implemented
++  assert(false);
 +}
 +
 +
@@ -4684,6 +4698,7 @@ index 0000000000000000000000000000000000000000..81c3d11a36e4a3aed11a6ebde8c66e39
 +      range_map_(new RangeMap<uint64_t, unsigned int>()),
 +      modules_(NULL),
 +      module_count_(0) {
++  range_map_->SetEnableShrinkDown(minidump_->IsAndroid());
 +}
 +
 +
@@ -4896,7 +4911,7 @@ index 0000000000000000000000000000000000000000..81c3d11a36e4a3aed11a6ebde8c66e39
 +  }
 +
 +  unsigned int module_index;
-+  if (!range_map_->RetrieveRangeAtIndex(sequence, &module_index, 
++  if (!range_map_->RetrieveRangeAtIndex(sequence, &module_index,
 +                                        NULL /* base */, NULL /* delta */,
 +                                        NULL /* size */)) {
 +    BPLOG(ERROR) << "MinidumpModuleList has no module at sequence " << sequence;
@@ -4928,6 +4943,14 @@ index 0000000000000000000000000000000000000000..81c3d11a36e4a3aed11a6ebde8c66e39
 +  return new BasicCodeModules(this);
 +}
 +
++vector<linked_ptr<const CodeModule> >
++MinidumpModuleList::GetShrunkRangeModules() const {
++  return vector<linked_ptr<const CodeModule> >();
++}
++
++bool MinidumpModuleList::IsModuleShrinkEnabled() const {
++  return range_map_->IsShrinkDownEnabled();
++}
 +
 +void MinidumpModuleList::Print() {
 +  if (!valid_) {
@@ -6719,6 +6742,24 @@ index 0000000000000000000000000000000000000000..81c3d11a36e4a3aed11a6ebde8c66e39
 +  return GetStream(&linux_maps_list);
 +}
 +
++bool Minidump::IsAndroid() {
++  // Save the current stream position
++  off_t saved_position = Tell();
++  if (saved_position == -1) {
++    return false;
++  }
++  const MDRawSystemInfo* system_info =
++    GetSystemInfo() ? GetSystemInfo()->system_info() : NULL;
++
++  // Restore position and return
++  if (!SeekSet(saved_position)) {
++    BPLOG(ERROR) << "Couldn't seek back to saved position";
++    return false;
++  }
++
++  return system_info && system_info->platform_id == MD_OS_ANDROID;
++}
++
 +static const char* get_stream_name(uint32_t stream_type) {
 +  switch (stream_type) {
 +  case MD_UNUSED_STREAM:
@@ -6832,7 +6873,7 @@ index 0000000000000000000000000000000000000000..81c3d11a36e4a3aed11a6ebde8c66e39
 +       iterator != stream_map_->end();
 +       ++iterator) {
 +    uint32_t stream_type = iterator->first;
-+    MinidumpStreamInfo info = iterator->second;
++    const MinidumpStreamInfo& info = iterator->second;
 +    printf("  stream type 0x%x (%s) at index %d\n", stream_type,
 +           get_stream_name(stream_type),
 +           info.stream_index);
@@ -6989,7 +7030,7 @@ index 0000000000000000000000000000000000000000..81c3d11a36e4a3aed11a6ebde8c66e39
 +    return false;
 +  }
 +
-+  MinidumpStreamInfo info = iterator->second;
++  const MinidumpStreamInfo& info = iterator->second;
 +  if (info.stream_index >= header_.stream_count) {
 +    BPLOG(ERROR) << "SeekToStreamType: type " << stream_type <<
 +                    " out of range: " <<
@@ -7327,10 +7368,10 @@ index 0000000000000000000000000000000000000000..fb62ace7351ab6c0e22344ccabf2ed7a
 +exit $?
 diff --git a/breakpad/src/processor/minidump_processor.cc b/breakpad/src/processor/minidump_processor.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..06a8916d34fefec00280b6188e8e30684adfbbd8
+index 0000000000000000000000000000000000000000..33b4a1284bd486a1c23e589083b1914a8d79cc96
 --- /dev/null
 +++ b/breakpad/src/processor/minidump_processor.cc
-@@ -0,0 +1,1562 @@
+@@ -0,0 +1,1577 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -7459,8 +7500,20 @@ index 0000000000000000000000000000000000000000..06a8916d34fefec00280b6188e8e3068
 +  // Put a copy of the module list into ProcessState object.  This is not
 +  // necessarily a MinidumpModuleList, but it adheres to the CodeModules
 +  // interface, which is all that ProcessState needs to expose.
-+  if (module_list)
++  if (module_list) {
 +    process_state->modules_ = module_list->Copy();
++    process_state->shrunk_range_modules_ =
++        process_state->modules_->GetShrunkRangeModules();
++    for (unsigned int i = 0;
++         i < process_state->shrunk_range_modules_.size();
++         i++) {
++      linked_ptr<const CodeModule> module =
++          process_state->shrunk_range_modules_[i];
++      BPLOG(INFO) << "The range for module " << module->code_file()
++                  << " was shrunk down by " << HexString(
++                      module->shrink_down_delta()) << " bytes. ";
++    }
++  }
 +
 +  MinidumpMemoryList *memory_list = dump->GetMemoryList();
 +  if (memory_list) {
@@ -8506,6 +8559,9 @@ index 0000000000000000000000000000000000000000..06a8916d34fefec00280b6188e8e3068
 +          break;
 +        case MD_EXCEPTION_CODE_WIN_HEAP_CORRUPTION:
 +          reason = "EXCEPTION_HEAP_CORRUPTION";
++          break;
++        case MD_EXCEPTION_OUT_OF_MEMORY:
++          reason = "Out of Memory";
 +          break;
 +        case MD_EXCEPTION_CODE_WIN_UNHANDLED_CPP_EXCEPTION:
 +          reason = "Unhandled C++ Exception";
@@ -14277,10 +14333,10 @@ index 0000000000000000000000000000000000000000..d3e02dc3f46ce0222985e3bbf65dcd14
 +}
 diff --git a/breakpad/src/processor/range_map-inl.h b/breakpad/src/processor/range_map-inl.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..082733e173a333803e34e7d4e742fa1baedafd76
+index 0000000000000000000000000000000000000000..9fe74c50290336a40194c43a4f8deb4af4e73490
 --- /dev/null
 +++ b/breakpad/src/processor/range_map-inl.h
-@@ -0,0 +1,267 @@
+@@ -0,0 +1,272 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -14333,6 +14389,11 @@ index 0000000000000000000000000000000000000000..082733e173a333803e34e7d4e742fa1b
 +void RangeMap<AddressType, EntryType>::SetEnableShrinkDown(
 +    bool enable_shrink_down) {
 +  enable_shrink_down_ = enable_shrink_down;
++}
++
++template<typename AddressType, typename EntryType>
++bool RangeMap<AddressType, EntryType>::IsShrinkDownEnabled() const {
++  return enable_shrink_down_;
 +}
 +
 +template<typename AddressType, typename EntryType>
@@ -14550,10 +14611,10 @@ index 0000000000000000000000000000000000000000..082733e173a333803e34e7d4e742fa1b
 +#endif  // PROCESSOR_RANGE_MAP_INL_H__
 diff --git a/breakpad/src/processor/range_map.h b/breakpad/src/processor/range_map.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..985d992f991ac993e7bb177296ef97b2dc80248c
+index 0000000000000000000000000000000000000000..d90a67327faa926aa85aa61566fa7233adbf3907
 --- /dev/null
 +++ b/breakpad/src/processor/range_map.h
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,161 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -14616,6 +14677,7 @@ index 0000000000000000000000000000000000000000..985d992f991ac993e7bb177296ef97b2
 +  // will be shrunk down by moving its start position to a higher address so
 +  // that it does not overlap anymore.
 +  void SetEnableShrinkDown(bool enable_shrink_down);
++  bool IsShrinkDownEnabled() const;
 +
 +  // Inserts a range into the map.  Returns false for a parameter error,
 +  // or if the location of the range would conflict with a range already
@@ -26077,10 +26139,10 @@ index 0000000000000000000000000000000000000000..e8f2a3888743bcbae51d289b50d32e56
 +#endif  // PROCESSOR_STACKWALKER_SPARC_H__
 diff --git a/breakpad/src/processor/stackwalker_unittest_utils.h b/breakpad/src/processor/stackwalker_unittest_utils.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..73ceb199fe8a0472ffa108a364d60a141d8a0a61
+index 0000000000000000000000000000000000000000..ee22a8fe1c1d97dbcd9925e8fa022ee4afc9f71a
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_unittest_utils.h
-@@ -0,0 +1,211 @@
+@@ -0,0 +1,224 @@
 +// -*- mode: C++ -*-
 +
 +// Copyright (c) 2010, Google Inc.
@@ -26131,6 +26193,7 @@ index 0000000000000000000000000000000000000000..73ceb199fe8a0472ffa108a364d60a14
 +#include "google_breakpad/processor/memory_region.h"
 +#include "google_breakpad/processor/symbol_supplier.h"
 +#include "google_breakpad/processor/system_info.h"
++#include "processor/linked_ptr.h"
 +
 +class MockMemoryRegion: public google_breakpad::MemoryRegion {
 + public:
@@ -26197,9 +26260,11 @@ index 0000000000000000000000000000000000000000..73ceb199fe8a0472ffa108a364d60a14
 +  string debug_file()       const { return code_file_; }
 +  string debug_identifier() const { return code_file_; }
 +  string version()          const { return version_; }
-+  const google_breakpad::CodeModule *Copy() const {
++  google_breakpad::CodeModule *Copy() const {
 +    abort(); // Tests won't use this.
 +  }
++  virtual uint64_t shrink_down_delta() const { return 0; }
++  virtual void SetShrinkDownDelta(uint64_t shrink_down_delta) {}
 +
 + private:
 +  uint64_t base_address_;
@@ -26209,11 +26274,11 @@ index 0000000000000000000000000000000000000000..73ceb199fe8a0472ffa108a364d60a14
 +};
 +
 +class MockCodeModules: public google_breakpad::CodeModules {
-+ public:  
++ public:
 +  typedef google_breakpad::CodeModule CodeModule;
 +  typedef google_breakpad::CodeModules CodeModules;
 +
-+  void Add(const MockCodeModule *module) { 
++  void Add(const MockCodeModule *module) {
 +    modules_.push_back(module);
 +  }
 +
@@ -26240,9 +26305,19 @@ index 0000000000000000000000000000000000000000..73ceb199fe8a0472ffa108a364d60a14
 +    return modules_.at(index);
 +  }
 +
-+  const CodeModules *Copy() const { abort(); } // Tests won't use this.
++  CodeModules *Copy() const { abort(); }  // Tests won't use this
 +
-+ private:  
++  virtual std::vector<google_breakpad::linked_ptr<const CodeModule> >
++  GetShrunkRangeModules() const {
++    return std::vector<google_breakpad::linked_ptr<const CodeModule> >();
++  }
++
++  // Returns true, if module address range shrink is enabled.
++  bool IsModuleShrinkEnabled() const {
++    return false;
++  }
++
++ private:
 +  typedef std::vector<const MockCodeModule *> ModuleVector;
 +  ModuleVector modules_;
 +};
@@ -306324,10 +306399,10 @@ index 0000000000000000000000000000000000000000..991a5de5ebc8014ecee3293e7ab63069
 +}
 diff --git a/breakpad/src/tools/mac/symupload/symupload.m b/breakpad/src/tools/mac/symupload/symupload.m
 new file mode 100644
-index 0000000000000000000000000000000000000000..179f8d50b38f32bfda69aa6dfca8c8b8c37591e5
+index 0000000000000000000000000000000000000000..a7cce7b00cc0209dd629bc7bca02e563492be1cd
 --- /dev/null
 +++ b/breakpad/src/tools/mac/symupload/symupload.m
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,204 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -306368,6 +306443,8 @@ index 0000000000000000000000000000000000000000..179f8d50b38f32bfda69aa6dfca8c8b8
 +//  cpu: the CPU that the module was built for (x86 or ppc)
 +//  symbol_file: the contents of the breakpad-format symbol file
 +
++#include <fcntl.h>
++#include <sys/stat.h>
 +#include <unistd.h>
 +
 +#include <Foundation/Foundation.h>
@@ -306492,6 +306569,25 @@ index 0000000000000000000000000000000000000000..179f8d50b38f32bfda69aa6dfca8c8b8
 +  if ((argc - optind) != 2) {
 +    fprintf(stderr, "%s: Missing symbols file and/or upload-URL\n", argv[0]);
 +    Usage(argc, argv);
++    exit(1);
++  }
++
++  int fd = open(argv[optind], O_RDONLY);
++  if (fd < 0) {
++    fprintf(stderr, "%s: %s: %s\n", argv[0], argv[optind], strerror(errno));
++    exit(1);
++  }
++
++  struct stat statbuf;
++  if (fstat(fd, &statbuf) < 0) {
++    fprintf(stderr, "%s: %s: %s\n", argv[0], argv[optind], strerror(errno));
++    close(fd);
++    exit(1);
++  }
++  close(fd);
++
++  if (!S_ISREG(statbuf.st_mode)) {
++    fprintf(stderr, "%s: %s: not a regular file\n", argv[0], argv[optind]);
 +    exit(1);
 +  }
 +
@@ -358551,10 +358647,10 @@ index 61eed79d4dc7856474d18c185f902769cbc309dc..16f5aefa8364a987683a476cbea9fec0
          'scrollbar_impl.h',
          'web_compositor_support_impl.cc',
 diff --git a/chrome_elf/blacklist.gypi b/chrome_elf/blacklist.gypi
-index f5521863851effcefbfc7691c3f7fbcb9124c896..14b7d59d3360a7bfe77d877e76489c1e103c2b68 100644
+index d87255aadaa264a524dcf84d904f54bd71dcdae9..755d5a813eaa6e44cf7ca6690610d13dc69aeba6 100644
 --- a/chrome_elf/blacklist.gypi
 +++ b/chrome_elf/blacklist.gypi
-@@ -61,7 +61,7 @@
+@@ -84,7 +84,7 @@
          # There's no exports in this DLL, this tells ninja not to expect an
          # import lib so that it doesn't keep rebuilding unnecessarily due to
          # the .lib being "missing".
@@ -358564,7 +358660,7 @@ index f5521863851effcefbfc7691c3f7fbcb9124c896..14b7d59d3360a7bfe77d877e76489c1e
      },
    ],
 diff --git a/chrome_elf/chrome_elf.def b/chrome_elf/chrome_elf.def
-index cbf354387f6e23391c749b9e57d25f59f69c3898..033a1610ee3425bd9b5cc26887b5341973789b85 100644
+index 75f31ab897552315317cb4ad22c10beb44a754b8..b77291756212a51904bbc68bed14484a5de8a34a 100644
 --- a/chrome_elf/chrome_elf.def
 +++ b/chrome_elf/chrome_elf.def
 @@ -2,7 +2,7 @@
@@ -358577,10 +358673,10 @@ index cbf354387f6e23391c749b9e57d25f59f69c3898..033a1610ee3425bd9b5cc26887b53419
  EXPORTS
    IsBlacklistInitialized
 diff --git a/chrome_elf/chrome_elf.gyp b/chrome_elf/chrome_elf.gyp
-index 7a49fe8518c49e6f86ff59f94cc784c69e3c6925..1f84d296a85b12c483574e296b957035525ce185 100644
+index c9a412b938f49714b447fb81f7d23c66561d9cd5..ce56a172af6487fb135632783ff1290698a75d04 100644
 --- a/chrome_elf/chrome_elf.gyp
 +++ b/chrome_elf/chrome_elf.gyp
-@@ -17,7 +17,7 @@
+@@ -20,7 +20,7 @@
        'type': 'none',
        'variables': {
          'output_dir': 'chrome_elf',
@@ -358589,7 +358685,7 @@ index 7a49fe8518c49e6f86ff59f94cc784c69e3c6925..1f84d296a85b12c483574e296b957035
          'template_input_path': '../chrome/app/chrome_version.rc.version',
        },
        'sources': [
-@@ -30,6 +30,7 @@
+@@ -33,6 +33,7 @@
      {
        'target_name': 'chrome_elf',
        'type': 'shared_library',
@@ -358605,8 +358701,27 @@ index 78f890e7ece7dc50b0ce3bb7784b88bc53bd7792..4c3c51d2be91a116f2df34ac9778c65a
  INTERNAL_NAME=chrome_elf_dll
 -ORIGINAL_FILENAME=chrome_elf.dll
 +ORIGINAL_FILENAME=vivaldi_elf.dll
+diff --git a/chrome_elf/chrome_elf_main.cc b/chrome_elf/chrome_elf_main.cc
+index 027821adfa3e2c72367155f5af5b4330eb9cbdf7..8858a6c658a080ca23a2648b549b13a373012e1a 100644
+--- a/chrome_elf/chrome_elf_main.cc
++++ b/chrome_elf/chrome_elf_main.cc
+@@ -44,7 +44,13 @@ base::string16 GetExeName() {
+ 
+ void InitializeCrashReportingForProcess() {
+   // We want to initialize crash reporting only in chrome.exe
+-  if (GetExeName() != L"chrome.exe")
++  if (GetExeName() != 
++#if defined(VIVALDI_BUILD)
++        L"vivaldi.exe"
++#else
++        L"chrome.exe"
++#endif
++    )
+     return;
+   ChromeCrashReporterClient::InitializeCrashReportingForProcess();
+ }
 diff --git a/chrome_elf/elf_imports_unittest.cc b/chrome_elf/elf_imports_unittest.cc
-index 016398965ddb10a404efe5668d3e464a24c725e2..efdc053b645ea84e2c6ab5050c03245f96933178 100644
+index 1e399ae83fd335cba82f62c980bfb5f41286c0e1..fe13b43740be837a06ae7cd35ddeae63b1fc9d77 100644
 --- a/chrome_elf/elf_imports_unittest.cc
 +++ b/chrome_elf/elf_imports_unittest.cc
 @@ -66,7 +66,7 @@ class ELFImportsTest : public testing::Test {
@@ -358618,7 +358733,7 @@ index 016398965ddb10a404efe5668d3e464a24c725e2..efdc053b645ea84e2c6ab5050c03245f
  
    std::vector<std::string> elf_imports;
    GetImports(dll, &elf_imports);
-@@ -130,7 +130,7 @@ TEST_F(ELFImportsTest, ChromeExeSanityCheck) {
+@@ -126,7 +126,7 @@ TEST_F(ELFImportsTest, ChromeExeSanityCheck) {
  
    base::FilePath exe;
    ASSERT_TRUE(PathService::Get(base::DIR_EXE, &exe));
@@ -358627,7 +358742,7 @@ index 016398965ddb10a404efe5668d3e464a24c725e2..efdc053b645ea84e2c6ab5050c03245f
    GetImports(exe, &exe_imports);
  
    // Check that chrome.exe has imports.
-@@ -138,7 +138,7 @@ TEST_F(ELFImportsTest, ChromeExeSanityCheck) {
+@@ -134,7 +134,7 @@ TEST_F(ELFImportsTest, ChromeExeSanityCheck) {
      "target was built, instead of chrome_elf_unittests.exe";
  
    // Chrome.exe's first import must be ELF.
@@ -358637,7 +358752,7 @@ index 016398965ddb10a404efe5668d3e464a24c725e2..efdc053b645ea84e2c6ab5050c03245f
        "target was built, instead of just chrome_elf_unittests.exe)";
  }
 diff --git a/crypto/encryptor.cc b/crypto/encryptor.cc
-index 06bf00cce94bc608bf2a79aa14f4565177bd942d..35661b2fc1b5bc059e492f3f0e552fed34846467 100644
+index fdbddb7430b1474cb4c25e7fb4b0318c28634481..075bdeee83ea5cc2347c9892493bfff09d061f85 100644
 --- a/crypto/encryptor.cc
 +++ b/crypto/encryptor.cc
 @@ -15,17 +15,29 @@
@@ -358706,7 +358821,7 @@ index 06bf00cce94bc608bf2a79aa14f4565177bd942d..35661b2fc1b5bc059e492f3f0e552fed
  }
  
 diff --git a/crypto/encryptor.h b/crypto/encryptor.h
-index 4b6745ef0fd278535213867f23385d56f9c6ed98..3319e6e88e6454fe9d3f3125d6fce3daa097a31b 100644
+index c94a730914d216be887883509b92e6a5c20c2a5d..7852a46ba3081c0c02600577eb5c15b1192ba6d9 100644
 --- a/crypto/encryptor.h
 +++ b/crypto/encryptor.h
 @@ -59,6 +59,9 @@ class CRYPTO_EXPORT Encryptor {
@@ -358909,11 +359024,38 @@ index 94446dfbde079026b1b5065c13da5ea12069403b..c3331fd001d8e1e3073b8c6220c01260
            'variables': {
              'grit_grd_file': 'bluetooth_strings.grd',
            },
+diff --git a/device/geolocation/location_arbitrator_impl.cc b/device/geolocation/location_arbitrator_impl.cc
+index 728448da651df4a43ca3afbfa9cc6d15af3351c3..8b670964bb9eca0befa3b245102eecd7cd5eb0a2 100644
+--- a/device/geolocation/location_arbitrator_impl.cc
++++ b/device/geolocation/location_arbitrator_impl.cc
+@@ -19,7 +19,7 @@ namespace device {
+ namespace {
+ 
+ const char* kDefaultNetworkProviderUrl =
+-    "https://www.googleapis.com/geolocation/v1/geolocate";
++    "https://location.services.mozilla.com/v1/geolocate";
+ }  // namespace
+ 
+ // To avoid oscillations, set this to twice the expected update interval of a
+diff --git a/device/geolocation/network_location_request.cc b/device/geolocation/network_location_request.cc
+index 49762137609a5df11c386ef7ac17b5ae70f9636a..0852fb2886f5012222f22fa85f2b0d1e307b6ecc 100644
+--- a/device/geolocation/network_location_request.cc
++++ b/device/geolocation/network_location_request.cc
+@@ -184,7 +184,8 @@ struct AccessPointLess {
+ 
+ GURL FormRequestURL(const GURL& url) {
+   if (url == LocationArbitratorImpl::DefaultNetworkProviderURL()) {
+-    std::string api_key = google_apis::GetAPIKey();
++    // Use Mozilla Location Services API key.
++    std::string api_key = "c18ef960-6b92-4abc-91b8-fc7e954062ee";
+     if (!api_key.empty()) {
+       std::string query(url.query());
+       if (!query.empty())
 diff --git a/ipc/ipc_message_start.h b/ipc/ipc_message_start.h
-index 5ee4fe1486ae94953490f1ca28a977912ff6aa78..22a0e8b3edaf84ef56fbc572946efac078ce6c3a 100644
+index 26f6973fcf16a2e67f8c572e9b14e4cdbca018df..36b84292b06c7660449a5fade043f0db1a96f746 100644
 --- a/ipc/ipc_message_start.h
 +++ b/ipc/ipc_message_start.h
-@@ -77,6 +77,7 @@ enum IPCMessageStart {
+@@ -74,6 +74,7 @@ enum IPCMessageStart {
    WebSocketMsgStart,
    NaClHostMsgStart,
    WebRTCIdentityMsgStart,
@@ -358921,7 +359063,7 @@ index 5ee4fe1486ae94953490f1ca28a977912ff6aa78..22a0e8b3edaf84ef56fbc572946efac0
    PowerMonitorMsgStart,
    EncryptedMediaMsgStart,
    CacheStorageMsgStart,
-@@ -130,6 +131,7 @@ enum IPCMessageStart {
+@@ -126,6 +127,7 @@ enum IPCMessageStart {
    SurfaceViewManagerMsgStart,
    ExtensionWorkerMsgStart,
    SubresourceFilterMsgStart,
@@ -358944,10 +359086,10 @@ index 60c12ab60f96f879259612c993acf89d0c749cd0..d5a0b7c8fe6647e57ed549fa9698f55f
    l->append(base::Int64ToString(static_cast<int64_t>(p)));
  }
 diff --git a/ipc/ipc_message_utils.h b/ipc/ipc_message_utils.h
-index 98485493511f279822dcf4a0907a041187a13969..0e714abbd83081e28447078351858833488ef354 100644
+index 6712d3ca69363e8a1e48a416304a1e54bb0c55d9..1d672db44bd9abf4ed3252556fce4264974b4450 100644
 --- a/ipc/ipc_message_utils.h
 +++ b/ipc/ipc_message_utils.h
-@@ -209,7 +209,8 @@ struct ParamTraits<unsigned int> {
+@@ -210,7 +210,8 @@ struct ParamTraits<unsigned int> {
  // Since we want to support Android 32<>64 bit IPC, as long as we don't have
  // these traits for 32 bit ARM then that'll catch any errors.
  #if defined(OS_WIN) || defined(OS_LINUX) || \
@@ -358957,7 +359099,7 @@ index 98485493511f279822dcf4a0907a041187a13969..0e714abbd83081e28447078351858833
  template <>
  struct ParamTraits<long> {
    typedef long param_type;
-@@ -306,6 +307,40 @@ struct IPC_EXPORT ParamTraits<double> {
+@@ -307,6 +308,40 @@ struct IPC_EXPORT ParamTraits<double> {
    static void Log(const param_type& p, std::string* l);
  };
  
@@ -359000,10 +359142,10 @@ index 98485493511f279822dcf4a0907a041187a13969..0e714abbd83081e28447078351858833
  template <>
 diff --git a/native_client/.gitignore b/native_client/.gitignore
 new file mode 100644
-index 0000000000000000000000000000000000000000..ea17f2cb8142e017af01bcd0026effae23c9ae8d
+index 0000000000000000000000000000000000000000..a1146adcb3fdf5a5abbe7546df867d46fb79bf40
 --- /dev/null
 +++ b/native_client/.gitignore
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,52 @@
 +# This is a standard .gitignore file, used to exclude certain files
 +# from a 'git status' command and other similar commands.
 +# Please keep each section in alphabetical order.
@@ -359022,6 +359164,7 @@ index 0000000000000000000000000000000000000000..ea17f2cb8142e017af01bcd0026effae
 +.settings/
 +
 +# toolchain_build/toolchain_build.py creates these.
++/cmake343/
 +/toolchain_build/cache/
 +/toolchain_build/git_cache/
 +/toolchain_build/out/
@@ -359170,7 +359313,7 @@ index 0000000000000000000000000000000000000000..1941a11f8ce94389160b458927a29ba2
 +OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 diff --git a/native_client/DEPS b/native_client/DEPS
 new file mode 100644
-index 0000000000000000000000000000000000000000..eb0353230171a641f0f59f8217bf538052964d78
+index 0000000000000000000000000000000000000000..2cbd25dd9eb6bdb46c5ff5258cafb92890705055
 --- /dev/null
 +++ b/native_client/DEPS
 @@ -0,0 +1,267 @@
@@ -359184,13 +359327,13 @@ index 0000000000000000000000000000000000000000..eb0353230171a641f0f59f8217bf5380
 +  # directories contain commits at each revision, you will need to select
 +  # revisions at latest revision up to a high watermark from each slice.
 +  # Document the high watermark here:
-+  # chrome_rev: 396528
-+  "build_rev": "a3802f0af222b2bcce4925e8df9b019f5a7f0263", # from cr commit position 396479
++  # chrome_rev: 411082
++  "build_rev": "43fc964cebbd602e2bd9721253d510a4f42d93ac", # from cr commit position 415304
 +  "binutils_rev": "8d77853bc9415bcb7bb4206fa2901de7603387db", # from cr commit position 392828
 +  "libcxx_static_rev": "fd8f9a82862aa40dab0c5bcdea6e498715284f5a", # from cr commit position 369150
 +  # NOTE: be sure to update clang_lib_version in SConstruct whenever
 +  # updating this clang_rev (e.g., if LLVM changes from version 3.7 to 3.8).
-+  "clang_rev": "ef8e028ea0f0fdf3be7be6e817e5c26c8ba7aebe", # from cr commit position 396388
++  "clang_rev": "f26ef1bab777afd1379aa900e7f39b99100db725", # from cr commit position 415563
 +
 +  # NOTE!  These five should be kept up to date with their counterparts in
 +  # chromium/src/DEPS.
@@ -359199,16 +359342,16 @@ index 0000000000000000000000000000000000000000..eb0353230171a641f0f59f8217bf5380
 +  # in the build that goes into Chromium.  But we might as well update it too.)
 +  # You should now use the roll-dep script in depot_tools to do this update.
 +  "gtest_rev": "6f8a66431cb592dad629028a50b3dd418a408c87",
-+  "gyp_rev": "bce1c7793010574d88d7915e2d55395213ac63d1",
-+  "breakpad_rev": "a4eb2e302cefff9908ec955e761fef5d813d1b00", # from svn revision 1416
++  "gyp_rev": "c61b0b35c8396bfd59efc6cfc11401d912b0f510",
++  "breakpad_rev": "5f638d532312685548d5033618c8a36f73302d0a",
 +  # Three lines of non-changing comments so that
 +  # the commit queue can handle CLs rolling build tools
 +  # and whatever else without interference from each other.
-+  'buildtools_revision': '06e80a0e17319868d4a9b13f9bb6a248dc8d8b20',
++  'buildtools_revision': 'adb8bf4e8fc92aa1717bf151b862d58e6f27c4f2',
 +  # Three lines of non-changing comments so that
 +  # the commit queue can handle CLs rolling lss
 +  # and whatever else without interference from each other.
-+  'lss_revision': '4fc942258fe5509549333b9487ec018e3c8c5b10',
++  'lss_revision': '3f6478ac95edf86cd3da300c2c0d34a438f5dbeb',
 +
 +  # Separately pinned repositories, update with roll-dep individually.
 +  "third_party_rev": "d4e38e5faf600b39649025e5605d6e7f94518ea7",
@@ -359227,7 +359370,7 @@ index 0000000000000000000000000000000000000000..eb0353230171a641f0f59f8217bf5380
 +
 +deps = {
 +  "breakpad":
-+    Var("chromium_git") + "/external/google-breakpad.git@" +
++    Var("chromium_git") + "/breakpad/breakpad.git@" +
 +    Var("breakpad_rev"),
 +  "buildtools":
 +    Var("chromium_git") + "/chromium/buildtools.git@" +
@@ -359257,7 +359400,7 @@ index 0000000000000000000000000000000000000000..eb0353230171a641f0f59f8217bf5380
 +    Var("chromium_git") + "/chromium/src/third_party/libc++-static.git@" +
 +    Var("libcxx_static_rev"),
 +  "third_party/lss":
-+    Var("chromium_git") + "/external/linux-syscall-support/lss.git@" +
++    Var("chromium_git") + "/linux-syscall-support.git@" +
 +    Var("lss_revision"),
 +  "tools/clang":
 +    Var("chromium_git") + "/chromium/src/tools/clang.git@" + Var("clang_rev"),
@@ -373306,7 +373449,7 @@ index 0000000000000000000000000000000000000000..2023c30103066287126e3032ef4ae8fd
 + * `tools/`: Utilities such as the plug-in installer.
 diff --git a/native_client/SConstruct b/native_client/SConstruct
 new file mode 100755
-index 0000000000000000000000000000000000000000..f09839f087bd71f77656e578514dc35bbdb4be63
+index 0000000000000000000000000000000000000000..8ba9d614a00804169c623d040f536efc7d0bf65a
 --- /dev/null
 +++ b/native_client/SConstruct
 @@ -0,0 +1,3859 @@
@@ -375513,7 +375656,7 @@ index 0000000000000000000000000000000000000000..f09839f087bd71f77656e578514dc35b
 +      # at the right directory using an environment variable.
 +      # Be sure to check and update clang_lib_version whenever updating
 +      # tools/clang revs in DEPS.
-+      clang_lib_version = '3.9.0'
++      clang_lib_version = '4.0.0'
 +      clang_lib_dir = str(env.Dir('${CLANG_DIR}/../lib/clang/%s/lib/darwin' %
 +                                  clang_lib_version).abspath)
 +      env['ENV']['DYLD_LIBRARY_PATH'] = clang_lib_dir
@@ -388499,10 +388642,10 @@ index 0000000000000000000000000000000000000000..83576d08e6c46f18843795028888f09a
 +mcgrathr@chromium.org
 diff --git a/native_client/buildbot/buildbot_lib.py b/native_client/buildbot/buildbot_lib.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..eb719296d335e6058023d281b19f794039c6b66b
+index 0000000000000000000000000000000000000000..df7bb148eb92e5130cb26a140d2e8310e4ee75b7
 --- /dev/null
 +++ b/native_client/buildbot/buildbot_lib.py
-@@ -0,0 +1,662 @@
+@@ -0,0 +1,666 @@
 +#!/usr/bin/python
 +# Copyright (c) 2012 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -388869,6 +389012,10 @@ index 0000000000000000000000000000000000000000..eb719296d335e6058023d281b19f7940
 +  RemoveDirectory('build/Release-Win32')
 +  RemoveDirectory('build/Debug-x64')
 +  RemoveDirectory('build/Release-x64')
++  RemoveDirectory('../out_32')
++  RemoveDirectory('../out_32_clang')
++  RemoveDirectory('../out_64')
++  RemoveDirectory('../out_64_clang')
 +
 +  # Linux and Mac
 +  RemoveDirectory('../xcodebuild')
@@ -390121,10 +390268,10 @@ index 0000000000000000000000000000000000000000..3d2e4d73cc4ba7024bc6cd1ee18e8754
 +fi
 diff --git a/native_client/buildbot/buildbot_pnacl_toolchain.py b/native_client/buildbot/buildbot_pnacl_toolchain.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..c8283a94e50282a81c52d2d0622a36b380d2b713
+index 0000000000000000000000000000000000000000..ae1f7aca3fcd2ed97c351ca426fa0f0079fc346b
 --- /dev/null
 +++ b/native_client/buildbot/buildbot_pnacl_toolchain.py
-@@ -0,0 +1,247 @@
+@@ -0,0 +1,249 @@
 +#!/usr/bin/python
 +# Copyright (c) 2013 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -390154,6 +390301,9 @@ index 0000000000000000000000000000000000000000..c8283a94e50282a81c52d2d0622a36b3
 +BUILD_DIR = os.path.join(NACL_DIR, 'build')
 +PACKAGE_VERSION_DIR = os.path.join(BUILD_DIR, 'package_version')
 +PACKAGE_VERSION_SCRIPT = os.path.join(PACKAGE_VERSION_DIR, 'package_version.py')
++
++GOMA_PATH = '/b/build/goma'
++GOMA_CTL = os.path.join(GOMA_PATH, 'goma_ctl.py')
 +
 +# As this is a buildbot script, we want verbose logging. Note however, that
 +# toolchain_build has its own log settings, controlled by its CLI flags.
@@ -390199,7 +390349,8 @@ index 0000000000000000000000000000000000000000..c8283a94e50282a81c52d2d0622a36b3
 +    '%s_%s' % (host_os, pynacl.platform.GetArch()),
 +    'pnacl_newlib')
 +
-+use_goma = buildbot_lib.RunningOnBuildbot() and not args.no_goma
++use_goma = (buildbot_lib.RunningOnBuildbot() and not args.no_goma
++            and os.path.isfile(GOMA_CTL))
 +
 +
 +def ToolchainBuildCmd(sync=False, extra_flags=[]):
@@ -390230,7 +390381,7 @@ index 0000000000000000000000000000000000000000..c8283a94e50282a81c52d2d0622a36b3
 +    executable_args.append('--disable-llvm-assertions')
 +
 +  if use_goma:
-+    executable_args.append('--goma=/b/build/goma')
++    executable_args.append('--goma=' + GOMA_PATH)
 +
 +  return [sys.executable] + executable_args + sync_flag + extra_flags
 +
@@ -390265,8 +390416,7 @@ index 0000000000000000000000000000000000000000..c8283a94e50282a81c52d2d0622a36b3
 +             NACL_DIR, '..', 'tools', 'clang', 'scripts', 'update.py')])
 +
 +if use_goma:
-+  buildbot_lib.Command(context, cmd=[
-+      sys.executable, '/b/build/goma/goma_ctl.py', 'restart'])
++  buildbot_lib.Command(context, cmd=[sys.executable, GOMA_CTL, 'restart'])
 +
 +# toolchain_build outputs its own buildbot annotations, so don't use
 +# buildbot_lib.Step to run it here.
@@ -390280,8 +390430,7 @@ index 0000000000000000000000000000000000000000..c8283a94e50282a81c52d2d0622a36b3
 +RunWithLog(ToolchainBuildCmd(sync=True, extra_flags=['--canonical-only']))
 +
 +if use_goma:
-+  buildbot_lib.Command(context, cmd=[
-+      sys.executable, '/b/build/goma/goma_ctl.py', 'stop'])
++  buildbot_lib.Command(context, cmd=[sys.executable, GOMA_CTL, 'stop'])
 +
 +if args.skip_tests:
 +  sys.exit(0)
@@ -391576,10 +391725,10 @@ index 0000000000000000000000000000000000000000..47a0afdbc4d32c4beabd50acc63ac1ae
 +fi
 diff --git a/native_client/buildbot/buildbot_standard.py b/native_client/buildbot/buildbot_standard.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..532bb02929ab229a736c23a50dc3bffc5aabf44c
+index 0000000000000000000000000000000000000000..e492041a2f483b06ddc7a99bd682aee3e95f03b9
 --- /dev/null
 +++ b/native_client/buildbot/buildbot_standard.py
-@@ -0,0 +1,490 @@
+@@ -0,0 +1,507 @@
 +#!/usr/bin/python
 +# Copyright (c) 2012 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -391916,7 +392065,8 @@ index 0000000000000000000000000000000000000000..532bb02929ab229a736c23a50dc3bffc
 +      CommandGclientRunhooks(context)
 +
 +  # Always update Clang.  On Linux and Mac, it's the default for the GN build.
-+  # On Windows, we do a second Clang GN build.
++  # It's also used for the Linux Breakpad build. On Windows, we do a second
++  # Clang GN build.
 +  with Step('update_clang', status):
 +    Command(context, cmd=[sys.executable, '../tools/clang/scripts/update.py'])
 +
@@ -391976,9 +392126,25 @@ index 0000000000000000000000000000000000000000..532bb02929ab229a736c23a50dc3bffc
 +  if context['use_breakpad_tools']:
 +    with Step('breakpad configure', status):
 +      Command(context, cmd=['mkdir', '-p', 'breakpad-out'])
++
++      # Breakpad requires C++11, so use clang and the sysroot rather than
++      # hoping that the host toolchain will provide support.
++      configure_args = []
++      if context.Linux():
++        cxx = 'CXX=../../third_party/llvm-build/Release+Asserts/bin/clang++ '
++        if context['arch'] == '32':
++          cxx += '-m32'
++          sysroot_arch = 'i386'
++        else:
++          cxx += '-m64'
++          sysroot_arch = 'amd64'
++        cxx += (' --sysroot=../../build/linux/debian_wheezy_%s-sysroot' %
++                sysroot_arch)
++        configure_args += [cxx]
++        configure_args += ['CXXFLAGS=-I../..']  # For third_party/lss
 +      Command(context, cwd='breakpad-out',
-+              cmd=['bash', '../../breakpad/configure',
-+                   'CXXFLAGS=-I../..'])  # For third_party/lss
++              cmd=['bash', '../../breakpad/configure'] + configure_args)
++
 +    with Step('breakpad make', status):
 +      Command(context, cmd=['make', '-j%d' % context['max_jobs'],
 +                            # This avoids a broken dependency on
@@ -412971,7 +413137,7 @@ index 0000000000000000000000000000000000000000..19c1481c7d2039ec2b61cd84efea4496
 +}
 diff --git a/native_client/pnacl/COMPONENT_REVISIONS b/native_client/pnacl/COMPONENT_REVISIONS
 new file mode 100644
-index 0000000000000000000000000000000000000000..38830406b296afe04300f73513ee277b82db0973
+index 0000000000000000000000000000000000000000..4054fcea424204976162f84e61552939de6b5df8
 --- /dev/null
 +++ b/native_client/pnacl/COMPONENT_REVISIONS
 @@ -0,0 +1,50 @@
@@ -413020,7 +413186,7 @@ index 0000000000000000000000000000000000000000..38830406b296afe04300f73513ee277b
 +#
 +# Three lines avoid merge conflicts.
 +#
-+subzero=c2ee36a65cb3ea176210301bb73dfda97ef229c9
++subzero=a64156e863885059cf21f2673b9341e87ebd367d
 +#
 +# Three lines avoid merge conflicts.
 +#
@@ -420560,128 +420726,3 @@ index 0000000000000000000000000000000000000000..58c247da0472d69731a1659cc549ad70
 +PNACLPYTHON="${PNACLPYTHON:-python}"
 +${PNACLPYTHON} "${PYDIR}/loader.py" "${TOOLNAME}" "$@"
 +
-diff --git a/native_client/pnacl/driver/shelltools.py b/native_client/pnacl/driver/shelltools.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..62088acaf277d0cde68d8da2525a41aeb8526284
---- /dev/null
-+++ b/native_client/pnacl/driver/shelltools.py
-@@ -0,0 +1,83 @@
-+#!/usr/bin/python
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+from driver_log import Log
-+
-+import types
-+
-+######################################################################
-+#
-+# Shell Utilities
-+#
-+######################################################################
-+
-+class shell(object):
-+
-+  @staticmethod
-+  def unescape(s):
-+    w = shell.split(s)
-+    if len(w) == 0:
-+      return ''
-+    if len(w) == 1:
-+      return w[0]
-+    # String was not properly escaped in the first place?
-+    assert(False)
-+
-+  # TODO(pdox): Simplify this function by moving more of it into unescape
-+  @staticmethod
-+  def split(s):
-+    """Split a shell-style string up into a list of distinct arguments.
-+    For example: split('cmd -arg1 -arg2="a b c"')
-+    Returns ['cmd', '-arg1', '-arg2=a b c']
-+    """
-+    assert(isinstance(s, types.StringTypes))
-+    out = []
-+    inspace = True
-+    inquote = False
-+    buf = ''
-+
-+    i = 0
-+    while i < len(s):
-+      if s[i] == '"':
-+        inspace = False
-+        inquote = not inquote
-+      elif s[i] == ' ' and not inquote:
-+        if not inspace:
-+          out.append(buf)
-+          buf = ''
-+        inspace = True
-+      elif s[i] == '\\':
-+        if not i+1 < len(s):
-+          Log.Fatal('Unterminated \\ escape sequence')
-+        inspace = False
-+        i += 1
-+        buf += s[i]
-+      else:
-+        inspace = False
-+        buf += s[i]
-+      i += 1
-+    if inquote:
-+      Log.Fatal('Unterminated quote')
-+    if not inspace:
-+      out.append(buf)
-+    return out
-+
-+  @staticmethod
-+  def join(args):
-+    """Turn a list into a shell-style string For example:
-+       shell.join([ 'a', 'b', 'c d e' ]) = 'a b "c d e"'
-+    """
-+    return ' '.join([ shell.escape(a) for a in args ])
-+
-+  @staticmethod
-+  def escape(s):
-+    """Shell-escape special characters in a string
-+       Surround with quotes if necessary
-+    """
-+    s = s.replace('\\', '\\\\')
-+    s = s.replace('"', '\\"')
-+    if ' ' in s:
-+      s = '"' + s + '"'
-+    return s
-diff --git a/native_client/pnacl/driver/tests/TEST_REV_GIT b/native_client/pnacl/driver/tests/TEST_REV_GIT
-new file mode 100644
-index 0000000000000000000000000000000000000000..3027a8713166907afe7e66fa2ffd8e4d57625fae
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/TEST_REV_GIT
-@@ -0,0 +1,12 @@
-+[GIT] https://chromium.googlesource.com/native_client/src/native_client.git: ebba42f04c6a61f2a92e0a15ab835ef2371b6836
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-compiler-rt.git: 042faedc42471163bd25591e062456a07b490ed7
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-gcc.git: 574429118e460375c377728420c43aad4a3103dc
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-llvm.git: 9dd1dea7a54652afee2582c8d5686a16feb406fa
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-libcxxabi.git: d980d1191e1034abd4e1c06ed9c532b6f9db2d5c
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-llvm-testsuite.git: 6438a2b505fa29f82eb850aed1785db1738b971c
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-libcxx.git: ba6de7e3eaac146ce1553c4b28141c19246c50e9
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-subzero.git: dddaf9cae5107a60becbe69628d774815e9305e7
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-clang.git: ee9f4759d2c241a5e896e922865895289a7ca702
-+[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 1d8592cc9f02cc9aeaef992c296376a8fd4c8761
-+[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 84c8183a55ddc46a4c2be03eef840cceb83d6bcb
-+[GIT] https://chromium.googlesource.com/native_client/nacl-newlib.git: 4e25c2883f51b43758f44ffcc6abb31b8680fb7c
-diff --git a/native_client/pnacl/driver/tests/TEST_REV_GIT2 b/native_client/pnacl/driver/tests/TEST_REV_GIT2
-new file mode 100644
-index 0000000000000000000000000000000000000000..0abbff235451220cc3cab8a55c6791923c1a1794
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/TEST_REV_GIT2
-@@ -0,0 +1,12 @@
-+[GIT] https://chromium.googlesource.com/a/native_client/src/native_client: 587c9f0a79e679a27304980809e4f0bfd2a6c3c2
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-compiler-rt.git: 042faedc42471163bd25591e062456a07b490ed7
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-gcc.git: 574429118e460375c377728420c43aad4a3103dc
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-llvm.git: 9dd1dea7a54652afee2582c8d5686a16feb406fa
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-libcxxabi.git: d980d1191e1034abd4e1c06ed9c532b6f9db2d5c
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-llvm-testsuite.git: 6438a2b505fa29f82eb850aed1785db1738b971c
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-libcxx.git: ba6de7e3eaac146ce1553c4b28141c19246c50e9
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-subzero.git: dddaf9cae5107a60becbe69628d774815e9305e7
-+[GIT] https://chromium.googlesource.com/native_client/pnacl-clang.git: ee9f4759d2c241a5e896e922865895289a7ca702
-+[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 1d8592cc9f02cc9aeaef992c296376a8fd4c8761
-+[GIT] https://chromium.googlesource.com/native_client/nacl-binutils.git: 84c8183a55ddc46a4c2be03eef840cceb83d6bcb
-+[GIT] https://chromium.googlesource.com/native_client/nacl-newlib.git: 4e25c2883f51b43758f44ffcc6abb31b8680fb7c

@@ -1,3 +1,81 @@
+diff --git a/native_client/tests/mmap_main_nexe/mmap_main_nexe.stderr b/native_client/tests/mmap_main_nexe/mmap_main_nexe.stderr
+new file mode 100644
+index 0000000000000000000000000000000000000000..5fbdfc5ca19ed35d3a34a6cacdb6657764062412
+--- /dev/null
++++ b/native_client/tests/mmap_main_nexe/mmap_main_nexe.stderr
+@@ -0,0 +1 @@
++NaClElfFileMapSegment: EXERCISING MMAP LOAD PATH
+diff --git a/native_client/tests/mmap_main_nexe/mmap_main_nexe_rpc.stderr b/native_client/tests/mmap_main_nexe/mmap_main_nexe_rpc.stderr
+new file mode 100644
+index 0000000000000000000000000000000000000000..5fbdfc5ca19ed35d3a34a6cacdb6657764062412
+--- /dev/null
++++ b/native_client/tests/mmap_main_nexe/mmap_main_nexe_rpc.stderr
+@@ -0,0 +1 @@
++NaClElfFileMapSegment: EXERCISING MMAP LOAD PATH
+diff --git a/native_client/tests/mmap_main_nexe/nacl.scons b/native_client/tests/mmap_main_nexe/nacl.scons
+new file mode 100644
+index 0000000000000000000000000000000000000000..731cc65584b58b5137f8c1e9e04e246b929780b9
+--- /dev/null
++++ b/native_client/tests/mmap_main_nexe/nacl.scons
+@@ -0,0 +1,38 @@
++# -*- python -*-
++# Copyright (c) 2013 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++Import('env')
++
++if 'TRUSTED_ENV' not in env:
++  Return()
++trusted_env = env['TRUSTED_ENV']
++
++# This test uses a nexe built by another test.  Nexes do not get
++# staged in pexe mode, so only run this test in nonpexe mode.
++if env.Bit('pnacl_generate_pexe'):
++  Return()
++
++# The log message that this test looks for is in
++# src/trusted/service_runtime/elf_util.c.
++node = env.CommandSelLdrTestNacl(
++    'mmap_main_nexe_test.out',
++    env.File('${STAGING_DIR}/hello_world.nexe'),
++    osenv=['NACL_FAULT_INJECTION=' +
++           'ELF_LOAD_BYPASS_DESCRIPTOR_SAFETY_CHECK=GF1/999:' +
++           'ELF_LOAD_FORCE_VALIDATION_STATUS=GF0',
++           'NACLVERBOSITY=1'],
++    filter_regex='"(NaClElfFileMapSegment: EXERCISING MMAP LOAD PATH)"',
++    filter_group_only='true',
++    stderr_golden=env.File('mmap_main_nexe.stderr'))
++
++# This test is broken on the memcheck bots, where Valgrind dies with an
++# assertion failure:
++#
++# valgrind: m_debuginfo/readelf.c:1445
++# (vgModuleLocal_read_elf_debug_info): Assertion 'rw_svma_limit != 0'
++# failed.
++env.AddNodeToTestSuite(node, ['small_tests', 'nonpexe_tests'],
++                       'run_mmap_main_nexe_test',
++                       is_broken=env.Bit('running_on_valgrind'))
+diff --git a/native_client/tests/mmap_prot_exec/exec_data.S b/native_client/tests/mmap_prot_exec/exec_data.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..c29e87ad233d66cb9715d66c5ef0155107608b8f
+--- /dev/null
++++ b/native_client/tests/mmap_prot_exec/exec_data.S
+@@ -0,0 +1,14 @@
++/*
++ * Copyright (c) 2015 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "native_client/src/trusted/service_runtime/nacl_config.h"
++
++/*
++ * This generates a full page of halt instructions.
++ * All that matters for this test is that it's all valid instructions.
++ */
++.text
++.fill (1 << NACL_MAP_PAGESHIFT) / NACL_HALT_LEN, NACL_HALT_LEN, NACL_HALT_OPCODE
 diff --git a/native_client/tests/mmap_prot_exec/mmap_code_data_alloc_test.c b/native_client/tests/mmap_prot_exec/mmap_code_data_alloc_test.c
 new file mode 100644
 index 0000000000000000000000000000000000000000..fc1c47d4301307604086bb18732fb8f89ceb04b4
@@ -10311,10 +10389,10 @@ index 0000000000000000000000000000000000000000..956c9b31c2dd4ee762853ba378824d2c
 +                       is_broken=is_broken)
 diff --git a/native_client/tests/signal_handler_single_step/nacl.scons b/native_client/tests/signal_handler_single_step/nacl.scons
 new file mode 100644
-index 0000000000000000000000000000000000000000..56c20dd09bebb45d85d5a6d428b30257a2e2a032
+index 0000000000000000000000000000000000000000..775d3729b3647cec98111a933e49e52c4790a99d
 --- /dev/null
 +++ b/native_client/tests/signal_handler_single_step/nacl.scons
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,66 @@
 +# -*- python -*-
 +# Copyright 2012 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -10334,8 +10412,6 @@ index 0000000000000000000000000000000000000000..56c20dd09bebb45d85d5a6d428b30257
 +if not env.AllowInlineAssembly():
 +  Return()
 +
-+if not (env.Bit('build_x86') or env.Bit('build_arm')):
-+  Return()
 +# This test uses POSIX signal handling so does not build on Windows.
 +if env.Bit('host_windows'):
 +  Return()
@@ -10385,10 +10461,10 @@ index 0000000000000000000000000000000000000000..56c20dd09bebb45d85d5a6d428b30257
 +                       is_broken=not env.Bit('nacl_static_link'))
 diff --git a/native_client/tests/signal_handler_single_step/regs_step_test_guest.c b/native_client/tests/signal_handler_single_step/regs_step_test_guest.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..e1781b0849adcb1a50e95538b0723a5d5f327643
+index 0000000000000000000000000000000000000000..020c7dfe92f600c32077d5f2a2cfd8045ecf3305
 --- /dev/null
 +++ b/native_client/tests/signal_handler_single_step/regs_step_test_guest.c
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,176 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -10458,6 +10534,28 @@ index 0000000000000000000000000000000000000000..e1781b0849adcb1a50e95538b0723a5d
 +            "str r7, [r5]\n" \
 +            "b ReturnFromSyscall\n" \
 +            ".popsection\n");
++#elif defined(__mips__)
++# define SYSCALL_CALLER(suffix) \
++    __asm__(".pushsection .text, \"ax\", @progbits\n" \
++            ".p2align 4\n" \
++            ".set noreorder\n" \
++            ".globl SyscallCaller" suffix "\n" \
++            "SyscallCaller" suffix ":\n" \
++            /* Set g_regs_should_match = 1. */ \
++            "sw $s2, 0($s1)\n" \
++            /* Call syscall. */ \
++            "jalr $s0\n" \
++            "nop\n" \
++            ".p2align 4\n" \
++            ".globl SyscallReturnAddress" suffix "\n" \
++            "SyscallReturnAddress" suffix ":\n" \
++            /* Set g_regs_should_match = 0. */ \
++            "sw $zero, 0($s1)\n" \
++            "lui $t9, %hi(ReturnFromSyscall)\n" \
++            "b ReturnFromSyscall\n" \
++            "addiu $t9, $t9, %lo(ReturnFromSyscall)\n" \
++            ".set reorder\n" \
++            ".popsection\n");
 +#else
 +# error Unsupported architecture
 +#endif
@@ -10519,6 +10617,10 @@ index 0000000000000000000000000000000000000000..e1781b0849adcb1a50e95538b0723a5d
 +    call_regs.r5 = (uintptr_t) &g_regs_should_match;
 +    call_regs.r6 = 1;
 +    call_regs.r7 = 0;
++#elif defined(__mips__)
++    call_regs.s0 = syscall_addr;
++    call_regs.s1 = (uintptr_t) &g_regs_should_match;
++    call_regs.s2 = 1;
 +#else
 +# error Unsupported architecture
 +#endif
@@ -10541,10 +10643,10 @@ index 0000000000000000000000000000000000000000..e1781b0849adcb1a50e95538b0723a5d
 +}
 diff --git a/native_client/tests/signal_handler_single_step/regs_step_test_host.c b/native_client/tests/signal_handler_single_step/regs_step_test_host.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cddddda9b8
+index 0000000000000000000000000000000000000000..605be009afb86d0722801c2d75fd9c1dc15e91ab
 --- /dev/null
 +++ b/native_client/tests/signal_handler_single_step/regs_step_test_host.c
-@@ -0,0 +1,353 @@
+@@ -0,0 +1,441 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -10561,7 +10663,7 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 +#include "native_client/src/shared/platform/nacl_check.h"
 +#include "native_client/src/shared/platform/nacl_exit.h"
 +#include "native_client/src/shared/platform/nacl_log.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h"
++
 +#include "native_client/src/trusted/service_runtime/include/bits/mman.h"
 +#include "native_client/src/trusted/service_runtime/include/bits/nacl_syscalls.h"
 +#include "native_client/src/trusted/service_runtime/load_file.h"
@@ -10576,6 +10678,12 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 +#include "native_client/src/trusted/service_runtime/thread_suspension_unwind.h"
 +#include "native_client/tests/common/register_set.h"
 +#include "native_client/tests/signal_handler_single_step/step_test_common.h"
++
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm
++# include "native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h"
++#elif NACL_ARCH(NACL_BUILD_ARCH) == NACL_mips
++# include "native_client/src/trusted/service_runtime/arch/mips/tramp_mips.h"
++#endif
 +
 +
 +/*
@@ -10599,7 +10707,7 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 + *
 + * On x86, we use single-stepping by setting the x86 trap flag.
 + *
-+ * ARM does not support single-stepping in hardware, so instead we set
++ * ARM and MIPS do not support single-stepping in hardware, so instead we set
 + * breakpoints on the code ranges we are interested in.
 + */
 +
@@ -10619,7 +10727,8 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 +#endif
 +
 +
-+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm || \
++    NACL_ARCH(NACL_BUILD_ARCH) == NACL_mips
 +
 +/*
 + * This represents a range of address space that has been patched to
@@ -10636,7 +10745,7 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 +/* Address from which the breakpoint has been temporarily removed. */
 +uint32_t *g_unpatched_addr = NULL;
 +
-+const int kArmInstructionBundleSize = 16;
++const int kInstructionBundleSize = 16;
 +
 +/* Add breakpoints covering the given range of instructions. */
 +static void AddBreakpoints(struct NaClApp *nap,
@@ -10666,27 +10775,20 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 +  for (dest = (uint32_t *) start; dest < (uint32_t *) end; ) {
 +    /* In untrusted address space, avoid overwriting any constant pools. */
 +    if (NaClIsUserAddr(nap, (uintptr_t) dest) &&
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm
 +        (*dest == NACL_HALT_WORD ||
 +         *dest == NACL_INSTR_ARM_LITERAL_POOL_HEAD)) {
++#else
++        *dest == NACL_HALT_WORD) {
++#endif
 +      do {
 +        dest++;
-+      } while ((uintptr_t) dest % kArmInstructionBundleSize != 0);
++      } while ((uintptr_t) dest % kInstructionBundleSize != 0);
 +    } else {
-+      *dest++ = NACL_INSTR_ARM_HALT_FILL;
++      *dest++ = NACL_HALT_WORD;
 +    }
 +  }
 +  __builtin___clear_cache((void *) start, (void *) end);
-+}
-+
-+/*
-+ * This is a workaround for qemu-arm: Writing to an address that has
-+ * been executed doesn't seem to work unless we re-call mprotect() on
-+ * the address.
-+ */
-+static void ResetPagePermissions(uintptr_t addr) {
-+  int rc = mprotect((void *) (addr & ~(NACL_PAGESIZE - 1)), NACL_PAGESIZE,
-+                    PROT_READ | PROT_WRITE | PROT_EXEC);
-+  CHECK(rc == 0);
 +}
 +
 +static uint32_t GetOverwrittenInstruction(uintptr_t addr) {
@@ -10702,6 +10804,19 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 +  _exit(1);
 +}
 +
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm
++
++/*
++ * This is a workaround for qemu-arm: Writing to an address that has
++ * been executed doesn't seem to work unless we re-call mprotect() on
++ * the address.
++ */
++static void ResetPagePermissions(uintptr_t addr) {
++  int rc = mprotect((void *) (addr & ~(NACL_PAGESIZE - 1)), NACL_PAGESIZE,
++                    PROT_READ | PROT_WRITE | PROT_EXEC);
++  CHECK(rc == 0);
++}
++
 +static void TemporarilyRemoveBreakpoint(uintptr_t addr) {
 +  uint32_t *dest;
 +
@@ -10710,17 +10825,90 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 +    ResetPagePermissions((uintptr_t) g_unpatched_addr);
 +    CHECK(*g_unpatched_addr
 +          == GetOverwrittenInstruction((uintptr_t) g_unpatched_addr));
-+    *g_unpatched_addr = NACL_INSTR_ARM_HALT_FILL;
++    *g_unpatched_addr = NACL_HALT_WORD;
 +    __builtin___clear_cache(g_unpatched_addr, &g_unpatched_addr[1]);
 +  }
 +
 +  dest = (uint32_t *) addr;
 +  ResetPagePermissions(addr);
-+  CHECK(*dest == NACL_INSTR_ARM_HALT_FILL);
++  CHECK(*dest == NACL_HALT_WORD);
 +  *dest = GetOverwrittenInstruction(addr);
 +  __builtin___clear_cache(dest, &dest[1]);
 +  g_unpatched_addr = dest;
 +}
++
++#else
++
++static int HasDelaySlot(uint32_t opcode) {
++  /*
++   * jr
++   * 0000 00xx xxx0 0000 0000 0000 0000 1000
++   *
++   * jalr
++   * 0000 00xx xxx0 0000 xxxx x000 0000 1001
++   *
++   * bltz, bgez, bltzl, bgezl, bltzal, bgezal, bltzall, bgezall
++   * 0000 01xx xxxx 00xx xxxx xxxx xxxx xxxx
++   *
++   * j, jal
++   * 0000 1xxx xxxx xxxx xxxx xxxx xxxx xxxx
++   *
++   * beq, bne, beql, bnel
++   * 0x01 0xxx xxxx xxxx xxxx xxxx xxxx xxxx
++   *
++   * blez, bgtz, blezl, bgtzl
++   * 0x01 1xxx xxx0 0000 xxxx xxxx xxxx xxxx
++   *
++   * bc1f, bc1fl, bc1t, bc1tl
++   * 0100 0101 000x xxxx xxxx xxxx xxxx xxxx
++   *
++   */
++
++  return ((opcode & 0xFC1FFFFF) == 0x00000008) ||
++         ((opcode & 0xFC1F07FF) == 0x00000009) ||
++         ((opcode & 0xFC0C0000) == 0x04000000) ||
++         ((opcode & 0xF8000000) == 0x08000000) ||
++         ((opcode & 0xB8000000) == 0x10000000) ||
++         ((opcode & 0xB81F0000) == 0x18000000) ||
++         ((opcode & 0xFFE00000) == 0x45000000);
++}
++
++static void TemporarilyRemoveBreakpoint(uintptr_t addr) {
++  uint32_t *dest;
++  /* MIPS version has to account for instruction in branch delay slot. */
++  uint32_t *delay_slot_addr;
++  int has_delay_slot;
++
++  if (g_unpatched_addr != NULL) {
++    has_delay_slot = HasDelaySlot(*g_unpatched_addr);
++    CHECK(*g_unpatched_addr
++          == GetOverwrittenInstruction((uintptr_t) g_unpatched_addr));
++    *g_unpatched_addr = NACL_HALT_WORD;
++
++    if (has_delay_slot) {
++      delay_slot_addr = g_unpatched_addr + 1;
++      CHECK(*delay_slot_addr
++             == GetOverwrittenInstruction((uintptr_t) delay_slot_addr));
++      *delay_slot_addr = NACL_HALT_WORD;
++    }
++    __builtin___clear_cache(g_unpatched_addr, &g_unpatched_addr[2]);
++  }
++
++  dest = (uint32_t *) addr;
++  CHECK(*dest == NACL_HALT_WORD);
++  *dest = GetOverwrittenInstruction(addr);
++
++  if (HasDelaySlot(*dest)) {
++    delay_slot_addr = dest + 1;
++    CHECK(*delay_slot_addr == NACL_HALT_WORD);
++    *delay_slot_addr = GetOverwrittenInstruction((uintptr_t) delay_slot_addr);
++   }
++
++  __builtin___clear_cache(dest, &dest[2]);
++  g_unpatched_addr = dest;
++}
++
++#endif
 +
 +static void SetUpBreakpoints(struct NaClApp *nap) {
 +  AddBreakpoints(nap, (uintptr_t) &NaClSyscallSeg,
@@ -10735,7 +10923,8 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 +static int32_t TestSyscall(struct NaClAppThread *natp) {
 +  if (g_call_count == 0) {
 +    g_natp = natp;
-+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm || \
++    NACL_ARCH(NACL_BUILD_ARCH) == NACL_mips
 +    SetUpBreakpoints(natp->nap);
 +#else
 +    SetTrapFlag();
@@ -10778,7 +10967,8 @@ index 0000000000000000000000000000000000000000..cc27559bc48329d06a9d5ae685f615cd
 +    _exit(1);
 +  }
 +
-+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_arm || \
++    NACL_ARCH(NACL_BUILD_ARCH) == NACL_mips
 +  /* Remove breakpoint to allow the instruction to be executed. */
 +  TemporarilyRemoveBreakpoint(context_ptr->prog_ctr);
 +#endif
@@ -15297,6 +15487,38 @@ index 0000000000000000000000000000000000000000..05d306dabf14040a0bfad1bd74d4973f
 +EMCCFLAGS_EXTRA_REF = --preload-file data/ref/input
 +include ../Makefile.common
 +
+diff --git a/native_client/tests/spec2k/164.gzip/diff b/native_client/tests/spec2k/164.gzip/diff
+new file mode 100644
+index 0000000000000000000000000000000000000000..711ef206fa0b37fd9011f554bbf600d9f483913d
+--- /dev/null
++++ b/native_client/tests/spec2k/164.gzip/diff
+@@ -0,0 +1,19 @@
++diff -Naurb /usr/local/google/home/ddchen/spec/2000/benchspec/CINT2000/164.gzip/src/util.c src/util.c
++--- src/util.c  1998-11-09 07:12:32.000000000 -0800
+++++ src2/util.c 2016-08-11 13:52:52.409553232 -0700
++@@ -162,6 +162,7 @@
++     }
++ }
++
+++#ifndef __EMSCRIPTEN__
++ /* ========================================================================
++  * Put string s in lower case, return s.
++  */
++@@ -172,6 +173,7 @@
++     for (t = s; *t; t++) *t = tolow(*t);
++     return s;
++ }
+++#endif
++
++ /* ========================================================================
++  * Return the base name of a file (remove any directory prefix and
+diff --git a/native_client/tests/spec2k/164.gzip/diff.README b/native_client/tests/spec2k/164.gzip/diff.README
+new file mode 100644
+index 0000000000000000000000000000000000000000..2809f5cf3cb81a37828d655e82d4122e2e5bef11
+--- /dev/null
++++ b/native_client/tests/spec2k/164.gzip/diff.README
+@@ -0,0 +1 @@
++Add conditional ifdef to check for "compat/string.h" from emscripten to prevent multiple defines of "strlwr"
 diff --git a/native_client/tests/spec2k/164.gzip/run.ref.sh b/native_client/tests/spec2k/164.gzip/run.ref.sh
 new file mode 100755
 index 0000000000000000000000000000000000000000..8c5fde30a5af1b2bf3d4d5d745ac0813a1adc68e
@@ -15395,12 +15617,176 @@ index 0000000000000000000000000000000000000000..fec1660c0181f7a221056926a81affea
 +
 +EXTRA_CLEAN=*.in
 +include ../Makefile.common
+diff --git a/native_client/tests/spec2k/175.vpr/diff b/native_client/tests/spec2k/175.vpr/diff
+new file mode 100644
+index 0000000000000000000000000000000000000000..6e95247c21d3540aa64e9ed695bee825cda4b13b
+--- /dev/null
++++ b/native_client/tests/spec2k/175.vpr/diff
+@@ -0,0 +1,150 @@
++diff -Naurb data2/ref/input/arch.in data/ref/input/arch.in
++--- data2/ref/input/arch.in 2016-08-19 00:53:56.461003496 -0700
+++++ data/ref/input/arch.in 2016-08-19 01:05:14.926978709 -0700
++@@ -33,14 +33,14 @@
++ Fc_input 1
++ Fc_pad 1
++
++-segment frequency: .6 length: 1 wire_switch: 0 opin_switch: 2 Frac_cb: 1. \
++-         Frac_sb: 1. Rmetal: 5 Cmetal: 5e-15
+++segment frequency: 0x1.3333333333333p-1 length: 1 wire_switch: 0 opin_switch: 2 Frac_cb: 1. \
+++         Frac_sb: 1. Rmetal: 5 Cmetal: 0x1.6849b86a12b9bp-48
++
++-segment frequency: .2 length: 2 wire_switch: 1 opin_switch: 1 \
++-         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 5e-15
+++segment frequency: 0x1.999999999999ap-3 length: 2 wire_switch: 1 opin_switch: 1 \
+++         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 0x1.6849b86a12b9bp-48
++
++-segment frequency: .2 length: 4 wire_switch: 1 opin_switch: 1 \
++-         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 5e-15
+++segment frequency: 0x1.999999999999ap-3 length: 4 wire_switch: 1 opin_switch: 1 \
+++         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 0x1.6849b86a12b9bp-48
++
++ switch 0  buffered: no  R: 50 Cin: 4e-15  Cout: 4e-15 Tdel: 1e-11
++ switch 1  buffered: yes  R: 40  Cin: .5e-15  Cout: 8e-15  Tdel: 5e-11
++@@ -51,13 +51,13 @@
++
++ # Timing info below.
++
++-ipin_cblock_C 1e-15
++-ipin_cblock_Tdel 0.5e-9
++-LUT_Tdel 2e-9
++-local_mux_Tdel 0.4e-9
++-BLE_mux_Tdel 0.2e-9
++-Q_to_out_Tdel 0.1e-9
++-Tsetup 0.3e-9
++-BLE_out_to_local_mux_Tdel 0.1e-9
++-ipad_Tdel 3e-9
++-opad_Tdel 2e-9
+++ipin_cblock_C 0x1.203af9ee75616p-50
+++ipin_cblock_Tdel 0x1.12e0be826d695p-31
+++LUT_Tdel 0x1.12e0be826d695p-29
+++local_mux_Tdel 0x1.b7cdfd9d7bdbbp-32
+++BLE_mux_Tdel 0x1.b7cdfd9d7bdbbp-33
+++Q_to_out_Tdel 0x1.b7cdfd9d7bdbbp-34
+++Tsetup 0x1.49da7e361ce4cp-32
+++BLE_out_to_local_mux_Tdel 0x1.b7cdfd9d7bdbbp-34
+++ipad_Tdel 0x1.9c511dc3a41dfp-29
+++opad_Tdel 0x1.12e0be826d695p-29
++diff -Naurb data2/test/input/arch.in data/test/input/arch.in
++--- data2/test/input/arch.in 2016-08-19 00:53:56.401002614 -0700
+++++ data/test/input/arch.in 2016-08-19 01:05:15.878992730 -0700
++@@ -33,14 +33,14 @@
++ Fc_input 1
++ Fc_pad 1
++
++-segment frequency: .5 length: 1 wire_switch: 0 opin_switch: 2 Frac_cb: 1. \
++-         Frac_sb: 1. Rmetal: 5 Cmetal: 5e-15
+++segment frequency: 0x1.0000000000000p-1 length: 1 wire_switch: 0 opin_switch: 2 Frac_cb: 1. \
+++         Frac_sb: 1. Rmetal: 5 Cmetal: 0x1.6849b86a12b9bp-48
++
++-segment frequency: .3 length: 2 wire_switch: 1 opin_switch: 1 \
++-         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 5e-15
+++segment frequency: 0x1.3333333333333p-2 length: 2 wire_switch: 1 opin_switch: 1 \
+++         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 0x1.6849b86a12b9bp-48
++
++-segment frequency: .2 length: 4 wire_switch: 1 opin_switch: 1 \
++-         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 5e-15
+++segment frequency: 0x1.999999999999ap-3 length: 4 wire_switch: 1 opin_switch: 1 \
+++         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 0x1.6849b86a12b9bp-48
++
++ switch 0  buffered: no  R: 50 Cin: 4e-15  Cout: 4e-15 Tdel: 1e-11
++ switch 1  buffered: yes  R: 40  Cin: .5e-15  Cout: 8e-15  Tdel: 5e-11
++@@ -51,13 +51,13 @@
++
++ # Timing info below.
++
++-ipin_cblock_C 1e-15
++-ipin_cblock_Tdel 0.5e-9
++-LUT_Tdel 2e-9
++-local_mux_Tdel 0.4e-9
++-BLE_mux_Tdel 0.2e-9
++-Q_to_out_Tdel 0.1e-9
++-Tsetup 0.3e-9
++-BLE_out_to_local_mux_Tdel 0.1e-9
++-ipad_Tdel 3e-9
++-opad_Tdel 2e-9
+++ipin_cblock_C 0x1.203af9ee75616p-50
+++ipin_cblock_Tdel 0x1.12e0be826d695p-31
+++LUT_Tdel 0x1.12e0be826d695p-29
+++local_mux_Tdel 0x1.b7cdfd9d7bdbbp-32
+++BLE_mux_Tdel 0x1.b7cdfd9d7bdbbp-33
+++Q_to_out_Tdel 0x1.b7cdfd9d7bdbbp-34
+++Tsetup 0x1.49da7e361ce4cp-32
+++BLE_out_to_local_mux_Tdel 0x1.b7cdfd9d7bdbbp-34
+++ipad_Tdel 0x1.9c511dc3a41dfp-29
+++opad_Tdel 0x1.12e0be826d695p-29
++diff -Naurb data2/train/input/arch.in data/train/input/arch.in
++--- data2/train/input/arch.in 2016-08-19 00:53:56.429003027 -0700
+++++ data/train/input/arch.in 2016-08-19 00:46:22.054322580 -0700
++@@ -33,31 +33,31 @@
++ Fc_input 1
++ Fc_pad 1
++
++-segment frequency: .6 length: 1 wire_switch: 0 opin_switch: 2 Frac_cb: 1. \
++-         Frac_sb: 1. Rmetal: 5 Cmetal: 5e-15
+++segment frequency: 0x1.3333333333333p-1 length: 1 wire_switch: 0 opin_switch: 2 Frac_cb: 1. \
+++         Frac_sb: 1. Rmetal: 5 Cmetal: 0x1.6849b86a12b9bp-48
++
++-segment frequency: .2 length: 2 wire_switch: 1 opin_switch: 1 \
++-         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 5e-15
+++segment frequency: 0x1.999999999999ap-3 length: 2 wire_switch: 1 opin_switch: 1 \
+++         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 0x1.6849b86a12b9bp-48
++
++-segment frequency: .2 length: 4 wire_switch: 1 opin_switch: 1 \
++-         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 5e-15
+++segment frequency: 0x1.999999999999ap-3 length: 4 wire_switch: 1 opin_switch: 1 \
+++         Frac_cb: 1. Frac_sb: 1 Rmetal: 5 Cmetal: 0x1.6849b86a12b9bp-48
++
++-switch 0  buffered: no  R: 50 Cin: 4e-15  Cout: 4e-15 Tdel: 1e-11
++-switch 1  buffered: yes  R: 40  Cin: .5e-15  Cout: 8e-15  Tdel: 5e-11
++-switch 2  buffered: yes  R: 80  Cin: .5e-15  Cout: 8e-15  Tdel: 5e-11
+++switch 0  buffered: no  R: 50 Cin: 0x1.203af9ee75616p-48  Cout: 0x1.203af9ee75616p-48 Tdel: 0x1.5fd7fe1796495p-37
+++switch 1  buffered: yes  R: 40  Cin: 0x1.203af9ee75616p-51  Cout: 0x1.203af9ee75616p-47  Tdel: 0x1.b7cdfd9d7bdbbp-35
+++switch 2  buffered: yes  R: 80  Cin: 0x1.203af9ee75616p-51  Cout: 0x1.203af9ee75616p-47  Tdel: 0x1.b7cdfd9d7bdbbp-35
++
++ R_minW_pmos 100.
++ R_minW_nmos 200.
++
++ # Timing info below.
++
++-ipin_cblock_C 1e-15
++-ipin_cblock_Tdel 0.5e-9
++-LUT_Tdel 2e-9
++-local_mux_Tdel 0.4e-9
++-BLE_mux_Tdel 0.2e-9
++-Q_to_out_Tdel 0.1e-9
++-Tsetup 0.3e-9
++-BLE_out_to_local_mux_Tdel 0.1e-9
++-ipad_Tdel 3e-9
++-opad_Tdel 2e-9
+++ipin_cblock_C 0x1.203af9ee75616p-50
+++ipin_cblock_Tdel 0x1.12e0be826d695p-31
+++LUT_Tdel 0x1.12e0be826d695p-29
+++local_mux_Tdel 0x1.b7cdfd9d7bdbbp-32
+++BLE_mux_Tdel 0x1.b7cdfd9d7bdbbp-33
+++Q_to_out_Tdel 0x1.b7cdfd9d7bdbbp-34
+++Tsetup 0x1.49da7e361ce4cp-32
+++BLE_out_to_local_mux_Tdel 0x1.b7cdfd9d7bdbbp-34
+++ipad_Tdel 0x1.9c511dc3a41dfp-29
+++opad_Tdel 0x1.12e0be826d695p-29
+diff --git a/native_client/tests/spec2k/175.vpr/diff.README b/native_client/tests/spec2k/175.vpr/diff.README
+new file mode 100644
+index 0000000000000000000000000000000000000000..d42556da15958445ff1d4979054e019ef14c35df
+--- /dev/null
++++ b/native_client/tests/spec2k/175.vpr/diff.README
+@@ -0,0 +1,2 @@
++// TODO: Revert when fixed in WebAssembly scanf(), both here and in run.*.sh
++Change float from decimal encoding to hexadecimal encoding to avoid scanf("%f") bug in WebAssembly
 diff --git a/native_client/tests/spec2k/175.vpr/run.ref.sh b/native_client/tests/spec2k/175.vpr/run.ref.sh
 new file mode 100755
-index 0000000000000000000000000000000000000000..e253f6e7b688add6f04c75360da973cbb23e8b01
+index 0000000000000000000000000000000000000000..7ebf73717ef5780df4a3bda97118549fd191d7c1
 --- /dev/null
 +++ b/native_client/tests/spec2k/175.vpr/run.ref.sh
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,41 @@
 +#!/bin/bash
 +# Copyright (c) 2011 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -15419,8 +15805,10 @@ index 0000000000000000000000000000000000000000..e253f6e7b688add6f04c75360da973cb
 +  touch costs.out place.out route.out
 +fi
 +
-+ARGS1="-nodisp -place_only -init_t 5 -exit_t 0.005 -alpha_t 0.9412 -inner_num 2"
-+ARGS2="-nodisp -route_only -route_chan_width 15 -pres_fac_mult 2 -acc_fac 1 -first_iter_pres_fac 4 -initial_pres_fac 8"
++ARGS1="-nodisp -place_only -init_t 5 -exit_t 0x1.47ae147ae147bp-8 -alpha_t \
++        0x1.e1e4f765fd8aep-1 -inner_num 2"
++ARGS2="-nodisp -route_only -route_chan_width 15 -pres_fac_mult 2 -acc_fac 1 \
++       -first_iter_pres_fac 4 -initial_pres_fac 8"
 +
 +
 +${PREFIX} $1  ${DASHDASH} net.in arch.in place.out dum.out ${ARGS1} \
@@ -15442,10 +15830,10 @@ index 0000000000000000000000000000000000000000..e253f6e7b688add6f04c75360da973cb
 +echo "OK"
 diff --git a/native_client/tests/spec2k/175.vpr/run.test.sh b/native_client/tests/spec2k/175.vpr/run.test.sh
 new file mode 100755
-index 0000000000000000000000000000000000000000..faccc6a334a74cb96cb6388b0410f15f6088a7ca
+index 0000000000000000000000000000000000000000..2942320d9e96d1d05a041fe50804127bf7c36c99
 --- /dev/null
 +++ b/native_client/tests/spec2k/175.vpr/run.test.sh
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,47 @@
 +#!/bin/bash
 +# Copyright (c) 2011 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -15469,8 +15857,10 @@ index 0000000000000000000000000000000000000000..faccc6a334a74cb96cb6388b0410f15f
 +  touch costs.out place.out route.out
 +fi
 +
-+ARGS1="-nodisp -place_only -init_t 5 -exit_t 0.005 -alpha_t 0.9412 -inner_num 2"
-+ARGS2="-nodisp -route_only -route_chan_width 15 -pres_fac_mult 2 -acc_fac 1 -first_iter_pres_fac 4 -initial_pres_fac 8"
++ARGS1="-nodisp -place_only -init_t 5 -exit_t 0x1.47ae147ae147bp-8 -alpha_t \
++       0x1.e1e4f765fd8aep-1 -inner_num 2"
++ARGS2="-nodisp -route_only -route_chan_width 15 -pres_fac_mult 2 -acc_fac 1 \
++       -first_iter_pres_fac 4 -initial_pres_fac 8"
 +
 +
 +${PREFIX} $1  ${DASHDASH} net.in arch.in place.out dum.out ${ARGS1} \
@@ -15493,10 +15883,10 @@ index 0000000000000000000000000000000000000000..faccc6a334a74cb96cb6388b0410f15f
 +echo "OK"
 diff --git a/native_client/tests/spec2k/175.vpr/run.train.sh b/native_client/tests/spec2k/175.vpr/run.train.sh
 new file mode 100755
-index 0000000000000000000000000000000000000000..9714caaf4128ecc009ecadf512b0d3a65ef003d1
+index 0000000000000000000000000000000000000000..d39f7576a9a373b1222bec637ea7fa1b3b3be490
 --- /dev/null
 +++ b/native_client/tests/spec2k/175.vpr/run.train.sh
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,41 @@
 +#!/bin/bash
 +# Copyright (c) 2011 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -15515,8 +15905,10 @@ index 0000000000000000000000000000000000000000..9714caaf4128ecc009ecadf512b0d3a6
 +  touch costs.out place.out route.out
 +fi
 +
-+ARGS1="-nodisp -place_only -init_t 5 -exit_t 0.005 -alpha_t 0.9412 -inner_num 2"
-+ARGS2="-nodisp -route_only -route_chan_width 15 -pres_fac_mult 2 -acc_fac 1 -first_iter_pres_fac 4 -initial_pres_fac 8"
++ARGS1="-nodisp -place_only -init_t 5 -exit_t 0x1.47ae147ae147bp-8 -alpha_t \
++       0x1.e1e4f765fd8aep-1 -inner_num 2"
++ARGS2="-nodisp -route_only -route_chan_width 15 -pres_fac_mult 2 -acc_fac 1 \
++       -first_iter_pres_fac 4 -initial_pres_fac 8"
 +
 +
 +${PREFIX} $1  ${DASHDASH} net.in arch.in place.out dum.out ${ARGS1} \
@@ -16273,6 +16665,219 @@ index 0000000000000000000000000000000000000000..e887d9db9e9f1a987afec61d52dc0988
 +EXTRA_CLEAN= ref.* train.*
 +
 +include ../Makefile.common
+diff --git a/native_client/tests/spec2k/188.ammp/diff b/native_client/tests/spec2k/188.ammp/diff
+new file mode 100644
+index 0000000000000000000000000000000000000000..2c7fe0f451e699492d6c75377583db6b2214a766
+--- /dev/null
++++ b/native_client/tests/spec2k/188.ammp/diff
+@@ -0,0 +1,199 @@
++diff -Naurb src2/analyze.c src/analyze.c
++--- src2/analyze.c 2016-08-12 23:25:14.297791577 -0700
+++++ src/analyze.c 2016-08-12 23:33:39.069342515 -0700
++@@ -31,7 +31,7 @@
++ */
++
++ void analyze( vfs,nfs,ilow,ihigh,op )
++-int  (*vfs[])();
+++int  (*vfs[])(float*, float);
++ int nfs;
++ FILE *op;
++ int ilow,ihigh;
++diff -Naurb src2/animate.c src/animate.c
++--- src2/animate.c 2016-08-12 23:25:14.297791577 -0700
+++++ src/animate.c 2016-08-12 23:36:18.867733418 -0700
++@@ -153,7 +153,7 @@
++ * perform nstep leapfrogging dynamics with dtime
++ */
++ int verlet(forces,nforces, nstep,dtime)
++-int (*forces[])(),nforces;
+++int (*forces[])(float),nforces;
++ int nstep;
++ float dtime;
++ {
++@@ -219,7 +219,7 @@
++ *  ideally several cycles are good
++ */
++ int pac(forces,nforces, nstep,dtime)
++-int (*forces[])(),nforces;
+++int (*forces[])(float),nforces;
++ int nstep;
++ float dtime;
++ {
++@@ -317,7 +317,7 @@
++ *
++ */
++ int tpac(forces,nforces, nstep,dtime_real,T)
++-int (*forces[])(),nforces;
+++int (*forces[])(float),nforces;
++ int nstep;
++ float dtime_real,T;
++ {
++@@ -437,7 +437,7 @@
++ *  ideally several cycles are good
++ */
++ int pacpac(forces,nforces, nstep,dtime)
++-int (*forces[])(),nforces;
+++int (*forces[])(float),nforces;
++ int nstep;
++ float dtime;
++ {
++@@ -586,7 +586,7 @@
++ *  ideally several cycles are good
++ */
++ int hpac(forces,poten,nforces,nstep,dtime_real,H)
++-int (*forces[])(),(*poten[])(),nforces;
+++int (*forces[])(float),(*poten[])(float*, float),nforces;
++ int nstep;
++ float dtime_real,H;
++ {
++@@ -724,7 +724,7 @@
++ *  ideally several cycles are good
++ */
++ int ppac(forces,nforces, nstep,dtime_real,P)
++-int (*forces[])(),nforces;
+++int (*forces[])(float),nforces;
++ int nstep;
++ float dtime_real,P;
++ {
++@@ -878,7 +878,7 @@
++ *  ideally several cycles are good
++ */
++ int ptpac(forces,nforces, nstep,dtime_real,P,T)
++-int (*forces[])(),nforces;
+++int (*forces[])(float),nforces;
++ int nstep;
++ float dtime_real,P,T;
++ {
++diff -Naurb src2/eval.c src/eval.c
++--- src2/eval.c 2016-08-12 23:25:14.297791577 -0700
+++++ src/eval.c 2016-08-12 23:28:59.113153303 -0700
++@@ -264,7 +264,7 @@
++ *  current version lexes tokens and if numeric
++ *  converts them to integer and floating point versions
++ */
++-  int  (*potentials[10])(),(*forces[10])(),nused=(-1);
+++  int  (*potentials[10])(float*, float),(*forces[10])(float),nused=(-1);
++ int eval( ip,op,line )
++ FILE *ip,*op;
++ char *line;
++diff -Naurb src2/gsdg.c src/gsdg.c
++--- src2/gsdg.c 2016-08-12 23:25:14.297791577 -0700
+++++ src/gsdg.c 2016-08-12 23:35:06.370648743 -0700
++@@ -29,7 +29,7 @@
++ #include "ammp.h"
++
++ void gsdg( vfs,nfs,niter,low_serial,high_serial )
++-int (*vfs[])(),nfs;
+++int (*vfs[])(float*, float),nfs;
++ int niter;
++ int low_serial,high_serial;
++ {
++diff -Naurb src2/math.c src/math.c
++--- src2/math.c 2016-08-12 23:25:14.297791577 -0700
+++++ src/math.c 2016-08-12 23:25:27.997996449 -0700
++@@ -298,7 +298,7 @@
++        if( strcmp( &tokens[0][0], "randf" ) == 0 )
++        {
++        atype = FLOAT;
++-       fa = randf( -1 );
+++       fa = randf();
++        goto GOOD_OP;
++        }
++        if( strcmp( &tokens[0][0], "serial" ) == 0 )
++diff -Naurb src2/monitor.c src/monitor.c
++--- src2/monitor.c 2016-08-12 23:25:14.297791577 -0700
+++++ src/monitor.c 2016-08-12 23:33:09.940906673 -0700
++@@ -33,7 +33,7 @@
++ * but otherwise is self-contained. Note the hooks for Non-bonded potentials
++ */
++ void AMMPmonitor( vfs,ffs,nfs,op )
++-int  (*vfs[])(),(*ffs[])();
+++int  (*vfs[])(float*, float),(*ffs[])(float);
++ int nfs;
++ FILE *op;
++ {
++@@ -143,7 +143,7 @@
++ }
++
++ void AMMPmonitor_mute( vfs,ffs,nfs,op )
++-int  (*vfs[])(),(*ffs[])();
+++int  (*vfs[])(float*, float),(*ffs[])(float);
++ int nfs;
++ FILE *op;
++ {
++diff -Naurb src2/optimist.c src/optimist.c
++--- src2/optimist.c 2016-08-12 23:25:14.297791577 -0700
+++++ src/optimist.c 2016-08-12 23:36:54.856271851 -0700
++@@ -42,7 +42,7 @@
++ *  when to stop
++ */
++ int steep( vfs,ffs,nfs, nstep,toler )
++-int nfs,(*vfs[])(),(*ffs[])();
+++int nfs,(*vfs[])(float*, float),(*ffs[])(float);
++ int nstep;
++ float toler;
++ {
++@@ -97,7 +97,7 @@
++ *  when to stop
++ */
++ int cngdel( vfs,ffs,nfs, nstep,nreset,toler,echo )
++-int nfs,(*vfs[])(),(*ffs[])();
+++int nfs,(*vfs[])(float*, float),(*ffs[])(float);
++ int nstep,nreset;
++ float toler;
++ {
++@@ -164,7 +164,7 @@
++ *  recursive line minimizer
++ */
++ float linmin(ffs,nfs ,damp )
++-int (*ffs[])();
+++int (*ffs[])(float*, float);
++ int nfs;
++ float damp;
++
++diff -Naurb src2/tset.c src/tset.c
++--- src2/tset.c 2016-08-12 23:25:14.297791577 -0700
+++++ src/tset.c 2016-08-12 23:35:38.003122023 -0700
++@@ -107,11 +107,11 @@
++       return 0;
++ }/* end of tset */
++ #ifdef NEWCCALL
++-int tmin( FILE *op, int echo ,int i1,int i2,int i3,int i4,int nstep, int (*vfs[])(),int nfs )
+++int tmin( FILE *op, int echo ,int i1,int i2,int i3,int i4,int nstep, int (*vfs[])(float*, float),int nfs )
++ #else
++ int tmin(op,echo, i1,i2,i3,i4,nstep, vfs,nfs )
++ int i1,i2,i3,i4,nstep;
++-int (*vfs[])();
+++int (*vfs[])(float*, float);
++ FILE *op;
++ int echo,nfs;
++ #endif
++@@ -352,14 +352,14 @@
++         return 1;
++ }/* end of set_torsion */
++ #ifdef NEWCCALL
++-int tmap( FILE *op, int echo, int (*vfs[])(),int nfs,int i1,int i2,int i3,int i4,
+++int tmap( FILE *op, int echo, int (*vfs[])(float*, float),int nfs,int i1,int i2,int i3,int i4,
++ int j1 , int j2 ,int j3, int j4 , int nistep, int njstep)
++ #else
++ int tmap(op,echo,vfs,nfs,i1,i2,i3,i4,j1,j2,j3,j4,nistep,njstep )
++ int i1,i2,i3,i4;
++ int j1,j2,j3,j4;
++ int nistep,njstep;
++-int (*vfs[])(),nfs;
+++int (*vfs[])(float*, float),nfs;
++ FILE *op;
++ int echo;
++ #endif
+diff --git a/native_client/tests/spec2k/188.ammp/diff.README b/native_client/tests/spec2k/188.ammp/diff.README
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a78588b2d805cdb7191d80996dde8f0f6e0a6d6
+--- /dev/null
++++ b/native_client/tests/spec2k/188.ammp/diff.README
+@@ -0,0 +1,2 @@
++Removed erroneous argument from call to randf(), which takes no arguments
++Specified explicit type on function pointer arrays
 diff --git a/native_client/tests/spec2k/188.ammp/run.ref.sh b/native_client/tests/spec2k/188.ammp/run.ref.sh
 new file mode 100755
 index 0000000000000000000000000000000000000000..223b4519a950036f05ee2be4e94d148ff6d0df4c
@@ -16366,6 +16971,94 @@ index 0000000000000000000000000000000000000000..4832f2a55ec689b0c641241dc48d8cca
 +
 +include ../Makefile.common
 +
+diff --git a/native_client/tests/spec2k/197.parser/diff b/native_client/tests/spec2k/197.parser/diff
+new file mode 100644
+index 0000000000000000000000000000000000000000..4ae0e02bf5e3c7b9026513f127e9b3ef7a4b9ff0
+--- /dev/null
++++ b/native_client/tests/spec2k/197.parser/diff
+@@ -0,0 +1,74 @@
++diff -Naurb src2/main.c src/main.c
++--- src2/main.c 2016-08-15 20:29:35.487496988 -0700
+++++ src/main.c 2016-08-15 20:27:50.297937988 -0700
++@@ -1034,7 +1034,8 @@
++     }
++ }
++
++-int compare_parse(Linkage_info * p1, Linkage_info * p2) {
+++int compare_parse(const void* a, const void* b) {
+++    const Linkage_info *p1 = (Linkage_info*) a, *p2 = (Linkage_info*) b;
++ /* for sorting the linkages */
++     if (p1->N_violations != p2->N_violations) {
++       return (p1->N_violations - p2->N_violations);
++@@ -1420,8 +1421,7 @@
++            N_canonical_linkages ++;
++        }
++        qsort((void *)linkage, N_canonical_linkages,
++-                      sizeof(Linkage_info),
++-                      (int (*)(const void *, const void *))compare_parse);
+++                      sizeof(Linkage_info), compare_parse);
++    }
++
++    assert(! ((N_canonical_linkages == 0) && (N_linkages > 0) && (N_linkages < linkage_count_limit)),
++@@ -1622,8 +1622,7 @@
++            N_canonical_linkages ++;
++        }
++        qsort((void *)linkage, N_canonical_linkages,
++-                      sizeof(Linkage_info),
++-                      (int (*)(const void *, const void *))compare_parse);
+++                      sizeof(Linkage_info), compare_parse);
++    }
++
++    print_time("Postprocessed some linkages");
++diff -Naurb src2/post-process.c src/post-process.c
++--- src2/post-process.c 2016-08-15 20:29:35.483496929 -0700
+++++ src/post-process.c 2016-08-15 20:27:59.902080352 -0700
++@@ -379,7 +379,8 @@
++     }
++ }
++
++-int domain_compare(Domain * d1, Domain * d2) {
+++int domain_compare(const void *a, const void *b) {
+++    const Domain *d1 = (Domain*) a, *d2 = (Domain*) b;
++ /* for sorting the domains by size */
++     return (d1->size - d2->size) ;
++ }
++@@ -434,8 +435,7 @@
++            N_domains++;
++        }
++    }
++-    qsort((void *)domain_array, N_domains, sizeof(Domain),
++-        (int (*)(const void *, const void *))domain_compare);
+++    qsort((void *)domain_array, N_domains, sizeof(Domain), domain_compare);
++    /* sort the domains by size */
++
++    for (d=0; d<N_domains; d++) {
++diff -Naurb src2/strncasecmp.c src/strncasecmp.c
++--- src2/strncasecmp.c 2016-08-15 20:29:35.487496988 -0700
+++++ src/strncasecmp.c 2016-08-15 15:29:09.408238838 -0700
++@@ -15,6 +15,7 @@
++ }
++ #endif
++
+++#ifndef __EMSCRIPTEN__
++ int strncasecmp(const char *s1, const char *s2, size_t n)
++ {
++
++@@ -35,5 +36,6 @@
++       if (*j) return  1;
++       return 0;
++ }
+++#endif
++
++
+diff --git a/native_client/tests/spec2k/197.parser/diff.README b/native_client/tests/spec2k/197.parser/diff.README
+new file mode 100644
+index 0000000000000000000000000000000000000000..de2deb9412f3d3eb5743956a51b1e587fd50e2bf
+--- /dev/null
++++ b/native_client/tests/spec2k/197.parser/diff.README
+@@ -0,0 +1,2 @@
++Add conditional ifdef to check for "strings.h" from emscripten to prevent multiple defines of "strncasecmp"
++Change function pointer types for comparison function to match qsort() usage
 diff --git a/native_client/tests/spec2k/197.parser/run.ref.sh b/native_client/tests/spec2k/197.parser/run.ref.sh
 new file mode 100755
 index 0000000000000000000000000000000000000000..bce6f18f2b3ff40b7fe815ba85f08f41438e2c74
@@ -17531,6 +18224,31 @@ index 0000000000000000000000000000000000000000..7197c68e602681a640adf70cdb55e85f
 +
 +
 +
+diff --git a/native_client/tests/spec2k/300.twolf/diff b/native_client/tests/spec2k/300.twolf/diff
+new file mode 100644
+index 0000000000000000000000000000000000000000..f5efffbeb8de2c7afd550c08c8a2dabe5285ba25
+--- /dev/null
++++ b/native_client/tests/spec2k/300.twolf/diff
+@@ -0,0 +1,12 @@
++diff -Naurb src2/uloop2.c src/uloop2.c
++--- src2/uloop2.c 2016-08-12 18:57:33.510089924 -0700
+++++ src/uloop2.c 2016-08-12 18:57:51.278353834 -0700
++@@ -62,7 +62,7 @@
++
++ fds = 0 ;
++ if( estimate_feeds ) {
++-    fds = controlf( 1 ) ;
+++    fds = controlf( ) ;
++ }
++
++ while( attempts < attmax ) {
+diff --git a/native_client/tests/spec2k/300.twolf/diff.README b/native_client/tests/spec2k/300.twolf/diff.README
+new file mode 100644
+index 0000000000000000000000000000000000000000..3af7e2c6299907d25e1dfaae360bbed2ae27287e
+--- /dev/null
++++ b/native_client/tests/spec2k/300.twolf/diff.README
+@@ -0,0 +1 @@
++Removed erroneous argument from call to controlf(), which takes no arguments
 diff --git a/native_client/tests/spec2k/300.twolf/run.ref.sh b/native_client/tests/spec2k/300.twolf/run.ref.sh
 new file mode 100755
 index 0000000000000000000000000000000000000000..300ea89fbc832268d7e8267bad27f748e695d3f6
@@ -17657,10 +18375,10 @@ index 0000000000000000000000000000000000000000..1db4963e49556c8ed7c0ca3ee3f8347c
 +
 diff --git a/native_client/tests/spec2k/Makefile.common b/native_client/tests/spec2k/Makefile.common
 new file mode 100644
-index 0000000000000000000000000000000000000000..3c0e96874e5c8da0225704dee4cd18691b42d5e9
+index 0000000000000000000000000000000000000000..79356176da87688207903da9025033baea528779
 --- /dev/null
 +++ b/native_client/tests/spec2k/Makefile.common
-@@ -0,0 +1,514 @@
+@@ -0,0 +1,539 @@
 +# Copyright (c) 2012 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
@@ -17817,6 +18535,31 @@ index 0000000000000000000000000000000000000000..3c0e96874e5c8da0225704dee4cd1869
 +		$(EMCCFLAGS) $(EMCCFLAGS_EXTRA_REF) $^ \
 +		-static -lstdc++ -lm  -o $@.ref.html
 +	../fixup_asmjs.py $@.ref.html
++	touch $@
++
++# WebAssembly build
++# Sadly, we have to build two versions -- one for "ref" and one for "train" --
++# due to the way Emscripten packages data files.
++# It will actually create .ref.js and .train.js files.
++# Environment variable $WASM_INSTALL_DIR must point to the wasm install
++# directory in the waterfall, which is WATERFALL_DIR/src/work/wasm-install where
++# WATERFALL_DIR is the top waterfall directory. Refer to run_wasm.sh for
++# details.
++$(IT).js: $(SRC) $(CPPSRC)
++	$(WASM_INSTALL_DIR)/bin/emscripten/emcc $^ -o $(IT).train.js \
++		-s BINARYEN=1 -s 'BINARYEN_METHOD="native-wasm"' \
++		--em-config $(WASM_INSTALL_DIR)/emscripten_config_vanilla \
++		$(CFLAGS) -s TOTAL_MEMORY=268435456 \
++		-Wno-implicit-function-declaration -O2 \
++		$(shell python ../prepare_input.py --gen-emcc-embed --config \
++			$(SPEC_COMPONENT) train)
++	$(WASM_INSTALL_DIR)/bin/emscripten/emcc $^ -o $(IT).ref.js \
++		-s BINARYEN=1 -s 'BINARYEN_METHOD="native-wasm"' \
++		--em-config $(WASM_INSTALL_DIR)/emscripten_config_vanilla \
++		$(CFLAGS) -s TOTAL_MEMORY=268435456 \
++		-Wno-implicit-function-declaration -O2 \
++		$(shell python ../prepare_input.py --gen-emcc-embed --config \
++			$(SPEC_COMPONENT) ref)
 +	touch $@
 +
 +######################################################################
@@ -18455,19 +19198,20 @@ index 0000000000000000000000000000000000000000..916797939e594b69e462132d69ba489d
 +  sys.exit(FixupAsmjs(sys.argv[1]))
 diff --git a/native_client/tests/spec2k/prepare_input.py b/native_client/tests/spec2k/prepare_input.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..2b0d4076fc75548bf881e7755e916cd289ae43ea
+index 0000000000000000000000000000000000000000..3681cce8d958c9e37b5a6365d89e8d1ad9b15de4
 --- /dev/null
 +++ b/native_client/tests/spec2k/prepare_input.py
-@@ -0,0 +1,275 @@
+@@ -0,0 +1,300 @@
 +#!/usr/bin/python
 +# Copyright 2013 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
 +
-+import os
 +import glob
-+from optparse import OptionParser
++import os
++import sys
 +from collections import namedtuple
++from optparse import OptionParser
 +
 +Config = namedtuple('Config', 'linkfiles linkfileglobs ' +
 +                              'rmfiles rmfileglobs no_rmfileglobs')
@@ -18688,6 +19432,10 @@ index 0000000000000000000000000000000000000000..2b0d4076fc75548bf881e7755e916cd2
 +                    help='Use predefined config for component SpecDir')
 +  parser.add_option('-v', '--verbose', action='store_true', dest='verbose',
 +                    default=False, help='Verbose file messages')
++  parser.add_option('--gen-emcc-embed', action='store_true',
++                    dest='gen_emcc_embed', default=False,
++                    help='Generate --embed-file options for input files for ' +
++                    'Wasm test')
 +  options, args = parser.parse_args()
 +  if args:
 +    parser.print_help()
@@ -18713,6 +19461,27 @@ index 0000000000000000000000000000000000000000..2b0d4076fc75548bf881e7755e916cd2
 +    rmfiles.extend(glob.glob(pattern))
 +  for pattern in options.no_rmfileglobs:
 +    no_rmfiles.extend(glob.glob(pattern))
++
++  # Wasm needs to embed input files into a js file
++  if options.gen_emcc_embed:
++    # Some benchmarks directly access input files in data/[config]/input
++    # directory, while others create symlinks into the current directory.
++    # When symlinks are created (=linkfileglobs is NOT empty), we embed those
++    # files assuming they are in the current directory.
++    # When symlinks are NOT created, we assume files in data/ will be accessed
++    # directly, and embed those files in the subdirectories.
++    input_dir = 'data/' + options.config[1] + '/input/*'
++    opts = ''
++    linkfiles_in_input_dir = []
++    if input_dir not in configs[options.config].linkfileglobs:
++      linkfiles_in_input_dir.extend(glob.glob(input_dir))
++    for file in linkfiles_in_input_dir:
++      opts += '--embed-file %s ' % file
++    for file in linkfiles:
++      opts += '--embed-file %s@%s ' % (file, os.path.basename(file))
++    sys.stdout.write(opts)
++    return 0
++
 +  for file in set(rmfiles) - set(no_rmfiles):
 +    try:
 +      if options.verbose:
@@ -18732,14 +19501,13 @@ index 0000000000000000000000000000000000000000..2b0d4076fc75548bf881e7755e916cd2
 +  return 0
 +
 +if __name__ == '__main__':
-+  import sys
 +  sys.exit(PrepareInput())
 diff --git a/native_client/tests/spec2k/run_all.sh b/native_client/tests/spec2k/run_all.sh
 new file mode 100755
-index 0000000000000000000000000000000000000000..3fabad5074baac45e6db74ca2d39b0eb4566856a
+index 0000000000000000000000000000000000000000..ad54a870524f6da836e247d5f04586677d1a7e09
 --- /dev/null
 +++ b/native_client/tests/spec2k/run_all.sh
-@@ -0,0 +1,1068 @@
+@@ -0,0 +1,1081 @@
 +#!/bin/bash
 +
 +# Copyright (c) 2012 The Native Client Authors. All rights reserved.
@@ -19351,7 +20119,20 @@ index 0000000000000000000000000000000000000000..3fabad5074baac45e6db74ca2d39b0eb
 +  SUFFIX=pnacl_translator_fast_1thread.opt.hw.sz.arm
 +}
 +
-+
++#@
++#@ SetupWasm
++#@   use emcc with wasm backend.
++SetupWasm() {
++  if [ -z $WASM_INSTALL_DIR ]; then
++    echo 'error: WASM_INSTALL_DIR is not set'
++    exit 1
++  fi
++  PREFIX=../run_wasm.sh
++  SUFFIX=js
++  # When running in d8, emcc does not support persistent output files.
++  # So we don't verify the results.
++  VERIFY=no
++}
 +
 +ConfigInfo() {
 +  SubBanner "Config Info"
@@ -19741,7 +20522,7 @@ index 0000000000000000000000000000000000000000..3fabad5074baac45e6db74ca2d39b0eb
 +    # patch if necessary
 +    if [[ -e $i/diff ]] ; then
 +      echo "PATCH"
-+      patch -d $i --verbose -p0 < $i/diff
++      patch -l -d $i --verbose -p0 < $i/diff
 +    fi
 +
 +    echo "COMPLETE"
@@ -19894,6 +20675,77 @@ index 0000000000000000000000000000000000000000..68881c4ccdc4fac705139f34a65d21a3
 +$FIREFOX "$URL"
 +
 +kill $PID
+diff --git a/native_client/tests/spec2k/run_wasm.sh b/native_client/tests/spec2k/run_wasm.sh
+new file mode 100755
+index 0000000000000000000000000000000000000000..079dbde3e8e0bca6d09f7d4c363dfb0589250034
+--- /dev/null
++++ b/native_client/tests/spec2k/run_wasm.sh
+@@ -0,0 +1,65 @@
++#!/bin/bash
++# Copyright 2016 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# This script assumes the waterfall framework
++# (https://github.com/WebAssembly/waterfall) has been downloaded and run, thus
++# it is required that all tools necessary for wasm be already installed in the
++# system and their relative paths to the waterfall directory follow the
++# directory structure of the waterfall framework. Or you can download a prebuilt
++# framework for Linux directly from the buildbot at https://wasm-stat.us/.
++#
++# Environment variable $WASM_INSTALL_DIR must point to the wasm install
++# directory in the waterfall, which is WATERFALL_DIR/src/work/wasm-install where
++# WATERFALL_DIR is the top waterfall directory.
++
++# Some limitations of this framework:
++#
++# Spec2k uses a lot of file I/O (stdin/stdout, reading files, writing files)
++# which doesn't really work in JavaScript. Emscripten deals with this by
++# providing the --embed-file and --preload-file options to package input files
++# into a virtual in-memory file system. --embed-file allows input files, stdin,
++# and stdout to work in the standalone js shell, except that initialization of
++# the file system is extremely slow and ruins any attempt to get reasonable
++# timings. --preload-file works reasonably fast, but it only works when running
++# in a browser and does not work with d8 shell. d8 shell supports read()
++# function which can read a file, so this might be able to be fixed for d8 shell
++# if Emscripten hooks up appropriate d8 functions. But it is not supported at
++# the time of this writing and --embed-file is the only option.
++#
++# Currently Wasm does not build and run correctly for many of the SPEC
++# benchmarks, which needs further investigation. In addition, 254.gap and
++# 176.gcc do not (yet) work because Emscripten does not support setjmp. Also,
++# currently wasm build fails if you override some of libc functions, because
++# Emscripten does not use archives and has all its libc functions precompiled in
++# ~/.emscripten_cache/wasm/libc.bc. 197.parser fails due to this reason
++# (strncasecmp is duplicated).
++#
++# The other file I/O related problem is that it is not possible for the harness
++# to inspect output files (which are only represented in-memory), so validation
++# is only possible by looking at stdout. To create persistent data out of a
++# session, emscripten provides two file system: NODEFS and IDBFS. However,
++# NODEFS is only for use when running inside node.js, and IDBFS works only when
++# running inside a browser.
++#
++# For the "train" versus "ref" runs, the run scripts generally copy or symlink
++# files from the appropriate input directory into the current directory before
++# running the binary. This approach doesn't work for Emscripten, where the files
++# need to be prepackaged at build time. The prepackaging is done by
++# concatenating all the files into one big file, and embedding offsets and
++# lengths into the JavaScript code. This means we have to build separate
++# versions for "train" and "ref". To avoid duplication, the input file
++# preparation is refactored into a new prepare_input.sh script in each Spec2k
++# component directory.
++
++if [ -z $WASM_INSTALL_DIR ]; then
++  echo 'error: WASM_INSTALL_DIR is not set'
++  exit 1
++fi
++if [ -z $SCRIPTNAME ]; then
++  echo 'error: SCRIPTNAME is not set. Try running using run_all.sh.'
++  exit 1
++fi
++REFTRAIN=`echo $SCRIPTNAME | sed -e 's/.*run\.//' -e 's/\.sh$//'`
++$WASM_INSTALL_DIR/bin/d8 --expose-wasm $(basename $1 .js).$REFTRAIN.js -- ${@:2}
 diff --git a/native_client/tests/spec2k/specdiff.sh b/native_client/tests/spec2k/specdiff.sh
 new file mode 100755
 index 0000000000000000000000000000000000000000..761d20b4c2dc05116646712116e9165721fbedd7
@@ -32324,12 +33176,12 @@ index 0000000000000000000000000000000000000000..319bed45def26b0396003955cf53c564
 +               bswap (builtin): 0x67452301
 +                bswapll (llvm): 0xefcdab8967452301
 +             bswapll (builtin): 0xefcdab8967452301
-diff --git a/native_client/tests/toolchain/llvm_math_intrinsics.c b/native_client/tests/toolchain/llvm_math_intrinsics.c
+diff --git a/native_client/tests/toolchain/llvm_math_intrinsics.cc b/native_client/tests/toolchain/llvm_math_intrinsics.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..0c79ec3e3b55d3f1a6274b03d2c9a70b5c1ed5ea
+index 0000000000000000000000000000000000000000..2aa3e7d228d6fd68baf6209b0a761b26afd8d224
 --- /dev/null
-+++ b/native_client/tests/toolchain/llvm_math_intrinsics.c
-@@ -0,0 +1,277 @@
++++ b/native_client/tests/toolchain/llvm_math_intrinsics.cc
+@@ -0,0 +1,278 @@
 +/*
 + * Copyright (c) 2011 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -32419,8 +33271,9 @@ index 0000000000000000000000000000000000000000..0c79ec3e3b55d3f1a6274b03d2c9a70b
 + * if it's okay to print the sign of the nan for the golden output
 + * (consistent / no known platform difference), and false otherwise.
 + */
-+static int sprint_double(char *buf, const char *format_with_prec,
-+                          double x, int nan_sign) {
++template <typename T>
++static int sprint_fp(char *buf, const char *format_with_prec,
++                     T x, int nan_sign) {
 +  if (isnan(x)) {
 +    if (nan_sign && signbit(x) != 0)
 +      return sprintf(buf, "-nan");
@@ -32447,7 +33300,7 @@ index 0000000000000000000000000000000000000000..0c79ec3e3b55d3f1a6274b03d2c9a70b
 +      int r = sprintf(buf, ", ");
 +      buf += r;
 +    }
-+    int r = sprint_double(buf, format_with_prec, vec[i], nan_sign);
++    int r = sprint_fp(buf, format_with_prec, vec[i], nan_sign);
 +    buf += r;
 +  }
 +}
@@ -32458,14 +33311,14 @@ index 0000000000000000000000000000000000000000..0c79ec3e3b55d3f1a6274b03d2c9a70b
 +#define print_op1_libm(prec, op, x, ns)                      \
 +  do {                                                       \
 +    __typeof(x) res = op(x);                                 \
-+    sprint_double(sprint_buf, "%." #prec "f", res, ns);      \
++    sprint_fp(sprint_buf, "%." #prec "f", res, ns);          \
 +    printf("%s (math.h): %s\n", #op, sprint_buf);            \
 +  } while (0)
 +
 +#define print_op1_builtin(prec, op, x, ns)                   \
 +  do {                                                       \
 +    __typeof(x) res = __builtin_ ## op(x);                   \
-+    sprint_double(sprint_buf, "%." #prec "f", res, ns);      \
++    sprint_fp(sprint_buf, "%." #prec "f", res, ns);          \
 +    printf("%s (builtin): %s\n", #op, sprint_buf);           \
 +  } while (0)
 +
@@ -32476,21 +33329,21 @@ index 0000000000000000000000000000000000000000..0c79ec3e3b55d3f1a6274b03d2c9a70b
 +#define print_op1_llvm(prec, op, x, ns)                      \
 +  do {                                                       \
 +    __typeof(x) res = llvm_intrinsic_ ## op(x);              \
-+    sprint_double(sprint_buf, "%." #prec "f", res, ns);      \
++    sprint_fp(sprint_buf, "%." #prec "f", res, ns);          \
 +    printf("%s (llvm): %s\n", #op, sprint_buf);              \
 +  } while (0)
 +
 +#define print_op2(prec, op, x, y, ns)                        \
 +  do {                                                       \
 +    __typeof(x) res = op(x, y);                              \
-+    sprint_double(sprint_buf, "%f", y, ns);                  \
++    sprint_fp(sprint_buf, "%f", y, ns);                      \
 +    printf("%s(%f, %s) (math.h): ", #op, x, sprint_buf);     \
-+    sprint_double(sprint_buf, "%." #prec "f", res, ns);      \
++    sprint_fp(sprint_buf, "%." #prec "f", res, ns);          \
 +    printf("%s\n", sprint_buf);                              \
 +    res = __builtin_ ## op(x, y);                            \
-+    sprint_double(sprint_buf, "%f", y, ns);                  \
++    sprint_fp(sprint_buf, "%f", y, ns);                      \
 +    printf("%s(%f, %s) (builtin): ", #op, x, sprint_buf);    \
-+    sprint_double(sprint_buf, "%." #prec "f", res, ns);      \
++    sprint_fp(sprint_buf, "%." #prec "f", res, ns);          \
 +    printf("%s\n", sprint_buf);                              \
 +  } while (0)
 +
@@ -32512,7 +33365,7 @@ index 0000000000000000000000000000000000000000..0c79ec3e3b55d3f1a6274b03d2c9a70b
 +  int nan_sign = 1;
 +
 +  for (int i = 0; i < ARRAY_SIZE_UNSAFE(f32); ++i) {
-+    sprint_double(sprint_buf, "%.6f", f32[i], nan_sign);
++    sprint_fp(sprint_buf, "%.6f", f32[i], nan_sign);
 +    printf("\nf32 value is: %s\n", sprint_buf);
 +    /*
 +     * We may want to fix this to have a consistent nan sign bit.
@@ -32558,7 +33411,7 @@ index 0000000000000000000000000000000000000000..0c79ec3e3b55d3f1a6274b03d2c9a70b
 +  }
 +
 +  for (int i = 0; i < ARRAY_SIZE_UNSAFE(f64); ++i) {
-+    sprint_double(sprint_buf, "%.6f", f64[i], nan_sign);
++    sprint_fp(sprint_buf, "%.6f", f64[i], nan_sign);
 +    printf("\nf64 value is: %s\n", sprint_buf);
 +    print_op1_libm(6, sqrt, f64[i], no_nan_sign);
 +    print_op1_builtin(6, sqrt, f64[i], no_nan_sign);
@@ -34006,7 +34859,7 @@ index 0000000000000000000000000000000000000000..0976415c31e5d4ff0970de5095bf6a4d
 +}
 diff --git a/native_client/tests/toolchain/nacl.scons b/native_client/tests/toolchain/nacl.scons
 new file mode 100644
-index 0000000000000000000000000000000000000000..90d853eb936e8ef80e5ea8c7a64df5eb4a89956d
+index 0000000000000000000000000000000000000000..a41d442df0fc9ccdb4f9ddf3c14971dcbd4eec5b
 --- /dev/null
 +++ b/native_client/tests/toolchain/nacl.scons
 @@ -0,0 +1,585 @@
@@ -34117,14 +34970,14 @@ index 0000000000000000000000000000000000000000..90d853eb936e8ef80e5ea8c7a64df5eb
 +  # inline case is currently broken:
 +  # https://code.google.com/p/nativeclient/issues/detail?id=4170
 +                     is_broken=should_inline)
-+  AddIntrinsicTest(env, 'llvm_math_intrinsics.c', '0',
++  AddIntrinsicTest(env, 'llvm_math_intrinsics.cc', '0',
 +                   golden_file=env.File('llvm_math_intrinsics.stdout'))
 +  # Also test the math functions with -ffast-math, so we are a tiny bit more
 +  # confident that sin() or __builtin_sin() doesn't get turned into
 +  # something like llvm.sin.f64.
 +  fastmath_env = env.Clone()
 +  fastmath_env.Append(CCFLAGS=['-ffast-math'])
-+  AddIntrinsicTest(fastmath_env, 'llvm_math_intrinsics.c', '0',
++  AddIntrinsicTest(fastmath_env, 'llvm_math_intrinsics.cc', '0',
 +                   golden_file=env.File('llvm_math_intrinsics.stdout'),
 +                   test_suffix='_fast_math')
 +
@@ -41373,10 +42226,10 @@ index 0000000000000000000000000000000000000000..5130929107d7a5ad41a61c9482de4063
 +  unittest.main()
 diff --git a/native_client/toolchain_build/pnacl_commands.py b/native_client/toolchain_build/pnacl_commands.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..d890629efc28a2845e18339589e0e0a30e1d8513
+index 0000000000000000000000000000000000000000..4c072623a3d1c7416506d0da72658d07dd450e5c
 --- /dev/null
 +++ b/native_client/toolchain_build/pnacl_commands.py
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,163 @@
 +#!/usr/bin/python
 +# Copyright (c) 2013 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -41391,9 +42244,11 @@ index 0000000000000000000000000000000000000000..d890629efc28a2845e18339589e0e0a3
 +import stat
 +import subprocess
 +import sys
++import tarfile
 +
 +sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 +import pynacl.file_tools
++import pynacl.platform
 +import pynacl.repo_tools
 +
 +
@@ -41410,6 +42265,46 @@ index 0000000000000000000000000000000000000000..d890629efc28a2845e18339589e0e0a3
 +                    ('artools', 'driver_env', 'driver_log', 'driver_temps',
 +                     'driver_tools', 'elftools', 'filetype', 'ldtools',
 +                     'loader', 'nativeld', 'pathtools', 'shelltools')]
++
++# The archive itself contains the 'cmake343' directory.
++PREBUILT_CMAKE_DIR = os.path.join(NACL_DIR, 'cmake343')
++PREBUILT_CMAKE_ARCHIVE = 'cmake343_%s.tgz'
++PREBUILT_CMAKE_URL = ('https://commondatastorage.googleapis.com/' +
++                      'chromium-browser-clang/tools/')
++PREBUILT_CMAKE_BIN = os.path.join(PREBUILT_CMAKE_DIR, 'bin', 'cmake')
++
++
++def PrebuiltCmake():
++  if (pynacl.platform.IsLinux() and not pynacl.platform.IsLinux64() or
++      pynacl.platform.IsWindows()):
++    # Prebuilt CMake does not work on linux32, and there is none for Windows.
++    return 'cmake'
++  return PREBUILT_CMAKE_BIN
++
++
++def InstallPrebuiltCMake():
++  if os.path.isdir(PREBUILT_CMAKE_DIR):
++    print 'Prebuilt CMake directory already exists'
++    if not os.path.isfile(PREBUILT_CMAKE_BIN):
++      raise Exception('Prebuilt CMake dir %s exists but does not contain CMake'%
++                      PREBUILT_CMAKE_DIR)
++  else:
++    assert not pynacl.platform.IsWindows()
++    platform = 'Darwin' if pynacl.platform.IsMac() else 'Linux'
++    filename = PREBUILT_CMAKE_ARCHIVE % platform
++    url = PREBUILT_CMAKE_URL + filename
++    os.mkdir(PREBUILT_CMAKE_DIR)
++    download_target = os.path.join(PREBUILT_CMAKE_DIR, filename)
++    pynacl.http_download.HttpDownload(url, download_target)
++
++    print 'Downloaded %s' % url
++    # The tar file itself includes the 'cmake343' directory, so set the
++    # extract path to WORK_DIR to get the right path
++    with open(download_target) as f:
++      tarfile.open(mode='r:gz', fileobj=f).extractall(path=NACL_DIR)
++    assert os.path.isfile(PREBUILT_CMAKE_BIN)
++    print 'Extracted CMake to %s' % PREBUILT_CMAKE_DIR
++
 +
 +def InstallDriverScripts(logger, subst, srcdir, dstdir, host_windows=False,
 +                         host_64bit=False, extra_config=[]):
@@ -41570,7 +42465,7 @@ index 0000000000000000000000000000000000000000..e84fdacc125e03382b8e618ab9655724
 +  return translators
 diff --git a/native_client/toolchain_build/pnacl_targetlibs.py b/native_client/toolchain_build/pnacl_targetlibs.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..3bf8339e87c3250e27f5f1660339d70beaeadbc2
+index 0000000000000000000000000000000000000000..d3acad8275e72b3b8ba2d6087c805302141f74f2
 --- /dev/null
 +++ b/native_client/toolchain_build/pnacl_targetlibs.py
 @@ -0,0 +1,961 @@
@@ -42072,7 +42967,7 @@ index 0000000000000000000000000000000000000000..3bf8339e87c3250e27f5f1660339d70b
 +                           T('libs_support')],
 +          'commands' :
 +              [command.SkipForIncrementalCommand(
-+                  ['cmake', '-G', 'Unix Makefiles',
++                  [pnacl_commands.PrebuiltCmake(), '-G', 'Unix Makefiles',
 +                   '-DCMAKE_C_COMPILER_WORKS=1',
 +                   '-DCMAKE_CXX_COMPILER_WORKS=1',
 +                   '-DCMAKE_INSTALL_PREFIX=',
@@ -43924,10 +44819,10 @@ index 0000000000000000000000000000000000000000..f7c4a08b24eb4d7d728dcd6df27af44b
 +  sys.exit(tb.Main())
 diff --git a/native_client/toolchain_build/toolchain_build_pnacl.py b/native_client/toolchain_build/toolchain_build_pnacl.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..83358d14bde90a43877b2b8ad15537480fa8172e
+index 0000000000000000000000000000000000000000..a11aa4097e948af0688f3bb48f405a73f8903063
 --- /dev/null
 +++ b/native_client/toolchain_build/toolchain_build_pnacl.py
-@@ -0,0 +1,1450 @@
+@@ -0,0 +1,1453 @@
 +#!/usr/bin/python
 +# Copyright (c) 2013 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -43954,6 +44849,7 @@ index 0000000000000000000000000000000000000000..83358d14bde90a43877b2b8ad1553748
 +sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 +import pynacl.file_tools
 +import pynacl.gsd_storage
++import pynacl.http_download
 +import pynacl.platform
 +import pynacl.repo_tools
 +
@@ -44627,7 +45523,7 @@ index 0000000000000000000000000000000000000000..83358d14bde90a43877b2b8ad1553748
 +            'inputs': libcxx_inputs,
 +            'commands': [
 +                command.SkipForIncrementalCommand([
-+                    'cmake', '-G', 'Unix Makefiles'] +
++                     pnacl_commands.PrebuiltCmake(), '-G', 'Unix Makefiles'] +
 +                     libcxx_host_arch_flags +
 +                     ['-DLIBCXX_CXX_ABI=libcxxabi',
 +                      '-DLIBCXX_LIBCXXABI_INCLUDE_PATHS=' + command.path.join(
@@ -44805,7 +45701,7 @@ index 0000000000000000000000000000000000000000..83358d14bde90a43877b2b8ad1553748
 +          'type': 'build',
 +          'commands': [
 +              command.SkipForIncrementalCommand([
-+                  'cmake', '-G', 'Ninja'] +
++                  pnacl_commands.PrebuiltCmake(), '-G', 'Ninja'] +
 +                  llvm_host_arch_flags + asan_flags +
 +                  [
 +                  '-DBUILD_SHARED_LIBS=ON',
@@ -45312,6 +46208,8 @@ index 0000000000000000000000000000000000000000..83358d14bde90a43877b2b8ad1553748
 +  upload_packages = GetUploadPackageTargets()
 +  if pynacl.platform.IsWindows():
 +    InstallMinGWHostCompiler()
++  else:
++    pnacl_commands.InstallPrebuiltCMake()
 +
 +  packages.update(HostToolsSources(GetGitSyncCmdsCallback(rev)))
 +  if args.testsuite_sync:
@@ -46798,7 +47696,7 @@ index 0000000000000000000000000000000000000000..f237cd70fb4707bcca3a47f9fa1fb505
 \ No newline at end of file
 diff --git a/native_client/toolchain_revisions/pnacl_newlib.json b/native_client/toolchain_revisions/pnacl_newlib.json
 new file mode 100644
-index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530574c83c7
+index 0000000000000000000000000000000000000000..86f3a8682142bcf9f61621596feeaf688075321d
 --- /dev/null
 +++ b/native_client/toolchain_revisions/pnacl_newlib.json
 @@ -0,0 +1,1222 @@
@@ -46809,19 +47707,19 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "0ccb9069cb36c05e9c11bd6a9585d310131840c5",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_64_linux_3190740bb8e6daee6c29dfbc6ab43f0cc8ddd9eb.log",
++          "hash": "02ad9f3149c872edd4c329b5a69c67e844891497",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_64_linux_8ccf4b8a74c844a041d2ad5d15e3999157eeffaf.log",
 +          "name": "binutils_x86_64_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_64_linux_3190740bb8e6daee6c29dfbc6ab43f0cc8ddd9eb.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_64_linux_8ccf4b8a74c844a041d2ad5d15e3999157eeffaf.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "d7ff303e87521243c8d54a976d853960194b70ce",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_x86_64_linux_30c4db0a7bc45e907cd34b4975ecfd45503bc60c.log",
++          "hash": "eeea8ea6da9b6d7b4b4c8cbf5a81b043a9ac10f8",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_x86_64_linux_48782a43a8af3479f0fe0a7aaace7d072aeb988f.log",
 +          "name": "binutils_x86_x86_64_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_x86_64_linux_30c4db0a7bc45e907cd34b4975ecfd45503bc60c.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_x86_64_linux_48782a43a8af3479f0fe0a7aaace7d072aeb988f.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -46857,43 +47755,43 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "48540d3c364fd3c954caa57c99ee10102dc819ba",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_arm_dcec9382939ea92f752b3d94f8f7106eb5d9ef70.log",
++          "hash": "e7e594dbc52dedbf73832b42eed91f118446acf7",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_arm_1e6fd71b1520e53db6ae0b601a19fcb8849e9831.log",
 +          "name": "core_sdk_libs_arm.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_arm_dcec9382939ea92f752b3d94f8f7106eb5d9ef70.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_arm_1e6fd71b1520e53db6ae0b601a19fcb8849e9831.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "bbae03403dda8747c626406e66a6207fb3a37922",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_i686_41b8768c99edfa543232f56e455e1d4c81b355b3.log",
++          "hash": "159c29a27fb65086917f475da8652ce9d1a07498",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_i686_da4ae62443144b77a31a9e995d48725d93d649ed.log",
 +          "name": "core_sdk_libs_i686.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_i686_41b8768c99edfa543232f56e455e1d4c81b355b3.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_i686_da4ae62443144b77a31a9e995d48725d93d649ed.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "08fa1b5ec915100cb57fa06fa839f3d6427a5ded",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_le32_2f086c51e5769760c86b4e852438221afc863018.log",
++          "hash": "9ced7021856aeca336df62e6dbf8fea4d8f1582c",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_le32_ec7a6d86bc8b03a7dba36f4ec5b20688866101e9.log",
 +          "name": "core_sdk_libs_le32.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_le32_2f086c51e5769760c86b4e852438221afc863018.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_le32_ec7a6d86bc8b03a7dba36f4ec5b20688866101e9.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "14017824d6632e226380d1813fc101c0eb34fd0f",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_mipsel_f8981bc165f1d0c9ede41aa1c9836841f6caa66b.log",
++          "hash": "a220fddc8dcea098f96104fcb24e571efc2699b4",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_mipsel_241409c60c8fd863b479a58246d1c82e477a647b.log",
 +          "name": "core_sdk_libs_mipsel.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_mipsel_f8981bc165f1d0c9ede41aa1c9836841f6caa66b.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_mipsel_241409c60c8fd863b479a58246d1c82e477a647b.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "b69d2dbb2ae10e1016202b6d8224db100ef9ee2f",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_x86_64_bf724780db5b879fe4a41b8fc2c60b0f7e774ecf.log",
++          "hash": "9acf25f53e7a2197048b7c766d0dd08e1aaa42f8",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_x86_64_16084d5bbd51b0c52d475d669675f6c57474abac.log",
 +          "name": "core_sdk_libs_x86_64.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_x86_64_bf724780db5b879fe4a41b8fc2c60b0f7e774ecf.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_x86_64_16084d5bbd51b0c52d475d669675f6c57474abac.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -46969,11 +47867,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "2316d962fe885f2a3c7fbad120d98980405ed86f",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libcxx_x86_64_linux_19e47435d179c7bc820f59b3162f6bf721335dd8.log",
++          "hash": "c287c7bb464043fd308068bc543ab93c9c307733",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libcxx_x86_64_linux_232c2b1151bad4df41fe89551f32e5f81ebc716f.log",
 +          "name": "libcxx_x86_64_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libcxx_x86_64_linux_19e47435d179c7bc820f59b3162f6bf721335dd8.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libcxx_x86_64_linux_232c2b1151bad4df41fe89551f32e5f81ebc716f.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47065,11 +47963,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "1324829909f27ff92e6d344401f30f70c7d04e47",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.log",
++          "hash": "1fd248a41f1d7aafa510deac3a6dfdf1c3b4fd61",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.log",
 +          "name": "libs_support_translator_arm_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47089,11 +47987,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "bcc897dfda85ee02d18d13897afb26b34da2be12",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.log",
++          "hash": "950c02a407e71b8b52edcb65fc1038e16766c904",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.log",
 +          "name": "libs_support_translator_x86_32_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47121,19 +48019,19 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "de1bee1f5e094f6b3d56dae2c1c8adfddd6558d8",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_x86_64_linux_d97c85063737d4200bd6d6a4b6d95a3e360a1351.log",
++          "hash": "796bbc1b83e1737b6cf9328700add10266f541d5",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_x86_64_linux_4714c5a92e796beda585a7aa080069cdd3d4f4eb.log",
 +          "name": "llvm_x86_64_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_x86_64_linux_d97c85063737d4200bd6d6a4b6d95a3e360a1351.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_x86_64_linux_4714c5a92e796beda585a7aa080069cdd3d4f4eb.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "f0febe9fa5c8fef07a968cb7c1e676f33ee2b8c4",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_a652799f4f3de9d359878ef52c6624424b411557.log",
++          "hash": "f53d65546632a3910fae3e622e5317a86ee881f5",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.log",
 +          "name": "metadata.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_a652799f4f3de9d359878ef52c6624424b411557.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47177,11 +48075,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "ae051afbaf1dcd7266f1d308fa526b1af665d2ad",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.log",
++          "hash": "e9998055b48b95618f47b7e4511a98a1f37fc7c3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.log",
 +          "name": "newlib_mipsel.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47201,19 +48099,19 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "ad385c967ea2be0795bec2be3532ee520eb99047",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/unsandboxed_runtime_arm_linux_ab99e6225450cfcda190be70e28a2ba96118278c.log",
++          "hash": "4261449fd2a5750b01af563eb9e9f5d2a94023e4",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/unsandboxed_runtime_arm_linux_74e3560c8a8555e8f111e6e5fe9216ec5811fda7.log",
 +          "name": "unsandboxed_runtime_arm_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/unsandboxed_runtime_arm_linux_ab99e6225450cfcda190be70e28a2ba96118278c.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/unsandboxed_runtime_arm_linux_74e3560c8a8555e8f111e6e5fe9216ec5811fda7.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "1b2b06adb1ea6cb1c33029037886ffb0b5820ccc",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/unsandboxed_runtime_x86_32_linux_7e9469b5ebd96e40ea3f7b0de93c2361ad06ece3.log",
++          "hash": "d54bf34c69ff7f4ec1b430e519a5ce5e1b18608c",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/unsandboxed_runtime_x86_32_linux_ec43cb9a60d17bb73aa07c41cc69cf6713820357.log",
 +          "name": "unsandboxed_runtime_x86_32_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/unsandboxed_runtime_x86_32_linux_7e9469b5ebd96e40ea3f7b0de93c2361ad06ece3.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/unsandboxed_runtime_x86_32_linux_ec43cb9a60d17bb73aa07c41cc69cf6713820357.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47230,19 +48128,19 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "5cf0e4e5eaf899f77c977d67552cc6153974fdaf",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_64_apple_darwin_13db5cb353c9a7ed31490fe4086a0596f818ce9b.log",
++          "hash": "706bf7cf72a23fafe0c384c93b688a111ad93e8b",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_64_apple_darwin_de36b4d4e2e0ccaaa068f8a197008459d1952eb7.log",
 +          "name": "binutils_x86_64_apple_darwin.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_64_apple_darwin_13db5cb353c9a7ed31490fe4086a0596f818ce9b.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_64_apple_darwin_de36b4d4e2e0ccaaa068f8a197008459d1952eb7.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "2baba5e3f2eb2bef453487bdd3bdf65016d6cf1c",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_x86_64_apple_darwin_f9ddfe974ce7fb47ff6eebff3f360fa8cdf5d12d.log",
++          "hash": "27406fd9501d23f34087e85b450590b16e55202c",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_x86_64_apple_darwin_454023d4db51bcf6b16e72652953b5aabe38ecf8.log",
 +          "name": "binutils_x86_x86_64_apple_darwin.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_x86_64_apple_darwin_f9ddfe974ce7fb47ff6eebff3f360fa8cdf5d12d.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_x86_64_apple_darwin_454023d4db51bcf6b16e72652953b5aabe38ecf8.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47278,43 +48176,43 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "48540d3c364fd3c954caa57c99ee10102dc819ba",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_arm_dcec9382939ea92f752b3d94f8f7106eb5d9ef70.log",
++          "hash": "e7e594dbc52dedbf73832b42eed91f118446acf7",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_arm_1e6fd71b1520e53db6ae0b601a19fcb8849e9831.log",
 +          "name": "core_sdk_libs_arm.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_arm_dcec9382939ea92f752b3d94f8f7106eb5d9ef70.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_arm_1e6fd71b1520e53db6ae0b601a19fcb8849e9831.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "bbae03403dda8747c626406e66a6207fb3a37922",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_i686_41b8768c99edfa543232f56e455e1d4c81b355b3.log",
++          "hash": "159c29a27fb65086917f475da8652ce9d1a07498",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_i686_da4ae62443144b77a31a9e995d48725d93d649ed.log",
 +          "name": "core_sdk_libs_i686.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_i686_41b8768c99edfa543232f56e455e1d4c81b355b3.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_i686_da4ae62443144b77a31a9e995d48725d93d649ed.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "08fa1b5ec915100cb57fa06fa839f3d6427a5ded",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_le32_2f086c51e5769760c86b4e852438221afc863018.log",
++          "hash": "9ced7021856aeca336df62e6dbf8fea4d8f1582c",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_le32_ec7a6d86bc8b03a7dba36f4ec5b20688866101e9.log",
 +          "name": "core_sdk_libs_le32.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_le32_2f086c51e5769760c86b4e852438221afc863018.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_le32_ec7a6d86bc8b03a7dba36f4ec5b20688866101e9.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "14017824d6632e226380d1813fc101c0eb34fd0f",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_mipsel_f8981bc165f1d0c9ede41aa1c9836841f6caa66b.log",
++          "hash": "a220fddc8dcea098f96104fcb24e571efc2699b4",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_mipsel_241409c60c8fd863b479a58246d1c82e477a647b.log",
 +          "name": "core_sdk_libs_mipsel.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_mipsel_f8981bc165f1d0c9ede41aa1c9836841f6caa66b.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_mipsel_241409c60c8fd863b479a58246d1c82e477a647b.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "b69d2dbb2ae10e1016202b6d8224db100ef9ee2f",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_x86_64_bf724780db5b879fe4a41b8fc2c60b0f7e774ecf.log",
++          "hash": "9acf25f53e7a2197048b7c766d0dd08e1aaa42f8",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_x86_64_16084d5bbd51b0c52d475d669675f6c57474abac.log",
 +          "name": "core_sdk_libs_x86_64.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_x86_64_bf724780db5b879fe4a41b8fc2c60b0f7e774ecf.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_x86_64_16084d5bbd51b0c52d475d669675f6c57474abac.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47382,11 +48280,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "14684d820658ac387c3952a3a63e30d54e47783c",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libcxx_x86_64_apple_darwin_0f1e075040625a689a0f1a0f269c354de55395cf.log",
++          "hash": "2717a4a9d8275a6bfd9c5551dd6eead63252c722",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libcxx_x86_64_apple_darwin_713157c0b45f415f5fd987428097de3034a6f947.log",
 +          "name": "libcxx_x86_64_apple_darwin.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libcxx_x86_64_apple_darwin_0f1e075040625a689a0f1a0f269c354de55395cf.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libcxx_x86_64_apple_darwin_713157c0b45f415f5fd987428097de3034a6f947.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47486,11 +48384,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "1324829909f27ff92e6d344401f30f70c7d04e47",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.log",
++          "hash": "1fd248a41f1d7aafa510deac3a6dfdf1c3b4fd61",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.log",
 +          "name": "libs_support_translator_arm_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47510,11 +48408,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "bcc897dfda85ee02d18d13897afb26b34da2be12",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.log",
++          "hash": "950c02a407e71b8b52edcb65fc1038e16766c904",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.log",
 +          "name": "libs_support_translator_x86_32_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47542,19 +48440,19 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "7dda36c85b2420027e163f2368f2bf49ac636630",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_x86_64_apple_darwin_3ad4073783094f0190a10b657ee0edfbb210ad2c.log",
++          "hash": "0a00e81a01b455adcfd9c0bdb85b7f8590d63d99",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_x86_64_apple_darwin_25cee5cd0158795949b547e3e14f9076460c3a8f.log",
 +          "name": "llvm_x86_64_apple_darwin.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_x86_64_apple_darwin_3ad4073783094f0190a10b657ee0edfbb210ad2c.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_x86_64_apple_darwin_25cee5cd0158795949b547e3e14f9076460c3a8f.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "f0febe9fa5c8fef07a968cb7c1e676f33ee2b8c4",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_a652799f4f3de9d359878ef52c6624424b411557.log",
++          "hash": "f53d65546632a3910fae3e622e5317a86ee881f5",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.log",
 +          "name": "metadata.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_a652799f4f3de9d359878ef52c6624424b411557.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47598,11 +48496,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "ae051afbaf1dcd7266f1d308fa526b1af665d2ad",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.log",
++          "hash": "e9998055b48b95618f47b7e4511a98a1f37fc7c3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.log",
 +          "name": "newlib_mipsel.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47635,19 +48533,19 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "ad9cb3094abf9a93d4b53447e8000fa13f2dfcad",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_i686_w64_mingw32_a1a1bc058210d343aa9e31455658df596fcdeaed.log",
++          "hash": "14abff6b44dde2761180a8f66a2fb3c2b4e07d63",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_i686_w64_mingw32_1119c35e6702f00b54e00ab168a0142161fbbfb4.log",
 +          "name": "binutils_i686_w64_mingw32.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_i686_w64_mingw32_a1a1bc058210d343aa9e31455658df596fcdeaed.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_i686_w64_mingw32_1119c35e6702f00b54e00ab168a0142161fbbfb4.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "66919319fb4a1264d349dda542c2b8fdac21af27",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_i686_w64_mingw32_d53a0e2ab26089ac01f17fd5448d14ee6cec41c4.log",
++          "hash": "09e242e8cb366db815005edc810ebe7ff7d3d9ba",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_i686_w64_mingw32_fe5545c7e0cbcfebf07771293f9f097c2cf9a80e.log",
 +          "name": "binutils_x86_i686_w64_mingw32.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_i686_w64_mingw32_d53a0e2ab26089ac01f17fd5448d14ee6cec41c4.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_i686_w64_mingw32_fe5545c7e0cbcfebf07771293f9f097c2cf9a80e.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47683,43 +48581,43 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "48540d3c364fd3c954caa57c99ee10102dc819ba",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_arm_dcec9382939ea92f752b3d94f8f7106eb5d9ef70.log",
++          "hash": "e7e594dbc52dedbf73832b42eed91f118446acf7",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_arm_1e6fd71b1520e53db6ae0b601a19fcb8849e9831.log",
 +          "name": "core_sdk_libs_arm.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_arm_dcec9382939ea92f752b3d94f8f7106eb5d9ef70.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_arm_1e6fd71b1520e53db6ae0b601a19fcb8849e9831.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "bbae03403dda8747c626406e66a6207fb3a37922",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_i686_41b8768c99edfa543232f56e455e1d4c81b355b3.log",
++          "hash": "159c29a27fb65086917f475da8652ce9d1a07498",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_i686_da4ae62443144b77a31a9e995d48725d93d649ed.log",
 +          "name": "core_sdk_libs_i686.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_i686_41b8768c99edfa543232f56e455e1d4c81b355b3.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_i686_da4ae62443144b77a31a9e995d48725d93d649ed.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "08fa1b5ec915100cb57fa06fa839f3d6427a5ded",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_le32_2f086c51e5769760c86b4e852438221afc863018.log",
++          "hash": "9ced7021856aeca336df62e6dbf8fea4d8f1582c",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_le32_ec7a6d86bc8b03a7dba36f4ec5b20688866101e9.log",
 +          "name": "core_sdk_libs_le32.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_le32_2f086c51e5769760c86b4e852438221afc863018.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_le32_ec7a6d86bc8b03a7dba36f4ec5b20688866101e9.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "14017824d6632e226380d1813fc101c0eb34fd0f",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_mipsel_f8981bc165f1d0c9ede41aa1c9836841f6caa66b.log",
++          "hash": "a220fddc8dcea098f96104fcb24e571efc2699b4",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_mipsel_241409c60c8fd863b479a58246d1c82e477a647b.log",
 +          "name": "core_sdk_libs_mipsel.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_mipsel_f8981bc165f1d0c9ede41aa1c9836841f6caa66b.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_mipsel_241409c60c8fd863b479a58246d1c82e477a647b.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "b69d2dbb2ae10e1016202b6d8224db100ef9ee2f",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_x86_64_bf724780db5b879fe4a41b8fc2c60b0f7e774ecf.log",
++          "hash": "9acf25f53e7a2197048b7c766d0dd08e1aaa42f8",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/core_sdk_libs_x86_64_16084d5bbd51b0c52d475d669675f6c57474abac.log",
 +          "name": "core_sdk_libs_x86_64.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_x86_64_bf724780db5b879fe4a41b8fc2c60b0f7e774ecf.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/core_sdk_libs_x86_64_16084d5bbd51b0c52d475d669675f6c57474abac.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47883,11 +48781,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "1324829909f27ff92e6d344401f30f70c7d04e47",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.log",
++          "hash": "1fd248a41f1d7aafa510deac3a6dfdf1c3b4fd61",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.log",
 +          "name": "libs_support_translator_arm_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47907,11 +48805,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "bcc897dfda85ee02d18d13897afb26b34da2be12",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.log",
++          "hash": "950c02a407e71b8b52edcb65fc1038e16766c904",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.log",
 +          "name": "libs_support_translator_x86_32_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47939,19 +48837,19 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "6d68f57fd6add525db4af9f3642496a982273e3e",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_i686_w64_mingw32_413e0a20750f74fd27d0cc31089f8ddb7e94e886.log",
++          "hash": "fc0a621f353d92e5691e6fd970f9f75692b856fc",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_i686_w64_mingw32_0393cf3c45ffad19a1d549df5a1e817a296eecc6.log",
 +          "name": "llvm_i686_w64_mingw32.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_i686_w64_mingw32_413e0a20750f74fd27d0cc31089f8ddb7e94e886.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_i686_w64_mingw32_0393cf3c45ffad19a1d549df5a1e817a296eecc6.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "f0febe9fa5c8fef07a968cb7c1e676f33ee2b8c4",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_a652799f4f3de9d359878ef52c6624424b411557.log",
++          "hash": "f53d65546632a3910fae3e622e5317a86ee881f5",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.log",
 +          "name": "metadata.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_a652799f4f3de9d359878ef52c6624424b411557.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -47995,11 +48893,11 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "ae051afbaf1dcd7266f1d308fa526b1af665d2ad",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.log",
++          "hash": "e9998055b48b95618f47b7e4511a98a1f37fc7c3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.log",
 +          "name": "newlib_mipsel.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48021,13 +48919,13 @@ index 0000000000000000000000000000000000000000..cf194d9097ee47f796e9b86249594530
 +      "version": 1
 +    }
 +  },
-+  "revision": "2eeb54c6995817a39e5c5cc0b40e26518396335f",
-+  "revision_hash": "15dcdbbe34214f19fe20d4403b71ba971f96fb7d"
++  "revision": "25a7ef81d2dc76b58450fa2d5f97070eafa20164",
++  "revision_hash": "87f003e6d27b47d5fe4d3cec6f794d66913d0059"
 +}
 \ No newline at end of file
 diff --git a/native_client/toolchain_revisions/pnacl_newlib_raw.json b/native_client/toolchain_revisions/pnacl_newlib_raw.json
 new file mode 100644
-index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa1fca9d63
+index 0000000000000000000000000000000000000000..1d8f2d71f472daa0eafe4afba0437297f3ce25d9
 --- /dev/null
 +++ b/native_client/toolchain_revisions/pnacl_newlib_raw.json
 @@ -0,0 +1,1102 @@
@@ -48038,19 +48936,19 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "0ccb9069cb36c05e9c11bd6a9585d310131840c5",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_64_linux_3190740bb8e6daee6c29dfbc6ab43f0cc8ddd9eb.log",
++          "hash": "02ad9f3149c872edd4c329b5a69c67e844891497",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_64_linux_8ccf4b8a74c844a041d2ad5d15e3999157eeffaf.log",
 +          "name": "binutils_x86_64_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_64_linux_3190740bb8e6daee6c29dfbc6ab43f0cc8ddd9eb.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_64_linux_8ccf4b8a74c844a041d2ad5d15e3999157eeffaf.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "d7ff303e87521243c8d54a976d853960194b70ce",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_x86_64_linux_30c4db0a7bc45e907cd34b4975ecfd45503bc60c.log",
++          "hash": "eeea8ea6da9b6d7b4b4c8cbf5a81b043a9ac10f8",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_x86_64_linux_48782a43a8af3479f0fe0a7aaace7d072aeb988f.log",
 +          "name": "binutils_x86_x86_64_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_x86_64_linux_30c4db0a7bc45e907cd34b4975ecfd45503bc60c.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_x86_64_linux_48782a43a8af3479f0fe0a7aaace7d072aeb988f.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48158,11 +49056,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "2316d962fe885f2a3c7fbad120d98980405ed86f",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libcxx_x86_64_linux_19e47435d179c7bc820f59b3162f6bf721335dd8.log",
++          "hash": "c287c7bb464043fd308068bc543ab93c9c307733",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libcxx_x86_64_linux_232c2b1151bad4df41fe89551f32e5f81ebc716f.log",
 +          "name": "libcxx_x86_64_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libcxx_x86_64_linux_19e47435d179c7bc820f59b3162f6bf721335dd8.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libcxx_x86_64_linux_232c2b1151bad4df41fe89551f32e5f81ebc716f.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48254,11 +49152,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "1324829909f27ff92e6d344401f30f70c7d04e47",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.log",
++          "hash": "1fd248a41f1d7aafa510deac3a6dfdf1c3b4fd61",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.log",
 +          "name": "libs_support_translator_arm_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48278,11 +49176,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "bcc897dfda85ee02d18d13897afb26b34da2be12",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.log",
++          "hash": "950c02a407e71b8b52edcb65fc1038e16766c904",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.log",
 +          "name": "libs_support_translator_x86_32_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48310,19 +49208,19 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "de1bee1f5e094f6b3d56dae2c1c8adfddd6558d8",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_x86_64_linux_d97c85063737d4200bd6d6a4b6d95a3e360a1351.log",
++          "hash": "796bbc1b83e1737b6cf9328700add10266f541d5",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_x86_64_linux_4714c5a92e796beda585a7aa080069cdd3d4f4eb.log",
 +          "name": "llvm_x86_64_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_x86_64_linux_d97c85063737d4200bd6d6a4b6d95a3e360a1351.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_x86_64_linux_4714c5a92e796beda585a7aa080069cdd3d4f4eb.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "f0febe9fa5c8fef07a968cb7c1e676f33ee2b8c4",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_a652799f4f3de9d359878ef52c6624424b411557.log",
++          "hash": "f53d65546632a3910fae3e622e5317a86ee881f5",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.log",
 +          "name": "metadata.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_a652799f4f3de9d359878ef52c6624424b411557.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48366,11 +49264,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "ae051afbaf1dcd7266f1d308fa526b1af665d2ad",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.log",
++          "hash": "e9998055b48b95618f47b7e4511a98a1f37fc7c3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.log",
 +          "name": "newlib_mipsel.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48390,19 +49288,19 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "ad385c967ea2be0795bec2be3532ee520eb99047",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/unsandboxed_runtime_arm_linux_ab99e6225450cfcda190be70e28a2ba96118278c.log",
++          "hash": "4261449fd2a5750b01af563eb9e9f5d2a94023e4",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/unsandboxed_runtime_arm_linux_74e3560c8a8555e8f111e6e5fe9216ec5811fda7.log",
 +          "name": "unsandboxed_runtime_arm_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/unsandboxed_runtime_arm_linux_ab99e6225450cfcda190be70e28a2ba96118278c.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/unsandboxed_runtime_arm_linux_74e3560c8a8555e8f111e6e5fe9216ec5811fda7.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "1b2b06adb1ea6cb1c33029037886ffb0b5820ccc",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/unsandboxed_runtime_x86_32_linux_7e9469b5ebd96e40ea3f7b0de93c2361ad06ece3.log",
++          "hash": "d54bf34c69ff7f4ec1b430e519a5ce5e1b18608c",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/unsandboxed_runtime_x86_32_linux_ec43cb9a60d17bb73aa07c41cc69cf6713820357.log",
 +          "name": "unsandboxed_runtime_x86_32_linux.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/unsandboxed_runtime_x86_32_linux_7e9469b5ebd96e40ea3f7b0de93c2361ad06ece3.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/unsandboxed_runtime_x86_32_linux_ec43cb9a60d17bb73aa07c41cc69cf6713820357.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48419,19 +49317,19 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "5cf0e4e5eaf899f77c977d67552cc6153974fdaf",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_64_apple_darwin_13db5cb353c9a7ed31490fe4086a0596f818ce9b.log",
++          "hash": "706bf7cf72a23fafe0c384c93b688a111ad93e8b",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_64_apple_darwin_de36b4d4e2e0ccaaa068f8a197008459d1952eb7.log",
 +          "name": "binutils_x86_64_apple_darwin.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_64_apple_darwin_13db5cb353c9a7ed31490fe4086a0596f818ce9b.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_64_apple_darwin_de36b4d4e2e0ccaaa068f8a197008459d1952eb7.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "2baba5e3f2eb2bef453487bdd3bdf65016d6cf1c",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_x86_64_apple_darwin_f9ddfe974ce7fb47ff6eebff3f360fa8cdf5d12d.log",
++          "hash": "27406fd9501d23f34087e85b450590b16e55202c",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_x86_64_apple_darwin_454023d4db51bcf6b16e72652953b5aabe38ecf8.log",
 +          "name": "binutils_x86_x86_64_apple_darwin.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_x86_64_apple_darwin_f9ddfe974ce7fb47ff6eebff3f360fa8cdf5d12d.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_x86_64_apple_darwin_454023d4db51bcf6b16e72652953b5aabe38ecf8.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48531,11 +49429,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "14684d820658ac387c3952a3a63e30d54e47783c",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libcxx_x86_64_apple_darwin_0f1e075040625a689a0f1a0f269c354de55395cf.log",
++          "hash": "2717a4a9d8275a6bfd9c5551dd6eead63252c722",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libcxx_x86_64_apple_darwin_713157c0b45f415f5fd987428097de3034a6f947.log",
 +          "name": "libcxx_x86_64_apple_darwin.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libcxx_x86_64_apple_darwin_0f1e075040625a689a0f1a0f269c354de55395cf.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libcxx_x86_64_apple_darwin_713157c0b45f415f5fd987428097de3034a6f947.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48635,11 +49533,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "1324829909f27ff92e6d344401f30f70c7d04e47",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.log",
++          "hash": "1fd248a41f1d7aafa510deac3a6dfdf1c3b4fd61",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.log",
 +          "name": "libs_support_translator_arm_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48659,11 +49557,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "bcc897dfda85ee02d18d13897afb26b34da2be12",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.log",
++          "hash": "950c02a407e71b8b52edcb65fc1038e16766c904",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.log",
 +          "name": "libs_support_translator_x86_32_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48691,19 +49589,19 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "7dda36c85b2420027e163f2368f2bf49ac636630",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_x86_64_apple_darwin_3ad4073783094f0190a10b657ee0edfbb210ad2c.log",
++          "hash": "0a00e81a01b455adcfd9c0bdb85b7f8590d63d99",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_x86_64_apple_darwin_25cee5cd0158795949b547e3e14f9076460c3a8f.log",
 +          "name": "llvm_x86_64_apple_darwin.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_x86_64_apple_darwin_3ad4073783094f0190a10b657ee0edfbb210ad2c.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_x86_64_apple_darwin_25cee5cd0158795949b547e3e14f9076460c3a8f.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "f0febe9fa5c8fef07a968cb7c1e676f33ee2b8c4",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_a652799f4f3de9d359878ef52c6624424b411557.log",
++          "hash": "f53d65546632a3910fae3e622e5317a86ee881f5",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.log",
 +          "name": "metadata.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_a652799f4f3de9d359878ef52c6624424b411557.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48747,11 +49645,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "ae051afbaf1dcd7266f1d308fa526b1af665d2ad",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.log",
++          "hash": "e9998055b48b95618f47b7e4511a98a1f37fc7c3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.log",
 +          "name": "newlib_mipsel.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48784,19 +49682,19 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "ad9cb3094abf9a93d4b53447e8000fa13f2dfcad",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_i686_w64_mingw32_a1a1bc058210d343aa9e31455658df596fcdeaed.log",
++          "hash": "14abff6b44dde2761180a8f66a2fb3c2b4e07d63",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_i686_w64_mingw32_1119c35e6702f00b54e00ab168a0142161fbbfb4.log",
 +          "name": "binutils_i686_w64_mingw32.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_i686_w64_mingw32_a1a1bc058210d343aa9e31455658df596fcdeaed.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_i686_w64_mingw32_1119c35e6702f00b54e00ab168a0142161fbbfb4.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "66919319fb4a1264d349dda542c2b8fdac21af27",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_i686_w64_mingw32_d53a0e2ab26089ac01f17fd5448d14ee6cec41c4.log",
++          "hash": "09e242e8cb366db815005edc810ebe7ff7d3d9ba",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/binutils_x86_i686_w64_mingw32_fe5545c7e0cbcfebf07771293f9f097c2cf9a80e.log",
 +          "name": "binutils_x86_i686_w64_mingw32.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_i686_w64_mingw32_d53a0e2ab26089ac01f17fd5448d14ee6cec41c4.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/binutils_x86_i686_w64_mingw32_fe5545c7e0cbcfebf07771293f9f097c2cf9a80e.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -48992,11 +49890,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "1324829909f27ff92e6d344401f30f70c7d04e47",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.log",
++          "hash": "1fd248a41f1d7aafa510deac3a6dfdf1c3b4fd61",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.log",
 +          "name": "libs_support_translator_arm_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_920829b387c943dc480baf93f67247f856e2dce8.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_arm_nonsfi_6feb244ec5768adb635d862a4599f140adec06d6.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -49016,11 +49914,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "bcc897dfda85ee02d18d13897afb26b34da2be12",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.log",
++          "hash": "950c02a407e71b8b52edcb65fc1038e16766c904",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.log",
 +          "name": "libs_support_translator_x86_32_nonsfi.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_e45cd81a7b6432d9c68d222308e8c43f65e86f8d.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/libs_support_translator_x86_32_nonsfi_0d890fe58714973398681c3cd82c0d1e2ac5521b.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -49048,19 +49946,19 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "6d68f57fd6add525db4af9f3642496a982273e3e",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_i686_w64_mingw32_413e0a20750f74fd27d0cc31089f8ddb7e94e886.log",
++          "hash": "fc0a621f353d92e5691e6fd970f9f75692b856fc",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/llvm_i686_w64_mingw32_0393cf3c45ffad19a1d549df5a1e817a296eecc6.log",
 +          "name": "llvm_i686_w64_mingw32.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_i686_w64_mingw32_413e0a20750f74fd27d0cc31089f8ddb7e94e886.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/llvm_i686_w64_mingw32_0393cf3c45ffad19a1d549df5a1e817a296eecc6.tgz"
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "f0febe9fa5c8fef07a968cb7c1e676f33ee2b8c4",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_a652799f4f3de9d359878ef52c6624424b411557.log",
++          "hash": "f53d65546632a3910fae3e622e5317a86ee881f5",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.log",
 +          "name": "metadata.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_a652799f4f3de9d359878ef52c6624424b411557.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/metadata_3e42a7875fe3db05f30ceb7132008b530a60e429.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -49104,11 +50002,11 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +        },
 +        {
 +          "extract_dir": "",
-+          "hash": "ae051afbaf1dcd7266f1d308fa526b1af665d2ad",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.log",
++          "hash": "e9998055b48b95618f47b7e4511a98a1f37fc7c3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.log",
 +          "name": "newlib_mipsel.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_f825aae6177ab77ee8b56591f6e448e97ad2f671.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/newlib_mipsel_aaac93f5a71d92f3b190bffd0049f557f3d3b561.tgz"
 +        },
 +        {
 +          "extract_dir": "",
@@ -49130,13 +50028,13 @@ index 0000000000000000000000000000000000000000..4b49cd83ed29915a286bf5c499d319fa
 +      "version": 1
 +    }
 +  },
-+  "revision": "2eeb54c6995817a39e5c5cc0b40e26518396335f",
-+  "revision_hash": "6f28bc8481f1544079cabc88159317b59137d9d5"
++  "revision": "25a7ef81d2dc76b58450fa2d5f97070eafa20164",
++  "revision_hash": "bdf2d8e130e406d157f94d4f46d2f94b88479744"
 +}
 \ No newline at end of file
 diff --git a/native_client/toolchain_revisions/pnacl_translator.json b/native_client/toolchain_revisions/pnacl_translator.json
 new file mode 100644
-index 0000000000000000000000000000000000000000..78558ae47992e280234501839f0bb211ef7a33bf
+index 0000000000000000000000000000000000000000..7e91732eeeb5175ad894ac893ee1227046dd7678
 --- /dev/null
 +++ b/native_client/toolchain_revisions/pnacl_translator.json
 @@ -0,0 +1,59 @@
@@ -49147,11 +50045,11 @@ index 0000000000000000000000000000000000000000..78558ae47992e280234501839f0bb211
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "c69693a2088023ee084608861507394327a71af3",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/sandboxed_translators_327a0565c0f57d35ec9c61a6aca5204f51c74b51.log",
++          "hash": "a932931ed1ae1ec69ee36d44ae8e6adffd19b2e3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/sandboxed_translators_588542cc5272b1ef528750e378e7a2afbc8f3fff.log",
 +          "name": "sandboxed_translators.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/sandboxed_translators_327a0565c0f57d35ec9c61a6aca5204f51c74b51.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/sandboxed_translators_588542cc5272b1ef528750e378e7a2afbc8f3fff.tgz"
 +        }
 +      ],
 +      "version": 1
@@ -49160,11 +50058,11 @@ index 0000000000000000000000000000000000000000..78558ae47992e280234501839f0bb211
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "c69693a2088023ee084608861507394327a71af3",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/sandboxed_translators_327a0565c0f57d35ec9c61a6aca5204f51c74b51.log",
++          "hash": "a932931ed1ae1ec69ee36d44ae8e6adffd19b2e3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/sandboxed_translators_588542cc5272b1ef528750e378e7a2afbc8f3fff.log",
 +          "name": "sandboxed_translators.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/sandboxed_translators_327a0565c0f57d35ec9c61a6aca5204f51c74b51.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/sandboxed_translators_588542cc5272b1ef528750e378e7a2afbc8f3fff.tgz"
 +        }
 +      ],
 +      "version": 1
@@ -49173,11 +50071,11 @@ index 0000000000000000000000000000000000000000..78558ae47992e280234501839f0bb211
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "c69693a2088023ee084608861507394327a71af3",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/sandboxed_translators_327a0565c0f57d35ec9c61a6aca5204f51c74b51.log",
++          "hash": "a932931ed1ae1ec69ee36d44ae8e6adffd19b2e3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/sandboxed_translators_588542cc5272b1ef528750e378e7a2afbc8f3fff.log",
 +          "name": "sandboxed_translators.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/sandboxed_translators_327a0565c0f57d35ec9c61a6aca5204f51c74b51.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/sandboxed_translators_588542cc5272b1ef528750e378e7a2afbc8f3fff.tgz"
 +        }
 +      ],
 +      "version": 1
@@ -49186,18 +50084,18 @@ index 0000000000000000000000000000000000000000..78558ae47992e280234501839f0bb211
 +      "archives": [
 +        {
 +          "extract_dir": "",
-+          "hash": "c69693a2088023ee084608861507394327a71af3",
-+          "log_url": "https://storage.googleapis.com/nativeclient-once/log/sandboxed_translators_327a0565c0f57d35ec9c61a6aca5204f51c74b51.log",
++          "hash": "a932931ed1ae1ec69ee36d44ae8e6adffd19b2e3",
++          "log_url": "https://storage.googleapis.com/nativeclient-once/log/sandboxed_translators_588542cc5272b1ef528750e378e7a2afbc8f3fff.log",
 +          "name": "sandboxed_translators.tgz",
 +          "tar_src_dir": "",
-+          "url": "https://storage.googleapis.com/nativeclient-once/object/sandboxed_translators_327a0565c0f57d35ec9c61a6aca5204f51c74b51.tgz"
++          "url": "https://storage.googleapis.com/nativeclient-once/object/sandboxed_translators_588542cc5272b1ef528750e378e7a2afbc8f3fff.tgz"
 +        }
 +      ],
 +      "version": 1
 +    }
 +  },
-+  "revision": "2eeb54c6995817a39e5c5cc0b40e26518396335f",
-+  "revision_hash": "6c06b4fe4045d63225651079a2f4c16bb12bd4e8"
++  "revision": "25a7ef81d2dc76b58450fa2d5f97070eafa20164",
++  "revision_hash": "2084d538822e1ef6ee337648c2a8a17e188e4a19"
 +}
 \ No newline at end of file
 diff --git a/native_client/tools/BACKPORTS/VERSIONS b/native_client/tools/BACKPORTS/VERSIONS
@@ -101334,1933 +102232,3 @@ index 0000000000000000000000000000000000000000..96af693488087d251f7317ebefb9252f
 +      out.append(BIT_TO_CPU_MAP[i])
 +  return out
 +"""
-diff --git a/native_client/tools/scons_to_gn/merge_data.py b/native_client/tools/scons_to_gn/merge_data.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..d64ccdf059a4639cc26cdaebef5bdd340f5ed943
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/merge_data.py
-@@ -0,0 +1,150 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+from collections import defaultdict
-+import hashlib
-+import json
-+import sys
-+
-+from print_data import PrintData
-+
-+
-+# Original data arrives as a dictionary of:
-+# name = { configs:[], type:'', properties: {}}
-+# where properties is a sub dictionary of the same type.
-+# So:
-+# {
-+#   'libnacl': {
-+#      'configs' : [ X1_Y1, X2_Y1, ...],
-+#      'type': 'source_set' | 'NaClSharedLibrary' | ....,
-+#      'properties' : {
-+#         'sources' : {
-+#             'source_file1.c' : {
-+#               'configs' : [ X1_Y1, X2_Y1, ...],
-+#             },
-+#             'source_file1.c' : {
-+#               'configs' : [ X1_Y1, X2_Y1, ...],
-+#             },
-+#
-+
-+
-+def HashKeys(key_a, key_b):
-+  m = hashlib.md5()
-+  if key_a:
-+    m.update(str(key_a))
-+  if key_b:
-+    m.update(str(key_b))
-+  return m.hexdigest()
-+
-+
-+def FindBsInConfigOfA(configs, setb, keya):
-+  bhits = []
-+  for config in configs:
-+    a, b = config.split('_')
-+    if a == keya:
-+      bhits.append(b)
-+  return bhits
-+
-+#
-+# TransformRawToIndexed
-+#
-+# Transforms data from the original form shown above, to a dictionary of
-+# dictionaries with condition A as the key to the outer dictionary, and
-+# the set of B conditions for that key
-+#
-+# {
-+#   'keyA1' : {
-+#     'keyBx keyBy ...' : [ name1, name2 ]
-+#     'keyBz' : [ name3 ],
-+#   }
-+# }
-+#
-+def CreateIndexedLookup(tree, seta, setb):
-+  # Build dictionary of dictionaries with a key of seta
-+  out = {}
-+  for keya in seta:
-+    out[keya] = defaultdict(list)
-+
-+  for name in tree:
-+    configs = sorted(tree[name].configs)
-+    for keya in seta:
-+      bhits = FindBsInConfigOfA(configs, setb, keya)
-+      if bhits:
-+        out[keya][' '.join(bhits)].append(name)
-+  return out
-+
-+
-+#
-+# MergeNodesToConditions
-+#
-+# Takes a dataset containing DICT[targets] = configs and generates a list of
-+# tupples containing the list of targets sharing a set of conditions.
-+# (name1, name2,...), (conda1, conda2), (condb1, condb2...)
-+#
-+def MergeRawTree(original, seta, availa, availb):
-+  merge_A = defaultdict(list)
-+
-+  merge_arch = {}
-+  merge_data = {}
-+
-+  # Build table of DATA[OS][CPU_SET] = List of NODES
-+  data = CreateIndexedLookup(original, seta, availb)
-+
-+  # For every item in the data table, generate key based on CPUs and NODES
-+  # matching a configuration, and build tables indexed by that key.
-+  for key_a in data:
-+    for arches, hits in data[key_a].iteritems():
-+      keyval_hash = HashKeys(arches, hits)
-+      merge_A[keyval_hash].append(key_a)
-+      merge_arch[keyval_hash] = arches.split(' ')
-+      merge_data[keyval_hash] = hits
-+
-+  # Merge all subsets
-+  keys = merge_A.keys()
-+  for i, i_key in enumerate(keys):
-+    # For each key, get the PLATFORMS, CPUS, and NODES
-+    i_oses = merge_A[i_key]
-+    i_cpus = merge_arch[i_key]
-+    i_hits = merge_data[i_key]
-+
-+    for j, j_key in enumerate(keys):
-+      # For each other non-matching key, get PLATFORMS, CPUS, and NODES
-+      if i == j:
-+        continue
-+      j_oses = merge_A[j_key]
-+      j_cpus = merge_arch[j_key]
-+      j_hits = merge_data[j_key]
-+
-+      # If the set of supported CPUS matches
-+      if i_cpus == j_cpus:
-+        i_set = set(i_hits)
-+        j_set = set(j_hits)
-+        # If the nodes in J are a subset of nodes in I
-+        # then move those nodes from I to J and add the OS
-+        if j_set.issubset(i_set):
-+          for hit in j_hits:
-+            merge_data[i_key].remove(hit)
-+          for os in i_oses:
-+            if os not in j_oses:
-+              merge_A[j_key].append(os)
-+
-+  out_list = []
-+  keys = merge_A.keys()
-+  for i in range(len(keys)):
-+    hash_cpu_data = keys[i]
-+    os_use = merge_A[hash_cpu_data]
-+    cpus = merge_arch[hash_cpu_data]
-+    names = merge_data[hash_cpu_data]
-+
-+    node = (names, os_use, cpus)
-+    out_list.append(node)
-+
-+  def SortByEffect(x, y):
-+    # Sort by bigest combition first (# platforms * # cpu architectures)
-+    xval = len(x[1]) * len(x[2])
-+    yval = len(y[1]) * len(y[2])
-+    return  yval - xval
-+
-+  out_list = sorted(out_list, cmp=SortByEffect)
-+  return out_list
-diff --git a/native_client/tools/scons_to_gn/merge_data_test.py b/native_client/tools/scons_to_gn/merge_data_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..f1f534075c6085cb6bb935628d75b67a97943e2b
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/merge_data_test.py
-@@ -0,0 +1,106 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+from collections import defaultdict
-+import pprint
-+import sys
-+
-+from merge_data import CreateIndexedLookup, MergeRawTree
-+from print_data import PrintData
-+
-+
-+CONDA = ['A1', 'A2', 'A3']
-+CONDB = ['B1', 'B2', 'B3']
-+
-+CONFIG_ALL = [a + '_' + b for a in CONDA for b in CONDB]
-+
-+CONFIG_A1 = [ 'A1_B1',  'A1_B2', 'A1_B3' ]
-+CONFIG_B1 = [ 'A1_B1',  'A2_B1', 'A3_B1' ]
-+
-+CONFIG_SET1 = [ 'A1_B1',  'A1_B2', 'A2_B2' ]
-+CONFIG_SET2 = [ 'A1_B1']
-+CONFIG_SET3 = [ 'A1_B1', 'A2_B3']
-+
-+
-+class TestNode(object):
-+  def __init__(self, configs):
-+    self.configs = configs
-+
-+TEST_ALL = {
-+  'target_1': TestNode(CONFIG_ALL),
-+  'target_2': TestNode(CONFIG_ALL),
-+  'target_3': TestNode(CONFIG_ALL),
-+}
-+
-+TEST_NOT3 = {
-+  'target_1': TestNode(CONFIG_ALL),
-+  'target_2': TestNode(CONFIG_ALL),
-+  'target_3': TestNode(CONFIG_SET2),
-+}
-+
-+TEST_A1_B1 = {
-+  'target_1': TestNode(CONFIG_A1),
-+  'target_2': TestNode(CONFIG_B1),
-+  'target_3': TestNode(CONFIG_ALL),
-+}
-+
-+def SameAsOriginal(table, hits):
-+  for target in hits:
-+    table_set = set(table[target].configs)
-+    trans_set = set(hits[target])
-+    if table_set != trans_set:
-+      table_set_items = ' '.join(table_set)
-+      trans_set_items = ' '.join(trans_set)
-+      print 'FAIL %s: %s vs %s' % (target, table_set_items, trans_set_items)
-+      return False
-+  return True
-+
-+
-+def CompareOriginalToTransformed(table, transformed, name):
-+  trans_hits = defaultdict(list)
-+  for keya, hit_table in transformed.iteritems():
-+    for hitsb, values in hit_table.iteritems():
-+      for value in values:
-+        trans_hits[value].extend([keya + '_' + b for b in hitsb.split(' ')])
-+
-+  if not SameAsOriginal(table, trans_hits):
-+    PrintData(table)
-+    PrintData(transformed)
-+    return 1
-+  return 0
-+
-+
-+def CompareOriginalToMerged(table, merged, name):
-+  trans_hits = defaultdict(list)
-+  for targets, seta, setb in merged:
-+    for target in targets:
-+      trans_hits[target].extend([a+'_'+b for a in seta for b in setb])
-+
-+  if not SameAsOriginal(table, trans_hits):
-+    PrintData(table)
-+    PrintData(merged)
-+    return 1
-+  return 0
-+
-+
-+def TestTransform(table, name, verbose=False):
-+  transformed  = CreateIndexedLookup(table, CONDA, CONDB)
-+  cnt  = CompareOriginalToTransformed(table, transformed, name)
-+  merged = MergeRawTree(table, CONDA, CONDA, CONDB)
-+  cnt += CompareOriginalToMerged(table, merged, name)
-+  if verbose:
-+    PrintData(merged)
-+  if not cnt:
-+    print 'PASS ' + name
-+    return 0
-+  print 'FAILED ' + name
-+  return 1
-+
-+
-+if __name__ == '__main__':
-+  retval = 0
-+  retval += TestTransform(TEST_ALL, 'All')
-+  retval += TestTransform(TEST_NOT3, 'Not3')
-+  retval += TestTransform(TEST_A1_B1, 'A1B1')
-+  sys.exit(retval)
-diff --git a/native_client/tools/scons_to_gn/nodes.py b/native_client/tools/scons_to_gn/nodes.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..b97600fc2135206a45736da11e1209cb669d1e57
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/nodes.py
-@@ -0,0 +1,218 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+from conditions import *
-+
-+"""Nodes for scons to gn
-+
-+Nodes class provides a means to store, explore and write out a tree
-+describing the table generated by interating over the scons file.  The
-+tree is created in the form of:
-+
-+  TopNode
-+    Condition
-+      Object
-+        Condition
-+          Property
-+
-+"""
-+
-+
-+REMAP = {
-+  'arm' : 'arm',
-+  'AND' : 'android',
-+  'CHR' : 'chrome',
-+  'LIN' : 'linux',
-+  'MAC' : 'mac',
-+  'IOS' : 'ios',
-+  'WIN' : 'win',
-+  'x86' : 'x86',
-+  'x64' : 'x64',
-+  'glibc' : 'glibc',
-+  'newlib' : 'newlib',
-+  'pnacl' : 'pnacl'
-+}
-+
-+def Express(use, avail, tag):
-+  use = sorted([REMAP[x] for x in use])
-+  avail = sorted([REMAP[x] for x in avail])
-+  if use == avail:
-+    return None
-+
-+  if len(use) == 1:
-+    return '(%s == "%s")' % (tag, use[0])
-+
-+  luse = len(use)
-+  lavail = len(avail)
-+  if luse > (lavail - luse):
-+    items = ['%s != "%s"' % (tag, i) for i in avail if i not in use]
-+    return '(' + ' || '.join(items) + ')'
-+
-+  items = ['%s == "%s"' % (tag, i) for i in use]
-+  return '(' + ' || '.join(items) + ')'
-+
-+
-+def Condition(os_use, os_avail, cpu_use, cpu_avail):
-+  # We can not hash a list, so we sometimes use  a space sperated string.
-+  if isinstance(cpu_use, str):
-+    cpu_use = cpu_use.split(' ')
-+  if isinstance(cpu_avail, str):
-+    cpu_avail = cpu_avail.split(' ')
-+
-+  o_cond = Express(os_use, os_avail, 'os')
-+  c_cond = Express(cpu_use, cpu_avail, 'cpu_arch')
-+
-+  if not o_cond and not c_cond:
-+    return None
-+
-+  if o_cond and c_cond:
-+    return 'if (%s && %s) {' % (o_cond, c_cond)
-+
-+  if o_cond:
-+    return 'if %s {' % o_cond
-+  return 'if %s {' % c_cond
-+
-+#
-+# TopNode
-+#   Condition
-+#     Object
-+#       Condition
-+#         Property
-+#
-+class Node(object):
-+  def __init__(self, name=''):
-+    self.children = []
-+    self.name = name
-+    self.parent = None
-+
-+  def DumpInfo(self, depth=0):
-+    print '%s%s(%s)' % ('  ' * depth, str(type(self)), self.name)
-+    for child in self.children:
-+      child.DumpInfo(depth+1)
-+
-+  def Write(self, fileobj, depth, text):
-+    for line in text.split('\n'):
-+      string = '  ' * depth + line + '\n'
-+      fileobj.write(string)
-+
-+  def Dump(self, fileobj, depth):
-+    adjust = self.DumpStart(fileobj, depth)
-+    for idx, child in enumerate(self.children):
-+      self.DumpChild(fileobj, child, adjust)
-+      if idx != len(self.children) - 1:
-+        fileobj.write('\n')
-+    self.DumpEnd(fileobj, depth)
-+
-+  def DumpStart(self, fileobj, depth):
-+    self.Write(fileobj, depth, self.name)
-+    return depth
-+
-+  def DumpEnd(self, fileobj, depth):
-+    pass
-+
-+  def DumpChild(self, fileobj, child, depth):
-+    child.Dump(fileobj, depth)
-+
-+  def AddChild(self, child):
-+    self.children.append(child)
-+    child.parent = self
-+
-+  def Examine(self, obj):
-+    obj.Enter(self)
-+    for child in self.children:
-+      child.Examine(obj)
-+    obj.Exit(self)
-+
-+
-+class TopNode(Node):
-+  def __init__(self, name):
-+    Node.__init__(self, name)
-+
-+  def DumpStart(self, fileobj, depth):
-+    self.Write(fileobj, depth, "#  Autogenerated from %s.\n\n" % self.name)
-+    return depth
-+
-+
-+class ConditionNode(Node):
-+  def __init__(self, os_use, os_avail, cpu_use, cpu_avail):
-+    name = Condition(os_use, os_avail, cpu_use, cpu_avail)
-+    Node.__init__(self, name)
-+
-+  def Dump(self, fileobj, depth):
-+    if self.name:
-+      self.Write(fileobj, depth, self.name)
-+      depth += 1
-+    for child in self.children:
-+      child.Dump(fileobj, depth)
-+    if self.name:
-+      self.Write(fileobj, depth - 1, '}')
-+
-+
-+class ObjectNode(Node):
-+  def __init__(self, name, obj_type):
-+    Node.__init__(self, name)
-+    self.obj_type = obj_type
-+    self.conditional = set()
-+    self.unconditional = set()
-+
-+  def DumpStart(self, fileobj, depth):
-+    self.Write(fileobj, depth, '%s("%s") {' % (self.obj_type, self.name))
-+    depth += 1
-+
-+    # For every conditional only property, set and empty array
-+    for cond in self.conditional:
-+      if cond not in self.unconditional:
-+        self.Write(fileobj, depth, '%s = []' % cond)
-+    return depth
-+
-+  def DumpEnd(self, fileobj, depth):
-+    self.Write(fileobj, depth, '}')
-+
-+
-+class PropertyNode(Node):
-+  def __init__(self, name):
-+    Node.__init__(self, name)
-+
-+  def Dump(self, fileobj, depth):
-+    if self.parent.name:
-+      self.Write(fileobj, depth, '%s += [' % self.name)
-+    else:
-+      self.Write(fileobj, depth, '%s = [' % self.name)
-+
-+    for child in self.children:
-+      child.Dump(fileobj, depth + 1)
-+
-+    self.Write(fileobj, depth, ']')
-+
-+
-+class ValueNode(Node):
-+  def __init__(self, name):
-+    Node.__init__(self,  name)
-+
-+  def Dump(self, fileobj, depth):
-+    self.Write(fileobj, depth, '"%s",' % self.name)
-+
-+
-+class OrganizeProperties(object):
-+  def __init__(self):
-+    self.cond = None
-+    self.obj = None
-+    pass
-+
-+  def Enter(self, node):
-+    if isinstance(node, ObjectNode):
-+      self.obj = node
-+
-+    if isinstance(node, ConditionNode):
-+      self.cond = node.name
-+
-+    if isinstance(node, PropertyNode):
-+      if self.cond == None:
-+        self.obj.unconditional |= set([node.name])
-+      else:
-+        self.obj.conditional |= set([node.name])
-+      node.children = sorted(node.children, key=lambda x: x.name)
-+
-+  def Exit(self, node):
-+    pass
-diff --git a/native_client/tools/scons_to_gn/print_data.py b/native_client/tools/scons_to_gn/print_data.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..3a17941a5cec03db8b2d11bc0c714be2ca399f1e
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/print_data.py
-@@ -0,0 +1,24 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+def GetItem(data, depth=0):
-+  if isinstance(data, str):
-+    return  '  ' * depth + '"%s"' % data
-+  return '  ' * depth + str(data)
-+
-+def PrintData(data, depth=0):
-+  if isinstance(data, dict):
-+    print '  ' * depth + '{'
-+    for key in data:
-+      print GetItem(key, depth + 1) + ':'
-+      PrintData(data[key], depth + 2)
-+    print '  ' * depth + '}'
-+    return
-+  if isinstance(data, list):
-+    print '  ' * depth + '['
-+    for item in data:
-+      PrintData(item, depth + 1)
-+    print '  ' * depth + ']'
-+    return
-+  print GetItem(data, depth)
-diff --git a/native_client/tools/scons_to_gn/properties.py b/native_client/tools/scons_to_gn/properties.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..12ece21a1bb08585463c1ac36e9378910a9e433f
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/properties.py
-@@ -0,0 +1,81 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+from collections import defaultdict
-+
-+
-+PROPERTY_REMAP = {
-+  'CFLAGS': 'cflags',
-+  'CCFLAGS': 'cflags_c',
-+  'CXXFLAGS': 'cflags_cc',
-+  'LDFLAGS': 'ldflags',
-+  'EXTRA_LIBS': 'deps'
-+}
-+COMPILER_FLAGS = ['cflags', 'cflags_c', 'cflags_cc']
-+LINKER_FLAGS = ['ldfalgs']
-+OTHER_KEYS = ['defines', 'include_dirs', 'sources']
-+
-+LIST_TYPES = set(COMPILER_FLAGS + LINKER_FLAGS + OTHER_KEYS)
-+
-+def ConvertIfSingle(key, values):
-+  if key in LIST_TYPES:
-+    return values
-+  return values[0]
-+
-+
-+def RemapCompilerProperties(propname, items):
-+  props = defaultdict(list)
-+  props[propname] = []
-+  for item in items:
-+    if not item:
-+      continue
-+
-+    if len(item) > 2:
-+      if item[:2] == '-D':
-+        props['defines'].append(item[2:])
-+        continue
-+      if item[:2] == '-I':
-+        props['include_dirs'].append(item[2:])
-+        continue
-+    props[propname].append(item)
-+  return props
-+
-+
-+def ConvertSconsPropertyToSubTable(key, items):
-+  # Force all items to be lists
-+  if items == None:
-+    items = [None]
-+  if type(items) is not type([]):
-+    items = [items]
-+
-+  # If the name is not in the remap, then keep it
-+  propname = PROPERTY_REMAP.get(key, key)
-+  print "KEY=%s, PROPNAME=%s" %(key, propname)
-+
-+  # If this is a compiler flag, we will need to build a new table
-+  if propname in COMPILER_FLAGS:
-+    return RemapCompilerProperties(propname, items)
-+
-+  if propname == 'deps':
-+    items = [i for i in items if i not in ['pthread']]
-+
-+  return { propname: items }
-+
-+
-+def ParsePropertyTable(table):
-+  props = defaultdict(list)
-+
-+  # Take a table of KEY=VALUE pairs
-+  for key, value in table.iteritems():
-+    # Convert into a new table with GN style names.  Since a scons properties
-+    # like CFLAGS can convert into defines, included_dirs, etc...
-+    sub_table = ConvertSconsPropertyToSubTable(key, value)
-+    if not sub_table:
-+      continue
-+    for k,v in sub_table.iteritems():
-+      # Now we have a single property name and list of values.
-+      props[k].extend(v)
-+
-+  return props
-+
-diff --git a/native_client/tools/scons_to_gn/properties_test.py b/native_client/tools/scons_to_gn/properties_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..e563b8069341ded4fc569fdd836642bb0817c06f
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/properties_test.py
-@@ -0,0 +1,69 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import pprint
-+import sys
-+
-+import properties
-+
-+
-+TEST_EMPTY = {
-+  'in': {
-+    'EMPTY_LIST': [],
-+    'NONE': None,
-+    'NONE_LIST': [None],
-+    'STRING' : '',
-+    'STRING_LIST' : [''],
-+  },
-+  'out': {
-+    'EMPTY_LIST': [],
-+    'NONE': [None],
-+    'NONE_LIST': [None],
-+    'STRING' : [''],
-+    'STRING_LIST' : [''],
-+  }
-+}
-+
-+TEST_CFLAGS = {
-+  'in': {
-+    'CFLAGS': ['-DDEFINE1', '-Iinclude', '-DDEFINE2=2', '-fPIC',],
-+    'CCFLAGS': None,
-+    'OTHER_NONE': None,
-+    'OTHER_SOME': 'Some',
-+    'CXXFLAGS': [],
-+  },
-+  'out': {
-+    'cflags' : ['-fPIC'],
-+    'defines' : ['DEFINE1', 'DEFINE2=2'],
-+    'include_dirs' : ['include'],
-+    'cflags_c' : [],
-+    'cflags_cc': [],
-+    'OTHER_NONE': [None],
-+    'OTHER_SOME': ['Some']
-+  }
-+}
-+
-+
-+def TestMap(table, name):
-+  out = properties.ParsePropertyTable(table['in'])
-+  pp = pprint.PrettyPrinter(indent=4)
-+  if out != table['out']:
-+    print '*** Conversion mismatch! ***'
-+    print 'ORIGINAL:'
-+    pp.pprint(table['in'])
-+    print 'CONVERTED:'
-+    pp.pprint(dict(out))
-+    print 'EXPECTED:'
-+    pp.pprint(table['out'])
-+    print '\n\n'
-+    return 1
-+  print 'PASSED ' + name
-+  return 0
-+
-+
-+if __name__ == '__main__':
-+  retval = 0
-+  retval += TestMap(TEST_EMPTY, 'Empty')
-+  retval += TestMap(TEST_CFLAGS, 'C flags')
-+  sys.exit(retval)
-diff --git a/native_client/tools/scons_to_gn/raw_object.py b/native_client/tools/scons_to_gn/raw_object.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..f2384016631425ad95853fc619854bc55ff5d4ab
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/raw_object.py
-@@ -0,0 +1,72 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+from collections import defaultdict
-+
-+
-+# {
-+#   'libnacl': {
-+#      'configs' : [ X1_Y1, X2_Y1, ...],
-+#      'type': 'source_set' | 'NaClSharedLibrary' | ....,
-+#      'properties' : {
-+#         'sources' : {
-+#             'source_file1.c' : {
-+#               'configs' : [ X1_Y1, X2_Y1, ...],
-+#             },
-+#             'source_file1.c' : {
-+#               'configs' : [ X1_Y1, X2_Y1, ...],
-+#             },
-+#
-+#  RawTree(TOP)
-+#     RawObject(libnacl)
-+#       RawTree(sources)
-+#           RawObject(source_file.c)
-+
-+class RawTree(object):
-+  def __init__(self):
-+    self.children = defaultdict(RawObject)
-+
-+  def __iter__(self):
-+    return self.children.__iter__()
-+
-+  def __len__(self):
-+    return len(self.children)
-+
-+  def __getitem__(self, key):
-+    return self.children[key]
-+
-+  def __setitem__(self, key, value):
-+    self.children[key] = value
-+
-+
-+class RawObject(object):
-+  def __init__(self):
-+    self.obj_type = None
-+    self.configs = []
-+    self.properties = defaultdict(RawTree)
-+
-+  def __getitem__(self, key):
-+    return self.properties[key]
-+
-+  def __setitem__(self, key, value):
-+    self.properties[key] = value
-+
-+  def SetType(self, obj_type):
-+    if self.obj_type == None:
-+      self.obj_type = obj_type
-+    if self.obj_type != obj_type:
-+      raise RuntimeError('Mismatch type for %s, expected %s.' %
-+                         (name, obj_type))
-+
-+  def AddCondition(self, cond):
-+    self.configs.append(cond)
-+
-+  def Configs(self):
-+    return self.configs
-+
-+  def Properties(self):
-+    return self.properties
-+
-+  def Type(self):
-+    return self.obj_type
-diff --git a/native_client/tools/scons_to_gn/scons_environment.py b/native_client/tools/scons_to_gn/scons_environment.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..0d708704228b9b8a6a69a86f06e4c306b82aefd7
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/scons_environment.py
-@@ -0,0 +1,206 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+import SCons.Errors
-+
-+from collections import defaultdict
-+from conditions import *
-+
-+from properties import ConvertIfSingle, ParsePropertyTable
-+
-+
-+def LibName(name):
-+  if name[:3] == "lib":
-+    return name[3:]
-+  return name
-+
-+
-+class Environment(object):
-+  def __init__(self, tracker, cond_obj):
-+    self.add_attributes = defaultdict()
-+    self.del_attributes = defaultdict()
-+    self.tracker = tracker
-+    self.cond_obj = cond_obj
-+    self.props = { 'AS' : 'assembler', 'OBJDUMP' : 'objdump' }
-+    self.headers = []
-+
-+  def __getitem__(self, key):
-+    if key in ['TARGET_ARCHITECTURE']:
-+      return self.cond_obj.get(key)
-+    return self.props[key]
-+
-+  def __setitem__(self, key, value):
-+    self.props[key] = value
-+
-+  def get(self, key, default=None):
-+    if key in self.props:
-+      return self.props[key]
-+    return self.cond_obj.get(key, default)
-+
-+  def Bit(self, name):
-+    return self.cond_obj.Bit(name)
-+
-+  def Clone(self, **kwargs):
-+    env = Environment(self.tracker, self.cond_obj)
-+    env.add_attributes = dict(self.add_attributes)
-+    env.del_attributes = dict(self.del_attributes)
-+    for k,v in kwargs.iteritems():
-+      env.props[k] = v
-+    return env
-+
-+  def MakeUntrustedNativeEnv(self):
-+    return self
-+
-+  def MakeGTestEnv(self):
-+    return self
-+
-+  def Append(self, **kwargs):
-+    table = ParsePropertyTable(kwargs)
-+    for k,v in table.iteritems():
-+      self.add_attributes[k] = self.add_attributes.get(k,[]) + v
-+
-+  def FilterOut(self, **kwargs):
-+    table = ParsePropertyTable(kwargs)
-+    for k,v in table.iteritems():
-+      self.del_attributes[k] = self.del_attributes.get(k,[]) + v
-+
-+  def AddHeaderToSdk(self, nodes):
-+    if not isinstance(nodes, list):
-+      nodes = [nodes]
-+    self.headers.extend(nodes)
-+    return nodes
-+
-+  def File(self, name):
-+    return name
-+
-+  def AutoDepsCommand(self, name, *args, **kwargs):
-+    return name
-+
-+  def AlwaysBuild(self, *args, **kwargs):
-+    return None
-+
-+  def AddLibraryToSdk(self, nodes):
-+    if not isinstance(nodes, list):
-+      nodes = [nodes]
-+
-+    for node in nodes:
-+      self.tracker.AddLibrary(node)
-+    return nodes
-+
-+  def AddObject(self, name, sources, objtype, **kwargs):
-+    if type(sources) == type(""):
-+      sources = [sources]
-+    add_props = { 'sources': sources }
-+
-+    table = ParsePropertyTable(kwargs)
-+    for k,v in table.iteritems():
-+      add_props[k] = add_props.get(k, []) + v
-+
-+    # For all GN property:value pairs in the environment
-+    for k,v in self.add_attributes.iteritems():
-+      add_props[k] = add_props.get(k, []) + v
-+
-+    self.tracker.AddObject(name, objtype, add_props, self.del_attributes)
-+    return name
-+
-+  def ComponentLibrary(self, name, sources, **kwargs):
-+    return self.AddObject(LibName(name), sources, 'static_library', **kwargs)
-+
-+  def DualLibrary(self, name, sources, **kwargs):
-+    return self.AddObject(LibName(name), sources, 'static_library', **kwargs)
-+
-+  def DualObject(self, name, **kwargs):
-+    return name
-+
-+  def Alias(self, *args, **kwargs):
-+    return None
-+
-+  def ComponentProgramAlias(self, *args, **kwargs):
-+    return None
-+
-+  def SDKInstallBin(self, *args, **kwargs):
-+    return None
-+
-+  def ApplyTLSEdit(self, nexe_name, raw_nexe):
-+    self.tracker.AddObject('ApplyTLS %s %s' % (raw_nexe,nexe_name), 'note')
-+    return nexe_name
-+
-+  def Install(self, dst, src):
-+    self.tracker.AddObject('Copy %s to %s' % (src, dst), 'note')
-+    return src
-+
-+  def ComponentObject(self, name, source=None):
-+    source = source or name
-+    self.AddObject(name, [source], 'source_set')
-+    return name
-+
-+  def ComponentProgram(self, name, sources, **kwargs):
-+    # self.AddObject(name, sources, 'executable', **kwargs)
-+    return name
-+
-+  def Command(self, *args, **kwargs):
-+    print "Command: %s : %s" % (str(args), str(kwargs))
-+
-+  def CommandTest(self, name, command, size='small', direct_emulation=True,
-+                extra_deps=[], posix_path=False, capture_output=True,
-+                capture_stderr=True, wrapper_program_prefix=None,
-+                scale_timeout=None, **kwargs):
-+
-+    ARGS = kwargs
-+    ARGS['direct_emulation']=direct_emulation
-+    ARGS['extra_deps']=extra_deps
-+    ARGS['posix_path']=posix_path
-+    ARGS['capture_output']=capture_output
-+    ARGS['capture_stderr']=capture_stderr
-+    ARGS['wrapper_program_prefix']=wrapper_program_prefix
-+    ARGS['scale_timeout'] = scale_timeout
-+    # self.AddObject(name, [], 'test', **ARGS)
-+    return name
-+
-+  def CommandSelLdrTestNacl(self, *args, **kwargs):
-+    return None
-+
-+  def GetTranslatedNexe(self, *args, **kwargs):
-+    return "Translated Nexe"
-+
-+  def AddNodeToTestSuite(self, node, suites, *args, **kwargs):
-+    name = "Unknown"
-+    if len(args):
-+      name = args[0]
-+    # self.tracker.AddObject('Add %s to %s.' %
-+    #                       (node, ' and '.join(suites)),
-+    #                       'note')
-+    return name
-+
-+  def EnsureRequiredBuildWarnings(env, **kwargs):
-+    return True
-+
-+  def IsRunningUnderValgrind(self):
-+    return False
-+
-+  def GetIrtNexe(self):
-+    return "irt_core.nexe"
-+
-+  def MakeEmptyFile(env, **kwargs) :
-+    return "BOGUS TEMP FILE"
-+
-+  def MakeTempDir(env, **kwargs) :
-+    return "BOGUS TEMP DIR"
-+
-+  def NaClSharedLibrary(env, name, *args, **kwargs):
-+    return self.AddObject(LibName(name), sources, 'shared_library', **kwargs)
-+
-+  def NaClSdkLibrary(self, name, sources, **kwargs):
-+    return self.AddObject(LibName(name), sources, 'static_library', **kwargs)
-+
-+  def Requires(self, *args):
-+    return args
-+
-+  def Flush(self):
-+    if self.headers:
-+      add_props = { 'sources' : self.headers }
-+      self.tracker.AddObject("Install", "Install", add_props)
-diff --git a/native_client/tools/scons_to_gn/targets.py b/native_client/tools/scons_to_gn/targets.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..fa7d00e91cdc1a349d25e2460b12dc0e24a31f3b
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/targets.py
-@@ -0,0 +1,24 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+TargetTracker
-+
-+The target tracker is responsible for tracking meta targets, and more complex
-+tragets such as NaCl test rules.
-+"""
-+
-+class TargetTracker(object):
-+  def __init__(self):
-+    self.targets = {}
-+    self.always = set()
-+    self.alias = {}
-+
-+  def Alias(self, alias, name):
-+    self.alias[alias] = name
-+    return alias
-+
-+  def AlwaysBuild(self, name):
-+    self.always |= set([name])
-+    return name
-diff --git a/native_client/tools/scons_to_gn/test.scons b/native_client/tools/scons_to_gn/test.scons
-new file mode 100644
-index 0000000000000000000000000000000000000000..31b1c58c65a67f567c6e197370b3a66760de47cb
---- /dev/null
-+++ b/native_client/tools/scons_to_gn/test.scons
-@@ -0,0 +1,38 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file
-+
-+# Test file for scons_to_gn
-+
-+sources = ['A.c', 'B.c', 'C.c']
-+defines = []
-+
-+if env.Bit('win'):
-+  sources += ['win']
-+if env.Bit('build_x86_32'):
-+  defines += ['_x86']
-+if env.Bit('build_x86_64'):
-+  defines += ['_x64']
-+
-+if True:
-+  sources += ['FOOBAR.c']
-+
-+env.ComponentLibrary('all', sources, CFLAGS=['-D' + x for x in defines])
-+
-+nacl_env = env.Clone()
-+nacl_env.Append(CFLAGS=['-DNACL'])
-+
-+if nacl_env.Bit('win'):
-+  nacl_env.ComponentLibrary('win', sources)
-+
-+if env.Bit('linux'):
-+  env.ComponentLibrary('linux', sources)
-+
-+if env.Bit('linux'):
-+  cpu_test = nacl_env.ComponentProgram('my_test', ['testing/test.c'],
-+      EXTRA_LIBS=['cpu_features','platform'])
-+
-+  node = nacl_env.CommandTest(
-+      'cpu_x86_test.out',
-+      [cpu_test])
-+  nacl_env.AddNodeToTestSuite(node, ['small_tests'], 'run_cpu_x86_test')
-diff --git a/native_client/tools/sel_ldr.bash b/native_client/tools/sel_ldr.bash
-new file mode 100644
-index 0000000000000000000000000000000000000000..16d8a112bd1d7b9f221d533bb216b9faebd9d502
---- /dev/null
-+++ b/native_client/tools/sel_ldr.bash
-@@ -0,0 +1,49 @@
-+#!/bin/bash
-+#
-+# sel_ldr.bash
-+# A simple shell script for:
-+# 1)  Invoking the sel_ldr with the setuid sandbox
-+# 2)  Starting up sel_ldr with an enhanced
-+#     library path, for Linux. This allows us to install libraries in
-+#     a user directory rather than having to put them someplace like
-+#     /usr/lib
-+#
-+LD_LIBRARY_PATH=$HOME/.mozilla/plugins:$LD_LIBRARY_PATH
-+export LD_LIBRARY_PATH
-+
-+safe_dir=/usr/local/google/plugins/
-+
-+if [ -f $safe_dir/sandboxme ]; then
-+  echo "Running sandboxed sel_ldr"
-+  found_module=0
-+  args=''
-+  for i in "$@"
-+  do
-+    if [ $found_module = 1 ]
-+    then
-+      module="$i"
-+      args="$args '$safe_dir/module.nexe'"
-+      cp -- "$i" "$safe_dir/module.nexe"
-+      chmod ugo+r "$safe_dir/module.nexe"
-+      found_module=0
-+    else
-+      i=$(echo "$i" | sed "s/'/'\\\\''/g")
-+      args="$args '$i'"
-+    fi
-+    case "$i" in
-+      -f)
-+        found_module=1
-+        ;;
-+    esac
-+  done
-+  if [ "$module" = '' ]
-+  then
-+    echo "Error:  No NaCl module specified." >&2
-+    exit 1
-+  fi
-+  cp $HOME/.mozilla/plugins/sel_ldr_bin "$safe_dir/"
-+  eval SBD_X=4 exec $safe_dir/sandboxme -c0 -u0 -- $safe_dir/sel_ldr_bin $args
-+else
-+  echo "Warning: Running non-sandboxed sel_ldr"
-+  exec $HOME/.mozilla/plugins/sel_ldr_bin "$@"
-+fi
-diff --git a/native_client/tools/synthesize_code.py b/native_client/tools/synthesize_code.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..eca4817c74a5def3ea3587676f35f9d6b6d3c898
---- /dev/null
-+++ b/native_client/tools/synthesize_code.py
-@@ -0,0 +1,55 @@
-+#!/usr/bin/python
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+
-+"""This tool synthesizes a very large C program based on a single
-+integer argument passed on the command line.
-+"""
-+import sys
-+
-+# The genareted code alternated between these operators
-+OPERATORS = ["+", "-", "*", "/"]
-+# number of function calls made by each function
-+# A fairly high number here will disuade the inliner from doing anything
-+# because function bodies will be large and the number of callers will be large.
-+NUM_CALLS = 100
-+
-+def EmitProlog(n, out):
-+  out.write("/* n == %d */\n" % n)
-+
-+  for i in range(n):
-+    out.write("int func_%d(int x);\n" % i)
-+
-+def EmitFunctions(n, out):
-+  for i in range(n):
-+    out.write("\n")
-+    out.write("int func_%d(int x) {\n" % i)
-+    out.write("  int result = %d;\n" % i)
-+    op = OPERATORS[i % len(OPERATORS)]
-+    fun_indices = [(i + x) % n for x in range(1, NUM_CALLS + 1)]
-+    for f in fun_indices:
-+      out.write("  if (result != %d) result %s= func_%d(result);\n" %
-+                (f, op, f))
-+    out.write("  return result;\n")
-+    out.write("}\n")
-+
-+def EmitMain(n, out):
-+  out.write("\n")
-+  # Note, use of argc is intended to thwart optimization
-+  out.write("int main(int argc, char* argv[]) { return func_0(argc); }\n")
-+
-+def main(argv):
-+  if len(argv) != 2:
-+    print "Expecting integer parameter"
-+    return 1
-+  n = int(argv[1])
-+  out = sys.stdout
-+  out.write("/* This code was generated using %s */\n" % repr(argv))
-+  EmitProlog(n, out)
-+  EmitFunctions(n, out)
-+  EmitMain(n, out)
-+
-+if __name__ == '__main__':
-+  sys.exit(main(sys.argv))
-diff --git a/native_client/tools/syscall_stats.py b/native_client/tools/syscall_stats.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..6455fe28e79ce8362b1d7d0e28ce4b993f0b9e40
---- /dev/null
-+++ b/native_client/tools/syscall_stats.py
-@@ -0,0 +1,244 @@
-+#!/usr/bin/python
-+# Copyright 2008 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+
-+
-+"""
-+Filter service runtime logging output and compute system call statistics.
-+
-+To use this script, define the BENCHMARK symbol to be zero (default)
-+in nacl_syscall_hook.c.  Next, run the service runtime with NACLLOG
-+set to an output file name.  When the run is complete, run this script
-+with that file as input.
-+
-+"""
-+
-+import math
-+import re
-+import sys
-+
-+
-+class Stats:
-+  """
-+  Compute basic statistics.
-+  """
-+  def __init__(self):
-+    self._sum_x = 0.0
-+    self._sum_x_squared = 0.0
-+    self._n = 0
-+
-+  def Enter(self, val):
-+    """Enter a new value.
-+
-+    Args:
-+      val: the new (floating point) value
-+    """
-+    self._sum_x += val
-+    self._sum_x_squared += val * val
-+    self._n += 1
-+
-+  def Mean(self):
-+    """Returns the mean of entered values.
-+    """
-+    return self._sum_x / self._n
-+
-+  def Variance(self):
-+    """Returns the variance of entered values.
-+    """
-+    mean = self.Mean()
-+    return self._sum_x_squared / self._n - mean * mean
-+
-+  def Stddev(self):
-+    """Returns the standard deviation of entered values.
-+    """
-+    return math.sqrt(self.Variance())
-+
-+  def NumEntries(self):
-+    """Returns the number of data points entered.
-+    """
-+    return self._n
-+
-+
-+class PeakStats:
-+  """Compute min and max for a data set.  While far less efficient
-+  than using a reduce, this class makes streaming data handling
-+  easier.
-+  """
-+
-+  def __init__(self):
-+    self._min = 1L << 64
-+    self._max = -1
-+
-+  def Enter(self, val):
-+    """Enter a new datum.
-+
-+    Args:
-+      val: the new datum to be entered.
-+    """
-+    if val > self._max:
-+      self._max = val
-+    if val < self._min:
-+      self._min = val
-+
-+  def Max(self):
-+    """Returns the maximum value found so far.
-+    """
-+    return self._max
-+
-+  def Min(self):
-+    """Returns the minimum value found so far.
-+    """
-+    return self._min
-+
-+
-+class WindowedRate:
-+
-+  """Class for computing statistics on events based on counting the
-+  number of occurrences in a time interval.  Statistcs on these
-+  bucketed counts are then available.
-+
-+  """
-+  def __init__(self, duration):
-+    self._t_start = -1
-+    self._t_duration = duration
-+    self._t_end = -1
-+    self._event_count = 0
-+    self._rate_stats = Stats()
-+    self._peak_stats = PeakStats()
-+
-+  def Enter(self, t):
-+    """Enter in a new event that occurred at time t.
-+
-+    Args:
-+      t: the time at which an event occurred.
-+    """
-+    if self._t_start == -1:
-+      self._t_start = t
-+      self._t_end = t + self._t_duration
-+      return
-+    # [ t_start, t_start + duration )
-+    if t < self._t_end:
-+      self._event_count += 1
-+      return
-+    self.Compute()
-+    self._event_count = 1
-+    next_end = self._t_end
-+    while next_end < t:
-+      next_end += self._t_duration
-+    self._t_end = next_end
-+    self._t_start = next_end - self._t_duration
-+
-+  def Compute(self):
-+    """Finalize the last bucket.
-+
-+    """
-+    self._rate_stats.Enter(self._event_count)
-+    self._peak_stats.Enter(self._event_count)
-+    self._event_count = 0
-+
-+  def RateStats(self):
-+    """Returns the event rate statistics object.
-+
-+    """
-+    return self._rate_stats
-+
-+  def PeakStats(self):
-+    """Returns the peak event rate statistics object.
-+
-+    """
-+    return self._peak_stats
-+
-+
-+class TimestampParser:
-+  """
-+  A class to parse timestamp strings.  This is needed because there is
-+  implicit state: the timestamp string is HH:MM:SS.fract and may cross
-+  a 24 hour boundary -- we do not log the date since that would make
-+  the log file much larger and generally it is not needed (implicit in
-+  file modification time) -- so we convert to a numeric representation
-+  that is relative to an arbitrary epoch start, and the state enables
-+  us to correctly handle midnight.
-+
-+  This code assumes that the timestamps are monotonically
-+  non-decreasing.
-+
-+  """
-+  def __init__(self):
-+    self._min_time = -1
-+
-+  def Convert(self, timestamp):
-+    """Converts a timestamp string into a numeric timestamp value.
-+
-+    Args:
-+      timestamp: A timestamp string in HH:MM:SS.fraction format.
-+
-+    Returns:
-+      a numeric timestamp (arbitrary epoch)
-+    """
-+    (hh, mm, ss) = map(float,timestamp.split(':'))
-+    t = ((hh * 60) + mm) * 60 + ss
-+    if self._min_time == -1:
-+      self._min_time = t
-+    while t < self._min_time:
-+      t += 24 * 60 * 60
-+    self._min_time = t
-+    return t
-+
-+
-+def ReadFileHandle(fh, duration):
-+  """Reads log data from the provided file handle, and compute and
-+  print various statistics on the system call rate based on the log
-+  data.
-+
-+  """
-+  # log format "[pid:timestamp] msg" where the timestamp is
-+  log_re = re.compile(r'\[[0-9,]+:([:.0-9]+)\] system call [0-9]+')
-+  parser = TimestampParser()
-+  inter_stats = Stats()
-+  rate_stats = Stats()
-+  windowed = WindowedRate(duration)
-+  prev_time = -1
-+  start_time = 0
-+  for line in fh:  # generator
-+    m = log_re.search(line)
-+    if m is not None:
-+      timestamp = m.group(1)
-+      t = parser.Convert(timestamp)
-+
-+      windowed.Enter(t)
-+
-+      if prev_time != -1:
-+        elapsed = t - prev_time
-+        inter_stats.Enter(elapsed)
-+        rate_stats.Enter(1.0/elapsed)
-+      else:
-+        start_time = t
-+      prev_time = t
-+
-+  print '\nInter-syscall time'
-+  print 'Mean:   %g' % inter_stats.Mean()
-+  print 'Stddev: %g' % inter_stats.Stddev()
-+  print '\nInstantaneous Syscall Rate (unweighted!)'
-+  print 'Mean :  %g' % rate_stats.Mean()
-+  print 'Stddev: %g' % rate_stats.Stddev()
-+  print '\nAvg Syscall Rate: %g' % (rate_stats.NumEntries()
-+                                    / (prev_time - start_time))
-+
-+  print '\nSyscalls in %f interval' % duration
-+  print 'Mean:   %g' % windowed.RateStats().Mean()
-+  print 'Stddev: %g' % windowed.RateStats().Stddev()
-+  print 'Min:    %g' % windowed.PeakStats().Min()
-+  print 'Max:    %g' % windowed.PeakStats().Max()
-+
-+
-+def main(argv):
-+  if len(argv) > 1:
-+    print >>sys.stderr, 'no arguments expected\n'
-+    return 1
-+  ReadFileHandle(sys.stdin, 0.010)
-+  return 0
-+
-+if __name__ == '__main__':
-+  sys.exit(main(sys.argv))
-diff --git a/native_client/tools/sysinfo.py b/native_client/tools/sysinfo.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..00d1c7e7bd1e939cc05db42658f396ba48c33764
---- /dev/null
-+++ b/native_client/tools/sysinfo.py
-@@ -0,0 +1,160 @@
-+#!/usr/bin/python
-+# Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+
-+"""Simple system info tool for bug reports, etc.
-+
-+"""
-+
-+
-+
-+# More info at:
-+#
-+# http://code.activestate.com/recipes/511491/
-+# http://www.koders.com/python/fidB436B8043AA994C550C0961247DACC3E04E84734.aspx?s=config
-+# http://developer.apple.com/documentation/Darwin/Reference/ManPages/man8/sysctl.8.html
-+
-+# imports
-+import os
-+import sys
-+import time
-+
-+
-+VERBOSE = 0
-+
-+
-+def Banner(text):
-+  print '=' * 70
-+  print text
-+  print '=' * 70
-+  # quick hack to keep banner in sync with os.system output
-+  sys.stdout.flush()
-+
-+
-+def InfoLinux():
-+  Banner('OS:')
-+  os.system('uname -a')
-+
-+  Banner('CPU:')
-+  if VERBOSE:
-+    os.system('cat /proc/cpuinfo')
-+  else:
-+    os.system("egrep 'name|MHz|stepping' /proc/cpuinfo")
-+
-+  Banner('RAM:')
-+  if VERBOSE:
-+    os.system('cat /proc/meminfo')
-+  else:
-+    os.system('cat /proc/meminfo | egrep Mem')
-+
-+  Banner('LOAD:')
-+  os.system('cat /proc/loadavg')
-+
-+  Banner('UPTIME:')
-+  os.system('cat /proc/uptime')
-+
-+
-+def InfoDarwin():
-+  Banner('OS:')
-+  os.system('sysctl kern | egrep "kern\.os|version"')
-+
-+  Banner('CPU:')
-+  os.system('sysctl hw.machine')
-+  os.system('sysctl hw.model')
-+  os.system('sysctl hw.ncpu')
-+  if VERBOSE:
-+    os.system("sysctl hw")
-+  else:
-+    os.system("sysctl hw | egrep 'cpu'")
-+
-+  Banner('RAM:')
-+  if VERBOSE:
-+    os.system("sysctl hw")
-+  else:
-+    os.system("sysctl hw | egrep 'mem'")
-+
-+  Banner('LOAD:')
-+  print 'TBD'
-+
-+  Banner('UPTIME:')
-+  os.system('sysctl kern | egrep "kern\.boottime"')
-+
-+
-+def InfoWin32():
-+  import _winreg
-+
-+  def GetRegistryOS( value):
-+    db = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE,
-+                         'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion')
-+
-+    return _winreg.QueryValueEx(db, value)[0]
-+
-+  Banner('OS:')
-+  for key in ['ProductName',
-+              'CSDVersion',
-+              'CurrentBuildNumber']:
-+    print  GetRegistryOS(key)
-+
-+  Banner('CPU:')
-+  db = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE,
-+                       'HARDWARE\\DESCRIPTION\\System\\CentralProcessor')
-+  for n in range(0, 1000):
-+     try:
-+       cpu = _winreg.EnumKey(db, n)
-+     except Exception:
-+       break
-+     print "\nProcessor :", cpu
-+     db_cpu = _winreg.OpenKey(db, cpu)
-+     for i in range(0, 1000):
-+       try:
-+         name, value, type =_winreg.EnumValue(db_cpu, i)
-+       except Exception:
-+         break
-+       # skip binary data
-+       if type == _winreg.REG_BINARY: continue
-+       if type == _winreg.REG_FULL_RESOURCE_DESCRIPTOR: continue
-+       print name, type, value
-+
-+  Banner('RAM:')
-+  print 'TBD'
-+  # TODO: this is currently broken since ctypes is not available
-+
-+  Banner('LOAD:')
-+  print 'TBD'
-+
-+  Banner('UPTIME:')
-+  print 'TBD'
-+
-+
-+PLATFORM_INFO = {
-+    'linux2': InfoLinux,
-+    'linux3': InfoLinux,
-+    'darwin': InfoDarwin,
-+    'win32': InfoWin32,
-+    }
-+
-+
-+def main():
-+  Banner('Python Info:')
-+  print sys.platform
-+  print sys.version
-+
-+  Banner('ENV:')
-+  for e in ['PATH']:
-+    print e, os.getenv(e)
-+
-+
-+  if sys.platform in PLATFORM_INFO:
-+    try:
-+      PLATFORM_INFO[sys.platform]()
-+    except Exception, err:
-+      print 'ERRROR: processing sys info', str(err)
-+  else:
-+    print 'ERROR: unknwon platform', system.platform
-+
-+  return 0
-+
-+
-+sys.exit(main())
-diff --git a/native_client/tools/test_lib.py b/native_client/tools/test_lib.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..bc96de2f31e04cce4d9c619816289c42b6e174b7
---- /dev/null
-+++ b/native_client/tools/test_lib.py
-@@ -0,0 +1,344 @@
-+#!/usr/bin/python
-+# Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Testing Library For Nacl.
-+
-+"""
-+
-+import atexit
-+import difflib
-+import os
-+import re
-+import shutil
-+import signal
-+import subprocess
-+import sys
-+import tempfile
-+import threading
-+
-+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-+import pynacl.platform
-+
-+
-+# Windows does not fully implement os.times functionality.  If
-+# _GetTimesPosix were used, the fields for CPU time used in user and
-+# in kernel mode by the process will both be zero.  Instead, we must
-+# use the ctypes module and access windll's kernel32 interface to
-+# extract the CPU usage information.
-+
-+if sys.platform[:3] == 'win':
-+  import ctypes
-+
-+
-+class SubprocessCpuTimer:
-+  """Timer used to measure user and kernel CPU time expended by a subprocess.
-+
-+  A new object of this class should be instantiated just before the
-+  subprocess is created, and after the subprocess is finished and
-+  waited for (via the wait method of the Popen object), the elapsed
-+  time can be obtained by invoking the ElapsedCpuTime of the
-+  SubprocessCpuTimer instance.
-+
-+  """
-+
-+  WIN32_PROCESS_TIMES_TICKS_PER_SECOND = 1.0e7
-+
-+  # use a class variable to avoid slicing at run-time
-+  _use_proc_handle = sys.platform[:3] == 'win'
-+
-+
-+  @staticmethod
-+  def _GetTimePosix():
-+    try:
-+      t = os.times()
-+    except OSError:
-+      # This works around a bug in the calling conventions for the
-+      # times() system call on Linux.  This syscall returns a number
-+      # of clock ticks since an arbitrary time in the past, but if
-+      # this happens to be between -4095 and -1, it is interpreted as
-+      # an errno value, and we get an exception here.
-+      # Returning 0 as a dummy value may result in ElapsedCpuTime()
-+      # below returning a negative value.  This is OK for our use
-+      # because a test that takes too long is likely to be caught
-+      # elsewhere.
-+      if sys.platform == "linux2":
-+        return 0
-+      raise
-+    else:
-+      return t[2] + t[3]
-+
-+
-+  @staticmethod
-+  def _GetTimeWindows(proc_handle):
-+    if proc_handle is None:
-+      return 0
-+    creation_time = ctypes.c_ulonglong()
-+    exit_time = ctypes.c_ulonglong()
-+    kernel_time = ctypes.c_ulonglong()
-+    user_time = ctypes.c_ulonglong()
-+    rc = ctypes.windll.kernel32.GetProcessTimes(
-+        int(proc_handle._handle),
-+        ctypes.byref(creation_time),
-+        ctypes.byref(exit_time),
-+        ctypes.byref(kernel_time),
-+        ctypes.byref(user_time))
-+    if not rc:
-+      print >>sys.stderr, 'Could not obtain process time'
-+      return 0
-+    return ((kernel_time.value + user_time.value)
-+            / SubprocessCpuTimer.WIN32_PROCESS_TIMES_TICKS_PER_SECOND)
-+
-+
-+  @staticmethod
-+  def _GetTime(proc_handle):
-+    if SubprocessCpuTimer._use_proc_handle:
-+      return SubprocessCpuTimer._GetTimeWindows(proc_handle)
-+    return SubprocessCpuTimer._GetTimePosix()
-+
-+
-+  def __init__(self):
-+    self._start_time = self._GetTime(None)
-+
-+
-+  def ElapsedCpuTime(self, proc_handle):
-+    return self._GetTime(proc_handle) - self._start_time
-+
-+def PopenBufSize():
-+  return 1000 * 1000
-+
-+
-+def CommunicateWithTimeout(proc, input_data=None, timeout=None):
-+  if timeout == 0:
-+    timeout = None
-+
-+  result = []
-+  def Target():
-+    result.append(list(proc.communicate(input_data)))
-+
-+  thread = threading.Thread(target=Target)
-+  thread.start()
-+  thread.join(timeout)
-+  if thread.is_alive():
-+    sys.stderr.write('\nAttempting to kill test due to timeout!\n')
-+    # This will kill the process which should force communicate to return with
-+    # any partial output.
-+    pynacl.platform.KillSubprocessAndChildren(proc)
-+    # Thus result should ALWAYS contain something after this join.
-+    thread.join()
-+    sys.stderr.write('\n\nKilled test due to timeout!\n')
-+    # Also append to stderr.
-+    result[0][1] += '\n\nKilled test due to timeout!\n'
-+    returncode = -9
-+  else:
-+    returncode = proc.returncode
-+  assert len(result) == 1
-+  return tuple(result[0]) + (returncode,)
-+
-+
-+def RunTestWithInput(cmd, input_data, timeout=None):
-+  """Run a test where we only care about the return code."""
-+  assert type(cmd) == list
-+  failed = 0
-+  timer = SubprocessCpuTimer()
-+  p = None
-+  try:
-+    sys.stdout.flush() # Make sure stdout stays in sync on the bots.
-+    if type(input_data) == str:
-+      p = subprocess.Popen(cmd,
-+                           bufsize=PopenBufSize(),
-+                           stdin=subprocess.PIPE)
-+      _, _, retcode = CommunicateWithTimeout(p, input_data, timeout=timeout)
-+    else:
-+      p = subprocess.Popen(cmd,
-+                           bufsize=PopenBufSize(),
-+                           stdin=input_data)
-+      _, _, retcode = CommunicateWithTimeout(p, timeout=timeout)
-+  except OSError:
-+    print 'exception: ' + str(sys.exc_info()[1])
-+    retcode = 0
-+    failed = 1
-+
-+  if p is None:
-+    return (0, 0, 1)
-+  return (timer.ElapsedCpuTime(p), retcode, failed)
-+
-+
-+def RunTestWithInputOutput(cmd, input_data, capture_stderr=True, timeout=None):
-+  """Run a test where we also care about stdin/stdout/stderr.
-+
-+  NOTE: this function may have problems with arbitrarily
-+        large input or output, especially on windows
-+  NOTE: input_data can be either a string or or a file like object,
-+        file like objects may be better for large input/output
-+  """
-+  assert type(cmd) == list
-+  stdout = ''
-+  stderr = ''
-+  failed = 0
-+
-+  p = None
-+  timer = SubprocessCpuTimer()
-+  try:
-+    # Python on windows does not include any notion of SIGPIPE.  On
-+    # Linux and OSX, Python installs a signal handler for SIGPIPE that
-+    # sets the handler to SIG_IGN so that syscalls return -1 with
-+    # errno equal to EPIPE, and translates those to exceptions;
-+    # unfortunately, the subprocess module fails to reset the handler
-+    # for SIGPIPE to SIG_DFL, and the SIG_IGN behavior is inherited.
-+    # subprocess.Popen's preexec_fn is apparently okay to use on
-+    # Windows, as long as its value is None.
-+
-+    if hasattr(signal, 'SIGPIPE'):
-+      no_pipe = lambda : signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-+    else:
-+      no_pipe = None
-+
-+    # Only capture stderr if capture_stderr is true
-+    p_stderr = subprocess.PIPE if capture_stderr else None
-+
-+    if type(input_data) == str:
-+      p = subprocess.Popen(cmd,
-+                           bufsize=PopenBufSize(),
-+                           stdin=subprocess.PIPE,
-+                           stderr=p_stderr,
-+                           stdout=subprocess.PIPE,
-+                           preexec_fn = no_pipe)
-+      stdout, stderr, retcode = CommunicateWithTimeout(
-+          p, input_data, timeout=timeout)
-+    else:
-+      # input_data is a file like object
-+      p = subprocess.Popen(cmd,
-+                           bufsize=PopenBufSize(),
-+                           stdin=input_data,
-+                           stderr=p_stderr,
-+                           stdout=subprocess.PIPE,
-+                           preexec_fn = no_pipe)
-+      stdout, stderr, retcode = CommunicateWithTimeout(p, timeout=timeout)
-+  except OSError, x:
-+    if x.errno == 10:
-+      print '@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
-+      print 'ignoring exception', str(sys.exc_info()[1])
-+      print 'return code NOT checked'
-+      print 'this seems to be a windows issue'
-+      print '@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
-+      failed = 0
-+      retcode = 0
-+    else:
-+      print 'exception: ' + str(sys.exc_info()[1])
-+      retcode = 0
-+      failed = 1
-+  if p is None:
-+    cpu_time_consumed = 0
-+  else:
-+    cpu_time_consumed = timer.ElapsedCpuTime(p)
-+  return (cpu_time_consumed, retcode, failed, stdout, stderr)
-+
-+
-+def DiffStringsIgnoringWhiteSpace(a, b):
-+  a = a.splitlines()
-+  b = b.splitlines()
-+  # NOTE: the whitespace stuff seems to be broken in python
-+  cruncher = difflib.SequenceMatcher(lambda x: x in ' \t\r', a, b)
-+
-+  for group in cruncher.get_grouped_opcodes():
-+    eq = True
-+    for tag, i1, i2, j1, j2 in group:
-+      if tag != 'equal':
-+        eq = False
-+        break
-+    if eq: continue
-+    i1, i2, j1, j2 = group[0][1], group[-1][2], group[0][3], group[-1][4]
-+    yield '@@ -%d,%d +%d,%d @@\n' % (i1+1, i2-i1, j1+1, j2-j1)
-+
-+    for tag, i1, i2, j1, j2 in group:
-+      if tag == 'equal':
-+        for line in a[i1:i2]:
-+          yield ' [' + line + ']'
-+        continue
-+      if tag == 'replace' or tag == 'delete':
-+        for line in a[i1:i2]:
-+          yield '-[' + repr(line) + ']'
-+      if tag == 'replace' or tag == 'insert':
-+        for line in b[j1:j2]:
-+          yield '+[' + repr(line) + ']'
-+
-+
-+def RegexpFilterLines(regexp, inverse, group_only, lines):
-+  """Apply regexp to filter lines of text, keeping only those lines
-+  that match.
-+
-+  Any carriage return / newline sequence is turned into a newline.
-+
-+  Args:
-+    regexp: A regular expression, only lines that match are kept
-+    inverse: Only keep lines that do not match
-+    group_only: replace matching lines with the regexp groups,
-+                text outside the groups are omitted, useful for
-+                eliminating file names that might change, etc).
-+
-+    lines: A string containing newline-separated lines of text
-+
-+  Return:
-+    Filtered lines of text, newline separated.
-+  """
-+
-+  result = []
-+  nfa = re.compile(regexp)
-+  for line in lines.split('\n'):
-+    if line.endswith('\r'):
-+      line = line[:-1]
-+    mobj = nfa.search(line)
-+    if mobj and inverse:
-+      continue
-+    if not mobj and not inverse:
-+      continue
-+
-+    if group_only:
-+      matched_strings = []
-+      for s in mobj.groups():
-+        if s is not None:
-+          matched_strings.append(s)
-+      result.append(''.join(matched_strings))
-+    else:
-+      result.append(line)
-+
-+  return '\n'.join(result)
-+
-+
-+def MakeTempDir(env, **kwargs):
-+  """Create a temporary directory and arrange to clean it up on exit.
-+
-+  Passes arguments through to tempfile.mkdtemp
-+  """
-+  temporary_dir = tempfile.mkdtemp(**kwargs)
-+  def Cleanup():
-+    try:
-+      # Try to remove the dir but only if it exists. Some tests may clean up
-+      # after themselves.
-+      if os.path.exists(temporary_dir):
-+        shutil.rmtree(temporary_dir)
-+    except BaseException as e:
-+      sys.stderr.write('Unable to delete dir %s on exit: %s\n' % (
-+        temporary_dir, e))
-+  atexit.register(Cleanup)
-+  return temporary_dir
-+
-+def MakeTempFile(env, **kwargs):
-+  """Create a temporary file and arrange to clean it up on exit.
-+
-+  Passes arguments through to tempfile.mkstemp
-+  """
-+  handle, path = tempfile.mkstemp(**kwargs)
-+  def Cleanup():
-+    try:
-+      # Try to remove the file but only if it exists. Some tests may clean up
-+      # after themselves.
-+      if os.path.exists(path):
-+        os.unlink(path)
-+    except BaseException as e:
-+      sys.stderr.write('Unable to delete file %s on exit: %s\n' % (
-+        path, e))
-+  atexit.register(Cleanup)
-+  return handle, path
