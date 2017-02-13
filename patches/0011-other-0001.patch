@@ -387,10 +387,10 @@ index 1ac5aef27947de679163f78d81d4f6998fe81ea3..747eed3fc636faa83d0cdedd6d8bcd69
    base::CommandLine::StringType about_blank_url(
        base::ASCIIToUTF16(url::kAboutBlankURL));
 diff --git a/base/BUILD.gn b/base/BUILD.gn
-index fc8f29fb9b0de02b6047678cba2fb592d6852f00..ecf68840f7f3d9735ea7091aa8c9658425cfd063 100644
+index 8f5be418e3458cdb86d54852883ae95f6d1bfd31..10784666c8af4a70d7e5bc63a942b85c077dcc7e 100644
 --- a/base/BUILD.gn
 +++ b/base/BUILD.gn
-@@ -304,6 +304,21 @@ component("base") {
+@@ -308,6 +308,21 @@ component("base") {
      "environment.h",
      "feature_list.cc",
      "feature_list.h",
@@ -412,18 +412,6 @@ index fc8f29fb9b0de02b6047678cba2fb592d6852f00..ecf68840f7f3d9735ea7091aa8c96584
      "file_descriptor_posix.h",
      "file_version_info.h",
      "file_version_info_mac.h",
-diff --git a/base/base.gyp b/base/base.gyp
-index d675119cb262c4d8ffca446b6fa43161afc14551..8c5ab92aef5372290d478ec3b51dd54fd1b084c0 100644
---- a/base/base.gyp
-+++ b/base/base.gyp
-@@ -30,6 +30,7 @@
-         '../testing/gtest.gyp:gtest_prod',
-         '../third_party/modp_b64/modp_b64.gyp:modp_b64',
-         'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-+        '../third_party/zlib/zlib.gyp:zlib',
-       ],
-       # TODO(gregoryd): direct_dependent_settings should be shared with the
-       #  64-bit target, but it doesn't work due to a bug in gyp
 diff --git a/base/base_paths.cc b/base/base_paths.cc
 index 31bc55401af4a8087b3319ba4f35d796e918c376..0f0baa96fda5030c352da673b2b8463fbb29434d 100644
 --- a/base/base_paths.cc
@@ -1703,18 +1691,18 @@ index 902e3013318d501a7a7df6983ef75d3661d3e419..c4bc0c1b618cf4d715985186688be70e
  
  static const size_t kSHA1Length = 20;  // Length in bytes of a SHA-1 hash.
 diff --git a/base/test/launcher/test_launcher.cc b/base/test/launcher/test_launcher.cc
-index a51d97e31207acc6c5e85e74eaacc8400e94170d..9c50c64a1e2967d331c31060b2e8c676d8b23e26 100644
+index 4b86c5621a938f7b57b7c2300ffa5437e1a9e6c8..05e4fe939446bd74e3a5dd207013867c7dc4e54b 100644
 --- a/base/test/launcher/test_launcher.cc
 +++ b/base/test/launcher/test_launcher.cc
-@@ -800,6 +800,7 @@ bool TestLauncher::Init() {
+@@ -786,6 +786,7 @@ bool TestLauncher::Init() {
    if (command_line->HasSwitch(switches::kTestLauncherForceRunBrokenTests))
      force_run_broken_tests_ = true;
  
 +  fprintf(stdout, "Initial parallel jobs limit: %" PRIuS ".\n", parallel_jobs_);
    if (command_line->HasSwitch(switches::kTestLauncherJobs)) {
-     int jobs = -1;
-     if (!StringToInt(command_line->GetSwitchValueASCII(
-@@ -810,10 +811,12 @@ bool TestLauncher::Init() {
+     size_t jobs = 0U;
+     if (!StringToSizeT(command_line->GetSwitchValueASCII(
+@@ -796,10 +797,12 @@ bool TestLauncher::Init() {
      }
  
      parallel_jobs_ = jobs;
@@ -1722,25 +1710,25 @@ index a51d97e31207acc6c5e85e74eaacc8400e94170d..9c50c64a1e2967d331c31060b2e8c676
    } else if (command_line->HasSwitch(kGTestFilterFlag) && !BotModeEnabled()) {
      // Do not run jobs in parallel by default if we are running a subset of
      // the tests and if bot mode is off.
-     parallel_jobs_ = 1;
+     parallel_jobs_ = 1U;
 +    fprintf(stdout, "Filter flag update parallel jobs limit: %" PRIuS ".\n", parallel_jobs_);
    }
  
    fprintf(stdout, "Using %" PRIuS " parallel jobs.\n", parallel_jobs_);
 diff --git a/base/test/launcher/unit_test_launcher.cc b/base/test/launcher/unit_test_launcher.cc
-index aeb96aca97c741b72c9052b93b7ff50cdb047a2f..9a61b1cd8fea2399da5da494b0555183a48c0963 100644
+index b97d09f65df8f37cea66683ad557ebf26bb58be1..c77be3f7ae1128d107b6031961b81a1de03a723b 100644
 --- a/base/test/launcher/unit_test_launcher.cc
 +++ b/base/test/launcher/unit_test_launcher.cc
-@@ -31,6 +31,8 @@
- #include "build/build_config.h"
- #include "testing/gtest/include/gtest/gtest.h"
+@@ -35,6 +35,8 @@
+ #include "base/files/file_descriptor_watcher_posix.h"
+ #endif
  
 +#include "base/vivaldi_switches.h"
 +
  namespace base {
  
  namespace {
-@@ -177,6 +179,8 @@ int LaunchUnitTestsInternal(const RunTestSuiteCallback& run_test_suite,
+@@ -181,6 +183,8 @@ int LaunchUnitTestsInternal(const RunTestSuiteCallback& run_test_suite,
                              int default_batch_limit,
                              bool use_job_objects,
                              const Closure& gtest_init) {
@@ -138600,3 +138588,120 @@ index 0000000000000000000000000000000000000000..72fbba84a9f1d5965136799c077775f1
 +}  // namespace google_breakpad
 +
 +#endif  // PROCESSOR_LINKED_PTR_H__
+diff --git a/breakpad/src/processor/logging.cc b/breakpad/src/processor/logging.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..c1eebbc22331e9786a785317899d9995fb59089d
+--- /dev/null
++++ b/breakpad/src/processor/logging.cc
+@@ -0,0 +1,111 @@
++// Copyright (c) 2007, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// logging.cc: Breakpad logging
++//
++// See logging.h for documentation.
++//
++// Author: Mark Mentovai
++
++#include <assert.h>
++#include <errno.h>
++#include <string.h>
++#include <time.h>
++
++#include <string>
++
++#include "common/stdio_wrapper.h"
++#include "common/using_std_string.h"
++#include "processor/logging.h"
++#include "processor/pathname_stripper.h"
++
++namespace google_breakpad {
++
++LogStream::LogStream(std::ostream &stream, Severity severity,
++                     const char *file, int line)
++    : stream_(stream) {
++  time_t clock;
++  time(&clock);
++  struct tm tm_struct;
++#ifdef _WIN32
++  localtime_s(&tm_struct, &clock);
++#else
++  localtime_r(&clock, &tm_struct);
++#endif
++  char time_string[20];
++  strftime(time_string, sizeof(time_string), "%Y-%m-%d %H:%M:%S", &tm_struct);
++
++  const char *severity_string = "UNKNOWN_SEVERITY";
++  switch (severity) {
++    case SEVERITY_INFO:
++      severity_string = "INFO";
++      break;
++    case SEVERITY_ERROR:
++      severity_string = "ERROR";
++      break;
++  }
++
++  stream_ << time_string << ": " << PathnameStripper::File(file) << ":" <<
++             line << ": " << severity_string << ": ";
++}
++
++LogStream::~LogStream() {
++  stream_ << std::endl;
++}
++
++string HexString(uint32_t number) {
++  char buffer[11];
++  snprintf(buffer, sizeof(buffer), "0x%x", number);
++  return string(buffer);
++}
++
++string HexString(uint64_t number) {
++  char buffer[19];
++  snprintf(buffer, sizeof(buffer), "0x%" PRIx64, number);
++  return string(buffer);
++}
++
++string HexString(int number) {
++  char buffer[19];
++  snprintf(buffer, sizeof(buffer), "0x%x", number);
++  return string(buffer);
++}
++
++int ErrnoString(string *error_string) {
++  assert(error_string);
++
++  // strerror isn't necessarily thread-safe.  strerror_r would be preferrable,
++  // but GNU libc uses a nonstandard strerror_r by default, which returns a
++  // char* (rather than an int success indicator) and doesn't necessarily
++  // use the supplied buffer.
++  error_string->assign(strerror(errno));
++  return errno;
++}
++
++}  // namespace google_breakpad
