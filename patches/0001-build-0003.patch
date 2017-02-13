@@ -1,279 +1,3 @@
-diff --git a/tools/gyp/test/mac/xcode-env-order/file.ext3 b/tools/gyp/test/mac/xcode-env-order/file.ext3
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/mac/xcode-env-order/main.c b/tools/gyp/test/mac/xcode-env-order/main.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..1bf4b2a11abd99b0655222eb96624b9abed72423
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-env-order/main.c
-@@ -0,0 +1,7 @@
-+// Copyright (c) 2011 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+int main() {
-+  return 0;
-+}
-diff --git a/tools/gyp/test/mac/xcode-env-order/test.gyp b/tools/gyp/test/mac/xcode-env-order/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..8f975f7d6b17feabd001f0c5f5ee55846f0f7124
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-env-order/test.gyp
-@@ -0,0 +1,121 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'targets': [
-+    {
-+      'target_name': 'test_app',
-+      'product_name': 'Test',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'sources': [
-+        'main.c',
-+        'file.ext1',
-+        'file.ext2',
-+        'file.ext3',
-+      ],
-+      # Env vars in copies.
-+      'copies': [
-+        {
-+          'destination': '<(PRODUCT_DIR)/${PRODUCT_NAME}-copy-brace',
-+          'files': [ 'main.c', ],  # ${SOURCE_ROOT} doesn't work with xcode
-+        },
-+        {
-+          'destination': '<(PRODUCT_DIR)/$(PRODUCT_NAME)-copy-paren',
-+          'files': [ '$(SOURCE_ROOT)/main.c', ],
-+        },
-+        {
-+          'destination': '<(PRODUCT_DIR)/$PRODUCT_NAME-copy-bare',
-+          'files': [ 'main.c', ],  # $SOURCE_ROOT doesn't work with xcode
-+        },
-+      ],
-+      # Env vars in actions. The $FOO's are here to test that env vars that
-+      # aren't defined are handled in some way that doesn't break the build.
-+      'actions': [
-+        {
-+          'action_name': 'Action copy braces ${PRODUCT_NAME} ${FOO}',
-+          'description': 'Action copy braces ${PRODUCT_NAME} ${FOO}',
-+          'inputs': [ '${SOURCE_ROOT}/main.c' ],
-+          # Referencing ${PRODUCT_NAME} in action outputs doesn't work with
-+          # the Xcode generator (PRODUCT_NAME expands to "Test Support").
-+          'outputs': [ '<(PRODUCT_DIR)/action-copy-brace.txt' ],
-+          'action': [ 'cp', '${SOURCE_ROOT}/main.c',
-+                      '<(PRODUCT_DIR)/action-copy-brace.txt' ],
-+        },
-+        {
-+          'action_name': 'Action copy parens $(PRODUCT_NAME) $(FOO)',
-+          'description': 'Action copy parens $(PRODUCT_NAME) $(FOO)',
-+          'inputs': [ '$(SOURCE_ROOT)/main.c' ],
-+          # Referencing $(PRODUCT_NAME) in action outputs doesn't work with
-+          # the Xcode generator (PRODUCT_NAME expands to "Test Support").
-+          'outputs': [ '<(PRODUCT_DIR)/action-copy-paren.txt' ],
-+          'action': [ 'cp', '$(SOURCE_ROOT)/main.c',
-+                      '<(PRODUCT_DIR)/action-copy-paren.txt' ],
-+        },
-+        {
-+          'action_name': 'Action copy bare $PRODUCT_NAME $FOO',
-+          'description': 'Action copy bare $PRODUCT_NAME $FOO',
-+          'inputs': [ '$SOURCE_ROOT/main.c' ],
-+          # Referencing $PRODUCT_NAME in action outputs doesn't work with
-+          # the Xcode generator (PRODUCT_NAME expands to "Test Support").
-+          'outputs': [ '<(PRODUCT_DIR)/action-copy-bare.txt' ],
-+          'action': [ 'cp', '$SOURCE_ROOT/main.c',
-+                      '<(PRODUCT_DIR)/action-copy-bare.txt' ],
-+        },
-+      ],
-+      # Env vars in xcode_settings.
-+      'xcode_settings': {
-+        'INFOPLIST_FILE': 'Info.plist',
-+        'STRING_KEY': '/Source/Project',
-+
-+        'BRACE_DEPENDENT_KEY2': '${STRING_KEY}/${PRODUCT_NAME}',
-+        'BRACE_DEPENDENT_KEY1': 'D:${BRACE_DEPENDENT_KEY2}',
-+        'BRACE_DEPENDENT_KEY3': '${PRODUCT_TYPE}:${BRACE_DEPENDENT_KEY1}',
-+
-+        'PAREN_DEPENDENT_KEY2': '$(STRING_KEY)/$(PRODUCT_NAME)',
-+        'PAREN_DEPENDENT_KEY1': 'D:$(PAREN_DEPENDENT_KEY2)',
-+        'PAREN_DEPENDENT_KEY3': '$(PRODUCT_TYPE):$(PAREN_DEPENDENT_KEY1)',
-+
-+        'BARE_DEPENDENT_KEY2': '$STRING_KEY/$PRODUCT_NAME',
-+        'BARE_DEPENDENT_KEY1': 'D:$BARE_DEPENDENT_KEY2',
-+        'BARE_DEPENDENT_KEY3': '$PRODUCT_TYPE:$BARE_DEPENDENT_KEY1',
-+
-+        'MIXED_DEPENDENT_KEY': '${STRING_KEY}:$(PRODUCT_NAME):$MACH_O_TYPE',
-+      },
-+      # Env vars in rules. The $FOO's are here to test that env vars that
-+      # aren't defined are handled in some way that doesn't break the build.
-+      'rules': [
-+        {
-+          'rule_name': 'brace_rule',
-+          'message': 'Rule braces ${PRODUCT_NAME} ${FOO} <(RULE_INPUT_NAME)',
-+          'extension': 'ext1',
-+          'inputs': [ '${SOURCE_ROOT}/main.c' ],
-+          'outputs': [ '<(PRODUCT_DIR)/rule-copy-brace.txt' ],
-+          'action': [ 'cp', '${SOURCE_ROOT}/main.c',
-+                      '<(PRODUCT_DIR)/rule-copy-brace.txt' ],
-+        },
-+        {
-+          'rule_name': 'paren_rule',
-+          'message': 'Rule parens $(PRODUCT_NAME) $(FOO) <(RULE_INPUT_NAME)',
-+          'extension': 'ext2',
-+          'inputs': [ '$(SOURCE_ROOT)/main.c' ],
-+          'outputs': [ '<(PRODUCT_DIR)/rule-copy-paren.txt' ],
-+          'action': [ 'cp', '$(SOURCE_ROOT)/main.c',
-+                      '<(PRODUCT_DIR)/rule-copy-paren.txt' ],
-+        },
-+        # TODO: Fails in xcode. Looks like a bug in the xcode generator though
-+        #       (which uses makefiles for rules, and thinks $PRODUCT_NAME is
-+        #       $(P)RODUCT_NAME).
-+        #{
-+        #  'rule_name': 'bare_rule',
-+        #  'message': 'Rule copy bare $PRODUCT_NAME $FOO',
-+        #  'extension': 'ext3',
-+        #  'inputs': [ '$SOURCE_ROOT/main.c' ],
-+        #  'outputs': [ '<(PRODUCT_DIR)/rule-copy-bare.txt' ],
-+        #  'action': [ 'cp', '$SOURCE_ROOT/main.c',
-+        #              '<(PRODUCT_DIR)/rule-copy-bare.txt' ],
-+        #},
-+      ],
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/aliasing.cc b/tools/gyp/test/mac/xcode-gcc/aliasing.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..16a41efb15cc331f9f666444c35d5ea962d164ab
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/aliasing.cc
-@@ -0,0 +1,13 @@
-+#include <stdio.h>
-+
-+void check(int* h, long* k) {
-+  *h = 1;
-+  *k = 0;
-+  printf("%d\n", *h);
-+}
-+
-+int main(void) {
-+  long k;
-+  check((int*)&k, &k);
-+  return 0;
-+}
-diff --git a/tools/gyp/test/mac/xcode-gcc/test-clang.gyp b/tools/gyp/test/mac/xcode-gcc/test-clang.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..9f4a98ae73fce423ef234dd2dcf0f752a7226b88
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/test-clang.gyp
-@@ -0,0 +1,42 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'make_global_settings': [
-+    ['CC', '/usr/bin/clang'],
-+    ['CXX', '/usr/bin/clang++'],
-+  ],
-+
-+  'targets': [
-+    {
-+      'target_name': 'aliasing_yes',
-+      'type': 'executable',
-+      'sources': [ 'aliasing.cc', ],
-+      'xcode_settings': {
-+        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-+        'GCC_STRICT_ALIASING': 'YES',
-+        'GCC_OPTIMIZATION_LEVEL': 2,
-+      },
-+    },
-+    {
-+      'target_name': 'aliasing_no',
-+      'type': 'executable',
-+      'sources': [ 'aliasing.cc', ],
-+      'xcode_settings': {
-+        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-+        'GCC_STRICT_ALIASING': 'NO',
-+        'GCC_OPTIMIZATION_LEVEL': 2,
-+      },
-+    },
-+    {
-+      'target_name': 'aliasing_default',
-+      'type': 'executable',
-+      'sources': [ 'aliasing.cc', ],
-+      'xcode_settings': {
-+        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-+        'GCC_OPTIMIZATION_LEVEL': 2,
-+      },
-+    },
-+  ],
-+}
-+
-diff --git a/tools/gyp/test/mac/xcode-gcc/test.gyp b/tools/gyp/test/mac/xcode-gcc/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..1ca8b215d8763f0b8ebe0acf2ccdf4350fc0a89c
---- /dev/null
-+++ b/tools/gyp/test/mac/xcode-gcc/test.gyp
-@@ -0,0 +1,60 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'target_defaults': {
-+    'xcode_settings': {
-+      'GCC_TREAT_WARNINGS_AS_ERRORS': 'YES',
-+    },
-+  },
-+
-+  'variables': {
-+    # Non-failing tests should check that these trivial files in every language
-+    # still compile correctly.
-+    'valid_sources': [
-+      'valid_c.c',
-+      'valid_cc.cc',
-+      'valid_m.m',
-+      'valid_mm.mm',
-+    ],
-+  },
-+
-+  # Targets come in pairs: 'foo' and 'foo-fail', with the former building with
-+  # no warnings and the latter not.
-+  'targets': [
-+    # GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO (default: YES):
-+    {
-+      'target_name': 'warn_about_invalid_offsetof_macro',
-+      'type': 'executable',
-+      'sources': [
-+        'warn_about_invalid_offsetof_macro.cc',
-+        '<@(valid_sources)',
-+      ],
-+      'xcode_settings': {
-+        'GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO': 'NO',
-+      },
-+    },
-+    {
-+      'target_name': 'warn_about_invalid_offsetof_macro-fail',
-+      'type': 'executable',
-+      'sources': [ 'warn_about_invalid_offsetof_macro.cc', ],
-+    },
-+    # GCC_WARN_ABOUT_MISSING_NEWLINE (default: NO):
-+    {
-+      'target_name': 'warn_about_missing_newline',
-+      'type': 'executable',
-+      'sources': [
-+        'warn_about_missing_newline.c',
-+        '<@(valid_sources)',
-+      ],
-+    },
-+    {
-+      'target_name': 'warn_about_missing_newline-fail',
-+      'type': 'executable',
-+      'sources': [ 'warn_about_missing_newline.c', ],
-+      'xcode_settings': {
-+        'GCC_WARN_ABOUT_MISSING_NEWLINE': 'YES',
-+      },
-+    },
-+  ],
-+}
 diff --git a/tools/gyp/test/mac/xcode-gcc/valid_c.c b/tools/gyp/test/mac/xcode-gcc/valid_c.c
 new file mode 100644
 index 0000000000000000000000000000000000000000..2b10ac3ed75818842adab67419edb300841ac795
@@ -18173,4 +17897,360 @@ index 0000000000000000000000000000000000000000..725a87028a56694acdfc6f4cd862c014
 +  if 'Relocations stripped' not in GetHeaders('test_fixed_yes.exe'):
 +    test.fail_test()
 +
++  test.pass_test()
+diff --git a/tools/gyp/test/win/gyptest-link-force-symbol-reference.py b/tools/gyp/test/win/gyptest-link-force-symbol-reference.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..235e94f71bd3d59cc1beb82f924811eca380dc9e
+--- /dev/null
++++ b/tools/gyp/test/win/gyptest-link-force-symbol-reference.py
+@@ -0,0 +1,26 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Make sure ForceSymbolReference is translated properly.
++"""
++
++import TestGyp
++
++import sys
++
++if sys.platform == 'win32':
++  test = TestGyp.TestGyp(formats=['msvs', 'ninja'])
++
++  CHDIR = 'linker-flags'
++  test.run_gyp('force-symbol-reference.gyp', chdir=CHDIR)
++  test.build('force-symbol-reference.gyp', test.ALL, chdir=CHDIR)
++
++  output = test.run_dumpbin(
++      '/disasm', test.built_file_path('test_force_reference.exe', chdir=CHDIR))
++  if '?x@@YAHXZ:' not in output or '?y@@YAHXZ:' not in output:
++    test.fail_test()
++  test.pass_test()
+diff --git a/tools/gyp/test/win/gyptest-link-generate-manifest.py b/tools/gyp/test/win/gyptest-link-generate-manifest.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..77c9228ee5d771ca25775c205ff6d6dcf4fae400
+--- /dev/null
++++ b/tools/gyp/test/win/gyptest-link-generate-manifest.py
+@@ -0,0 +1,127 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Make sure we generate a manifest file when linking binaries, including
++handling AdditionalManifestFiles.
++"""
++
++import TestGyp
++
++import sys
++
++if sys.platform == 'win32':
++  import pywintypes
++  import win32api
++  import winerror
++
++  RT_MANIFEST = 24
++
++  class LoadLibrary(object):
++    """Context manager for loading and releasing binaries in Windows.
++    Yields the handle of the binary loaded."""
++    def __init__(self, path):
++      self._path = path
++      self._handle = None
++
++    def __enter__(self):
++      self._handle = win32api.LoadLibrary(self._path)
++      return self._handle
++
++    def __exit__(self, type, value, traceback):
++      win32api.FreeLibrary(self._handle)
++
++  def extract_manifest(path, resource_name):
++    """Reads manifest from |path| and returns it as a string.
++    Returns None is there is no such manifest."""
++    with LoadLibrary(path) as handle:
++      try:
++        return win32api.LoadResource(handle, RT_MANIFEST, resource_name)
++      except pywintypes.error as error:
++        if error.args[0] == winerror.ERROR_RESOURCE_DATA_NOT_FOUND:
++          return None
++        else:
++          raise
++
++  test = TestGyp.TestGyp(formats=['msvs', 'ninja'])
++
++  CHDIR = 'linker-flags'
++  test.run_gyp('generate-manifest.gyp', chdir=CHDIR)
++  test.build('generate-manifest.gyp', test.ALL, chdir=CHDIR)
++
++  # Make sure that generation of .generated.manifest does not cause a relink.
++  test.run_gyp('generate-manifest.gyp', chdir=CHDIR)
++  test.up_to_date('generate-manifest.gyp', test.ALL, chdir=CHDIR)
++
++  def test_manifest(filename, generate_manifest, embedded_manifest,
++                    extra_manifest):
++    exe_file = test.built_file_path(filename, chdir=CHDIR)
++    if not generate_manifest:
++      test.must_not_exist(exe_file + '.manifest')
++      manifest = extract_manifest(exe_file, 1)
++      test.fail_test(manifest)
++      return
++    if embedded_manifest:
++      manifest = extract_manifest(exe_file, 1)
++      test.fail_test(not manifest)
++    else:
++      test.must_exist(exe_file + '.manifest')
++      manifest = test.read(exe_file + '.manifest')
++      test.fail_test(not manifest)
++      test.fail_test(extract_manifest(exe_file, 1))
++    if generate_manifest:
++      test.must_contain_any_line(manifest, 'requestedExecutionLevel')
++    if extra_manifest:
++      test.must_contain_any_line(manifest,
++                                 '35138b9a-5d96-4fbd-8e2d-a2440225f93a')
++      test.must_contain_any_line(manifest,
++                                 'e2011457-1546-43c5-a5fe-008deee3d3f0')
++
++  test_manifest('test_generate_manifest_true.exe',
++                generate_manifest=True,
++                embedded_manifest=False,
++                extra_manifest=False)
++  test_manifest('test_generate_manifest_false.exe',
++                generate_manifest=False,
++                embedded_manifest=False,
++                extra_manifest=False)
++  test_manifest('test_generate_manifest_default.exe',
++                generate_manifest=True,
++                embedded_manifest=False,
++                extra_manifest=False)
++  test_manifest('test_generate_manifest_true_as_embedded.exe',
++                generate_manifest=True,
++                embedded_manifest=True,
++                extra_manifest=False)
++  test_manifest('test_generate_manifest_false_as_embedded.exe',
++                generate_manifest=False,
++                embedded_manifest=True,
++                extra_manifest=False)
++  test_manifest('test_generate_manifest_default_as_embedded.exe',
++                generate_manifest=True,
++                embedded_manifest=True,
++                extra_manifest=False)
++  test_manifest('test_generate_manifest_true_with_extra_manifest.exe',
++                generate_manifest=True,
++                embedded_manifest=False,
++                extra_manifest=True)
++  test_manifest('test_generate_manifest_false_with_extra_manifest.exe',
++                generate_manifest=False,
++                embedded_manifest=False,
++                extra_manifest=True)
++  test_manifest('test_generate_manifest_true_with_extra_manifest_list.exe',
++                generate_manifest=True,
++                embedded_manifest=False,
++                extra_manifest=True)
++  test_manifest('test_generate_manifest_false_with_extra_manifest_list.exe',
++                generate_manifest=False,
++                embedded_manifest=False,
++                extra_manifest=True)
++  test_manifest('test_generate_manifest_default_embed_default.exe',
++                generate_manifest=True,
++                embedded_manifest=True,
++                extra_manifest=False)
++  test.pass_test()
+diff --git a/tools/gyp/test/win/gyptest-link-incremental.py b/tools/gyp/test/win/gyptest-link-incremental.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e7184e162c8c1048ad9b8316d222d6852454f7b1
+--- /dev/null
++++ b/tools/gyp/test/win/gyptest-link-incremental.py
+@@ -0,0 +1,37 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Make sure incremental linking setting is extracted properly.
++"""
++
++import TestGyp
++
++import sys
++
++if sys.platform == 'win32':
++  test = TestGyp.TestGyp(formats=['msvs', 'ninja'])
++
++  CHDIR = 'linker-flags'
++  test.run_gyp('incremental.gyp', chdir=CHDIR)
++  test.build('incremental.gyp', test.ALL, chdir=CHDIR)
++
++  def HasILTTables(exe):
++    full_path = test.built_file_path(exe, chdir=CHDIR)
++    output = test.run_dumpbin('/disasm', full_path)
++    return '@ILT+' in output
++
++  # Default or unset is to be on.
++  if not HasILTTables('test_incremental_unset.exe'):
++    test.fail_test()
++  if not HasILTTables('test_incremental_default.exe'):
++    test.fail_test()
++  if HasILTTables('test_incremental_no.exe'):
++    test.fail_test()
++  if not HasILTTables('test_incremental_yes.exe'):
++    test.fail_test()
++
++  test.pass_test()
+diff --git a/tools/gyp/test/win/gyptest-link-large-address-aware.py b/tools/gyp/test/win/gyptest-link-large-address-aware.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ea433f20994cfc98ce050c5caf9fc3c90bdf41d7
+--- /dev/null
++++ b/tools/gyp/test/win/gyptest-link-large-address-aware.py
+@@ -0,0 +1,35 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Make sure largeaddressaware setting is extracted properly.
++"""
++
++import TestGyp
++
++import sys
++
++if sys.platform == 'win32':
++  test = TestGyp.TestGyp(formats=['msvs', 'ninja'])
++
++  CHDIR = 'linker-flags'
++  test.run_gyp('large-address-aware.gyp', chdir=CHDIR)
++  test.build('large-address-aware.gyp', test.ALL, chdir=CHDIR)
++
++  def GetHeaders(exe):
++    return test.run_dumpbin('/headers', test.built_file_path(exe, chdir=CHDIR))
++
++  MARKER = 'Application can handle large (>2GB) addresses'
++
++  # Explicitly off.
++  if MARKER in GetHeaders('test_large_address_aware_no.exe'):
++    test.fail_test()
++
++  # Explicitly on.
++  if MARKER not in GetHeaders('test_large_address_aware_yes.exe'):
++    test.fail_test()
++
++  test.pass_test()
+diff --git a/tools/gyp/test/win/gyptest-link-large-pdb.py b/tools/gyp/test/win/gyptest-link-large-pdb.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..4604745d142ceb0ddfcd2df014f051e59806530c
+--- /dev/null
++++ b/tools/gyp/test/win/gyptest-link-large-pdb.py
+@@ -0,0 +1,74 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Make sure msvs_large_pdb works correctly.
++"""
++
++import TestGyp
++
++import struct
++import sys
++
++if sys.platform == 'win32':
++  print "This test is currently disabled: https://crbug.com/483696."
++  sys.exit(0)
++
++
++CHDIR = 'large-pdb'
++
++
++def CheckImageAndPdb(test, image_basename, expected_page_size,
++                     pdb_basename=None):
++  if not pdb_basename:
++    pdb_basename = image_basename + '.pdb'
++  test.built_file_must_exist(image_basename, chdir=CHDIR)
++  test.built_file_must_exist(pdb_basename, chdir=CHDIR)
++
++  # We expect the PDB to have the given page size. For full details of the
++  # header look here: https://code.google.com/p/pdbparser/wiki/MSF_Format
++  # We read the little-endian 4-byte unsigned integer at position 32 of the
++  # file.
++  pdb_path = test.built_file_path(pdb_basename, chdir=CHDIR)
++  pdb_file = open(pdb_path, 'rb')
++  pdb_file.seek(32, 0)
++  page_size = struct.unpack('<I', pdb_file.read(4))[0]
++  if page_size != expected_page_size:
++    print "Expected page size of %d, got %d for PDB file `%s'." % (
++        expected_page_size, page_size, pdb_path)
++
++
++if sys.platform == 'win32':
++  test = TestGyp.TestGyp(formats=['msvs', 'ninja'])
++
++  test.run_gyp('large-pdb.gyp', chdir=CHDIR)
++
++  test.build('large-pdb.gyp', 'large_pdb_exe', chdir=CHDIR)
++  CheckImageAndPdb(test, 'large_pdb_exe.exe', 4096)
++
++  test.build('large-pdb.gyp', 'small_pdb_exe', chdir=CHDIR)
++  CheckImageAndPdb(test, 'small_pdb_exe.exe', 1024)
++
++  test.build('large-pdb.gyp', 'large_pdb_dll', chdir=CHDIR)
++  CheckImageAndPdb(test, 'large_pdb_dll.dll', 4096)
++
++  test.build('large-pdb.gyp', 'small_pdb_dll', chdir=CHDIR)
++  CheckImageAndPdb(test, 'small_pdb_dll.dll', 1024)
++
++  test.build('large-pdb.gyp', 'large_pdb_implicit_exe', chdir=CHDIR)
++  CheckImageAndPdb(test, 'large_pdb_implicit_exe.exe', 4096)
++
++  # This target has a different PDB name because it uses an
++  # 'msvs_large_pdb_path' variable.
++  test.build('large-pdb.gyp', 'large_pdb_variable_exe', chdir=CHDIR)
++  CheckImageAndPdb(test, 'large_pdb_variable_exe.exe', 4096,
++                   pdb_basename='foo.pdb')
++
++  # This target has a different output name because it uses 'product_name'.
++  test.build('large-pdb.gyp', 'large_pdb_product_exe', chdir=CHDIR)
++  CheckImageAndPdb(test, 'bar.exe', 4096)
++
++  test.pass_test()
+diff --git a/tools/gyp/test/win/gyptest-link-library-adjust.py b/tools/gyp/test/win/gyptest-link-library-adjust.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..71d1c0936067fd279001c4b3bb48f34fbb1b108f
+--- /dev/null
++++ b/tools/gyp/test/win/gyptest-link-library-adjust.py
+@@ -0,0 +1,21 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Make sure link_settings containing -lblah.lib is remapped to just blah.lib.
++"""
++
++import TestGyp
++
++import sys
++
++if sys.platform == 'win32':
++  test = TestGyp.TestGyp(formats=['ninja'])
++
++  CHDIR = 'linker-flags'
++  test.run_gyp('library-adjust.gyp', chdir=CHDIR)
++  test.build('library-adjust.gyp', test.ALL, chdir=CHDIR)
 +  test.pass_test()

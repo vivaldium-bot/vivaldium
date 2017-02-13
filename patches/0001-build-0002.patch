@@ -1,261 +1,3 @@
-diff --git a/tools/gyp/test/generator-output/gyptest-rules.py b/tools/gyp/test/generator-output/gyptest-rules.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..a3ff8bd858ab8ef67f6f63c134da8e87fb07c8b7
---- /dev/null
-+++ b/tools/gyp/test/generator-output/gyptest-rules.py
-@@ -0,0 +1,58 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies --generator-output= behavior when using rules.
-+"""
-+
-+import TestGyp
-+
-+test = TestGyp.TestGyp()
-+
-+test.writable(test.workpath('rules'), False)
-+
-+test.run_gyp('rules.gyp',
-+             '--generator-output=' + test.workpath('gypfiles'),
-+             chdir='rules')
-+
-+test.writable(test.workpath('rules'), True)
-+
-+test.relocate('rules', 'relocate/rules')
-+test.relocate('gypfiles', 'relocate/gypfiles')
-+
-+test.writable(test.workpath('relocate/rules'), False)
-+
-+test.writable(test.workpath('relocate/rules/build'), True)
-+test.writable(test.workpath('relocate/rules/subdir1/build'), True)
-+test.writable(test.workpath('relocate/rules/subdir2/build'), True)
-+test.writable(test.workpath('relocate/rules/subdir2/rules-out'), True)
-+
-+test.build('rules.gyp', test.ALL, chdir='relocate/gypfiles')
-+
-+expect = """\
-+Hello from program.c
-+Hello from function1.in1
-+Hello from function2.in1
-+Hello from define3.in0
-+Hello from define4.in0
-+"""
-+
-+if test.format == 'xcode':
-+  chdir = 'relocate/rules/subdir1'
-+else:
-+  chdir = 'relocate/gypfiles'
-+test.run_built_executable('program', chdir=chdir, stdout=expect)
-+
-+test.must_match('relocate/rules/subdir2/rules-out/file1.out',
-+                "Hello from file1.in0\n")
-+test.must_match('relocate/rules/subdir2/rules-out/file2.out',
-+                "Hello from file2.in0\n")
-+test.must_match('relocate/rules/subdir2/rules-out/file3.out',
-+                "Hello from file3.in1\n")
-+test.must_match('relocate/rules/subdir2/rules-out/file4.out',
-+                "Hello from file4.in1\n")
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/generator-output/gyptest-subdir2-deep.py b/tools/gyp/test/generator-output/gyptest-subdir2-deep.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..ec7862ddd91e2ec7f2a406334b4722d8c373dba8
---- /dev/null
-+++ b/tools/gyp/test/generator-output/gyptest-subdir2-deep.py
-@@ -0,0 +1,36 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies building a target from a .gyp file a few subdirectories
-+deep when the --generator-output= option is used to put the build
-+configuration files in a separate directory tree.
-+"""
-+
-+import TestGyp
-+
-+test = TestGyp.TestGyp()
-+
-+test.writable(test.workpath('src'), False)
-+
-+test.writable(test.workpath('src/subdir2/deeper/build'), True)
-+
-+test.run_gyp('deeper.gyp',
-+             '-Dset_symroot=1',
-+             '--generator-output=' + test.workpath('gypfiles'),
-+             chdir='src/subdir2/deeper')
-+
-+test.build('deeper.gyp', test.ALL, chdir='gypfiles')
-+
-+chdir = 'gypfiles'
-+
-+if test.format == 'xcode':
-+  chdir = 'src/subdir2/deeper'
-+test.run_built_executable('deeper',
-+                          chdir=chdir,
-+                          stdout="Hello from deeper.c\n")
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/generator-output/gyptest-symlink.py b/tools/gyp/test/generator-output/gyptest-symlink.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..8b29b348c275cf458ee8f738b482cb9ffd2b3a32
---- /dev/null
-+++ b/tools/gyp/test/generator-output/gyptest-symlink.py
-@@ -0,0 +1,42 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies building a target when the --generator-output= option is used to put
-+the build configuration files in a separate directory tree referenced by a
-+symlink.
-+"""
-+
-+import TestGyp
-+import os
-+
-+test = TestGyp.TestGyp()
-+if not hasattr(os, 'symlink'):
-+  test.skip_test('Missing os.symlink -- skipping test.\n')
-+
-+test.writable(test.workpath('src'), False)
-+
-+test.writable(test.workpath('src/subdir2/deeper/build'), True)
-+
-+test.subdir(test.workpath('build'))
-+test.subdir(test.workpath('build/deeper'))
-+test.symlink('build/deeper', test.workpath('symlink'))
-+
-+test.writable(test.workpath('build/deeper'), True)
-+test.run_gyp('deeper.gyp',
-+             '-Dset_symroot=2',
-+             '--generator-output=' + test.workpath('symlink'),
-+             chdir='src/subdir2/deeper')
-+
-+chdir = 'symlink'
-+test.build('deeper.gyp', test.ALL, chdir=chdir)
-+
-+if test.format == 'xcode':
-+  chdir = 'src/subdir2/deeper'
-+test.run_built_executable('deeper',
-+                          chdir=chdir,
-+                          stdout="Hello from deeper.c\n")
-+test.pass_test()
-diff --git a/tools/gyp/test/generator-output/gyptest-top-all.py b/tools/gyp/test/generator-output/gyptest-top-all.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..b1776776ead76ad00e19d21fc7c0e565ff1deee6
---- /dev/null
-+++ b/tools/gyp/test/generator-output/gyptest-top-all.py
-@@ -0,0 +1,53 @@
-+#!/usr/bin/env python
-+
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+Verifies building a project hierarchy created when the --generator-output=
-+option is used to put the build configuration files in a separate
-+directory tree.
-+"""
-+
-+import TestGyp
-+
-+test = TestGyp.TestGyp()
-+
-+test.writable(test.workpath('src'), False)
-+
-+test.run_gyp('prog1.gyp',
-+             '-Dset_symroot=1',
-+             '--generator-output=' + test.workpath('gypfiles'),
-+             chdir='src')
-+
-+test.writable(test.workpath('src/build'), True)
-+test.writable(test.workpath('src/subdir2/build'), True)
-+test.writable(test.workpath('src/subdir3/build'), True)
-+
-+test.build('prog1.gyp', test.ALL, chdir='gypfiles')
-+
-+chdir = 'gypfiles'
-+
-+expect = """\
-+Hello from %s
-+Hello from inc.h
-+Hello from inc1/include1.h
-+Hello from inc2/include2.h
-+Hello from inc3/include3.h
-+Hello from subdir2/deeper/deeper.h
-+"""
-+
-+if test.format == 'xcode':
-+  chdir = 'src'
-+test.run_built_executable('prog1', chdir=chdir, stdout=expect % 'prog1.c')
-+
-+if test.format == 'xcode':
-+  chdir = 'src/subdir2'
-+test.run_built_executable('prog2', chdir=chdir, stdout=expect % 'prog2.c')
-+
-+if test.format == 'xcode':
-+  chdir = 'src/subdir3'
-+test.run_built_executable('prog3', chdir=chdir, stdout=expect % 'prog3.c')
-+
-+test.pass_test()
-diff --git a/tools/gyp/test/generator-output/mac-bundle/Info.plist b/tools/gyp/test/generator-output/mac-bundle/Info.plist
-new file mode 100644
-index 0000000000000000000000000000000000000000..8cb142e9f5aa52091f9af7abb5eacc8cc6159de7
---- /dev/null
-+++ b/tools/gyp/test/generator-output/mac-bundle/Info.plist
-@@ -0,0 +1,32 @@
-+<?xml version="1.0" encoding="UTF-8"?>
-+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-+<plist version="1.0">
-+<dict>
-+	<key>CFBundleDevelopmentRegion</key>
-+	<string>English</string>
-+	<key>CFBundleExecutable</key>
-+	<string>${EXECUTABLE_NAME}</string>
-+	<key>CFBundleIconFile</key>
-+	<string></string>
-+	<key>CFBundleIdentifier</key>
-+	<string>com.google.${PRODUCT_NAME}</string>
-+	<key>CFBundleInfoDictionaryVersion</key>
-+	<string>6.0</string>
-+	<key>CFBundleName</key>
-+	<string>${PRODUCT_NAME}</string>
-+	<key>CFBundlePackageType</key>
-+	<string>APPL</string>
-+	<key>CFBundleShortVersionString</key>
-+	<string>1.0</string>
-+	<key>CFBundleSignature</key>
-+	<string>ause</string>
-+	<key>CFBundleVersion</key>
-+	<string>1</string>
-+	<key>LSMinimumSystemVersion</key>
-+	<string>${MACOSX_DEPLOYMENT_TARGET}</string>
-+	<key>NSMainNibFile</key>
-+	<string>MainMenu</string>
-+	<key>NSPrincipalClass</key>
-+	<string>NSApplication</string>
-+</dict>
-+</plist>
-diff --git a/tools/gyp/test/generator-output/mac-bundle/app.order b/tools/gyp/test/generator-output/mac-bundle/app.order
-new file mode 100644
-index 0000000000000000000000000000000000000000..4eb9e89d39c8b5ccd7521b445ac896ab050181c4
---- /dev/null
-+++ b/tools/gyp/test/generator-output/mac-bundle/app.order
-@@ -0,0 +1 @@
-+_main
 diff --git a/tools/gyp/test/generator-output/mac-bundle/header.h b/tools/gyp/test/generator-output/mac-bundle/header.h
 new file mode 100644
 index 0000000000000000000000000000000000000000..7ed777512290417bcbd91b14c2c91f6a3f58da0e
@@ -23838,3 +23580,279 @@ index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2
 diff --git a/tools/gyp/test/mac/xcode-env-order/file.ext2 b/tools/gyp/test/mac/xcode-env-order/file.ext2
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/tools/gyp/test/mac/xcode-env-order/file.ext3 b/tools/gyp/test/mac/xcode-env-order/file.ext3
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/tools/gyp/test/mac/xcode-env-order/main.c b/tools/gyp/test/mac/xcode-env-order/main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..1bf4b2a11abd99b0655222eb96624b9abed72423
+--- /dev/null
++++ b/tools/gyp/test/mac/xcode-env-order/main.c
+@@ -0,0 +1,7 @@
++// Copyright (c) 2011 Google Inc. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++int main() {
++  return 0;
++}
+diff --git a/tools/gyp/test/mac/xcode-env-order/test.gyp b/tools/gyp/test/mac/xcode-env-order/test.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..8f975f7d6b17feabd001f0c5f5ee55846f0f7124
+--- /dev/null
++++ b/tools/gyp/test/mac/xcode-env-order/test.gyp
+@@ -0,0 +1,121 @@
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++{
++  'targets': [
++    {
++      'target_name': 'test_app',
++      'product_name': 'Test',
++      'type': 'executable',
++      'mac_bundle': 1,
++      'sources': [
++        'main.c',
++        'file.ext1',
++        'file.ext2',
++        'file.ext3',
++      ],
++      # Env vars in copies.
++      'copies': [
++        {
++          'destination': '<(PRODUCT_DIR)/${PRODUCT_NAME}-copy-brace',
++          'files': [ 'main.c', ],  # ${SOURCE_ROOT} doesn't work with xcode
++        },
++        {
++          'destination': '<(PRODUCT_DIR)/$(PRODUCT_NAME)-copy-paren',
++          'files': [ '$(SOURCE_ROOT)/main.c', ],
++        },
++        {
++          'destination': '<(PRODUCT_DIR)/$PRODUCT_NAME-copy-bare',
++          'files': [ 'main.c', ],  # $SOURCE_ROOT doesn't work with xcode
++        },
++      ],
++      # Env vars in actions. The $FOO's are here to test that env vars that
++      # aren't defined are handled in some way that doesn't break the build.
++      'actions': [
++        {
++          'action_name': 'Action copy braces ${PRODUCT_NAME} ${FOO}',
++          'description': 'Action copy braces ${PRODUCT_NAME} ${FOO}',
++          'inputs': [ '${SOURCE_ROOT}/main.c' ],
++          # Referencing ${PRODUCT_NAME} in action outputs doesn't work with
++          # the Xcode generator (PRODUCT_NAME expands to "Test Support").
++          'outputs': [ '<(PRODUCT_DIR)/action-copy-brace.txt' ],
++          'action': [ 'cp', '${SOURCE_ROOT}/main.c',
++                      '<(PRODUCT_DIR)/action-copy-brace.txt' ],
++        },
++        {
++          'action_name': 'Action copy parens $(PRODUCT_NAME) $(FOO)',
++          'description': 'Action copy parens $(PRODUCT_NAME) $(FOO)',
++          'inputs': [ '$(SOURCE_ROOT)/main.c' ],
++          # Referencing $(PRODUCT_NAME) in action outputs doesn't work with
++          # the Xcode generator (PRODUCT_NAME expands to "Test Support").
++          'outputs': [ '<(PRODUCT_DIR)/action-copy-paren.txt' ],
++          'action': [ 'cp', '$(SOURCE_ROOT)/main.c',
++                      '<(PRODUCT_DIR)/action-copy-paren.txt' ],
++        },
++        {
++          'action_name': 'Action copy bare $PRODUCT_NAME $FOO',
++          'description': 'Action copy bare $PRODUCT_NAME $FOO',
++          'inputs': [ '$SOURCE_ROOT/main.c' ],
++          # Referencing $PRODUCT_NAME in action outputs doesn't work with
++          # the Xcode generator (PRODUCT_NAME expands to "Test Support").
++          'outputs': [ '<(PRODUCT_DIR)/action-copy-bare.txt' ],
++          'action': [ 'cp', '$SOURCE_ROOT/main.c',
++                      '<(PRODUCT_DIR)/action-copy-bare.txt' ],
++        },
++      ],
++      # Env vars in xcode_settings.
++      'xcode_settings': {
++        'INFOPLIST_FILE': 'Info.plist',
++        'STRING_KEY': '/Source/Project',
++
++        'BRACE_DEPENDENT_KEY2': '${STRING_KEY}/${PRODUCT_NAME}',
++        'BRACE_DEPENDENT_KEY1': 'D:${BRACE_DEPENDENT_KEY2}',
++        'BRACE_DEPENDENT_KEY3': '${PRODUCT_TYPE}:${BRACE_DEPENDENT_KEY1}',
++
++        'PAREN_DEPENDENT_KEY2': '$(STRING_KEY)/$(PRODUCT_NAME)',
++        'PAREN_DEPENDENT_KEY1': 'D:$(PAREN_DEPENDENT_KEY2)',
++        'PAREN_DEPENDENT_KEY3': '$(PRODUCT_TYPE):$(PAREN_DEPENDENT_KEY1)',
++
++        'BARE_DEPENDENT_KEY2': '$STRING_KEY/$PRODUCT_NAME',
++        'BARE_DEPENDENT_KEY1': 'D:$BARE_DEPENDENT_KEY2',
++        'BARE_DEPENDENT_KEY3': '$PRODUCT_TYPE:$BARE_DEPENDENT_KEY1',
++
++        'MIXED_DEPENDENT_KEY': '${STRING_KEY}:$(PRODUCT_NAME):$MACH_O_TYPE',
++      },
++      # Env vars in rules. The $FOO's are here to test that env vars that
++      # aren't defined are handled in some way that doesn't break the build.
++      'rules': [
++        {
++          'rule_name': 'brace_rule',
++          'message': 'Rule braces ${PRODUCT_NAME} ${FOO} <(RULE_INPUT_NAME)',
++          'extension': 'ext1',
++          'inputs': [ '${SOURCE_ROOT}/main.c' ],
++          'outputs': [ '<(PRODUCT_DIR)/rule-copy-brace.txt' ],
++          'action': [ 'cp', '${SOURCE_ROOT}/main.c',
++                      '<(PRODUCT_DIR)/rule-copy-brace.txt' ],
++        },
++        {
++          'rule_name': 'paren_rule',
++          'message': 'Rule parens $(PRODUCT_NAME) $(FOO) <(RULE_INPUT_NAME)',
++          'extension': 'ext2',
++          'inputs': [ '$(SOURCE_ROOT)/main.c' ],
++          'outputs': [ '<(PRODUCT_DIR)/rule-copy-paren.txt' ],
++          'action': [ 'cp', '$(SOURCE_ROOT)/main.c',
++                      '<(PRODUCT_DIR)/rule-copy-paren.txt' ],
++        },
++        # TODO: Fails in xcode. Looks like a bug in the xcode generator though
++        #       (which uses makefiles for rules, and thinks $PRODUCT_NAME is
++        #       $(P)RODUCT_NAME).
++        #{
++        #  'rule_name': 'bare_rule',
++        #  'message': 'Rule copy bare $PRODUCT_NAME $FOO',
++        #  'extension': 'ext3',
++        #  'inputs': [ '$SOURCE_ROOT/main.c' ],
++        #  'outputs': [ '<(PRODUCT_DIR)/rule-copy-bare.txt' ],
++        #  'action': [ 'cp', '$SOURCE_ROOT/main.c',
++        #              '<(PRODUCT_DIR)/rule-copy-bare.txt' ],
++        #},
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/mac/xcode-gcc/aliasing.cc b/tools/gyp/test/mac/xcode-gcc/aliasing.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..16a41efb15cc331f9f666444c35d5ea962d164ab
+--- /dev/null
++++ b/tools/gyp/test/mac/xcode-gcc/aliasing.cc
+@@ -0,0 +1,13 @@
++#include <stdio.h>
++
++void check(int* h, long* k) {
++  *h = 1;
++  *k = 0;
++  printf("%d\n", *h);
++}
++
++int main(void) {
++  long k;
++  check((int*)&k, &k);
++  return 0;
++}
+diff --git a/tools/gyp/test/mac/xcode-gcc/test-clang.gyp b/tools/gyp/test/mac/xcode-gcc/test-clang.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f4a98ae73fce423ef234dd2dcf0f752a7226b88
+--- /dev/null
++++ b/tools/gyp/test/mac/xcode-gcc/test-clang.gyp
+@@ -0,0 +1,42 @@
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++{
++  'make_global_settings': [
++    ['CC', '/usr/bin/clang'],
++    ['CXX', '/usr/bin/clang++'],
++  ],
++
++  'targets': [
++    {
++      'target_name': 'aliasing_yes',
++      'type': 'executable',
++      'sources': [ 'aliasing.cc', ],
++      'xcode_settings': {
++        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
++        'GCC_STRICT_ALIASING': 'YES',
++        'GCC_OPTIMIZATION_LEVEL': 2,
++      },
++    },
++    {
++      'target_name': 'aliasing_no',
++      'type': 'executable',
++      'sources': [ 'aliasing.cc', ],
++      'xcode_settings': {
++        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
++        'GCC_STRICT_ALIASING': 'NO',
++        'GCC_OPTIMIZATION_LEVEL': 2,
++      },
++    },
++    {
++      'target_name': 'aliasing_default',
++      'type': 'executable',
++      'sources': [ 'aliasing.cc', ],
++      'xcode_settings': {
++        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
++        'GCC_OPTIMIZATION_LEVEL': 2,
++      },
++    },
++  ],
++}
++
+diff --git a/tools/gyp/test/mac/xcode-gcc/test.gyp b/tools/gyp/test/mac/xcode-gcc/test.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..1ca8b215d8763f0b8ebe0acf2ccdf4350fc0a89c
+--- /dev/null
++++ b/tools/gyp/test/mac/xcode-gcc/test.gyp
+@@ -0,0 +1,60 @@
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++{
++  'target_defaults': {
++    'xcode_settings': {
++      'GCC_TREAT_WARNINGS_AS_ERRORS': 'YES',
++    },
++  },
++
++  'variables': {
++    # Non-failing tests should check that these trivial files in every language
++    # still compile correctly.
++    'valid_sources': [
++      'valid_c.c',
++      'valid_cc.cc',
++      'valid_m.m',
++      'valid_mm.mm',
++    ],
++  },
++
++  # Targets come in pairs: 'foo' and 'foo-fail', with the former building with
++  # no warnings and the latter not.
++  'targets': [
++    # GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO (default: YES):
++    {
++      'target_name': 'warn_about_invalid_offsetof_macro',
++      'type': 'executable',
++      'sources': [
++        'warn_about_invalid_offsetof_macro.cc',
++        '<@(valid_sources)',
++      ],
++      'xcode_settings': {
++        'GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO': 'NO',
++      },
++    },
++    {
++      'target_name': 'warn_about_invalid_offsetof_macro-fail',
++      'type': 'executable',
++      'sources': [ 'warn_about_invalid_offsetof_macro.cc', ],
++    },
++    # GCC_WARN_ABOUT_MISSING_NEWLINE (default: NO):
++    {
++      'target_name': 'warn_about_missing_newline',
++      'type': 'executable',
++      'sources': [
++        'warn_about_missing_newline.c',
++        '<@(valid_sources)',
++      ],
++    },
++    {
++      'target_name': 'warn_about_missing_newline-fail',
++      'type': 'executable',
++      'sources': [ 'warn_about_missing_newline.c', ],
++      'xcode_settings': {
++        'GCC_WARN_ABOUT_MISSING_NEWLINE': 'YES',
++      },
++    },
++  ],
++}
