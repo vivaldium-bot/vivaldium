@@ -1,1240 +1,3 @@
-diff --git a/third_party/catapult/tracing/app.yaml b/third_party/catapult/tracing/app.yaml
-new file mode 100644
-index 0000000000000000000000000000000000000000..40839ddfb07929136c584381bd8fff6fa50d8762
---- /dev/null
-+++ b/third_party/catapult/tracing/app.yaml
-@@ -0,0 +1,58 @@
-+# Copyright 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+runtime: python27
-+threadsafe: true
-+api_version: 1
-+
-+handlers:
-+
-+- url: /base
-+  static_dir: tracing/tracing/base
-+  secure: always
-+
-+- url: /core
-+  static_dir: tracing/tracing/core
-+  secure: always
-+
-+- url: /extras
-+  static_dir: tracing/tracing/extras
-+  secure: always
-+
-+- url: /ui
-+  static_dir: tracing/tracing/ui
-+  secure: always
-+
-+- url: /components
-+  static_dir: tracing/third_party/components
-+  secure: always
-+
-+- url: /trace_viewer
-+  static_dir: tracing/tracing
-+  secure: always
-+
-+- url: /gl-matrix-min.js
-+  static_files: tracing/third_party/gl-matrix/dist/gl-matrix-min.js
-+  upload: tracing/third_party/gl-matrix/dist/gl-matrix-min.js
-+  secure: always
-+
-+- url: /mannwhitneyu.js
-+  static_files: tracing/third_party/mannwhitneyu/mannwhitneyu.js
-+  upload: tracing/third_party/mannwhitneyu/mannwhitneyu.js
-+  secure: always
-+
-+- url: /jszip.min.js
-+  static_files: tracing/third_party/jszip/jszip.min.js
-+  upload: tracing/third_party/jszip/jszip.min.js
-+  secure: always
-+
-+- url: /d3.min.js
-+  static_files: tracing/third_party/d3/d3.min.js
-+  upload: tracing/third_party/d3/d3.min.js
-+  secure: always
-+
-+- url: /.*
-+  static_files: tracing/tracing/ui/extras/drive/index.html
-+  upload: tracing/tracing/ui/extras/drive/index.html
-+  secure: always
-diff --git a/third_party/catapult/tracing/bin/PRESUBMIT.py b/third_party/catapult/tracing/bin/PRESUBMIT.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..799215d729da79358e32f41905256623b926e829
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/PRESUBMIT.py
-@@ -0,0 +1,19 @@
-+# Copyright 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+import os
-+
-+def CheckChange(input_api, output_api):
-+  init_py_path = os.path.join(input_api.PresubmitLocalPath(), '__init__.py')
-+  res = []
-+  if os.path.exists(init_py_path):
-+    res += [output_api.PresubmitError(
-+        '__init__.py is not allowed to exist in bin/')]
-+  return res
-+
-+def CheckChangeOnUpload(input_api, output_api):
-+  return CheckChange(input_api, output_api)
-+
-+
-+def CheckChangeOnCommit(input_api, output_api):
-+  return CheckChange(input_api, output_api)
-diff --git a/third_party/catapult/tracing/bin/compare_samples b/third_party/catapult/tracing/bin/compare_samples
-new file mode 100755
-index 0000000000000000000000000000000000000000..ff56ccc69faa370daedf828494eaaf6a50daacaf
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/compare_samples
-@@ -0,0 +1,54 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import argparse
-+import os
-+import sys
-+
-+tracing_path = os.path.abspath(os.path.join(os.path.dirname(__file__),
-+                               '..'))
-+sys.path.append(tracing_path)
-+from tracing.metrics import compare_samples
-+
-+def Main(argv):
-+  parser = argparse.ArgumentParser(
-+      description='Compare samples.')
-+  parser.add_argument('sample_a', type=str,
-+                      help='comma-separated list of paths to valuesets from '
-+                           'sample a')
-+  parser.add_argument('sample_b', type=str,
-+                      help='comma-separated list of paths to valuesets from '
-+                           'sample b')
-+  parser.add_argument('metric', type=str,
-+                      help='name of the metric to compare')
-+  parser.add_argument('--chartjson', dest='format', action='store_const',
-+                      const='chartjson',
-+                      help='assume chartjson format for the input data')
-+  parser.add_argument('--buildbot', dest='format', action='store_const',
-+                      const='buildbot',
-+                      help='assume buildbot result line format for the data')
-+  parser.add_argument('--valueset', dest='format', action='store_const',
-+                      const='valueset',
-+                      help='assume valueset format for the input data')
-+  args = parser.parse_args(argv[1:])
-+
-+  if not args.format:
-+    filename = os.path.basename(sample_a.split(',')[0])
-+    if filename == 'results-valueset.json':
-+      args.format = 'valueset'
-+    else:
-+      args.format = 'chartjson'
-+
-+  vinn_result = compare_samples.CompareSamples(
-+      args.sample_a,
-+      args.sample_b,
-+      args.metric,
-+      args.format
-+  )
-+  print vinn_result.stdout
-+  return vinn_result.returncode
-+
-+if __name__ == '__main__':
-+  sys.exit(Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/generate_about_tracing_contents b/third_party/catapult/tracing/bin/generate_about_tracing_contents
-new file mode 100755
-index 0000000000000000000000000000000000000000..feee8828976e83e0dfcbebcee69634594a651a5c
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/generate_about_tracing_contents
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2014 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..'))
-+  sys.path.append(tracing_path)
-+  from tracing_build import generate_about_tracing_contents
-+  sys.exit(generate_about_tracing_contents.Main(sys.argv[1:]))
-diff --git a/third_party/catapult/tracing/bin/html2trace b/third_party/catapult/tracing/bin/html2trace
-new file mode 100755
-index 0000000000000000000000000000000000000000..82161fb1cfd64f440f078cb904706bc19a6347ca
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/html2trace
-@@ -0,0 +1,53 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import argparse
-+import codecs
-+import sys
-+import os
-+
-+tracing_path = os.path.abspath(os.path.join(
-+  os.path.dirname(os.path.realpath(__file__)), '..'))
-+sys.path.append(tracing_path)
-+from tracing_build import html2trace
-+
-+
-+def main():
-+  parser = argparse.ArgumentParser(description='Extract trace data from an '
-+                                   'HTML trace.', add_help=False)
-+  parser.add_argument('html_path', metavar='HTML_PATH',
-+                      help='HTML file path (input).')
-+  parser.add_argument('trace_path', metavar='TRACE_PATH',
-+                      help='Trace file path (output). If the HTML file '
-+                      'contains more than one trace data block, the first '
-+                      'block will be extracted into %(metavar)s and the rest '
-+                      'will be extracted into separate files %(metavar)s.1, '
-+                      '%(metavar)s.2, etc.')
-+  parser.add_argument('--gzipped_output', choices=['true', 'false', 'auto'],
-+                      default='auto', help='Flag whether the output trace '
-+                      'file should be gzipped.')
-+  parser.add_argument('-q', '--quiet', action='store_true',
-+                      help='Don\'t print the saved file name(s).')
-+  parser.add_argument('-h', '--help', action='help',
-+                      help='Show this help message and exit.')
-+  args = parser.parse_args()
-+
-+  if args.gzipped_output == 'true':
-+    gzipped_output = True
-+  elif args.gzipped_output == 'false':
-+    gzipped_output = False
-+  else:
-+    gzipped_output = args.trace_path.endswith('.gz')
-+
-+  with codecs.open(args.html_path, mode='r', encoding='utf-8') as html_file:
-+    saved_paths = html2trace.CopyTraceDataFromHTMLFilePath(
-+        html_file, args.trace_path, gzipped_output)
-+
-+  if not args.quiet:
-+    print '\n'.join(saved_paths)
-+
-+
-+if __name__ == '__main__':
-+  sys.exit(main())
-diff --git a/third_party/catapult/tracing/bin/index.html b/third_party/catapult/tracing/bin/index.html
-new file mode 100644
-index 0000000000000000000000000000000000000000..d48ccc92a4a95696dbc4f8c988886ed386e89226
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/index.html
-@@ -0,0 +1,115 @@
-+<!DOCTYPE html>
-+<!--
-+Copyright (c) 2014 The Chromium Authors. All rights reserved.
-+Use of this source code is governed by a BSD-style license that can be
-+found in the LICENSE file.
-+-->
-+<head>
-+<script>
-+'use strict';
-+
-+function onTraceViewerImportFail() {
-+  document.addEventListener('DOMContentLoaded', function() {
-+    document.body.textContent =
-+        'tracing/bin/trace_viewer_full.html is missing. ' +
-+        'Run vulcanize_trace_viewer from $TRACE_VIEWER and reload.';
-+  });
-+}
-+</script>
-+<link rel="import" href="trace_viewer_full.html"
-+      onerror="onTraceViewerImportFail(event)">
-+
-+<style>
-+  html, body {
-+    box-sizing: border-box;
-+    overflow: hidden;
-+    margin: 0px;
-+    padding: 0;
-+    width: 100%;
-+    height: 100%;
-+  }
-+  #trace-viewer {
-+    width: 100%;
-+    height: 100%;
-+  }
-+  #trace-viewer:focus {
-+    outline: none;
-+  }
-+</style>
-+<script>
-+'use strict';
-+
-+(function() {
-+  var viewer;
-+  var url;
-+  var model;
-+
-+  function load() {
-+    var req = new XMLHttpRequest();
-+    var is_binary = /[.]gz$/.test(url) || /[.]zip$/.test(url);
-+    req.overrideMimeType('text/plain; charset=x-user-defined');
-+    req.open('GET', url, true);
-+    if (is_binary)
-+      req.responseType = 'arraybuffer';
-+
-+    req.onreadystatechange = function(event) {
-+      if (req.readyState !== 4)
-+        return;
-+
-+      window.setTimeout(function() {
-+        if (req.status === 200)
-+          onResult(is_binary ? req.response : req.responseText);
-+        else
-+          onResultFail(req.status);
-+      }, 0);
-+    };
-+    req.send(null);
-+  }
-+
-+  function onResultFail(err) {
-+    var overlay = new tr.ui.b.Overlay();
-+    overlay.textContent = err + ': ' + url + ' could not be loaded';
-+    overlay.title = 'Failed to fetch data';
-+    overlay.visible = true;
-+  }
-+
-+  function onResult(result) {
-+    model = new tr.Model();
-+    var i = new tr.importer.Import(model);
-+    var p = i.importTracesWithProgressDialog([result]);
-+    p.then(onModelLoaded, onImportFail);
-+  }
-+
-+  function onModelLoaded() {
-+    viewer.model = model;
-+    viewer.viewTitle = url;
-+  }
-+
-+  function onImportFail() {
-+    var overlay = new tr.ui.b.Overlay();
-+    overlay.textContent = tr.b.normalizeException(err).message;
-+    overlay.title = 'Import error';
-+    overlay.visible = true;
-+  }
-+
-+  document.addEventListener('DOMContentLoaded', function() {
-+    var container = document.createElement('track-view-container');
-+    container.id = 'track_view_container';
-+
-+    viewer = document.createElement('tr-ui-timeline-view');
-+    viewer.track_view_container = container;
-+    Polymer.dom(viewer).appendChild(container);
-+
-+    viewer.id = 'trace-viewer';
-+    viewer.globalMode = true;
-+    Polymer.dom(document.body).appendChild(viewer);
-+
-+    url = '../test_data/big_trace.json';
-+    load();
-+  });
-+}());
-+</script>
-+</head>
-+<body>
-+</body>
-+</html>
-diff --git a/third_party/catapult/tracing/bin/map_traces b/third_party/catapult/tracing/bin/map_traces
-new file mode 100755
-index 0000000000000000000000000000000000000000..af58491504df566af15f282d56f819f8e4963e2e
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/map_traces
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(os.path.dirname(__file__),
-+                                              '..'))
-+  sys.path.append(tracing_path)
-+  from tracing.mre import map_traces
-+  sys.exit(map_traces.Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/merge_traces b/third_party/catapult/tracing/bin/merge_traces
-new file mode 100755
-index 0000000000000000000000000000000000000000..4b610dd0699b3421efe41187150aae58b0ebc561
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/merge_traces
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..'))
-+  sys.path.append(tracing_path)
-+  from tracing_build import merge_traces
-+  sys.exit(merge_traces.Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/run_dev_server_tests b/third_party/catapult/tracing/bin/run_dev_server_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..bd09476721e433f991b8193a6d0de767594cc92d
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_dev_server_tests
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..', '..'))
-+  sys.path.append(tracing_path)
-+  from catapult_build import run_dev_server_tests
-+  sys.exit(run_dev_server_tests.Main(sys.argv + ['--tests=tracing']))
-diff --git a/third_party/catapult/tracing/bin/run_metric b/third_party/catapult/tracing/bin/run_metric
-new file mode 100755
-index 0000000000000000000000000000000000000000..c1d913c5658a495a6076ea80366165e7a824c065
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_metric
-@@ -0,0 +1,75 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import argparse
-+import codecs
-+import json
-+import os
-+import sys
-+
-+sys.path.insert(1, os.path.join(os.path.dirname(__file__), '..'))
-+from tracing import results_renderer
-+from tracing.metrics import metric_runner
-+from tracing.metrics import discover
-+
-+def Main(argv):
-+  all_metrics = discover.DiscoverMetrics(
-+      ['/tracing/metrics/all_metrics.html'])
-+
-+  parser = argparse.ArgumentParser(
-+      description='Runs metrics on local traces')
-+  parser.add_argument('trace_file_or_dir',
-+                      help='A trace file, or a dir containing trace files')
-+  parser.add_argument('metrics', nargs='+',
-+                      help=('Function names of registered metrics '
-+                            '(not filenames.) '
-+                            'Available metrics are: %s' %
-+                            ', '.join(all_metrics)),
-+                      choices=all_metrics, metavar='metricName')
-+  parser.add_argument('--filename', default='results2', type=str,
-+                      help='Output file name (no extension)')
-+  parser.add_argument('--reset', action='store_true',
-+                      help=('Whether to ignore existing results in HTML file '
-+                            '(if it exists'))
-+  parser.add_argument('--also-output-json', action='store_true',
-+                      help=('Also output json file containing values. Note that'
-+                            'this only contains the results of current run'))
-+
-+  args = parser.parse_args(argv[1:])
-+  trace_file_or_dir = os.path.abspath(args.trace_file_or_dir)
-+
-+  if os.path.isdir(trace_file_or_dir):
-+    trace_dir = trace_file_or_dir
-+    traces = [os.path.join(trace_dir, trace) for trace in os.listdir(trace_dir)]
-+  else:
-+    traces = [trace_file_or_dir]
-+
-+  failures = []
-+  histograms = []
-+  for trace_url, mre_result in metric_runner.RunMetricOnTraces(
-+      traces, args.metrics).iteritems():
-+    failures.extend(mre_result.failures)
-+    histograms.extend(mre_result.pairs.get('histograms', []))
-+
-+  if failures:
-+    print 'Running metric failed:'
-+    for failure in failures:
-+      print failure['stack']
-+
-+  output_file = args.filename + '.html'
-+  open(output_file, 'a').close() # Create file if it doesn't exist.
-+  with codecs.open(output_file, mode='r+', encoding='utf-8') as output_stream:
-+    results_renderer.RenderHTMLView(histograms, output_stream, args.reset)
-+    print 'HTML result created in file://' + os.path.abspath(output_file)
-+
-+  if args.also_output_json:
-+    output_file = args.filename + '.json'
-+    with open(output_file, 'w') as f:
-+      json.dump(histograms, f, indent=2, sort_keys=True, separators=(',', ': '))
-+    print 'JSON result created in file://' + os.path.abspath(output_file)
-+
-+
-+if __name__ == '__main__':
-+  sys.exit(Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/run_node_tests b/third_party/catapult/tracing/bin/run_node_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..d044e0f1c2276f97735490d73199c677cb19a682
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_node_tests
-@@ -0,0 +1,23 @@
-+#!/usr/bin/env node
-+// Copyright (c) 2016 The Chromium Authors. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+'use strict';
-+
-+var fs = require('fs');
-+var path = require('path');
-+
-+var catapultPath = fs.realpathSync(path.join(__dirname, '..', '..'));
-+var catapultBuildPath = path.join(catapultPath, 'catapult_build');
-+
-+var node_bootstrap = require(path.join(catapultBuildPath, 'node_bootstrap.js'));
-+
-+HTMLImportsLoader.addArrayToSourcePath(
-+    node_bootstrap.getSourcePathsForProject('tracing'));
-+
-+// Go!
-+var headless_test_module_filenames =
-+    node_bootstrap.getHeadlessTestModuleFilenamesForProject('tracing');
-+
-+HTMLImportsLoader.loadHTML('/tracing/base/headless_tests.html');
-+tr.b.unittest.loadAndRunTests(headless_test_module_filenames);
-\ No newline at end of file
-diff --git a/third_party/catapult/tracing/bin/run_py_tests b/third_party/catapult/tracing/bin/run_py_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..23a6ceaa31f22d5098bef1471898b0111e9d0826
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_py_tests
-@@ -0,0 +1,41 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import platform
-+import sys
-+
-+_CATAPULT_PATH = os.path.abspath(
-+    os.path.join(
-+        os.path.dirname(os.path.realpath(__file__)),
-+        os.path.pardir,
-+        os.path.pardir))
-+_TRACING_PATH = os.path.join(_CATAPULT_PATH, 'tracing')
-+
-+
-+def _RunTestsOrDie(top_level_dir):
-+  exit_code = run_with_typ.Run(top_level_dir, path=[_TRACING_PATH])
-+  if exit_code:
-+    sys.exit(exit_code)
-+
-+
-+def _AddToPathIfNeeded(path):
-+  if path not in sys.path:
-+    sys.path.insert(0, path)
-+
-+
-+if __name__ == '__main__':
-+  _AddToPathIfNeeded(_CATAPULT_PATH)
-+
-+  from hooks import install
-+  if '--no-install-hooks' in sys.argv:
-+    sys.argv.remove('--no-install-hooks')
-+  else:
-+    install.InstallHooks()
-+
-+  from catapult_build import run_with_typ
-+  _RunTestsOrDie(os.path.join(_TRACING_PATH, 'tracing'))
-+  _RunTestsOrDie(os.path.join(_TRACING_PATH, 'tracing_build'))
-+  sys.exit(0)
-diff --git a/third_party/catapult/tracing/bin/run_tests b/third_party/catapult/tracing/bin/run_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..df95b1d6c4e3251b158391f369061f46dd12f3ce
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_tests
-@@ -0,0 +1,25 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+
-+_THIS_PATH = os.path.dirname(os.path.realpath(__file__))
-+_TESTS = [
-+    {'path': os.path.join(_THIS_PATH, 'run_py_tests')},
-+    {'path': os.path.join(_THIS_PATH, 'run_vinn_tests'),
-+     'disabled': {'win32'}},
-+    {'path': os.path.join(_THIS_PATH, 'run_dev_server_tests'),
-+     'chrome_path_arg': True}
-+]
-+
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..'))
-+  sys.path.append(tracing_path)
-+  from catapult_build import test_runner
-+  sys.exit(test_runner.Main('tracing', _TESTS, sys.argv))
-diff --git a/third_party/catapult/tracing/bin/run_vinn_tests b/third_party/catapult/tracing/bin/run_vinn_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..42ec180f119bcc8836c0d6678146a5cbfd2af392
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_vinn_tests
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..'))
-+  sys.path.append(tracing_path)
-+  from tracing_build import run_vinn_tests
-+  sys.exit(run_vinn_tests.Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/slim_trace b/third_party/catapult/tracing/bin/slim_trace
-new file mode 100755
-index 0000000000000000000000000000000000000000..2e170777840855ede68c7d119a21f7f41fd47c64
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/slim_trace
-@@ -0,0 +1,16 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import sys
-+import os
-+
-+tracing_path = os.path.abspath(os.path.join(
-+  os.path.dirname(os.path.realpath(__file__)), '..'))
-+sys.path.append(tracing_path)
-+from tracing_build import slim_trace
-+
-+
-+if __name__ == '__main__':
-+  sys.exit(slim_trace.Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/strip_memory_infra_trace b/third_party/catapult/tracing/bin/strip_memory_infra_trace
-new file mode 100755
-index 0000000000000000000000000000000000000000..8bdc8375d75847ebb62ec39e9ec21721684ecdb6
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/strip_memory_infra_trace
-@@ -0,0 +1,13 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-+  sys.path.append(tracing_path)
-+  from tracing_build import strip_memory_infra_trace
-+  sys.exit(strip_memory_infra_trace.Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/symbolize_trace b/third_party/catapult/tracing/bin/symbolize_trace
-new file mode 100755
-index 0000000000000000000000000000000000000000..ecfbb673bf0c46bbbcb4dce0f414a68388f237fe
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/symbolize_trace
-@@ -0,0 +1,409 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import argparse
-+import bisect
-+import collections
-+import gzip
-+import json
-+import os
-+import re
-+import subprocess
-+import sys
-+
-+_SYMBOLS_PATH = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)),
-+    '..',
-+    'third_party',
-+    'symbols'))
-+sys.path.append(_SYMBOLS_PATH)
-+# pylint: disable=import-error
-+import symbols.elf_symbolizer as elf_symbolizer
-+
-+
-+# Relevant trace event phases from Chromium's
-+# src/base/trace_event/common/trace_event_common.h.
-+TRACE_EVENT_PHASE_METADATA = 'M'
-+TRACE_EVENT_PHASE_MEMORY_DUMP = 'v'
-+
-+
-+# Matches Android library paths, supports both K (/data/app-lib/<>/lib.so)
-+# as well as L+ (/data/app/<>/lib/<>/lib.so). Library name is available
-+# via 'name' group.
-+ANDROID_PATH_MATCHER = re.compile(
-+    r'^/data/(?:'
-+      r'app/[^/]+/lib/[^/]+/|'
-+      r'app-lib/[^/]+/|'
-+      r'data/[^/]+/incremental-install-files/lib/'
-+    r')(?P<name>.*\.so)')
-+
-+# Subpath of output path where unstripped libraries are stored.
-+ANDROID_UNSTRIPPED_SUBPATH = 'lib.unstripped'
-+
-+
-+def FindInSystemPath(binary_name):
-+  paths = os.environ['PATH'].split(os.pathsep)
-+  for path in paths:
-+    binary_path = os.path.join(path, binary_name)
-+    if os.path.isfile(binary_path):
-+      return binary_path
-+  return None
-+
-+
-+def IsSymbolizableFile(file_path):
-+  result = subprocess.check_output(['file', '-0', file_path])
-+  type_string = result[result.find('\0') + 1:]
-+  return bool(re.match(r'\: (ELF|Mach-O) (32|64)-bit\b', type_string))
-+
-+
-+class ProcessMemoryMaps(object):
-+  """Represents 'process_mmaps' trace file entry."""
-+
-+  class Region(object):
-+    def __init__(self, start_address, size, file_path):
-+      self._start_address = start_address
-+      self._size = size
-+      self._file_path = file_path
-+
-+    @property
-+    def start_address(self):
-+      return self._start_address
-+
-+    @property
-+    def end_address(self):
-+      return self._start_address + self._size
-+
-+    @property
-+    def size(self):
-+      return self._size
-+
-+    @property
-+    def file_path(self):
-+      return self._file_path
-+
-+    def __cmp__(self, other):
-+      if isinstance(other, type(self)):
-+        return long(self._start_address).__cmp__(long(other._start_address))
-+      elif isinstance(other, (long, int)):
-+        return long(self._start_address).__cmp__(long(other))
-+      else:
-+        raise Exception('Cannot compare with %s' % type(other))
-+
-+    def __repr__(self):
-+      return 'Region(0x{:X} - 0x{:X}, {})'.format(
-+          self.start_address, self.end_address, self.file_path)
-+
-+  def __init__(self, process_mmaps):
-+    """Parses 'process_mmaps' dictionary."""
-+
-+    regions = []
-+    for region_value in process_mmaps['vm_regions']:
-+      regions.append(self.Region(
-+          long(region_value['sa'], 16),
-+          long(region_value['sz'], 16),
-+          region_value['mf']))
-+    regions.sort()
-+
-+    # Copy regions without duplicates and check for overlaps.
-+    self._regions = []
-+    previous_region = None
-+    for region in regions:
-+      if previous_region is not None:
-+        if region == previous_region:
-+          continue
-+        assert region.start_address >= previous_region.end_address, \
-+            'Regions {} and {} overlap.'.format(previous_region, region)
-+      previous_region = region
-+      self._regions.append(region)
-+
-+  @property
-+  def regions(self):
-+    return self._regions
-+
-+  def FindRegion(self, address):
-+    """Finds region containing |address|. Returns None if none found."""
-+
-+    region_index = bisect.bisect_right(self._regions, address) - 1
-+    if region_index >= 0:
-+      region = self._regions[region_index]
-+      if address >= region.start_address and address < region.end_address:
-+        return region
-+    return None
-+
-+
-+class StackFrames(object):
-+  """Represents 'stackFrames' trace file entry."""
-+
-+  class PCFrame(object):
-+    def __init__(self, pc, frame):
-+      self._modified = False
-+      self._pc = pc
-+      self._frame = frame
-+
-+    @property
-+    def modified(self):
-+      return self._modified
-+
-+    @property
-+    def pc(self):
-+      return self._pc
-+
-+    @property
-+    def name(self):
-+      return self._frame['name']
-+
-+    @name.setter
-+    def name(self, value):
-+      self._modified = True
-+      self._frame['name'] = value
-+
-+  def __init__(self, stack_frames):
-+    """Constructs object using 'stackFrames' dictionary."""
-+    self._pc_frames = []
-+    for frame in stack_frames.itervalues():
-+      pc_frame = self._ParsePCFrame(frame)
-+      if pc_frame:
-+        self._pc_frames.append(pc_frame)
-+
-+  @property
-+  def pc_frames(self):
-+    return self._pc_frames
-+
-+  @property
-+  def modified(self):
-+    return any(f.modified for f in self._pc_frames)
-+
-+  _PC_TAG = 'pc:'
-+
-+  @classmethod
-+  def _ParsePCFrame(self, frame):
-+    name = frame['name']
-+    if not name.startswith(self._PC_TAG):
-+      return None
-+    pc = long(name[len(self._PC_TAG):], 16)
-+    return self.PCFrame(pc, frame)
-+
-+
-+class Process(object):
-+  """Holds various bits of information about a process in a trace file."""
-+
-+  def __init__(self, pid):
-+    self.pid = pid
-+    self.name = None
-+    self.mmaps = None
-+    self.stack_frames = None
-+
-+
-+def CollectProcesses(trace):
-+  """Parses trace dictionary and returns pid->Process map of all processes
-+     suitable for symbolization (which have both mmaps and stack_frames).
-+  """
-+
-+  process_map = {}
-+
-+  # Android traces produced via 'chrome://inspect/?tracing#devices' are
-+  # just list of events.
-+  events = trace if isinstance(trace, list) else trace['traceEvents']
-+  for event in events:
-+    name = event.get('name')
-+    if not name:
-+      continue
-+
-+    pid = event['pid']
-+    process = process_map.get(pid)
-+    if process is None:
-+      process = Process(pid)
-+      process_map[pid] = process
-+
-+    phase = event['ph']
-+    if phase == TRACE_EVENT_PHASE_METADATA:
-+      if name == 'process_name':
-+        process.name = event['args']['name']
-+      elif name == 'stackFrames':
-+        process.stack_frames = StackFrames(event['args']['stackFrames'])
-+    elif phase == TRACE_EVENT_PHASE_MEMORY_DUMP:
-+      process_mmaps = event['args']['dumps'].get('process_mmaps')
-+      if process_mmaps:
-+        # TODO(dskiba): this parses all process_mmaps, but retains only the
-+        #               last one. We need to parse only once (lazy parsing?).
-+        process.mmaps = ProcessMemoryMaps(process_mmaps)
-+
-+  return [p for p in process_map.itervalues() if p.mmaps and p.stack_frames]
-+
-+
-+class SymbolizableFile(object):
-+  """Holds file path, addresses to symbolize and stack frames to update.
-+
-+  This class is a link between ELFSymbolizer and a trace file: it specifies
-+  what to symbolize (addresses) and what to update with the symbolization
-+  result (frames).
-+  """
-+  def __init__(self, file_path):
-+    self.path = file_path
-+    self.symbolizable_path = file_path # path to use for symbolization
-+    self.frames_by_address = collections.defaultdict(list)
-+
-+
-+def ResolveSymbolizableFiles(processes):
-+  """Resolves and groups PCs into list of SymbolizableFiles.
-+
-+  As part of the grouping process, this function resolves PC from each stack
-+  frame to the corresponding mmap region. Stack frames that failed to resolve
-+  are symbolized with '<unresolved>'.
-+  """
-+  symfile_by_path = {}
-+  for process in processes:
-+    for frame in process.stack_frames.pc_frames:
-+      region = process.mmaps.FindRegion(frame.pc)
-+      if region is None:
-+        frame.name = '<unresolved>'
-+        continue
-+
-+      symfile = symfile_by_path.get(region.file_path)
-+      if symfile is None:
-+        symfile = SymbolizableFile(region.file_path)
-+        symfile_by_path[symfile.path] = symfile
-+
-+      relative_pc = frame.pc - region.start_address
-+      symfile.frames_by_address[relative_pc].append(frame)
-+  return symfile_by_path.values()
-+
-+
-+def SymbolizeFiles(symfiles, addr2line_path):
-+  """Symbolizes each file in the given list of SymbolizableFiles
-+     and updates stack frames with symbolization results."""
-+  print 'Symbolizing...'
-+
-+  def _SubPrintf(message, *args):
-+    print ('  ' + message).format(*args)
-+
-+  symbolized = False
-+  for symfile in symfiles:
-+    unsymbolized_name = '<{}>'.format(
-+        symfile.path if symfile.path else 'unnamed')
-+
-+    problem = None
-+    if not os.path.isabs(symfile.symbolizable_path):
-+      problem = 'not a file'
-+    elif not os.path.isfile(symfile.symbolizable_path):
-+      problem = "file doesn't exist"
-+    elif not IsSymbolizableFile(symfile.symbolizable_path):
-+      problem = 'file is not symbolizable'
-+    if problem:
-+      _SubPrintf("Won't symbolize {} PCs for '{}': {}.",
-+                 len(symfile.frames_by_address),
-+                 symfile.symbolizable_path,
-+                 problem)
-+      for frames in symfile.frames_by_address.itervalues():
-+        for frame in frames:
-+          frame.name = unsymbolized_name
-+      continue
-+
-+    def _SymbolizerCallback(sym_info, frames):
-+      # Unwind inline chain to the top.
-+      while sym_info.inlined_by:
-+        sym_info = sym_info.inlined_by
-+
-+      symbolized_name = sym_info.name if sym_info.name else unsymbolized_name
-+      for frame in frames:
-+        frame.name = symbolized_name
-+
-+    symbolizer = elf_symbolizer.ELFSymbolizer(symfile.symbolizable_path,
-+                                              addr2line_path,
-+                                              _SymbolizerCallback,
-+                                              inlines=True)
-+
-+    _SubPrintf('Symbolizing {} PCs from {}...',
-+               len(symfile.frames_by_address),
-+               symfile.path)
-+
-+    for address, frames in symfile.frames_by_address.iteritems():
-+      # SymbolizeAsync() asserts that the type of address is int. We operate
-+      # on longs (since they are raw pointers possibly from 64-bit processes).
-+      # It's OK to cast here because we're passing relative PC, which should
-+      # always fit into int.
-+      symbolizer.SymbolizeAsync(int(address), frames)
-+
-+    symbolizer.Join()
-+    symbolized = True
-+
-+  return symbolized
-+
-+
-+def HaveFilesFromAndroid(symfiles):
-+  return any(ANDROID_PATH_MATCHER.match(f.path) for f in symfiles)
-+
-+
-+def RemapAndroidFiles(symfiles, output_path):
-+  for symfile in symfiles:
-+    match = ANDROID_PATH_MATCHER.match(symfile.path)
-+    if match:
-+      name = match.group('name')
-+      symfile.symbolizable_path = os.path.join(
-+          output_path, ANDROID_UNSTRIPPED_SUBPATH, name)
-+    else:
-+      # Clobber file path to trigger "not a file" problem in SymbolizeFiles().
-+      # Without this, files won't be symbolized with "file not found" problem,
-+      # which is not accurate.
-+      symfile.symbolizable_path = 'android://{}'.format(symfile.path)
-+
-+
-+# Suffix used for backup files.
-+BACKUP_FILE_TAG = '.BACKUP'
-+
-+def main():
-+  parser = argparse.ArgumentParser()
-+  parser.add_argument('file',
-+                      help='Trace file to symbolize (.json or .json.gz)')
-+  parser.add_argument('--no-backup',
-+                      dest='backup', default='true', action='store_false',
-+                      help="Don't create {} files".format(BACKUP_FILE_TAG))
-+  parser.add_argument('--output-directory',
-+                      help='The path to the build output directory, such ' +
-+                           'as out/Debug. Only needed for Android.')
-+  options = parser.parse_args()
-+
-+  trace_file_path = options.file
-+  def _OpenTraceFile(mode):
-+    if trace_file_path.endswith('.gz'):
-+      return gzip.open(trace_file_path, mode + 'b')
-+    else:
-+      return open(trace_file_path, mode + 't')
-+
-+  addr2line_path = FindInSystemPath('addr2line')
-+  if addr2line_path is None:
-+    sys.exit("Can't symbolize - no addr2line in PATH.")
-+
-+  print 'Reading trace file...'
-+  with _OpenTraceFile('r') as trace_file:
-+    trace = json.load(trace_file)
-+
-+  processes = CollectProcesses(trace)
-+  symfiles = ResolveSymbolizableFiles(processes)
-+
-+  # Android trace files don't have any indication they are from Android.
-+  # So we're checking for Android-specific paths.
-+  if HaveFilesFromAndroid(symfiles):
-+    if not options.output_directory:
-+      parser.error('The trace file appears to be from Android. Please '
-+                   "specify output directory (e.g. 'out/Debug') to properly "
-+                   'symbolize it.')
-+    RemapAndroidFiles(symfiles, os.path.abspath(options.output_directory))
-+
-+  if SymbolizeFiles(symfiles, addr2line_path):
-+    if options.backup:
-+      backup_file_path = trace_file_path + BACKUP_FILE_TAG
-+      print 'Backing up trace file to {}...'.format(backup_file_path)
-+      os.rename(trace_file_path, backup_file_path)
-+
-+    print 'Updating trace file...'
-+    with _OpenTraceFile('w') as trace_file:
-+      json.dump(trace, trace_file)
-+  else:
-+    print 'No PCs symbolized - not updating trace file.'
-+
-+
-+if __name__ == '__main__':
-+  main()
-diff --git a/third_party/catapult/tracing/bin/trace2html b/third_party/catapult/tracing/bin/trace2html
-new file mode 100755
-index 0000000000000000000000000000000000000000..0457d39a66b2c6357a8ca0060f4ca657cf34a049
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/trace2html
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2014 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import sys
-+import os
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..'))
-+  sys.path.append(tracing_path)
-+  from tracing_build import trace2html
-+  sys.exit(trace2html.Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/update_gypi b/third_party/catapult/tracing/bin/update_gypi
-new file mode 100755
-index 0000000000000000000000000000000000000000..a4e54fdf3485595a8d55644aefa2dd0f1ecf29a0
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/update_gypi
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..'))
-+  sys.path.append(tracing_path)
-+  from tracing_build import update_gypi
-+  sys.exit(update_gypi.Update())
-diff --git a/third_party/catapult/tracing/bin/validate_all_metrics b/third_party/catapult/tracing/bin/validate_all_metrics
-new file mode 100755
-index 0000000000000000000000000000000000000000..b4b26307bc172f8b158c90cc1cc864547bda7708
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/validate_all_metrics
-@@ -0,0 +1,43 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import argparse
-+import json
-+import os
-+import string
-+import sys
-+
-+sys.path.insert(
-+    1,
-+    os.path.join(os.path.dirname(os.path.realpath(__file__)), '..'))
-+from tracing.metrics import discover
-+import tracing_project
-+
-+
-+def Main():
-+  all_registered_metrics = set(discover.DiscoverMetrics(
-+      ['/tracing/metrics/all_metrics.html']))
-+  all_modules = list(
-+      '/' + rel_path for rel_path in
-+      tracing_project.TracingProject().FindAllMetricsModuleRelPaths())
-+  all_possible_metrics = set(discover.DiscoverMetrics(all_modules))
-+  unregistered_metrics = all_possible_metrics - all_registered_metrics
-+  if unregistered_metrics:
-+    print ('These metrics are unregistered: %s. Please import their modules in '
-+           'tracing/tracing/metrics/all_metrics.html' %
-+           ', '.join(unregistered_metrics))
-+    return 1
-+  uppercased_metrics = []
-+  for m in all_possible_metrics:
-+    if str.isupper(m[0]):
-+      uppercased_metrics.append(m)
-+  if uppercased_metrics:
-+    print ('These metrics must be renamed to start with a lower-case: %s' %
-+           uppercased_metrics)
-+    return 1
-+  return 0
-+
-+if __name__ == '__main__':
-+  sys.exit(Main())
-diff --git a/third_party/catapult/tracing/bin/vulcanize_trace_viewer b/third_party/catapult/tracing/bin/vulcanize_trace_viewer
-new file mode 100755
-index 0000000000000000000000000000000000000000..c3602d40447536b69c319b0a926e8932ffcafb37
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/vulcanize_trace_viewer
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2014 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..'))
-+  sys.path.append(tracing_path)
-+  from tracing_build import vulcanize_trace_viewer
-+  sys.exit(vulcanize_trace_viewer.Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/why_imported b/third_party/catapult/tracing/bin/why_imported
-new file mode 100755
-index 0000000000000000000000000000000000000000..9b5a59a6f49058f61592e5c71cee7da2fa63a9bc
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/why_imported
-@@ -0,0 +1,48 @@
-+#!/usr/bin/env python
-+# Copyright 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Produces a dot file showing dependency relationships between modules.
-+
-+The dot file contains a text-based representation of a directed graph that
-+explains why given module names were included in a trace_viewer config.
-+
-+Example usage:
-+$ ./why_imported tracing.ui.analysis.analysis_view > ~/analysis_view.dot
-+
-+This can then be converted to a graphical representation with the dot tool:
-+$ dot -Grankdir=LR -Tpng ~/analysis_view.dot -o ~/analysis_view.png
-+"""
-+
-+import os
-+import sys
-+import argparse
-+
-+
-+def Main():
-+  project = tracing_project.TracingProject()
-+
-+  parser = argparse.ArgumentParser(
-+      usage='%(prog)s <options> moduleNames', epilog=__doc__)
-+  parser.add_argument('--config', choices=project.GetConfigNames())
-+  parser.add_argument('module_names', nargs='+')
-+  args = parser.parse_args()
-+
-+  if args.config:
-+    names = [project.GetModuleNameForConfigName(options.config)]
-+    vulcanizer = project.CreateVulcanizer()
-+    load_sequence = vulcanizer.CalcLoadSequenceForModuleNames(names)
-+  else:
-+    parser.error('No config specified.')
-+  print vulcanizer.GetDominatorGraphForModulesNamed(
-+      args.module_names, load_sequence)
-+
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..'))
-+  sys.path.append(tracing_path)
-+  import tracing_project
-+  tracing_project.UpdateSysPathIfNeeded()
-+  sys.exit(Main())
 diff --git a/third_party/catapult/tracing/bower.json b/third_party/catapult/tracing/bower.json
 new file mode 100644
 index 0000000000000000000000000000000000000000..429f8995649b190ac965fd37f2643dd8a24cac40
@@ -1436,7 +199,7 @@ index 0000000000000000000000000000000000000000..6af936598d5f815b8049e2efaa8b089b
 + * Familiarize yourself with the [[Trace-Viewer's-Internals]] and our [[Trace-Viewer-Components]].
 diff --git a/third_party/catapult/tracing/docs/trace-viewer-internals.md b/third_party/catapult/tracing/docs/trace-viewer-internals.md
 new file mode 100644
-index 0000000000000000000000000000000000000000..13c23e7e87222c610d512ab02992d8917f9a6e16
+index 0000000000000000000000000000000000000000..fc85929cf79417061ca74d398762d9b3e5502899
 --- /dev/null
 +++ b/third_party/catapult/tracing/docs/trace-viewer-internals.md
 @@ -0,0 +1,129 @@
@@ -1515,7 +278,7 @@ index 0000000000000000000000000000000000000000..13c23e7e87222c610d512ab02992d891
 + * This of visualization starts as a *flat* array of slices:
 +
 +```
-+ [{title: “a”, start: 0, end: 1), {title: “c”, start: 1.5, end: 3.5}, {title: “b”, start: 0.5, end: 0.8}[
++ [{title: “a”, start: 0, end: 1), {title: “c”, start: 1.5, end: 3.5}, {title: “b”, start: 0.5, end: 0.8}]
 +```
 +
 + * We call this a slice group. A slice group can be composed into subRows -- a subRow is an array of slices that are all non-overlapping. E.g. in the thread7 example above, there are two subrows:
@@ -2224,3 +987,501 @@ We<7R<2Lbs20000<MNUMnLSTYE;=Bt0
 literal 0
 HcmV?d00001
 
+diff --git a/third_party/catapult/tracing/images/trace-viewer-circle-yellow.png b/third_party/catapult/tracing/images/trace-viewer-circle-yellow.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..a805cc1b4d99d7bbacfc36c4790f40c472dd2b2b
+GIT binary patch
+literal 9633
+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
+Xq>Nxi_|LdZ00000NkvXXu0mjfq5uUx
+
+literal 0
+HcmV?d00001
+
+diff --git a/third_party/catapult/tracing/images/trace-viewer-square-blue.png b/third_party/catapult/tracing/images/trace-viewer-square-blue.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..441f684bb0473a38288a3b41142e84464f8fdf8a
+GIT binary patch
+literal 3199
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/third_party/catapult/tracing/images/trace-viewer-square-green.png b/third_party/catapult/tracing/images/trace-viewer-square-green.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..a4da2ef051ffedd91cec0538c5c3780a5cf1e9c2
+GIT binary patch
+literal 3170
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/third_party/catapult/tracing/images/trace-viewer-square-red.png b/third_party/catapult/tracing/images/trace-viewer-square-red.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..fc8e7fe71f89f9738bfab4499dd2ba2d0b2cf510
+GIT binary patch
+literal 3122
+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
+F{{yBoyiouE
+
+literal 0
+HcmV?d00001
+
+diff --git a/third_party/catapult/tracing/images/trace-viewer-square-yellow.png b/third_party/catapult/tracing/images/trace-viewer-square-yellow.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..7216975bef686e5eeeaefd371a561e1da1d20521
+GIT binary patch
+literal 3519
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/third_party/catapult/tracing/package.json b/third_party/catapult/tracing/package.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..7153679fd2efb2a2627c94c40e43f7506214c437
+--- /dev/null
++++ b/third_party/catapult/tracing/package.json
+@@ -0,0 +1,22 @@
++{
++  "name": "traceviewer",
++  "version": "1.0.5",
++  "description": "Trace-Viewer is the javascript frontend for Chrome about:tracing and Android systrace.",
++  "main": "tracing/index.js",
++  "scripts": {
++    "test": "echo \"Error: no test specified\" && exit 1"
++  },
++  "repository": {
++    "type": "git",
++    "url": "https://github.com/catapult-project/catapult/tree/master/tracing"
++  },
++  "keywords": [
++    "tracing",
++    "traceviewer",
++    "trace",
++    "events"
++  ],
++  "author": "The Chromium Authors",
++  "license": "BSD-2-Clause",
++  "gypfile": false
++}
