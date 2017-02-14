@@ -1,1426 +1,3 @@
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/resources/geolocation-mock.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/resources/geolocation-mock.js
-deleted file mode 100644
-index 836c79d69e1f587a21de25b7a58d80172f77ed62..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/resources/geolocation-mock.js
-+++ /dev/null
-@@ -1,186 +0,0 @@
--/*
-- * geolocation-mock contains a mock implementation of GeolocationService and
-- * PermissionService.
-- */
--
--"use strict";
--
--let geolocationServiceMock = loadMojoModules(
--    'geolocationServiceMock',
--    ['device/geolocation/public/interfaces/geolocation.mojom',
--     'third_party/WebKit/public/platform/modules/permissions/permission.mojom',
--     'third_party/WebKit/public/platform/modules/permissions/permission_status.mojom',
--     'mojo/public/js/router',
--    ]).then(mojo => {
--  let [geolocation, permission, permissionStatus, router] =
--      mojo.modules;
--
--  class GeolocationServiceMock {
--    constructor(interfaceProvider) {
--      interfaceProvider.addInterfaceOverrideForTesting(
--          geolocation.GeolocationService.name,
--          handle => this.connectGeolocation_(handle));
--
--      interfaceProvider.addInterfaceOverrideForTesting(
--          permission.PermissionService.name,
--          handle => this.connectPermission_(handle));
--
--      this.interfaceProvider_ = interfaceProvider;
--
--      /**
--       * The next geoposition to return in response to a queryNextPosition()
--       * call.
--      */
--      this.geoposition_ = null;
--
--      /**
--       * A pending request for permission awaiting a decision to be set via a
--       * setGeolocationPermission call.
--       *
--       * @type {?Function}
--       */
--      this.pendingPermissionRequest_ = null;
--
--      /**
--       * The status to respond to permission requests with. If set to ASK, then
--       * permission requests will block until setGeolocationPermission is called
--       * to allow or deny permission requests.
--       *
--       * @type {!permissionStatus.PermissionStatus}
--       */
--      this.permissionStatus_ = permissionStatus.PermissionStatus.ASK;
--      this.rejectPermissionConnections_ = false;
--      this.rejectGeolocationConnections_ = false;
--    }
--
--    connectGeolocation_(handle) {
--      if (this.rejectGeolocationConnections_) {
--        mojo.core.close(handle);
--        return;
--      }
--      this.geolocationStub_ = new geolocation.GeolocationService.stubClass(
--          this);
--      this.geolocationRouter_ = new router.Router(handle);
--      this.geolocationRouter_.setIncomingReceiver(this.geolocationStub_);
--    }
--
--    connectPermission_(handle) {
--      if (this.rejectPermissionConnections_) {
--        mojo.core.close(handle);
--        return;
--      }
--      this.permissionStub_ = new permission.PermissionService.stubClass(this);
--      this.permissionRouter_ = new router.Router(handle);
--      this.permissionRouter_.setIncomingReceiver(this.permissionStub_);
--    }
--
--    setHighAccuracy(highAccuracy) {
--      // FIXME: We need to add some tests regarding "high accuracy" mode.
--      // See https://bugs.webkit.org/show_bug.cgi?id=49438
--    }
--
--    /**
--     * A mock implementation of GeolocationService.queryNextPosition(). This
--     * returns the position set by a call to setGeolocationPosition() or
--     * setGeolocationPositionUnavailableError().
--     */
--    queryNextPosition() {
--      if (!this.geoposition_) {
--        this.setGeolocationPositionUnavailableError(
--            'Test error: position not set before call to queryNextPosition()');
--      }
--      let geoposition = this.geoposition_;
--      this.geoposition_ = null;
--      return Promise.resolve({geoposition});
--    }
--
--    /**
--     * Sets the position to return to the next queryNextPosition() call. If any
--     * queryNextPosition() requests are outstanding, they will all receive the
--     * position set by this call.
--     */
--    setGeolocationPosition(latitude, longitude, accuracy, altitude,
--                           altitudeAccuracy, heading, speed) {
--      this.geoposition_ = new geolocation.Geoposition();
--      this.geoposition_.latitude = latitude;
--      this.geoposition_.longitude = longitude;
--      this.geoposition_.accuracy = accuracy;
--      this.geoposition_.altitude = altitude;
--      this.geoposition_.altitude_accuracy = altitudeAccuracy;
--      this.geoposition_.heading = heading;
--      this.geoposition_.speed = speed;
--      this.geoposition_.timestamp = new Date().getTime() / 1000;
--      this.geoposition_.error_message = '';
--      this.geoposition_.valid = true;
--    }
--
--    /**
--     * Sets the error message to return to the next queryNextPosition() call. If
--     * any queryNextPosition() requests are outstanding, they will all receive
--     * the error set by this call.
--     */
--    setGeolocationPositionUnavailableError(message) {
--      this.geoposition_ = new geolocation.Geoposition();
--      this.geoposition_.valid = false;
--      this.geoposition_.error_message = message;
--      this.geoposition_.error_code =
--          geolocation.Geoposition.ErrorCode.POSITION_UNAVAILABLE;
--    }
--
--    /**
--     * Reject any connection requests for the permission service. This will
--     * trigger a connection error in the client.
--     */
--    rejectPermissionConnections() {
--      this.rejectPermissionConnections_ = true;
--    }
--
--    /**
--     * Reject any connection requests for the geolocation service. This will
--     * trigger a connection error in the client.
--     */
--    rejectGeolocationConnections() {
--      this.rejectGeolocationConnections_ = true;
--    }
--
--    /**
--     * A mock implementation of PermissionService.requestPermission(). This
--     * returns the result set by a call to setGeolocationPermission(), waiting
--     * for a call if necessary. Any permission request that is not for
--     * geolocation is always denied.
--     */
--    requestPermission(permissionDescriptor) {
--      if (permissionDescriptor.name != permission.PermissionName.GEOLOCATION)
--        return Promise.resolve(permissionStatus.PermissionStatus.DENIED);
--
--      return new Promise(resolve => {
--        if (this.pendingPermissionRequest_)
--          this.pendingPermissionRequest_(permissionStatus.PermissionStatus.ASK);
--        this.pendingPermissionRequest_ = resolve;
--        this.runPermissionCallback_();
--      });
--    }
--
--    runPermissionCallback_() {
--      if (this.permissionStatus_ == permissionStatus.PermissionStatus.ASK ||
--          !this.pendingPermissionRequest_)
--        return;
--
--      this.pendingPermissionRequest_({status: this.permissionStatus_});
--      this.permissionStatus_ = permissionStatus.PermissionStatus.ASK ;
--      this.pendingPermissionRequest_ = null;
--    }
--
--    /**
--     * Sets whether the next geolocation permission request should be allowed.
--     */
--    setGeolocationPermission(allowed) {
--      this.permissionStatus_ = allowed ?
--          permissionStatus.PermissionStatus.GRANTED :
--          permissionStatus.PermissionStatus.DENIED;
--      this.runPermissionCallback_();
--    }
--
--  }
--  return new GeolocationServiceMock(mojo.frameInterfaces);
--});
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/resources/remove-remote-context-in-error-callback-crash-inner.html b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/resources/remove-remote-context-in-error-callback-crash-inner.html
-deleted file mode 100644
-index a7294ae47b1f50e9c43ebb215d18da7725391c46..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/resources/remove-remote-context-in-error-callback-crash-inner.html
-+++ /dev/null
-@@ -1,20 +0,0 @@
--<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
--<html>
--  <head>
--    <script src="../../../../resources/mojo-helpers.js"></script>
--    <script src="geolocation-mock.js"></script>
--    <script>
--      function init() {
--          if (!window.testRunner || !window.mojo)
--              debug('This test can not run without testRunner or mojo');
--
--          geolocationServiceMock.then(mock => {
--              mock.setGeolocationPermission(false);
--              window.parent.onIframeReady()
--          });
--      }
--    </script>
--  </head>
--  <body onload="init()">
--  </body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/resources/window-close-popup.html b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/resources/window-close-popup.html
-deleted file mode 100644
-index 8b9504a22190f1aa77b75490f200683ccd8a9841..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/resources/window-close-popup.html
-+++ /dev/null
-@@ -1,20 +0,0 @@
--<script src="../../../../resources/mojo-helpers.js"></script>
--<script src="geolocation-mock.js"></script>
--<script>
--var mockLatitude = 51.478;
--var mockLongitude = -0.166;
--var mockAccuracy = 100.0;
--
--function loadNext() {
--    if (!window.testRunner || !window.mojo)
--        debug('This test can not run without testRunner or mojo');
--
--    geolocationServiceMock.then(mock => {
--        mock.setGeolocationPermission(true);
--        mock.setGeolocationPosition(mockLatitude, mockLongitude, mockAccuracy);
--
--        navigator.geolocation.watchPosition(window.opener.gotPosition);
--    });
--}
--</script>
--<body onload="loadNext()"></body>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/argument-types.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/argument-types.js
-deleted file mode 100644
-index 6c007e9517248fea7636a72e927a33d2a103bb4f..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/argument-types.js
-+++ /dev/null
-@@ -1,118 +0,0 @@
--description("Tests the acceptable types for arguments to Geolocation methods.");
--
--function shouldNotThrow(expression)
--{
--  try {
--    eval(expression);
--    testPassed(expression + " did not throw exception.");
--  } catch(e) {
--    testFailed(expression + " should not throw exception. Threw exception " + e);
--  }
--}
--
--function test(expression, expressionShouldThrow, expectedException) {
--    if (expressionShouldThrow) {
--        if (expectedException)
--            shouldThrow(expression, '(function() { return "' + expectedException + '"; })();');
--        else
--            shouldThrow(expression);
--    } else {
--        shouldNotThrow(expression);
--    }
--}
--
--var emptyFunction = function() {};
--
--function ObjectThrowingException() {};
--ObjectThrowingException.prototype.valueOf = function() {
--    throw new Error('valueOf threw exception');
--}
--ObjectThrowingException.prototype.__defineGetter__("enableHighAccuracy", function() {
--    throw new Error('enableHighAccuracy getter exception');
--});
--var objectThrowingException = new ObjectThrowingException();
--
--
--test('navigator.geolocation.getCurrentPosition()', true);
--
--test('navigator.geolocation.getCurrentPosition(undefined)', true);
--test('navigator.geolocation.getCurrentPosition(null)', true);
--test('navigator.geolocation.getCurrentPosition({})', true);
--test('navigator.geolocation.getCurrentPosition(objectThrowingException)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction)', false);
--test('navigator.geolocation.getCurrentPosition(Math.abs)', false);
--test('navigator.geolocation.getCurrentPosition(true)', true);
--test('navigator.geolocation.getCurrentPosition(42)', true);
--test('navigator.geolocation.getCurrentPosition(Infinity)', true);
--test('navigator.geolocation.getCurrentPosition(-Infinity)', true);
--test('navigator.geolocation.getCurrentPosition("string")', true);
--
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined)', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, null)', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, {})', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, objectThrowingException)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, emptyFunction)', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, Math.abs)', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, true)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, 42)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, Infinity)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, -Infinity)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, "string")', true);
--
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, undefined)', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, null)', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, objectThrowingException)', true, 'Error: enableHighAccuracy getter exception');
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, emptyFunction)', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, true)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, 42)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, Infinity)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, -Infinity)', true);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, "string")', true);
--
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:undefined})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:null})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:{}})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:objectThrowingException})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:emptyFunction})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:true})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:42})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:Infinity})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:-Infinity})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {dummyProperty:"string"})', false);
--
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:undefined})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:null})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:{}})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:objectThrowingException})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:emptyFunction})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:true})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:42})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:Infinity})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:-Infinity})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {enableHighAccuracy:"string"})', false);
--
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:undefined})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:null})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:{}})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:objectThrowingException})', true, 'Error: valueOf threw exception');
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:emptyFunction})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:true})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:42})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:Infinity})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:-Infinity})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {maximumAge:"string"})', false);
--
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:undefined})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:null})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:{}})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:objectThrowingException})', true, 'Error: valueOf threw exception');
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:emptyFunction})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:true})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:42})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:Infinity})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:-Infinity})', false);
--test('navigator.geolocation.getCurrentPosition(emptyFunction, undefined, {timeout:"string"})', false);
--
--window.jsTestIsAsync = false;
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/cached-position-called-once.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/cached-position-called-once.js
-deleted file mode 100644
-index 8f9862b9af19fecd1829d2be87d561b2d252510e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/cached-position-called-once.js
-+++ /dev/null
-@@ -1,53 +0,0 @@
--description('Tests that when a cached position is available the callback for getCurrentPosition is called only once. This is a regression test for http://crbug.com/311876 .');
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--// Only one success callback should be reported per call to getCurrentPosition.
--var reportCount = 0;
--var isSuccess;
--
--function reportCallback(success, id) {
--    isSuccess = success;
--    shouldBeTrue('isSuccess');
--    getCurrentPositionCallId = id;
--    shouldBe('getCurrentPositionCallId', 'reportCount');
--    if (++reportCount >= 3)
--        finishJSTest();
--}
--
--var getCurrentPositionCall = 0;
--function getPosition(milliseconds) {
--    var id = getCurrentPositionCall++;
--    var fn = function() {
--        navigator.geolocation.getCurrentPosition(
--                function(position) {
--                    reportCallback(true, id);
--                },
--                function(error) {
--                    reportCallback(false, id);
--                },
--                { maximumAge:600000, timeout:0 });
--    };
--    setTimeout(fn, milliseconds);
--}
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPosition(31.478, -0.166, 100);
--    mock.setGeolocationPermission(true);
--
--    // Make a geolocation request to populate the cached value so requests with a
--    // timeout of 0 can succeed.
--    navigator.geolocation.getCurrentPosition(function(position) {
--        // The test terminates at the 3rd reported callback. If the bug still exists
--        // this happens after the 2nd call to getCurrentPosition, one of them is a
--        // repeat of the first.
--        getPosition(0);
--        getPosition(100);
--        getPosition(200);
--    }, function(error) {
--        testFailed('Error callback invoked unexpectedly');
--    });
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-exception.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-exception.js
-deleted file mode 100644
-index 19e38ba2ee37348db4fb3bd047afe7388b7583b5..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-exception.js
-+++ /dev/null
-@@ -1,41 +0,0 @@
--description("Tests that when an exception is thrown in the success callback, the error callback is not invoked. Note that this test throws an exception which is not caught.");
--
--var mockLatitude = 51.478;
--var mockLongitude = -0.166;
--var mockAccuracy = 100;
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var position;
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPermission(true);
--    mock.setGeolocationPosition(mockLatitude,
--                                mockLongitude,
--                                mockAccuracy);
--    navigator.geolocation.getCurrentPosition(function(p) {
--        position = p;
--        shouldBe('position.coords.latitude', 'mockLatitude');
--        shouldBe('position.coords.longitude', 'mockLongitude');
--        shouldBe('position.coords.accuracy', 'mockAccuracy');
--
--        // Yield to allow for the error callback to be invoked. The timer
--        // must be started before the exception is thrown.
--        window.setTimeout(assertWeGotException, 0);
--        expectError();
--
--        throw new Error('Exception in success callback');
--    }, function(e) {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--});
--
--function assertWeGotException()
--{
--    shouldHaveHadError();
--    finishJSTest();
--}
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-to-deleted-context.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-to-deleted-context.js
-deleted file mode 100644
-index 533b34a62b555ee9ea49bb6730614cc779b32333..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-to-deleted-context.js
-+++ /dev/null
-@@ -1,22 +0,0 @@
--description("Tests that when a Geolocation request is made from a remote frame, and that frame's script context goes away before the Geolocation callback is made, the callback is made as usual.");
--
--function onFirstIframeLoaded() {
--    iframe.src = 'resources/callback-to-deleted-context-inner2.html';
--}
--
--function onSecondIframeLoaded() {
--    window.setTimeout(function() {
--        testFailed('No callbacks invoked');
--        finishJSTest();
--    }, 500);
--}
--
--var iframe = document.createElement('iframe');
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPermission(true);
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--    iframe.src = 'resources/callback-to-deleted-context-inner1.html';
--    document.body.appendChild(iframe);
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-to-remote-context.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-to-remote-context.js
-deleted file mode 100644
-index 9ac34c3ad3a6ad94c6c053857dfa22101328c586..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-to-remote-context.js
-+++ /dev/null
-@@ -1,18 +0,0 @@
--description("Tests that when a Geolocation request is made from a remote frame, callbacks are made as usual.");
--
--function onIframeReady() {
--    // Make request from remote frame
--    iframe.contentWindow.navigator.geolocation.getCurrentPosition(function() {
--        testPassed('Success callback invoked');
--        finishJSTest();
--    }, function() {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--}
--
--var iframe = document.createElement('iframe');
--iframe.src = 'resources/callback-to-remote-context-inner.html';
--document.body.appendChild(iframe);
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-to-remote-context2.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-to-remote-context2.js
-deleted file mode 100644
-index 7b9188d7e0da47c724c40f554ddc079a9896cd20..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/callback-to-remote-context2.js
-+++ /dev/null
-@@ -1,20 +0,0 @@
--description("Tests that when a Geolocation request is made from a remote frame, and the JavaScript call chain starts from that remote frame, callbacks are made as usual.");
--
--function onIframeReady() {
--    // Make request from remote frame, with call chain starting here
--    window.setTimeout(function() {
--        iframe.contentWindow.navigator.geolocation.getCurrentPosition(function() {
--            testPassed('Success callback invoked');
--            finishJSTest();
--        }, function() {
--            testFailed('Error callback invoked unexpectedly');
--            finishJSTest();
--        });
--    }, 0);
--}
--
--var iframe = document.createElement('iframe');
--iframe.src = 'resources/callback-to-remote-context-inner.html';
--document.body.appendChild(iframe);
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/clear-watch-invalid-id-crash.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/clear-watch-invalid-id-crash.js
-deleted file mode 100644
-index 3a98fade286a211109201957ada05e0a35cd1c25..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/clear-watch-invalid-id-crash.js
-+++ /dev/null
-@@ -1,17 +0,0 @@
--description("Tests for a crash when clearWatch() is called with a zero ID.<br><br>We call clearWatch() with a request in progress then navigate the page. This accesses the watchers map during cleanup and triggers the crash. This page should not be visible when the test completes.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--document.body.onload = function() {
--    geolocationServiceMock.then(mock => {
--        mock.setGeolocationPermission(true);
--        mock.setGeolocationPosition(51.478, -0.166, 100);
--
--        navigator.geolocation.watchPosition(function() {});
--        navigator.geolocation.clearWatch(0);
--        location = "data:text/html,TEST COMPLETE<script>if(window.testRunner) testRunner.notifyDone();</script>";
--    });
--}
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-allowed-for-multiple-requests.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-allowed-for-multiple-requests.js
-deleted file mode 100644
-index a37a6e8165112a3e579a48696edcd0d23e2dc1a7..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-allowed-for-multiple-requests.js
-+++ /dev/null
-@@ -1,55 +0,0 @@
--description("Tests that when multiple requests are waiting for permission, no callbacks are invoked until permission is allowed.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    var permissionSet = false;
--
--    function allowPermission() {
--        permissionSet = true;
--        mock.setGeolocationPermission(true);
--    }
--
--    var watchCallbackInvoked = false;
--    var oneShotCallbackInvoked = false;
--
--    navigator.geolocation.watchPosition(function() {
--        if (permissionSet) {
--            testPassed('Success callback invoked');
--            watchCallbackInvoked = true;
--            maybeFinishTest();
--            return;
--        }
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(err) {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--
--    navigator.geolocation.getCurrentPosition(function() {
--        if (permissionSet) {
--            testPassed('Success callback invoked');
--            oneShotCallbackInvoked = true;
--            maybeFinishTest();
--            return;
--        }
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(err) {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--
--    window.setTimeout(allowPermission, 100);
--
--    function maybeFinishTest() {
--        if (watchCallbackInvoked && oneShotCallbackInvoked)
--            finishJSTest();
--    }
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-allowed.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-allowed.js
-deleted file mode 100644
-index 5fdb68f2cc72bd5408111d70e013f8020ba95270..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-allowed.js
-+++ /dev/null
-@@ -1,31 +0,0 @@
--description("Tests that when a position is available, no callbacks are invoked until permission is allowed.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    var permissionSet = false;
--
--    function allowPermission() {
--        permissionSet = true;
--        mock.setGeolocationPermission(true);
--    }
--
--    navigator.geolocation.getCurrentPosition(function() {
--        if (permissionSet) {
--            testPassed('Success callback invoked');
--            finishJSTest();
--            return;
--        }
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function() {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--    window.setTimeout(allowPermission, 100);
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-denied-for-multiple-requests.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-denied-for-multiple-requests.js
-deleted file mode 100644
-index 63ec68946a08a3057e558c88828bc3424be8a23b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-denied-for-multiple-requests.js
-+++ /dev/null
-@@ -1,60 +0,0 @@
--description("Tests that when multiple requests are waiting for permission, no callbacks are invoked until permission is denied.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    var permissionSet = false;
--
--    function denyPermission() {
--        permissionSet = true;
--        mock.setGeolocationPermission(false);
--    }
--
--    var watchCallbackInvoked = false;
--    var oneShotCallbackInvoked = false;
--
--    navigator.geolocation.watchPosition(function() {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        if (permissionSet) {
--            error = e;
--            shouldBe('error.code', 'error.PERMISSION_DENIED');
--            shouldBe('error.message', '"User denied Geolocation"');
--            watchCallbackInvoked = true;
--            maybeFinishTest();
--            return;
--        }
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--
--    navigator.geolocation.getCurrentPosition(function() {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        if (permissionSet) {
--            error = e;
--            shouldBe('error.code', 'error.PERMISSION_DENIED');
--            shouldBe('error.message', '"User denied Geolocation"');
--            oneShotCallbackInvoked = true;
--            maybeFinishTest();
--            return;
--        }
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--    window.setTimeout(denyPermission, 100);
--
--    function maybeFinishTest() {
--        if (watchCallbackInvoked && oneShotCallbackInvoked)
--            finishJSTest();
--    }
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-denied.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-denied.js
-deleted file mode 100644
-index 22afa53ffbff7a54b454975d7d7c6d1476f97c1d..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/delayed-permission-denied.js
-+++ /dev/null
-@@ -1,35 +0,0 @@
--description("Tests that when a position is available, no callbacks are invoked until permission is denied.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    var permissionSet = false;
--
--    function denyPermission() {
--        permissionSet = true;
--        mock.setGeolocationPermission(false);
--    }
--
--    navigator.geolocation.getCurrentPosition(function() {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        if (permissionSet) {
--            error = e;
--            shouldBe('error.code', 'error.PERMISSION_DENIED');
--            shouldBe('error.message', '"User denied Geolocation"');
--            finishJSTest();
--            return;
--        }
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--    window.setTimeout(denyPermission, 100);
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/disconnected-frame-already.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/disconnected-frame-already.js
-deleted file mode 100644
-index c91cff752b068bdc343db9b0521af2f93bff7851..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/disconnected-frame-already.js
-+++ /dev/null
-@@ -1,37 +0,0 @@
--description("Tests that when a request is made on a Geolocation object after its frame has been disconnected, no callbacks are made and no crash occurs.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var iframe = document.createElement('iframe');
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPermission(true);
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    iframe.src = 'resources/disconnected-frame-already-inner1.html';
--    document.body.appendChild(iframe);
--});
--
--function onFirstIframeLoaded() {
--    iframeGeolocation = iframe.contentWindow.navigator.geolocation;
--    iframe.src = 'resources/disconnected-frame-already-inner2.html';
--}
--
--function onSecondIframeLoaded() {
--    iframeGeolocation.getCurrentPosition(function () {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--    setTimeout(finishTest, 1000);
--}
--
--function finishTest() {
--    debug('Method called on Geolocation object with disconnected Frame.');
--    finishJSTest();
--}
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/disconnected-frame-permission-denied.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/disconnected-frame-permission-denied.js
-deleted file mode 100644
-index 66a5fea2cd7c8d40cc427fd0fbdb5ff47490ea53..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/disconnected-frame-permission-denied.js
-+++ /dev/null
-@@ -1,49 +0,0 @@
--description("Tests that when a request is made on a Geolocation object, permission is denied and its Frame is disconnected before a callback is made, no callbacks are made.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--var iframe = document.createElement('iframe');
--
--function onIframeLoaded() {
--    iframeGeolocation = iframe.contentWindow.navigator.geolocation;
--    iframeGeolocation.getCurrentPosition(function() {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        error = e;
--        shouldBe('error.code', 'error.PERMISSION_DENIED');
--        shouldBe('error.message', '"User denied Geolocation"');
--        debug('');
--        iframe.src = 'data:text/html,This frame should be visible when the test completes';
--    });
--}
--
--function onIframeUnloaded() {
--    // Make another request, with permission already denied.
--    iframeGeolocation.getCurrentPosition(function () {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--    setTimeout(function() {
--        testPassed('No callbacks invoked');
--        finishJSTest();
--    }, 100);
--}
--
--
--geolocationServiceMock.then(mock => {
--    // Prime the Geolocation instance by denying permission. This makes sure that we execute the
--    // same code path for both preemptive and non-preemptive permissions policies.
--    mock.setGeolocationPermission(false);
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    iframe.src = 'resources/disconnected-frame-inner.html';
--    document.body.appendChild(iframe);
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/disconnected-frame.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/disconnected-frame.js
-deleted file mode 100644
-index a0a1a88010fb759875f4b69ad2dc8d6f8f6bd217..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/disconnected-frame.js
-+++ /dev/null
-@@ -1,36 +0,0 @@
--description("Tests that when a request is made on a Geolocation object and its Frame is disconnected before a callback is made, no callbacks are made.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--var iframe = document.createElement('iframe');
--
--function onIframeLoaded() {
--    iframeGeolocation = iframe.contentWindow.navigator.geolocation;
--    iframe.src = 'data:text/html,This frame should be visible when the test completes';
--}
--
--function onIframeUnloaded() {
--    iframeGeolocation.getCurrentPosition(function () {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--    setTimeout(function() {
--        testPassed('No callbacks invoked');
--        finishJSTest();
--    }, 100);
--}
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPermission(true);
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    iframe.src = 'resources/disconnected-frame-inner.html';
--    document.body.appendChild(iframe);
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/enabled.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/enabled.js
-deleted file mode 100644
-index 6e3ec6c14603ccd2b0ef07596f973c5a824da764..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/enabled.js
-+++ /dev/null
-@@ -1,16 +0,0 @@
--description("Tests that the navigator.geolocation object is present.");
--
--function hasGeolocationProperty()
--{
--    for (var property in navigator) {
--        if (property == "geolocation")
--            return true;
--    }
--    return false;
--}
--
--shouldBeTrue("typeof navigator.geolocation == 'object'");
--shouldBeTrue("hasGeolocationProperty()");
--shouldBeTrue("'geolocation' in navigator");
--
--window.jsTestIsAsync = false;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/error-service-connection-error.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/error-service-connection-error.js
-deleted file mode 100644
-index a5f070a38b3b65a6dd1d85168cf5aac927b06cef..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/error-service-connection-error.js
-+++ /dev/null
-@@ -1,23 +0,0 @@
--description("Tests Geolocation when the geolocation service connection fails.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--
--geolocationServiceMock.then(mock => {
--  mock.setGeolocationPermission(true);
--  mock.rejectGeolocationConnections();
--
--  navigator.geolocation.getCurrentPosition(function(p) {
--    testFailed('Success callback invoked unexpectedly');
--    finishJSTest();
--  }, function(e) {
--    error = e;
--    shouldBe('error.code', 'error.POSITION_UNAVAILABLE');
--    shouldBe('error.message', '"Failed to start Geolocation service"');
--    finishJSTest();
--  });
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/error.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/error.js
-deleted file mode 100644
-index a2d730bec594cc6d5f940dc7b0b85b838ecf2150..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/error.js
-+++ /dev/null
-@@ -1,29 +0,0 @@
--description("Tests Geolocation error callback using the mock service.");
--
--var mockMessage = "debug";
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--
--geolocationServiceMock.then(mock => {
--  mock.setGeolocationPermission(true);
--  mock.setGeolocationPositionUnavailableError(mockMessage);
--
--  navigator.geolocation.getCurrentPosition(function(p) {
--    testFailed('Success callback invoked unexpectedly');
--    finishJSTest();
--  }, function(e) {
--    error = e;
--    shouldBe('error.code', 'error.POSITION_UNAVAILABLE');
--    shouldBe('error.message', 'mockMessage');
--    shouldBe('error.UNKNOWN_ERROR', 'undefined');
--    shouldBe('error.PERMISSION_DENIED', '1');
--    shouldBe('error.POSITION_UNAVAILABLE', '2');
--    shouldBe('error.TIMEOUT', '3');
--    finishJSTest();
--  });
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/maximum-age.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/maximum-age.js
-deleted file mode 100644
-index 60019fe1d84d0f78624b065e5f24133521678e61..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/maximum-age.js
-+++ /dev/null
-@@ -1,120 +0,0 @@
--description("Tests that the PositionOptions.maximumAge parameter is correctly applied.");
--
--var mockLatitude = 51.478;
--var mockLongitude = -0.166;
--var mockAccuracy = 100.0;
--
--var mockMessage = 'test';
--
--var position;
--var error;
--
--function checkPosition(p) {
--    debug('');
--    position = p;
--    shouldBe('position.coords.latitude', 'mockLatitude');
--    shouldBe('position.coords.longitude', 'mockLongitude');
--    shouldBe('position.coords.accuracy', 'mockAccuracy');
--}
--
--function checkError(e) {
--    debug('');
--    error = e;
--    shouldBe('error.code', 'error.POSITION_UNAVAILABLE');
--    shouldBe('error.message', 'mockMessage');
--}
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPermission(true);
--    mock.setGeolocationPosition(mockLatitude, mockLongitude, mockAccuracy);
--
--    // Initialize the cached Position
--    navigator.geolocation.getCurrentPosition(function(p) {
--        checkPosition(p);
--        testZeroMaximumAge();
--    }, function(e) {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--
--    function testZeroMaximumAge() {
--        // Update the position provided by the mock service.
--        mock.setGeolocationPosition(++mockLatitude, ++mockLongitude, ++mockAccuracy);
--        // The default maximumAge is zero, so we expect the updated position from the service.
--        navigator.geolocation.getCurrentPosition(function(p) {
--            checkPosition(p);
--            testNonZeroMaximumAge();
--        }, function(e) {
--            testFailed('Error callback invoked unexpectedly');
--            finishJSTest();
--        });
--    }
--
--    function testNonZeroMaximumAge() {
--        // Update the mock service to report an error.
--        mock.setGeolocationPositionUnavailableError(mockMessage);
--        // The maximumAge is non-zero, so we expect the cached position, not the error from the service.
--        navigator.geolocation.getCurrentPosition(function(p) {
--            checkPosition(p);
--            testNegativeValueMaximumAge();
--        }, function(e) {
--            testFailed('Error callback invoked unexpectedly');
--            finishJSTest();
--        }, {maximumAge: 1000});
--    }
--
--    function testNegativeValueMaximumAge() {
--        // Update the position provided by the mock service.
--        mock.setGeolocationPosition(++mockLatitude, ++mockLongitude, ++mockAccuracy);
--        // The maximumAge is same as zero, so we expect the updated position from the service.
--        navigator.geolocation.getCurrentPosition(function(p) {
--            checkPosition(p);
--            testOverSignedIntMaximumAge();
--        }, function(e) {
--            testFailed('Error callback invoked unexpectedly');
--            finishJSTest();
--        }, {maximumAge: -1000});
--    }
--
--    function testOverSignedIntMaximumAge() {
--        // Update the mock service to report an error.
--        mock.setGeolocationPositionUnavailableError(mockMessage);
--        // The maximumAge is non-zero, so we expect the cached position, not the error from the service.
--        navigator.geolocation.getCurrentPosition(function(p) {
--            checkPosition(p);
--            testOverUnsignedIntMaximumAge();
--        }, function(e) {
--            testFailed('Error callback invoked unexpectedly');
--            finishJSTest();
--        }, {maximumAge: 2147483648});
--    }
--
--    function testOverUnsignedIntMaximumAge() {
--        // Update the mock service to report an error.
--        mock.setGeolocationPositionUnavailableError(mockMessage);
--        // The maximumAge is max-value of unsigned, so we expect the cached position, not the error from the service.
--        navigator.geolocation.getCurrentPosition(function(p) {
--            checkPosition(p);
--            testZeroMaximumAgeError();
--        }, function(e) {
--            testFailed('Error callback invoked unexpectedly');
--            finishJSTest();
--        }, {maximumAge: 4294967296});
--    }
--
--    function testZeroMaximumAgeError() {
--        // The default maximumAge is zero, so we expect the error from the service.
--        navigator.geolocation.getCurrentPosition(function(p) {
--            testFailed('Success callback invoked unexpectedly');
--            finishJSTest();
--        }, function(e) {
--            checkError(e);
--            finishJSTest();
--        });
--    }
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/multiple-requests.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/multiple-requests.js
-deleted file mode 100644
-index 71d9da47c29e9267404f46e338a894093d053be9..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/multiple-requests.js
-+++ /dev/null
-@@ -1,46 +0,0 @@
--description("Tests that Geolocation correctly handles multiple concurrent requests.");
--
--var mockLatitude = 51.478;
--var mockLongitude = -0.166;
--var mockAccuracy = 100;
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var position;
--var watchCallbackInvoked = false;
--var oneShotCallbackInvoked = false;
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPermission(true);
--    mock.setGeolocationPosition(mockLatitude, mockLongitude, mockAccuracy);
--
--    navigator.geolocation.watchPosition(function(p) {
--        shouldBeFalse('watchCallbackInvoked');
--        watchCallbackInvoked = true;
--        maybeFinishTest(p);
--    }, function() {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--
--    navigator.geolocation.getCurrentPosition(function(p) {
--        shouldBeFalse('oneShotCallbackInvoked');
--        oneShotCallbackInvoked = true;
--        maybeFinishTest(p);
--    }, function() {
--        testFailed('Error callback invoked unexpectedly');
--        finishJSTest();
--    });
--
--    function maybeFinishTest(p) {
--        position = p;
--        shouldBe('position.coords.latitude', 'mockLatitude');
--        shouldBe('position.coords.longitude', 'mockLongitude');
--        shouldBe('position.coords.accuracy', 'mockAccuracy');
--        if (watchCallbackInvoked && oneShotCallbackInvoked)
--            finishJSTest();
--    }
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/notimer-after-unload.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/notimer-after-unload.js
-deleted file mode 100644
-index 828f89185938f2a66913fde17f57a88ffb9befcd..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/notimer-after-unload.js
-+++ /dev/null
-@@ -1,21 +0,0 @@
--description("Tests that no timers will trigger for navigator.geolocation object after onunload.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPermission(true);
--
--    location = "data:text/html,You should have seen one unload alert appear.<script>window.setTimeout('if (window.testRunner) testRunner.notifyDone();', 100);</script>";
--});
--
--document.body.onunload = function() {
--    navigator.geolocation.getCurrentPosition(
--        function(p) {alert('FAIL: Unexpected Geolocation success callback.');},
--        function(e) {alert('FAIL: Unexpected Geolocation error callback.' + e.code + e.message);},
--        {timeout: 0, maximumAge:0}
--    );
--    alert("unload-called");
--}
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-already-clear-watch.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-already-clear-watch.js
-deleted file mode 100644
-index a5e5f5cd294333545e7843e755db3394351a182c..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-already-clear-watch.js
-+++ /dev/null
-@@ -1,41 +0,0 @@
--description("Tests that when Geolocation permission has been denied prior to a call to watchPosition, and the watch is cleared in the error callback, there is no crash. This a regression test for https://bugs.webkit.org/show_bug.cgi?id=32111.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--
--geolocationServiceMock.then(mock => {
--
--    // Prime the Geolocation instance by denying permission.
--    mock.setGeolocationPermission(false);
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    navigator.geolocation.getCurrentPosition(function(p) {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        error = e;
--        shouldBe('error.code', 'error.PERMISSION_DENIED');
--        shouldBe('error.message', '"User denied Geolocation"');
--        debug('');
--        continueTest();
--    });
--
--    function continueTest()
--    {
--        // Make another request, with permission already denied.
--        var watchId = navigator.geolocation.watchPosition(function(p) {
--            testFailed('Success callback invoked unexpectedly');
--            finishJSTest();
--        }, function(e) {
--            error = e;
--            shouldBe('error.code', 'error.PERMISSION_DENIED');
--            shouldBe('error.message', '"User denied Geolocation"');
--            navigator.geolocation.clearWatch(watchId);
--            window.setTimeout(finishJSTest, 0);
--        });
--    }
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-already-error.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-already-error.js
-deleted file mode 100644
-index ed00f4803549922b65f7401702d7d42cfed2723b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-already-error.js
-+++ /dev/null
-@@ -1,40 +0,0 @@
--description("Tests that when Geolocation permission has been denied prior to a call to a Geolocation method, the error callback is invoked with code PERMISSION_DENIED, when the Geolocation service encounters an error.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--
--geolocationServiceMock.then(mock => {
--    mock.setGeolocationPermission(false);
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    navigator.geolocation.getCurrentPosition(function(p) {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        error = e;
--        shouldBe('error.code', 'error.PERMISSION_DENIED');
--        shouldBe('error.message', '"User denied Geolocation"');
--        debug('');
--        continueTest();
--    });
--
--    function continueTest()
--    {
--        // Make another request, with permission already denied.
--        mock.setGeolocationPositionUnavailableError('test');
--
--        navigator.geolocation.getCurrentPosition(function(p) {
--            testFailed('Success callback invoked unexpectedly');
--            finishJSTest();
--        }, function(e) {
--            error = e;
--            shouldBe('error.code', 'error.PERMISSION_DENIED');
--            shouldBe('error.message', '"User denied Geolocation"');
--            finishJSTest();
--        });
--    }
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-already-success.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-already-success.js
-deleted file mode 100644
-index b09cbc18fed58bc0248ab28e238b4d4f628339d7..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-already-success.js
-+++ /dev/null
-@@ -1,40 +0,0 @@
--description("Tests that when Geolocation permission has been denied prior to a call to a Geolocation method, the error callback is invoked with code PERMISSION_DENIED, when the Geolocation service has a good position.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--
--geolocationServiceMock.then(mock => {
--
--    // Prime the Geolocation instance by denying permission.
--    mock.setGeolocationPermission(false);
--    mock.setGeolocationPosition(51.478, -0.166, 100);
--
--    navigator.geolocation.getCurrentPosition(function(p) {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        error = e;
--        shouldBe('error.code', 'error.PERMISSION_DENIED');
--        shouldBe('error.message', '"User denied Geolocation"');
--        debug('');
--        continueTest();
--    });
--
--    function continueTest()
--    {
--        // Make another request, with permission already denied.
--        navigator.geolocation.getCurrentPosition(function(p) {
--            testFailed('Success callback invoked unexpectedly');
--            finishJSTest();
--        }, function(e) {
--            error = e;
--            shouldBe('error.code', 'error.PERMISSION_DENIED');
--            shouldBe('error.message', '"User denied Geolocation"');
--            finishJSTest();
--        });
--    }
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-stops-watches.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-stops-watches.js
-deleted file mode 100644
-index 8e2feb7233f61b289a90abed478d657c52423851..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied-stops-watches.js
-+++ /dev/null
-@@ -1,37 +0,0 @@
--description("Tests that when Geolocation permission is denied, watches are stopped, as well as one-shots.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--
--geolocationServiceMock.then(mock => {
--
--    // Configure the mock Geolocation service to report a position to cause permission
--    // to be requested, then deny it.
--    mock.setGeolocationPermission(false);
--    mock.setGeolocationPosition(51.478, -0.166, 100.0);
--
--    var errorCallbackInvoked = false;
--    navigator.geolocation.watchPosition(function(p) {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        if (errorCallbackInvoked) {
--            testFailed('Error callback invoked unexpectedly : ' + error.message);
--            finishJSTest();
--        }
--        errorCallbackInvoked = true;
--
--        error = e;
--        shouldBe('error.code', 'error.PERMISSION_DENIED');
--        shouldBe('error.message', '"User denied Geolocation"');
--
--        // Update the mock Geolocation service to report a new position, then
--        // yield to allow a chance for the success callback to be invoked.
--        mock.setGeolocationPosition(55.478, -0.166, 100);
--        window.setTimeout(finishJSTest, 0);
--    });
--});
--
--window.jsTestIsAsync = true;
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied.js
-deleted file mode 100644
-index d89d110268a5398e23d2fee582c60dee3122597f..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-denied.js
-+++ /dev/null
-@@ -1,24 +0,0 @@
--description("Tests Geolocation when permission is denied, using the mock service.");
--
--if (!window.testRunner || !window.mojo)
--    debug('This test can not run without testRunner or mojo');
--
--var error;
--
--geolocationServiceMock.then(mock => {
--
--    mock.setGeolocationPermission(false);
--    mock.setGeolocationPosition(51.478, -0.166, 100.0);
--
--    navigator.geolocation.getCurrentPosition(function(p) {
--        testFailed('Success callback invoked unexpectedly');
--        finishJSTest();
--    }, function(e) {
--        error = e;
--        shouldBe('error.code', 'error.PERMISSION_DENIED');
--        shouldBe('error.message', '"User denied Geolocation"');
--        finishJSTest();
--    });
--});
--
--window.jsTestIsAsync = true;
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-service-connection-error.js b/third_party/WebKit/LayoutTests/fast/dom/Geolocation/script-tests/permission-service-connection-error.js
 deleted file mode 100644
 index 7951b6aedf84ac88d598ba1daf7ee889b8ea9879..0000000000000000000000000000000000000000
@@ -7642,10 +6219,11 @@ index 72561141896ced902cfa85187b9e5b18cfdb17c6..00000000000000000000000000000000
 -</html>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLDialogElement/inert-node-is-unfocusable-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLDialogElement/inert-node-is-unfocusable-expected.txt
 deleted file mode 100644
-index 0151288d908ece429b33a730b0643b65d07999a9..0000000000000000000000000000000000000000
+index 722dc6c641bab42b24241e95f764336e84b321fb..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/HTMLDialogElement/inert-node-is-unfocusable-expected.txt
 +++ /dev/null
-@@ -1,27 +0,0 @@
+@@ -1,28 +0,0 @@
+-CONSOLE MESSAGE: Blink Test Plugin: initializing
 -Test that inert nodes are not focusable. The test passses if only the topmost dialog and its button are focusable.
 -
 -On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -14624,11 +13202,11 @@ index e0c83303c00b86f0a4f1ca493351a2a8fa7767bb..00000000000000000000000000000000
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLFormElement/associated-elements-after-index-assertion-fail1-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLFormElement/associated-elements-after-index-assertion-fail1-expected.txt
 deleted file mode 100644
-index 0303108db1415b8d0508bfe60b1639ed73cb5d6b..0000000000000000000000000000000000000000
+index ee8e0b185dcaddfb3c53a0fee07133815bcc4c2a..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/HTMLFormElement/associated-elements-after-index-assertion-fail1-expected.txt
 +++ /dev/null
 @@ -1,5 +0,0 @@
--CONSOLE WARNING: The <keygen> element is deprecated and will be removed in M56, around January 2017. See https://www.chromestatus.com/features/5716060992962560 for more details.
+-CONSOLE WARNING: The <keygen> element is deprecated and will be removed in M57, around March 2017. See https://www.chromestatus.com/features/5716060992962560 for more details.
 -This page verifies fix for bug 58247. WebKit should not crash when this page is rendered.
 -
 -
@@ -19707,3 +18285,822 @@ index 39df24e87a634f2f74dc54c6066ec08a935f805e..00000000000000000000000000000000
 -</script>
 -</body>
 -</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-checked-reset-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-checked-reset-expected.txt
+deleted file mode 100644
+index 6ea722cd5497572b074ca963bb42d82ea10713b1..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-checked-reset-expected.txt
++++ /dev/null
+@@ -1,14 +0,0 @@
+-
+-
+-
+-
+- Reset Button
+-This test verifies that check-type input form controls are properly reset by both a reset input control and a reset button control.
+-
+-You should see four element IDs below, and the word "SUCCESS" twice after each:
+-
+-checkboxUnchecked : SUCCESS : SUCCESS 
+-checkboxChecked : SUCCESS : SUCCESS 
+-radioUnchecked : SUCCESS : SUCCESS 
+-radioChecked : SUCCESS : SUCCESS 
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-checked-reset.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-checked-reset.html
+deleted file mode 100644
+index 356b00928cb07dffaa0dfc08515fdb79604a4374..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-checked-reset.html
++++ /dev/null
+@@ -1,56 +0,0 @@
+-<html>
+-<head>
+-</head>
+-<body>
+-<form>
+-<input id="checkboxUnchecked" type="checkbox" value="Unchecked"><br>
+-<input id="checkboxChecked" type="checkbox" value="Checked" checked="checked"><br>
+-<input id="radioUnchecked" name="radio1" type="radio" value="Unchecked"><br>
+-<input id="radioChecked" name="radio1" type="radio" value="Checked" checked="checked"><br>
+-
+-<input id="inputReset" type="reset">
+-<button id="buttonReset" type="reset">Reset Button</button>
+-</form>
+-<p>This test verifies that check-type input form controls are properly reset by
+-both a reset input control and a reset button control.
+-
+-<p>You should see four element IDs below, and the word "SUCCESS" twice after each:</p>
+-
+-<script>
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-var inputReset = document.getElementById("inputReset");
+-var buttonReset = document.getElementById("buttonReset");
+-
+-function testChecked(testElement, expected, button)
+-{
+-    var success = false;
+-    if (testElement.checked == expected)
+-    {
+-        testElement.checked = !expected;
+-        button.click();
+-        if (testElement.checked == expected)
+-            success = true;
+-    }
+-    if (success)
+-        document.writeln(": SUCCESS");
+-    else
+-        document.writeln(": FAILED (checked = " + testElement.checked + ")");
+-}
+-
+-function test(elementId, expected)
+-{
+-    var element = document.getElementById(elementId);
+-    document.writeln(elementId);
+-    testChecked(element, expected, inputReset);
+-    testChecked(element, expected, buttonReset);
+-    document.writeln("<br>");
+-}
+-
+-test("checkboxUnchecked", false);
+-test("checkboxChecked", true);
+-test("radioUnchecked", false);
+-test("radioChecked", true);
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-hidden-value-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-hidden-value-expected.txt
+deleted file mode 100644
+index d153685b4f9eb36e80b4c5a8c75e93d31f73178b..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-hidden-value-expected.txt
++++ /dev/null
+@@ -1,8 +0,0 @@
+-This tests that the JS property value and the attribute value for a hidden input field are the same.
+-Markup: <input type="hidden" id="tf" value="New value">
+-Value: New value
+-Attribute: New value
+-After reset
+-Markup: <input type="hidden" id="tf" value="New value">
+-Value: New value
+-Attribute: New value
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-hidden-value.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-hidden-value.html
+deleted file mode 100644
+index b829bdf6961208239b52b4e470e859963bacef05..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-hidden-value.html
++++ /dev/null
+@@ -1,42 +0,0 @@
+-<html>
+-    <head>
+-        <script language="javascript">
+-        function test()
+-        {
+-            if (window.testRunner)
+-                testRunner.dumpAsText();
+-            
+-            var frm = document.getElementById("frm");
+-            var tf = document.getElementById('tf');
+-            tf.setAttribute('value', 'Almost Original Value');
+-            tf.value = "New value";
+-            log('Markup: ' + String(frm.innerHTML));
+-            log('Value: ' + tf.value);
+-            log('Attribute: ' + tf.getAttribute('value'));
+-            frm.reset();
+-            log('After reset');
+-            log('Markup: ' + String(frm.innerHTML));
+-            log('Value: ' + tf.value);
+-            log('Attribute: ' + tf.getAttribute('value'));
+-        }
+-
+-        var console_messages = document.createElement("ol");
+-
+-        function log(message)
+-        {
+-          var console = document.getElementById('console');
+-          var item = document.createElement("li");
+-          item.appendChild(document.createTextNode(String(message).replace(/0x[0-9a-fA-F]{8}/g, "0xXXXXXXXX")));
+-          console.appendChild(item);
+-        }
+-
+-        </script>
+-    </head>
+-    <body onload="test()">
+-        This tests that the JS property value and the attribute value for a hidden input field are the same.<br>
+-        <form id="frm">
+-                <input type="hidden" id="tf" value="Original value">
+-        </form>
+-        <div id="console"></div>
+-    </body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-image-alt-text.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-image-alt-text.html
+deleted file mode 100644
+index e465836dd7c3c87326decc8e4195af614ec582f0..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-image-alt-text.html
++++ /dev/null
+@@ -1,14 +0,0 @@
+-<html>
+-<head>
+-</head>
+-<body>
+-This tests whether alt text is shown for image-type form input elements with 
+-no src attribute. You should see "Success" twice, followed by a blue rectangle.
+-<p>
+-<form>
+-<input type="image" alt="Success"><br>
+-<input type="image" alt="Success" width="100" height="50" border="1"><br>
+-
+-<input type="image" src="resources/blue_rect.jpg" alt="FAILED!"><br>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-size-attribute-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-size-attribute-expected.txt
+deleted file mode 100644
+index d449a74537819a9cc0d4975ab4046452a3e83f27..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-size-attribute-expected.txt
++++ /dev/null
+@@ -1,20 +0,0 @@
+-HTMLInputElement size attribute test
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS input.size is 20
+-PASS input.setAttribute('size', '-1'); input.size is 20
+-PASS input.removeAttribute('size'); input.size is 20
+-PASS input.setAttribute('size', '1'); input.size is 1
+-PASS input.setAttribute('size', '2'); input.size is 2
+-PASS input.removeAttribute('size'); input.size is 20
+-PASS input.setAttribute('size', 'a'); input.size is 20
+-PASS input.removeAttribute('size'); input.size is 20
+-PASS input.setAttribute('size', '0'); input.size is 20
+-PASS input.setAttribute('size', '10'); input.size is 10
+-PASS input.size = 0 threw exception IndexSizeError: Failed to set the 'size' property on 'HTMLInputElement': The value provided is 0, which is an invalid size..
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-size-attribute.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-size-attribute.html
+deleted file mode 100644
+index 6a8093dba9bbbed190fe93d6c3ff6d9db4801d86..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-size-attribute.html
++++ /dev/null
+@@ -1,32 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../../resources/js-test.js"></script>
+-</head>
+-<body>
+-
+-<body>
+-<script>
+-description('HTMLInputElement size attribute test');
+-
+-var input = document.createElement("input");
+-
+-shouldBe("input.size", "20");
+-
+-shouldBe("input.setAttribute('size', '-1'); input.size", "20");
+-shouldBe("input.removeAttribute('size'); input.size", "20");
+-shouldBe("input.setAttribute('size', '1'); input.size", "1");
+-shouldBe("input.setAttribute('size', '2'); input.size", "2");
+-shouldBe("input.removeAttribute('size'); input.size", "20");
+-shouldBe("input.setAttribute('size', 'a'); input.size", "20");
+-shouldBe("input.removeAttribute('size'); input.size", "20");
+-shouldBe("input.setAttribute('size', '0'); input.size", "20");
+-shouldBe("input.setAttribute('size', '10'); input.size", "10");
+-
+-shouldThrow("input.size = 0", '"IndexSizeError: Failed to set the \'size\' property on \'HTMLInputElement\': The value provided is 0, which is an invalid size."');
+-
+-</script>
+-</body>
+-
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-expected.txt
+deleted file mode 100644
+index 4188c9bc7724829cd457514f24bcbd05db206ffb..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-expected.txt
++++ /dev/null
+@@ -1,10 +0,0 @@
+-layer at (0,0) size 800x600
+-  LayoutView at (0,0) size 800x600
+-layer at (0,0) size 800x600
+-  LayoutBlockFlow {HTML} at (0,0) size 800x600
+-    LayoutBlockFlow {BODY} at (8,8) size 784x584
+-      LayoutSlider {INPUT} at (2,2) size 129x15 [color=#909090] [bgcolor=#FFFFFF]
+-        LayoutFlexibleBox {DIV} at (0,0) size 129x15
+-          LayoutBlockFlow {DIV} at (0,0) size 129x15
+-            LayoutBlockFlow {DIV} at (114,0) size 15x15
+-      LayoutText {#text} at (0,0) size 0x0
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-styled-expected.png b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-styled-expected.png
+deleted file mode 100644
+index 25ac567abc3e8f2ffa30ace1ff40e24bf471ed31..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 11165
+zcmeAS@N?(olHy`uVBq!ia0y~yU{+vYV2a>i1B%QlYbpRznkB9gCCM47$=SuFxeSJe
+z$rdR|$*IXEmd0kumPsbY#>QztAydN?qr?;oivU)M13(krWjZ?tcse^P1Qg|`W#*(Z
+zFjO$MhMdn9b`<$%mbdbP5=T@v-=>NQN}iFcGhDBj{S{2g=D97u&2>VGvFEisv)Av`
+zwl3{>^5~-0J=eDj+5b1lReea&_iBxD)ws7>BWa<y?#HuvKHHYQI&iM;^F8zTwfSZD
+z8F-5>nS5<vdBS@<XpvxMPK{I6pALq;MVyW%s-d^v_^GftHW&Y_etx5hzcD)OaP{x<
+zP33E6UD`H_z2&dN1NT`swKlvLFXW08V(PHDzfkjd3CI1%H$J`TxAd#5IJlKx+xAGL
+zQjLSD?zwv39l>W+FFQ1QSWNj^7-To+diRv;vh108X~#|o?De0pZ1<UWtCJSa@%zR%
+zVei~8b$*-g*&R|m#4Wkj-fc(kystf1?H?sRT=MKlo2`t5>6ae~qT8ib{xCfx5-;GZ
+zz9^*drXKId8SDOree!B5m|$@#C9$D6%ESM<Pu`DR?X0zG*M-+VDh~^MSlKU}e(%cN
+z_pY~?)*JB2@<{Q_;`Im+aAirHu_3^r%|^=5WK)s7@@h8e$<;=sDp|Wrl3X@AR-4_i
+z-5$8)uFXFUrNSxBTRA5Ear~#X{-poY%AcoWHrxpNK4tCfS-U<xus-^9=1wWO>z7YF
+zF7}P9nR=yca=81nHI-F+X1$TJe-l34@L7{-|B>Pizd!26PdzhTvq$9U<IvBqyjx16
+z49)M)&#AYzeWZ6@Z|k+<wVmDOVY8>F|IPCF{chEs$<IQ6`p13!_$U4Bk>p33hH7P9
+z&lNkTAJzLf>4x`e?neo^$2sOsZPUDzJMovw)r5pud%o(&+DBLHb*tz38aPGr%%zad
+z@AZeYQcULV<jeonfBX0!@h9KAp3m1{($9HtV&<;g;KKI;3saZo6|Z9w-+!_8!?wKa
+z#dQ{cSR!mzi>(bZov*NmQKqcDO74Z`jLXxeowW>V*O@<g*UM8$L1zMPI|l__SG}I<
+zEw*`PXwu8F8#6D<=E*Fybozc|xmW7sU+X^#Zuq+)=;zNhK{xCCq^>ni|CN7W&tKOA
+z72TZ-3<?aME{-7;jBoEc=1Dt>I3LtFv3Kt5(~bTLDHqop>a0&Ks4FyU5v$t!|L@;V
+z?hOo#Oe`D%3Jwhnjm%8@`BOSTOqke#{szWJu1F#eW;8Gs^+XB46aZDSb(AACFf=AJ
+zv7Io?a)g=*QYWEs4@o&oAE$)E@fECs2vZXpD%c@T0IRc5OK6Z;EarkR^}zgo&bamc
+z_OF`%>woz5`{w_B`~NijO%Jkjg{di++>q~(mvwkE*e76PDt0t5e)`Zf7vaSRYK+WJ
+zmYLab!=2OE&Ml$9uYaQw;oLkS1KJsM;Q9WRf8S2uR=>x3N_|Qy+_51{`xsX~c`5`C
+z6A2Lm2R83=BZN!64ls<W7!40-f*(yEqq$+Ubb!@Vqq$);H;m?n(cA!O#*Vg>Mq7@f
+zEooS%ZZtQH=7!PSFq#`cqdcSS<k5EWXghhdojlr39xV$;+l8a;!qIl&XuEK<UC7Wl
+zS{9C$g~O~Y<YSv+$iTp%30ey<I%f!)S0BygqbmwVS6ILo`;69kqjlaetMf+dIkM}y
+bA8ZWSd}}Qy9}xwvw`K5j^>bP0l+XkK<AuAv
+
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-styled-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-styled-expected.txt
+deleted file mode 100644
+index a98af893d8a8b7204b3ddae628205e96fbbf50d4..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-styled-expected.txt
++++ /dev/null
+@@ -1,10 +0,0 @@
+-layer at (0,0) size 800x600
+-  LayoutView at (0,0) size 800x600
+-layer at (0,0) size 800x600
+-  LayoutBlockFlow {HTML} at (0,0) size 800x600
+-    LayoutBlockFlow {BODY} at (8,8) size 784x584
+-      LayoutSlider {INPUT} at (2,2) size 100x10 [color=#909090] [bgcolor=#FF0000]
+-        LayoutFlexibleBox {DIV} at (0,0) size 100x10
+-          LayoutBlockFlow {DIV} at (0,0) size 100x10
+-            LayoutBlockFlow {DIV} at (90,0) size 10x10 [bgcolor=#008000]
+-      LayoutText {#text} at (0,0) size 0x0
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-styled.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-styled.html
+deleted file mode 100644
+index 25099bd008e56094f0544248514e9e192ccf4000..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update-styled.html
++++ /dev/null
+@@ -1,47 +0,0 @@
+-<html>
+-<head>
+-<style>
+-
+-input {
+-    -webkit-appearance: none;
+-    background-color: Red;
+-    height: 10px;
+-    width: 100px;
+-}
+-
+-input::-webkit-slider-thumb {
+-    -webkit-appearance: none;
+-    background-color: Green;
+-    width: 10px;
+-    height: 10px;
+-}
+-
+-</style>
+-<script>
+-
+-/*
+-
+-Tests whether style slider thumb moves to the new position when input element's
+-value is updated.
+-
+-*/
+-
+-if (window.testRunner)
+-    testRunner.waitUntilDone();
+-
+-function runTest()
+-{
+-    setTimeout(function()
+-    {
+-        document.getElementById('slider').value = 100;
+-        if (window.testRunner)
+-            testRunner.notifyDone();
+-    }, 0);
+-}
+-
+-</script>
+-</head>
+-<body onload="runTest()">
+-<input id="slider" type="range" value="0">
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update.html
+deleted file mode 100644
+index 005ccc67faef0efe87a4cf9ba64d876b89f8e460..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-slider-update.html
++++ /dev/null
+@@ -1,30 +0,0 @@
+-<html>
+-<head>
+-<script>
+-
+-/*
+-
+-Tests whether the slider thumb moves to the new position when input element's
+-value is updated.
+-
+-*/
+-
+-if (window.testRunner)
+-    testRunner.waitUntilDone();
+-
+-function runTest()
+-{
+-    setTimeout(function()
+-    {
+-        document.getElementById('slider').value = 100;
+-        if (window.testRunner)
+-            testRunner.notifyDone();
+-    }, 0);
+-}
+-
+-</script>
+-</head>
+-<body onload="runTest()">
+-<input id="slider" type="range" value="0">
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-text-reset-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-text-reset-expected.txt
+deleted file mode 100644
+index 107edbad7f2e3bfbbbc92912b3011db387165f80..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-text-reset-expected.txt
++++ /dev/null
+@@ -1,16 +0,0 @@
+-
+-
+-
+-
+-
+- Reset Button
+-This test verifies that text-type input form controls are properly reset by both a reset input control and a reset button control.
+-(But file input element values can't be modified by JS, so this test can't be used for those.)
+-
+-You should see six element IDs below, and the word "SUCCESS" twice after each:
+-
+-textEmpty : SUCCESS : SUCCESS 
+-textValue : SUCCESS : SUCCESS 
+-passwordEmpty : SUCCESS : SUCCESS 
+-passwordValue : SUCCESS : SUCCESS 
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-text-reset.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-text-reset.html
+deleted file mode 100644
+index bb7b801016f114863d16e73ec06ce8f658fc3e14..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-text-reset.html
++++ /dev/null
+@@ -1,60 +0,0 @@
+-<html>
+-<head>
+-</head>
+-<body>
+-<form>
+-<input id="textEmpty" type="text"><br>
+-<input id="textValue" type="text" value="Default Value"><br>
+-<input id="passwordEmpty" type="password"><br>
+-<input id="passwordValue" type="password" value="Default Value"><br>
+-<input id="hiddenEmpty" type="hidden"><br>
+-<input id="hiddenValue" type="hidden" value="Default Value">
+-
+-<input id="inputReset" type="reset">
+-<button id="buttonReset" type="reset">Reset Button</button>
+-</form>
+-<p>This test verifies that text-type input form controls are properly reset by
+-both a reset input control and a reset button control.<br>
+-(But file input element values can't be modified by JS, so this test can't be
+-used for those.)</p>
+-
+-<p>You should see six element IDs below, and the word "SUCCESS" twice after each:</p>
+-
+-<script>
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-var inputReset = document.getElementById("inputReset");
+-var buttonReset = document.getElementById("buttonReset");
+-
+-function testValue(testElement, expected, button)
+-{
+-    var success = false;
+-    if (testElement.value == expected)
+-    {
+-        testElement.value = "Not Expected! " + expected;
+-        button.click();
+-        if (testElement.value == expected)
+-          success = true;
+-    }
+-    if (success)
+-        document.writeln(": SUCCESS");
+-    else
+-        document.writeln(": FAILED (value = " + testElement.value + ")");
+-}
+-
+-function test(elementId, expected)
+-{
+-    var element = document.getElementById(elementId);
+-    document.writeln(elementId);
+-    testValue(element, expected, inputReset);
+-    testValue(element, expected, buttonReset);
+-    document.writeln("<br>");
+-}
+-
+-test("textEmpty", "");
+-test("textValue", "Default Value");
+-test("passwordEmpty", "");
+-test("passwordValue", "Default Value");
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-value-null.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-value-null.html
+deleted file mode 100644
+index 2c884953324c52d27666a2a01f50c42458f8119a..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-value-null.html
++++ /dev/null
+@@ -1,62 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<head>
+-<title>This test checks that assigning null to HTMLInputElement.value behaves
+-correctly; i.e. as if the empty string was assigned.</title>
+-<script src="../../../resources/testharness.js"></script>
+-<script src="../../../resources/testharnessreport.js"></script>
+-<link rel="stylesheet" href="../../../resources/testharness.css">
+-</head>
+-<body>
+-<form style="display: none">
+-<input id="text-with-default" type="text" value="default">
+-<input id="text-without-default" type="text">
+-<input id="hidden" type="hidden" value="value">
+-</form>
+-<script>
+-
+-test(function () {
+-    var input = document.getElementById("text-with-default");
+-
+-    assert_equals(input.value, "default");
+-    assert_equals(input.getAttribute("value"), "default");
+-
+-    input.value = "custom";
+-
+-    assert_equals(input.value, "custom");
+-    assert_equals(input.getAttribute("value"), "default");
+-
+-    input.value = null;
+-
+-    assert_equals(input.value, "");
+-    assert_true(input.hasAttribute("value"));
+-}, "input[type=text] with value content attribute.");
+-
+-test(function () {
+-    var input = document.getElementById("text-without-default");
+-
+-    assert_equals(input.value, "");
+-    assert_false(input.hasAttribute("value"));
+-
+-    input.value = null;
+-
+-    assert_equals(input.value, "");
+-    assert_false(input.hasAttribute("value"));
+-}, "input[type=text] without value content attribute.");
+-
+-test(function () {
+-    var input = document.getElementById("hidden");
+-
+-    assert_equals(input.value, "value");
+-    assert_equals(input.getAttribute("value"), "value");
+-
+-    input.value = null;
+-
+-    assert_equals(input.value, "");
+-    assert_true(input.hasAttribute("value"));
+-    assert_equals(input.getAttribute("value"), "");
+-}, "input[type=hidden] with value content attribute.");
+-
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-with-invalid-border-expected.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-with-invalid-border-expected.html
+deleted file mode 100644
+index 9345750600c71ce85e519d89f9d13e3db7d5b3ea..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-with-invalid-border-expected.html
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<!DOCTYPE html>
+-<body>
+-<p>Image input elements with invalid border attribute should have the same appearance as an image input element without border attribute.</p>
+-<input type="image">
+-<input type="image">
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-with-invalid-border.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-with-invalid-border.html
+deleted file mode 100644
+index d191eef34c42d2d1a79a659ce6e46c2d7e6830c3..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/input-with-invalid-border.html
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<!DOCTYPE html>
+-<body>
+-<p>Image input elements with invalid border attribute should have the same appearance as an image input element without border attribute.</p>
+-<input type="image" border="invalid">
+-<input type="image" border="9999999999">
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/resources/blue_rect.jpg b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/resources/blue_rect.jpg
+deleted file mode 100644
+index 595dacba30ad44de86e778a1100b6d94afbb21d4..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 338
+zcma)$KMKN742QqG=TM4B<K}5Zkb;Vr(C6gf<lrujo~eU_NAS<$0mLiBSCCrk(q9N9
+zU&t@9i#^Du`6Ndigc#Tp9dDQG9YTi^VlR55uvx4KMI>T(_DFlVuY9G?x)X`hnAM<d
+yVFj8nVCF?}Dqh7-%;RJ6$GXz;R2@K)W(@-RN9;z|OZ4{2kmJGVpMQNCon7Bjlpb0D
+
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/script-tests/TEMPLATE.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/script-tests/TEMPLATE.html
+deleted file mode 100644
+index a44cea6ae5efb61151a6c29de25eb96b9e332bb8..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/script-tests/TEMPLATE.html
++++ /dev/null
+@@ -1,9 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<script src="YOUR_JS_FILE_HERE"></script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/script-tests/checked-pseudo-selector.js b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/script-tests/checked-pseudo-selector.js
+deleted file mode 100644
+index 49b77b1e36354576c6eb988829f68f245c089fb9..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/script-tests/checked-pseudo-selector.js
++++ /dev/null
+@@ -1,17 +0,0 @@
+-var style = document.createElement('style');
+-style.appendChild(document.createTextNode("input { color: green; }"));
+-style.appendChild(document.createTextNode("input:checked { color: red; }"));
+-document.documentElement.firstChild.appendChild(style);
+-
+-var input1 = document.createElement('input');
+-input1.type = 'radio';
+-document.body.appendChild(input1);
+-input1.checked = true;
+-input1.type = "text";
+-
+-var view = document.defaultView;
+-shouldBeEqualToString("view.getComputedStyle(input1, '').getPropertyValue('color')", "rgb(0, 128, 0)");
+-shouldBeTrue("input1.checked");
+-
+-// cleanup
+-document.body.removeChild(input1);
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/script-tests/size-attribute.js b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/script-tests/size-attribute.js
+deleted file mode 100644
+index 83bc5c0f0c022b35eb15d61716d9a04124c7bdab..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/script-tests/size-attribute.js
++++ /dev/null
+@@ -1,40 +0,0 @@
+-description("HTMLInputElement size attribute test");
+-
+-function sizeAttributeEffect(value)
+-{
+-    var element = document.createElement("input");
+-    element.setAttribute("size", value);
+-    return element.size;
+-}
+-
+-shouldBe('document.createElement("input").size', '20');
+-
+-shouldBe('sizeAttributeEffect("")', '20');
+-
+-shouldBe('sizeAttributeEffect("1")', '1');
+-shouldBe('sizeAttributeEffect("2")', '2');
+-shouldBe('sizeAttributeEffect("10")', '10');
+-
+-shouldBe('sizeAttributeEffect("0")', '20');
+-
+-shouldBe('sizeAttributeEffect("-1")', '20');
+-
+-shouldBe('sizeAttributeEffect("1x")', '1');
+-shouldBe('sizeAttributeEffect("1.")', '1');
+-shouldBe('sizeAttributeEffect("1.9")', '1');
+-shouldBe('sizeAttributeEffect("2x")', '2');
+-shouldBe('sizeAttributeEffect("2.")', '2');
+-shouldBe('sizeAttributeEffect("2.9")', '2');
+-
+-shouldBe('sizeAttributeEffect("a")', '20');
+-shouldBe('sizeAttributeEffect("\v7")', '20');
+-shouldBe('sizeAttributeEffect("  7")', '7');
+-
+-var arabicIndicDigitOne = String.fromCharCode(0x661);
+-shouldBe('sizeAttributeEffect(arabicIndicDigitOne)', '20');
+-shouldBe('sizeAttributeEffect("2" + arabicIndicDigitOne)', '2');
+-
+-shouldBe('sizeAttributeEffect("2147483647")', '2147483647');
+-shouldBe('sizeAttributeEffect("2147483648")', '20');
+-shouldBe('sizeAttributeEffect("4294967295")', '20');
+-shouldBe('sizeAttributeEffect("4294967296")', '20');
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-as-number-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-as-number-expected.txt
+deleted file mode 100644
+index 219574fa5021553474a1e140b93f42423eeb4492..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-as-number-expected.txt
++++ /dev/null
+@@ -1,7 +0,0 @@
+-
+-This tests to make sure that HTMLInputElement::size returns a number, not a string. This is in violation of the DOM Level 1 spec, but is what FireFox does, so we match.
+-
+-You should see 2 lines with "SUCCESS" below:
+-SUCCESS (value: "number")
+-
+-SUCCESS (value: "9")
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-as-number.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-as-number.html
+deleted file mode 100644
+index aa33fcb8ee5c01741e0db1443412c34689029007..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-as-number.html
++++ /dev/null
+@@ -1,27 +0,0 @@
+-<html>
+-<body>
+-<form>
+-<input id="inputElement" size="4">
+-</form>
+-<p>
+-This tests to make sure that HTMLInputElement::size returns a number, not a string.  This is in violation of the DOM Level 1 spec, but is what FireFox does, so we match.
+-</p>
+-You should see 2 lines with "SUCCESS" below:
+-<script>
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-
+-function checkExpected(actual, expected)
+-{
+-    if (actual != expected)
+-        document.writeln("<p>FAILURE: expected \"" + expected + "\", actual \"" + actual + "\"</p>");
+-    else
+-        document.writeln("<p>SUCCESS (value: \"" + actual + "\")</p>");
+-}
+-
+-var inputElement = document.getElementById("inputElement");
+-checkExpected(typeof(inputElement.size), "number");
+-checkExpected(inputElement.size + 5, 9);
+-</script>
+-</body>
+-</html>
+\ No newline at end of file
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-attribute-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-attribute-expected.txt
+deleted file mode 100644
+index 247cff64a7018c6bca67a7f718599df080d2db19..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-attribute-expected.txt
++++ /dev/null
+@@ -1,31 +0,0 @@
+-HTMLInputElement size attribute test
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS document.createElement("input").size is 20
+-PASS sizeAttributeEffect("") is 20
+-PASS sizeAttributeEffect("1") is 1
+-PASS sizeAttributeEffect("2") is 2
+-PASS sizeAttributeEffect("10") is 10
+-PASS sizeAttributeEffect("0") is 20
+-PASS sizeAttributeEffect("-1") is 20
+-PASS sizeAttributeEffect("1x") is 1
+-PASS sizeAttributeEffect("1.") is 1
+-PASS sizeAttributeEffect("1.9") is 1
+-PASS sizeAttributeEffect("2x") is 2
+-PASS sizeAttributeEffect("2.") is 2
+-PASS sizeAttributeEffect("2.9") is 2
+-PASS sizeAttributeEffect("a") is 20
+-PASS sizeAttributeEffect("7") is 20
+-PASS sizeAttributeEffect("  7") is 7
+-PASS sizeAttributeEffect(arabicIndicDigitOne) is 20
+-PASS sizeAttributeEffect("2" + arabicIndicDigitOne) is 2
+-PASS sizeAttributeEffect("2147483647") is 2147483647
+-PASS sizeAttributeEffect("2147483648") is 20
+-PASS sizeAttributeEffect("4294967295") is 20
+-PASS sizeAttributeEffect("4294967296") is 20
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-attribute.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-attribute.html
+deleted file mode 100644
+index a08cff4fab55486ff3e7bd69fa32d2f7859855bc..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLInputElement/size-attribute.html
++++ /dev/null
+@@ -1,9 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<script src="script-tests/size-attribute.js"></script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLIsIndexElement/prototype-chain-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/HTMLIsIndexElement/prototype-chain-expected.txt
+deleted file mode 100644
+index d845a23654a4eeacb5e9b4d57d02dfc1efee8712..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLIsIndexElement/prototype-chain-expected.txt
++++ /dev/null
+@@ -1,18 +0,0 @@
+-HTMLIsIndexElement should inherit directly from HTMLElement and be an HTMLUnknownElement
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS isIndex.__proto__ is HTMLUnknownElement.prototype
+-PASS isIndex.__proto__.__proto__ is HTMLElement.prototype
+-PASS isIndex.prompt is undefined.
+-PASS isIndex.form is undefined.
+-PASS isIndex.defaultValue is undefined.
+-PASS isIndex.disabled is undefined.
+-PASS isIndex.multiple is undefined.
+-PASS isIndex.alt is undefined.
+-PASS isIndex.accept is undefined.
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLIsIndexElement/prototype-chain.html b/third_party/WebKit/LayoutTests/fast/dom/HTMLIsIndexElement/prototype-chain.html
+deleted file mode 100644
+index 1506f1ae1d5089df3016fcc97c541f4cb22f2c26..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLIsIndexElement/prototype-chain.html
++++ /dev/null
+@@ -1,9 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<script src="script-tests/prototype-chain.js"></script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/HTMLIsIndexElement/script-tests/prototype-chain.js b/third_party/WebKit/LayoutTests/fast/dom/HTMLIsIndexElement/script-tests/prototype-chain.js
+deleted file mode 100644
+index 9b2fe58db17478409dba8100a65dfa56c01da2e7..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/HTMLIsIndexElement/script-tests/prototype-chain.js
++++ /dev/null
+@@ -1,15 +0,0 @@
+-description("HTMLIsIndexElement should inherit directly from HTMLElement and be an HTMLUnknownElement");
+-
+-var isIndex = document.createElement("isindex");
+-
+-shouldBe("isIndex.__proto__", "HTMLUnknownElement.prototype");
+-shouldBe("isIndex.__proto__.__proto__", "HTMLElement.prototype");
+-
+-shouldBeUndefined("isIndex.prompt");
+-shouldBeUndefined("isIndex.form");
+-
+-shouldBeUndefined("isIndex.defaultValue");
+-shouldBeUndefined("isIndex.disabled");
+-shouldBeUndefined("isIndex.multiple");
+-shouldBeUndefined("isIndex.alt");
+-shouldBeUndefined("isIndex.accept");

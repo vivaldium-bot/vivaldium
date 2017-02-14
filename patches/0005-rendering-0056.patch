@@ -1,1047 +1,3 @@
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/invalid-first-char-combinators.html b/third_party/WebKit/LayoutTests/fast/dom/custom/invalid-first-char-combinators.html
-deleted file mode 100644
-index f69422a0dfc238ea453bfbc2aaa525cb4e0911b0..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/invalid-first-char-combinators.html
-+++ /dev/null
-@@ -1,18 +0,0 @@
--<!DOCTYPE html>
--<script src="../../../resources/testharness.js"></script>
--<script src="../../../resources/testharnessreport.js"></script>
--
--<script>
--test(function () {
--    var invalidCombinators = [ 0x0B83, 0x0F88, 0x0F89, 0x0F8A, 0x0F8B ];
--
--    for (var i = 0; i < invalidCombinators.length; i++) {
--        var invalidCombinator = String.fromCharCode(invalidCombinators[i]) + '-xfoo';
--        assert_throws('SYNTAX_ERR', function () {
--            document.registerElement(invalidCombinator);
--        }, 'registering custom element: *' +
--        invalidCombinator + '* should throw syntax error');
--    }
--
--}, 'registering invalid first letter combinators, not covered in Document::validNames');
--</script>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/invalid-type-extension-crash-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/invalid-type-extension-crash-expected.txt
-deleted file mode 100644
-index a72d8d8f2c05572ab1b673ae0e53624d0bcbe9ce..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/invalid-type-extension-crash-expected.txt
-+++ /dev/null
-@@ -1,5 +0,0 @@
--Accessing an XML element that looks like a Custom Element should not crash.On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".PASS document.getElementById("t") instanceof Element is true
--PASS successfullyParsed is true
--
--TEST COMPLETE
--.pass {font-weight: bold;color: green;}.fail {font-weight: bold;color: red;}#console {white-space: pre-wrap;font-family: monospace;}
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/invalid-type-extension-crash.svg b/third_party/WebKit/LayoutTests/fast/dom/custom/invalid-type-extension-crash.svg
-deleted file mode 100644
-index 27e32fa642525c518d7abdb08bd65cbe8b56465b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/invalid-type-extension-crash.svg
-+++ /dev/null
-@@ -1,10 +0,0 @@
--<html xmlns="http://www.w3.org/1999/xhtml"><x-test is="x-a" id="t"></x-test>
--<script src="../../../resources/js-test.js"></script>
--<script><![CDATA[
--description('Accessing an XML element that looks like a Custom Element ' +
--            'should not crash.');
--shouldBeTrue('document.getElementById("t") instanceof Element');
--
--var successfullyParsed = true;
--]]></script>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/isolated-world-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/isolated-world-expected.txt
-deleted file mode 100644
-index ddc8927b70b864201e36a1462250fa8825c51aab..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/isolated-world-expected.txt
-+++ /dev/null
-@@ -1,11 +0,0 @@
--Tests that accessing custom elements from an isolated world does not cause worlds to collide and destroy the galaxy.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS window.testRunner is non-null.
--PASS did not crash
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/isolated-world.html b/third_party/WebKit/LayoutTests/fast/dom/custom/isolated-world.html
-deleted file mode 100644
-index 6f2a846a7080601d0755f7f84741876d6d4cc0d1..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/isolated-world.html
-+++ /dev/null
-@@ -1,104 +0,0 @@
--<!DOCTYPE html>
--<script src="../../../resources/js-test.js"></script>
--<body>
--<div id="container-a"><span is="x-a" id="x"></span></div>
--<div id="container-b"><span is="x-a" id="y"></span></div>
--<script>
--description('Tests that accessing custom elements from an isolated world ' +
--            'does not cause worlds to collide and destroy the galaxy.');
--
--shouldBeNonNull('window.testRunner', 'this test requires testRunner');
--
--var containerA = document.querySelector('#container-a');
--
--// Access an upgrade candidate from an isolated world.
--var world = 1;
--testRunner.evaluateScriptInIsolatedWorld(
--    world,
--    'window.containerA = document.querySelector("#container-a"); ' +
--    'window.a = containerA.firstElementChild; ' +
--    'containerA.remove();');
--
--// Registering an exception in the isolated world should raise an exception.
--result = testRunner.evaluateScriptInIsolatedWorldAndReturnValue(
--    world,
--    '(function () { ' +
--    '  var proto = Object.create(HTMLSpanElement.prototype); ' +
--    '  proto.createdCallback = function () { ' +
--    '    console.log(this.id + " entered (isolated)"); ' +
--    '  }; ' +
--    '  try { ' +
--    '    document.registerElement("x-a", {extends: "span", prototype: proto}); ' +
--    '    return "register succeeded"; ' +
--    '  } catch (e) { ' +
--    '    return e.code; ' +
--    '  } ' +
--    '})()');
--
--shouldBe('result', 'DOMException.NOT_SUPPORTED_ERR',
--         'calling register from an isolated world should throw an exception');
--
--// Now access this element from the main world.
--a = containerA.querySelector('#x');
--shouldBe('a.__proto__', 'HTMLSpanElement.prototype',
--         'the main world should see the usual main world prototype');
--
--// Upgrade from the main world
--
--var proto = Object.create(HTMLSpanElement.prototype);
--invocations = [];
--proto.attachedCallback = function () {
--    invocations.push(this.id + ' entered (main)');
--};
--document.registerElement('x-a', {extends: 'span', prototype: proto});
--shouldBe('invocations', '["y entered (main)"]',
--         'only the element in the document should generate entered events');
--
--// Insert from the isolated world
--
--invocations = [];
--testRunner.evaluateScriptInIsolatedWorld(world,
--                                         'document.body.appendChild(a);');
--shouldBe('invocations', '["x entered (main)"]',
--         'modification in the isolated world should have caused callbacks ' +
--         'in the main world');
--
--// Examine prototypes from the isolated world
--
--proto.p = 'p';
--HTMLSpanElement.prototype.q = 'q';
--
--result = testRunner.evaluateScriptInIsolatedWorldAndReturnValue(
--    world,
--    '(function () { ' +
--    '  try { ' +
--    '    var messages = []; ' +
--    '    function log(message) { messages.push(message); } ' +
--    '    function inspect(obj) { ' +
--    '      log(obj.id + " prototype is HTMLSpanElement.prototype? " + ' +
--    '          (obj.__proto__ === HTMLSpanElement.prototype)); ' +
--    '      log(obj.id + ".p ~> " + obj.p); ' +
--    '      log(obj.id + ".q ~> " + obj.q); ' +
--    '    } ' +
--    '    inspect(window.a); ' +
--    '    inspect(document.querySelector("#y")); ' +
--    '    return messages.join(", "); ' +
--    '  } catch (e) { ' +
--    '    return e.toString(); ' +
--    '  } ' +
--    '})()');
--shouldBe(
--    'result',
--    '"x prototype is HTMLSpanElement.prototype? true,' +
--    ' x.p ~> undefined,' +
--    ' x.q ~> undefined,' +
--    ' y prototype is HTMLSpanElement.prototype? true,' +
--    ' y.p ~> undefined,' +
--    ' y.q ~> undefined"',
--    'the isolated world should not see main world prototypes');
--
--// Lastly, collect some wrappers (e.g #b in isolated world)
--document.querySelector('#container-b').innerHTML = '';
--gc();
--testPassed('did not crash');
--</script>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-recursion-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-recursion-expected.txt
-deleted file mode 100644
-index 10bf539c4f3c559c5b48f0a0e64c8dfeff3c4ceb..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-recursion-expected.txt
-+++ /dev/null
-@@ -1,6 +0,0 @@
--CONSOLE ERROR: line 8: Uncaught RangeError: Maximum call stack size exceeded.
--PASS unless crash
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-recursion.html b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-recursion.html
-deleted file mode 100644
-index 5f9d983bb50f92bdc0507bc42f5f0dbd07ed85e9..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-recursion.html
-+++ /dev/null
-@@ -1,15 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<script src="../../../resources/js-test.js"></script>
--</head>
--<body>
--<script>
--document.registerElement("x-foo", { prototype: Object.create(HTMLElement.prototype, { createdCallback: { value: function () { this.innerHTML = "<x-foo>Hello</x-foo>"; } } }) });
--if (window.testRunner)
--    testRunner.dumpAsText();
--document.createElement("x-foo");
--debug("PASS unless crash");
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-reentrancy-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-reentrancy-expected.txt
-deleted file mode 100644
-index 7edcc1837c256b6896b1be39f90c0f1e4d5c341a..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-reentrancy-expected.txt
-+++ /dev/null
-@@ -1,13 +0,0 @@
--This test ensures that the lifecycle callback of a parser-made element is visible in following script block.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS window.callbacksCalled is []
--PASS window.callbacksCalled is ['X-FOO']
--PASS window.callbacksCalled is ['X-FOO', 'X-BAR']
--PASS window.callbacksCalled is ['X-FOO', 'X-BAR']
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-reentrancy.html b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-reentrancy.html
-deleted file mode 100644
-index c9620fa716464c6c93a46af834e1a0c51400c381..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-createElement-reentrancy.html
-+++ /dev/null
-@@ -1,32 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<script src="../../../resources/js-test.js"></script>
--<script>
--description("This test ensures that the lifecycle callback of a parser-made element is visible in following script block.")
--
--window.callbacksCalled = [];
--
--function fooCreatedFunction() {
--  shouldBe("window.callbacksCalled", "[]");
--  window.callbacksCalled.push(this.tagName);
--  this.innerHTML = "<x-bar></x-bar>";
--  shouldBe("window.callbacksCalled", "['X-FOO', 'X-BAR']");
--}
--
--function barCreatedFunction() {
--  shouldBe("window.callbacksCalled", "['X-FOO']");
--  window.callbacksCalled.push(this.tagName);
--}
--
--document.registerElement("x-foo", { prototype: Object.create(HTMLElement.prototype, { createdCallback: { value: fooCreatedFunction } }) });
--document.registerElement("x-bar", { prototype: Object.create(HTMLElement.prototype, { createdCallback: { value: barCreatedFunction } }) });
--</script>
--</head>
--<body>
--<script>
--document.createElement("x-foo");
--shouldBe("window.callbacksCalled", "['X-FOO', 'X-BAR']");
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-creation-api-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-creation-api-expected.txt
-deleted file mode 100644
-index 8f70874605860b3df988b9a1f348c62d7677a2ec..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-creation-api-expected.txt
-+++ /dev/null
-@@ -1,27 +0,0 @@
--This test ensures that the lifecycle callbacks of API-originated elements are visible in following script block.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS document.createElement('x-foo').callbacksCalled is true
--PASS document.createElement('div', 'x-bar').callbacksCalled is true
--PASS document.createElementNS('http://www.w3.org/1999/xhtml', 'x-foo').callbacksCalled is true
--PASS document.createElementNS('http://www.w3.org/1999/xhtml', 'div', 'x-bar').callbacksCalled is true
--PASS foo.cloneNode().callbacksCalled is true
--PASS foo.cloneNode(true).firstChild.callbacksCalled is true
--PASS bar.cloneNode().callbacksCalled is true
--PASS bar.cloneNode(true).firstChild.callbacksCalled is true
--PASS foreignFoo.callbacksCalled is true
--PASS foreignFoo.firstChild.callbacksCalled is true
--PASS importedFoo.callbacksCalled is true
--PASS importedFoo.firstChild.callbacksCalled is true
--PASS window.callbacksCalled is ['div', 'x-foo']
--PASS importedBar.callbacksCalled is true
--PASS importedBar.firstChild.callbacksCalled is true
--PASS window.callbacksCalled is ['DIV', 'X-FOO']
--PASS window.callbacksCalled is ['X-FOO']
--PASS window.callbacksCalled is ['X-FOO']
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-creation-api.html b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-creation-api.html
-deleted file mode 100644
-index 7a3ba8f12536cd5663ed0aecaa4a3749166c1d7e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-creation-api.html
-+++ /dev/null
-@@ -1,73 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<script src="../../../resources/js-test.js"></script>
--<script>
--description("This test ensures that the lifecycle callbacks of API-originated elements are visible in following script block.")
--window.callbacksCalled = [];
--function markingReadyCallback() {
--    window.callbacksCalled.push(this.tagName);
--    this.callbacksCalled = true;
--}
--
--document.registerElement("x-foo", { prototype: Object.create(HTMLElement.prototype, { createdCallback: { value: markingReadyCallback } }) });
--document.registerElement("x-bar", { extends: "div", prototype: Object.create(HTMLDivElement.prototype, { createdCallback: { value: markingReadyCallback } }) });
--</script>
--</head>
--<body>
--<div id="container"></div>
--<div id="host"></div>
--
--<script>
--
--shouldBeTrue("document.createElement('x-foo').callbacksCalled");
--shouldBeTrue("document.createElement('div', 'x-bar').callbacksCalled");
--
--shouldBeTrue("document.createElementNS('http://www.w3.org/1999/xhtml', 'x-foo').callbacksCalled");
--shouldBeTrue("document.createElementNS('http://www.w3.org/1999/xhtml', 'div', 'x-bar').callbacksCalled");
--
--var foo = document.createElement('x-foo');
--foo.appendChild(document.createElement('div', 'x-bar'));
--shouldBeTrue("foo.cloneNode().callbacksCalled");
--shouldBeTrue("foo.cloneNode(true).firstChild.callbacksCalled");
--
--var bar = document.createElement('div', 'x-bar');
--bar.appendChild(document.createElement('x-foo'));
--shouldBeTrue("bar.cloneNode().callbacksCalled");
--shouldBeTrue("bar.cloneNode(true).firstChild.callbacksCalled");
--
--var foreignDoc = document.implementation.createDocument('http://www.w3.org/1999/xhtml', 'html', null);
--
--var foreignFoo = foreignDoc.createElement('x-foo');
--foreignFoo.appendChild(foreignDoc.createElement('div', 'x-bar'));
--shouldBeTrue("foreignFoo.callbacksCalled");
--shouldBeTrue("foreignFoo.firstChild.callbacksCalled");
--importedFoo = document.importNode(foreignFoo, true)
--shouldBeTrue("importedFoo.callbacksCalled");
--shouldBeTrue("importedFoo.firstChild.callbacksCalled");
--
--window.callbacksCalled = [];
--var foreignBar = foreignDoc.createElement('div', 'x-bar');
--foreignBar.appendChild(foreignDoc.createElement('x-foo'));
--shouldBe("window.callbacksCalled", "['div', 'x-foo']");
--window.callbacksCalled = [];
--importedBar = document.importNode(foreignBar, true);
--shouldBeTrue("importedBar.callbacksCalled");
--shouldBeTrue("importedBar.firstChild.callbacksCalled");
--shouldBe("window.callbacksCalled", "['DIV', 'X-FOO']");
--
--window.callbacksCalled = [];
--var toBeReplaced = document.createElement("div");
--document.body.appendChild(toBeReplaced);
--toBeReplaced.outerHTML = "<x-foo></x-foo>";
--shouldBe("window.callbacksCalled", "['X-FOO']");
--
--window.callbacksCalled = [];
--var insertionPlaceHolder = document.createElement("div");
--document.body.appendChild(insertionPlaceHolder);
--insertionPlaceHolder.insertAdjacentHTML("beforebegin", "<x-foo></x-foo>");
--shouldBe("window.callbacksCalled", "['X-FOO']");
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-innerHTML-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-innerHTML-expected.txt
-deleted file mode 100644
-index ed516f317a29473163d15b931004066975382463..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-innerHTML-expected.txt
-+++ /dev/null
-@@ -1,11 +0,0 @@
--This test ensures that the lifecycle callback of a parser-made element is visible in following script block.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS window.callbacksCalled is ['a', 'b', 'c']
--PASS window.callbacksCalled is ['a', 'b', 'c']
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-innerHTML.html b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-innerHTML.html
-deleted file mode 100644
-index 336d6cba20c21d5dcc2088611d8b18978818e918..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-innerHTML.html
-+++ /dev/null
-@@ -1,34 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<script src="../../../resources/js-test.js"></script>
--<script>
--description("This test ensures that the lifecycle callback of a parser-made element is visible in following script block.")
--
--window.callbacksCalled = [];
--
--function trackingReadyCallback()
--{
--    window.callbacksCalled.push(this.id);
--}
--
--document.registerElement("x-foo", { prototype: Object.create(HTMLElement.prototype, { createdCallback: { value: trackingReadyCallback } }) });
--document.registerElement("x-bar", { extends: "div", prototype: Object.create(HTMLDivElement.prototype, { createdCallback: { value: trackingReadyCallback } }) });
--document.registerElement("x-baz", { prototype: Object.create(HTMLElement.prototype, { createdCallback: { value: trackingReadyCallback } }) });
--</script>
--</head>
--<body>
--<div id="container">
--<script>
--// Testing element siblings
--window.callbacksCalled = [];
--container.innerHTML = "<x-foo id='a'></x-foo><div id='b' is='x-bar'></div><x-baz id='c'></x-baz>";
--shouldBe("window.callbacksCalled", "['a', 'b', 'c']");
--
--// Testing nested elements
--window.callbacksCalled = [];
--container.innerHTML = "<x-foo id='a'><div id='b' is='x-bar'><x-baz id='c'></x-baz></div></x-foo>";
--shouldBe("window.callbacksCalled", "['a', 'b', 'c']");
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-only-expected.html b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-only-expected.html
-deleted file mode 100644
-index 96fd80745b0ef05f175491d23811b15b9cf38b4d..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-only-expected.html
-+++ /dev/null
-@@ -1,6 +0,0 @@
--<!DOCTYPE html>
--<html>
--<body>
--<span>Hello</span>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-only.html b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-only.html
-deleted file mode 100644
-index ec4e7029f7c4761851f0e56e5ae26e6c76ed7130..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-only.html
-+++ /dev/null
-@@ -1,12 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<script>
--proto = Object.create(HTMLElement.prototype, { createdCallback: { value: function() { this.innerHTML = "Hello"; } } });
--document.registerElement("x-foo", { prototype: proto });
--</script>
--</head>
--<body>
--<x-foo></x-foo>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-script-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-script-expected.txt
-deleted file mode 100644
-index 34c7ef7b7d530b964cbcff78ac792f0411872c7d..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-script-expected.txt
-+++ /dev/null
-@@ -1,10 +0,0 @@
--This test ensures that the lifecycle callback of a parser-made element is visible in following script block.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS window.callbacksCalled is true
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-script.html b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-script.html
-deleted file mode 100644
-index f983a7cebf9e9f2137e3ba267bfc63a9520dfd02..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-parser-script.html
-+++ /dev/null
-@@ -1,17 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<script src="../../../resources/js-test.js"></script>
--<script>
--description("This test ensures that the lifecycle callback of a parser-made element is visible in following script block.")
--proto = Object.create(HTMLElement.prototype, { createdCallback: { value: function() { window.callbacksCalled = true; } } });
--document.registerElement("x-foo", { prototype: proto });
--</script>
--</head>
--<body>
--<x-foo></x-foo>
--<script>
--shouldBeTrue("window.callbacksCalled");
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-paste-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-paste-expected.txt
-deleted file mode 100644
-index 43fb3de699e0cc4adb87346a7edfd873d275b233..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-paste-expected.txt
-+++ /dev/null
-@@ -1,11 +0,0 @@
--This test ensures that the lifecycle callbacks of editing-originated elements are visible in following script block.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS window.callbacksCalled is ['X-FOO', 'DIV']
--PASS window.callbacksCalled is ['X-FOO', 'DIV', 'X-FOO', 'DIV']
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-paste.html b/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-paste.html
-deleted file mode 100644
-index d26706f891d2c7b7b16d8cb7d3cb2caa1b176ae3..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/lifecycle-created-paste.html
-+++ /dev/null
-@@ -1,28 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<script src="../../../resources/js-test.js"></script>
--<script>
--description("This test ensures that the lifecycle callbacks of editing-originated elements are visible in following script block.")
--window.callbacksCalled = [];
--document.registerElement("x-foo", { prototype: Object.create(HTMLElement.prototype, { createdCallback: { value: function() { window.callbacksCalled.push(this.tagName); } } }) });
--document.registerElement("x-bar", { extends: "div", prototype: Object.create(HTMLDivElement.prototype, { createdCallback: { value: function() { window.callbacksCalled.push(this.tagName); } } }) });
--</script>
--</head>
--<body>
--<div id="container" contenteditable>[<x-foo>Foo</x-foo><div is='x-bar'>Bar</div>]</div>
--<script>
--var selection = window.getSelection();
--
--selection.selectAllChildren(container);
--document.execCommand("Copy");
--
--shouldBe("window.callbacksCalled", "['X-FOO', 'DIV']");
--selection.collapseToEnd();
--document.execCommand("Paste");
--shouldBe("window.callbacksCalled", "['X-FOO', 'DIV', 'X-FOO', 'DIV']");
--
--container.style.display = "none";
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/prerender-insert-after-stop-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/prerender-insert-after-stop-expected.txt
-deleted file mode 100644
-index cec33742001e5e946391193342cf4e5cc0eae582..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/prerender-insert-after-stop-expected.txt
-+++ /dev/null
-@@ -1,11 +0,0 @@
--Test that Custom Element should be defined while navigating between frames.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS customBody is defined.
--PASS customBody.toLocaleString() is "[object HTMLBodyElement]"
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/prerender-insert-after-stop.html b/third_party/WebKit/LayoutTests/fast/dom/custom/prerender-insert-after-stop.html
-deleted file mode 100644
-index 18c92a11b699982a1bb86b241fc32831c6f07fe9..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/prerender-insert-after-stop.html
-+++ /dev/null
-@@ -1,25 +0,0 @@
--<!DOCTYPE html>
--<script src='../../../resources/js-test.js'></script>
--<script>
--description('Test that Custom Element should be defined while navigating between frames.');
--
--var customBody;
--var jsTestIsAsync = true;
--
--function linkInserter(doc) {
--    return function() {
--        customBody = doc.getElementById('thebody');
--        shouldBeDefined('customBody');
--        shouldBeEqualToString('customBody.toLocaleString()', '[object HTMLBodyElement]');
--        finishJSTest();
--    }
--}
--
--function navigateIFrameThenInsertLink() {
--    var iframe = document.getElementById('iframe');
--    iframe.onload = linkInserter(iframe.contentDocument);
--    iframe.contentWindow.location = 'resources/empty-custom-body.html';
--}
--</script>
--<iframe id='iframe' onload='navigateIFrameThenInsertLink()' src='resources/empty-custom-body.html'>
--</iframe>
-\ No newline at end of file
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/processing-stack-recursion.html b/third_party/WebKit/LayoutTests/fast/dom/custom/processing-stack-recursion.html
-deleted file mode 100644
-index 27fcf5829225cab35f8e57113a5721fb65c96d04..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/processing-stack-recursion.html
-+++ /dev/null
-@@ -1,157 +0,0 @@
--<!DOCTYPE html>
--<script src="../../../resources/testharness.js"></script>
--<script src="../../../resources/testharnessreport.js"></script>
--<body>
--<template id="expected">A entered
--A removing parent node
--   A left
--   A inserting parent node
--      A entered
--      A removing parent node
--         A left
--         A inserting parent node
--            A entered
--            B entered
--            B left
--            B entered
--            B setting attribute on C
--               C entered
--               C left
--               C entered
--               C left
--               C entered
--               C@by null->b
--               C setting attribute on B
--                  B left
--                  B entered
--                  B@by null->c
--                  B setting attribute on A
--                     A@by null->b
--                  done
--               done
--            done
--         done
--      done
--   done
--done</template>
--<script>
--test(function () {
--    // Helpers for logging
--    var buffer = [];
--    var indentation = '';
--    function log(msg) {
--        buffer.push(indentation + msg);
--    }
--    function indented(msg) {
--        log(msg);
--        indentation += '   ';
--    }
--    function unindent() {
--        indentation = indentation.substring(3);
--        log('done');
--    }
--
--    // This tests recursion and the processing stack. Specifically:
--    //
--    // (1) Scheduling callbacks for an element that has callbacks
--    // scheduled at an outer level of recursion, but that have not
--    // begun to be processed yet.
--    //
--    // (2) Scheduling callbacks for an element that is in the middle
--    // of processing callbacks at an outer level of recursion.
--    //
--    // (3) Scheduling callbacks for an element that exhaustively
--    // processed callbacks at an outer level of recursion.
--    //
--    // appendChild and remove are used on a subtree containing
--    // multiple custom elements. In this way it is possible to
--    // schedule callbacks for multiple custom elements with one DOM
--    // call.
--    //
--    // The test creates this tree:
--    //
--    //   <div>
--    //     <x-a></x-a>
--    //     <x-b></x-b>
--    //     <x-c></x-c>
--    //   </div>
--    //
--    // x-a pushes its parent in and out of the document, thus scheduling
--    // work for x-b and x-c at every level of recursion.
--    //
--    // Then x-b processes half its queue before setting an attribute
--    // on x-c. This tests case (1) because x-c has not begun its queue
--    // yet.
--    //
--    // x-c turns around and sets and attribute on x-b. This tests case
--    // (2) because x-b is half way through processing its queue.
--    //
--    // x-b turns around and sets an attribute on x-a. This tests case
--    // (3) because x-a has finished processing its queue.
--    
--    var protoA = Object.create(HTMLElement.prototype);
--    var n = 0;
--    protoA.attachedCallback = function () {
--        log('A entered');
--        n++;
--        if (n < 3) {
--            indented('A removing parent node');
--            this.parentNode.remove();
--            unindent();
--        }
--    };
--    protoA.detachedCallback = function () {
--        log('A left');
--        indented('A inserting parent node');
--        document.body.appendChild(this.parentNode);
--        unindent();
--    };
--    protoA.attributeChangedCallback = function (name, oldValue, newValue) {
--        log('A@' + name + ' ' + oldValue + '->' + newValue);
--    };
--    var A = document.registerElement('x-a', {prototype: protoA});
--
--    var protoB = Object.create(HTMLElement.prototype);
--    var m = 0;
--    protoB.attachedCallback = function () {
--        log('B entered');
--        m++;
--        if (m == 2) {
--            indented('B setting attribute on C');
--            this.parentNode.querySelector('x-c').setAttribute('by', 'b');
--            unindent();
--        }
--    };
--    protoB.detachedCallback = function () {
--        log('B left');
--    };
--    protoB.attributeChangedCallback = function (name, oldValue, newValue) {
--        log('B@' + name + ' ' + oldValue + '->' + newValue);
--        indented('B setting attribute on A');
--        this.parentNode.querySelector('x-a').setAttribute('by', 'b');
--        unindent();
--    };
--    var B = document.registerElement('x-b', {prototype: protoB});
--
--    var protoC = Object.create(HTMLElement.prototype);
--    protoC.attachedCallback = function () {
--        log('C entered');
--    };
--    protoC.detachedCallback = function () {
--        log('C left');
--    };
--    protoC.attributeChangedCallback = function (name, oldValue, newValue) {
--        log('C@' + name + ' ' + oldValue + '->' + newValue);
--        indented('C setting attribute on B');
--        this.parentNode.querySelector('x-b').setAttribute('by', 'c');
--        unindent();
--    };
--    var C = document.registerElement('x-c', {prototype: protoC});
--
--    var div = document.createElement('div');
--    div.innerHTML = '<div><x-a></x-a><x-b></x-b><x-c></x-c></div>';
--    document.body.appendChild(div);
--
--    assert_equals(buffer.join('\n'), expected.content.textContent, 'should have generated an identical log');
--}, 'recursively scheduled callbacks');
--</script>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed-expected.txt
-deleted file mode 100644
-index 9c78f7e7a71b6d391fd3e74923fee72993c01696..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed-expected.txt
-+++ /dev/null
-@@ -1,11 +0,0 @@
--Tests destroying a context during attributeChanged callback.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS destroyed context
--PASS child done
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed-retrieval-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed-retrieval-expected.txt
-deleted file mode 100644
-index 7a1c1eecb1041972e66380b637e31cb4055dc6d0..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed-retrieval-expected.txt
-+++ /dev/null
-@@ -1,12 +0,0 @@
--Tests destroying a context during registration at the point when the attributeChanged callback is retrieved.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS destroyed context
--PASS caught expected exception "InvalidStateError: Failed to execute 'registerElement' on 'Document': Registration failed for type 'x-a'. The context is no longer valid."
--PASS child done
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed-retrieval.html b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed-retrieval.html
-deleted file mode 100644
-index 3981bd7f25282c6a284789a19729cb78c1a12ebc..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed-retrieval.html
-+++ /dev/null
-@@ -1,31 +0,0 @@
--<!DOCTYPE html>
--<script src="../../../resources/js-test.js"></script>
--<script src="testutils.js"></script>
--<body>
--<script>
--if (fork()) {
--    // The controlling parent frame
--    description('Tests destroying a context during registration at the point when the attributeChanged callback is retrieved.');
--    jsTestIsAsync = true;
--    successfullyParsed = true;
--} else {
--    // The child frame
--
--    var proto = Object.create(HTMLElement.prototype, {
--        attributeChangedCallback: {
--            get: function () {
--                destroyContext();
--                return function () { }
--            }
--        }
--    });
--
--    try {
--        document.registerElement('x-a', {prototype: proto});
--        log('FAIL expected register to throw an exception');
--    } catch (ex) {
--        log('PASS caught expected exception "' + ex + '"');
--    }
--    done();
--}
--</script>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed.html b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed.html
-deleted file mode 100644
-index 0783b98dd8f06a9ed0949349d1a6763b118d49b4..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-attribute-changed.html
-+++ /dev/null
-@@ -1,25 +0,0 @@
--<!DOCTYPE html>
--<script src="../../../resources/js-test.js"></script>
--<script src="testutils.js"></script>
--<body>
--<x-a></x-a>
--<script>
--if (fork()) {
--    // The controlling parent frame
--    description('Tests destroying a context during attributeChanged callback.');
--    jsTestIsAsync = true;
--    successfullyParsed = true;
--} else {
--    // The child frame
--
--    var proto = Object.create(HTMLElement.prototype);
--    proto.attributeChangedCallback = function () {
--        destroyContext();
--    };
--
--    var A = document.registerElement('x-a', {prototype: proto});
--    var a = new A();
--    a.id = 'boom';
--    done();
--}
--</script>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-callback-recursion-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-callback-recursion-expected.txt
-deleted file mode 100644
-index 9c78f7e7a71b6d391fd3e74923fee72993c01696..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-callback-recursion-expected.txt
-+++ /dev/null
-@@ -1,11 +0,0 @@
--Tests destroying a context during attributeChanged callback.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS destroyed context
--PASS child done
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-callback-recursion.html b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-callback-recursion.html
-deleted file mode 100644
-index 1418f3379974903d1fc7e01e1ec999edd2d91b2d..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-callback-recursion.html
-+++ /dev/null
-@@ -1,38 +0,0 @@
--<!DOCTYPE html>
--<script src="../../../resources/js-test.js"></script>
--<script src="testutils.js"></script>
--<body>
--<div id="s">
--</div>
--<script>
--if (fork()) {
--    // The controlling parent frame
--    description('Tests destroying a context during attributeChanged callback.');
--    jsTestIsAsync = true;
--    successfullyParsed = true;
--} else {
--    // The child frame
--
--    var n = 0;
--    var proto = Object.create(HTMLElement.prototype);
--    proto.createdCallback = function () {
--        if (n++ == 2)
--            this.previousSibling.setAttribute('tick', '...');
--    };
--    proto.attributeChangedCallback = function (name) {
--        if (name == 'tick')
--            this.previousSibling.setAttribute('boom', 'tsk');
--        if (name == 'boom')
--            destroyContext();
--    };
--
--    var A = document.registerElement('x-a', {prototype: proto});
--    s.innerHTML =
--        '<x-a id="t"></x-a>' +
--        '<x-a id="u"></x-a>' +
--        '<x-a id="v"></x-a>' +
--        '<x-a id="w"></x-a>';
--
--    done();
--}
--</script>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-base-constructor-retrieval-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-base-constructor-retrieval-expected.txt
-deleted file mode 100644
-index 538f5a5bd3908296ea41b03a736b723bcc233de3..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-base-constructor-retrieval-expected.txt
-+++ /dev/null
-@@ -1,12 +0,0 @@
--Tests destroying a context during registration at the point when the prototype's constructor property is retrieved.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS destroyed context
--PASS caught expected exception "InvalidStateError: Failed to execute 'registerElement' on 'Document': Registration failed for type 'x-a'. The context is no longer valid."
--PASS child done
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-base-constructor-retrieval.html b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-base-constructor-retrieval.html
-deleted file mode 100644
-index 158f4c94d105b3ee6fca87c5036fc54af1596caf..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-base-constructor-retrieval.html
-+++ /dev/null
-@@ -1,32 +0,0 @@
--<!DOCTYPE html>
--<script src="../../../resources/js-test.js"></script>
--<script src="testutils.js"></script>
--<body>
--<script>
--if (fork()) {
--    // The controlling parent frame
--    description('Tests destroying a context during registration at the' +
--                ' point when the prototype\'s constructor property is retrieved.');
--    jsTestIsAsync = true;
--    successfullyParsed = true;
--} else {
--    // The child frame
--    var proto = Object.create(HTMLElement.prototype, {
--        constructor: {
--            configurable: true,
--            get: function () {
--                destroyContext();
--                return HTMLElement;
--            }
--        }
--    });
--
--    try {
--        var element = document.registerElement('x-a', {prototype: proto});
--        log('FAIL expected register to throw an exception');
--    } catch (ex) {
--        log('PASS caught expected exception "' + ex + '"');
--    }
--    done();
--}
--</script>
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-created-retrieval-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-created-retrieval-expected.txt
-deleted file mode 100644
-index 57aa198a23119e7c61f46546a765c9ba552bd6e2..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-created-retrieval-expected.txt
-+++ /dev/null
-@@ -1,12 +0,0 @@
--Tests destroying a context during registration at the point when the created callback is retrieved.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS destroyed context
--PASS caught expected exception "InvalidStateError: Failed to execute 'registerElement' on 'Document': Registration failed for type 'x-a'. The context is no longer valid."
--PASS child done
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-created-retrieval.html b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-created-retrieval.html
-deleted file mode 100644
-index 488859fae9f62d83304976652cb1a85cf1c8a522..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-created-retrieval.html
-+++ /dev/null
-@@ -1,31 +0,0 @@
--<!DOCTYPE html>
--<script src="../../../resources/js-test.js"></script>
--<script src="testutils.js"></script>
--<body>
--<script>
--if (fork()) {
--    // The controlling parent frame
--    description('Tests destroying a context during registration at the point when the created callback is retrieved.');
--    jsTestIsAsync = true;
--    successfullyParsed = true;
--} else {
--    // The child frame
--
--    var proto = Object.create(HTMLElement.prototype, {
--        createdCallback: {
--            get: function () {
--                destroyContext();
--                return function () { }
--            }
--        }
--    });
--
--    try {
--        document.registerElement('x-a', {prototype: proto});
--        log('FAIL expected register to throw an exception');
--    } catch (ex) {
--        log('PASS caught expected exception "' + ex + '"');
--    }
--    done();
--}
--</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-extends-retrieval-and-throw-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/custom/registration-context-delete-during-register-extends-retrieval-and-throw-expected.txt
 deleted file mode 100644
 index 0293312b576205a17b577a68bfcb6892821f03a5..0000000000000000000000000000000000000000
@@ -5895,11 +4851,11 @@ index 69540dadfdefff7d4d7ae3f8b94a72cd897c7fbf..00000000000000000000000000000000
 \ No newline at end of file
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/domstring-attribute-reflection-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/domstring-attribute-reflection-expected.txt
 deleted file mode 100644
-index c5c3d9b78a16e38e9d5dce940e9f917321b696f0..0000000000000000000000000000000000000000
+index 9dd588377d43cf0cd058f3ea80c09b91b809246c..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/domstring-attribute-reflection-expected.txt
 +++ /dev/null
-@@ -1,965 +0,0 @@
--CONSOLE WARNING: line 10: The <keygen> element is deprecated and will be removed in M56, around January 2017. See https://www.chromestatus.com/features/5716060992962560 for more details.
+@@ -1,935 +0,0 @@
+-CONSOLE WARNING: line 10: The <keygen> element is deprecated and will be removed in M57, around March 2017. See https://www.chromestatus.com/features/5716060992962560 for more details.
 -Reflected DOMString attribute test for button/@name
 -Initial value:
 -PASS element.name is ""
@@ -6138,36 +5094,6 @@ index c5c3d9b78a16e38e9d5dce940e9f917321b696f0..00000000000000000000000000000000
 -Setting non-string via the content attribute:
 -PASS element.setAttribute("label", 456); element.label is "456"
 -PASS element.getAttribute("label") is "456"
--
--
--Reflected DOMString attribute test for menuitem/@type
--Initial value:
--PASS element.type is ""
--PASS element.getAttribute("type") is null
--Setting a value via the IDL attribute:
--PASS element.type = "foo"; element.type is "foo"
--PASS element.getAttribute("type") is "foo"
--Setting a value via the content attribute:
--PASS element.setAttribute("type", " bar\n"); element.type is " bar\n"
--PASS element.getAttribute("type") is " bar\n"
--Setting null via the IDL attribute:
--PASS element.type = null; element.type is "null"
--PASS element.getAttribute("type") is "null"
--Setting null via the content attribute:
--PASS element.setAttribute("type", null); element.type is "null"
--PASS element.getAttribute("type") is "null"
--Setting undefined via the IDL attribute:
--PASS element.type = undefined; element.type is "undefined"
--PASS element.getAttribute("type") is "undefined"
--Setting undefined via the content attribute:
--PASS element.setAttribute("type", undefined); element.type is "undefined"
--PASS element.getAttribute("type") is "undefined"
--Setting non-string via the IDL attribute:
--PASS element.type = 123; element.type is "123"
--PASS element.getAttribute("type") is "123"
--Setting non-string via the content attribute:
--PASS element.setAttribute("type", 456); element.type is "456"
--PASS element.getAttribute("type") is "456"
 -
 -
 -Reflected DOMString attribute test for menuitem/@label
@@ -6866,10 +5792,10 @@ index c5c3d9b78a16e38e9d5dce940e9f917321b696f0..00000000000000000000000000000000
 -
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/domstring-attribute-reflection.html b/third_party/WebKit/LayoutTests/fast/dom/domstring-attribute-reflection.html
 deleted file mode 100644
-index 5a9ed357a2f70dbc7669969ddc14cbec6c2e92ca..0000000000000000000000000000000000000000
+index f633fed9705a8cc0170294472d7476e69b49566d..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/domstring-attribute-reflection.html
 +++ /dev/null
-@@ -1,96 +0,0 @@
+@@ -1,95 +0,0 @@
 -<!DOCTYPE html>
 -<html>
 -<body>
@@ -6933,7 +5859,6 @@ index 5a9ed357a2f70dbc7669969ddc14cbec6c2e92ca..00000000000000000000000000000000
 -testDOMStringReflection('keygen', 'name');
 -testDOMStringReflection('menu', 'type');
 -testDOMStringReflection('menu', 'label');
--testDOMStringReflection('menuitem', 'type');
 -testDOMStringReflection('menuitem', 'label');
 -testDOMStringReflection('object', 'name');
 -testDOMStringReflection('output', 'name');
@@ -7232,11 +6157,11 @@ index 22d14c30852e47fa691c329494eb2db61a9c11c4..00000000000000000000000000000000
 -</frameset>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/element-attribute-js-null-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/element-attribute-js-null-expected.txt
 deleted file mode 100644
-index e11458e94bdcf2d5d70af14ad7b7c4010eb58eb5..0000000000000000000000000000000000000000
+index 81aa283b4f65ca7b6bb41c5f5a3159618e94c6a1..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/element-attribute-js-null-expected.txt
 +++ /dev/null
 @@ -1,304 +0,0 @@
--CONSOLE WARNING: line 362: The <keygen> element is deprecated and will be removed in M56, around January 2017. See https://www.chromestatus.com/features/5716060992962560 for more details.
+-CONSOLE WARNING: line 362: The <keygen> element is deprecated and will be removed in M57, around March 2017. See https://www.chromestatus.com/features/5716060992962560 for more details.
 -This test setting various attributes of a elements to JavaScript null.
 -
 -TEST SUCCEEDED: The value was null. [tested Node.nodeValue]
@@ -10134,12 +9059,12 @@ index b7d8a80ab1bf3905d1672dacd2a880929a1975fd..00000000000000000000000000000000
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/everything-to-string-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/everything-to-string-expected.txt
 deleted file mode 100644
-index f20af51f3fcdf356d85fe965bf770c7329be7967..0000000000000000000000000000000000000000
+index cc0bd189985f81d1a3b63d95b6d37a4c7b54d49a..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/everything-to-string-expected.txt
 +++ /dev/null
 @@ -1,7 +0,0 @@
 -CONSOLE WARNING: line 17: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
--CONSOLE WARNING: line 17: 'webkitIndexedDB' is deprecated. Please use 'indexedDB' instead.
+-CONSOLE WARNING: line 17: 'webkitIndexedDB' is deprecated and will be removed in M57, around March 2017. Please use 'indexedDB' instead. See https://www.chromestatus.com/features/5775330191081472 for more details.
 -Test for bug 8131: Some properties and methods of window and document objects cannot be converted to a string.
 -
 -Should say SUCCESS:
@@ -13180,10 +12105,10 @@ index 1b4e4843b8a7245d43b60dd1ac29a07cacfbe23a..00000000000000000000000000000000
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-readonly.html b/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-readonly.html
 deleted file mode 100644
-index ed4dcf582b98529a3cd3d0d35cae1e23e50ce795..0000000000000000000000000000000000000000
+index 0019e14e50103dc6b8bf3ef7a2ad98b883eacd5c..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-readonly.html
 +++ /dev/null
-@@ -1,155 +0,0 @@
+@@ -1,191 +0,0 @@
 -<!DOCTYPE HTML>
 -<script src="../../resources/testharness.js"></script>
 -<script src="../../resources/testharnessreport.js"></script>
@@ -13236,6 +12161,42 @@ index ed4dcf582b98529a3cd3d0d35cae1e23e50ce795..00000000000000000000000000000000
 -  assert_false(matrix3d.is2D);
 -  assert_equals(matrix3d.toString(), "matrix3d(1, 2, 3, 4, 5, 6, 7, 8, 9, 10.1, 11, 12, 13, 14, 15, 16.6)");
 -}, "DOMMatrixReadOnly toString() - 3D matrix");
+-
+-test(() => {
+-  var identity_matrix = DOMMatrixReadOnly.fromMatrix();
+-  assert_true(identity_matrix.is2D);
+-  assert_object_equals(identity_matrix.toJSON(),
+-    { a : 1, b : 0, c : 0, d : 1, e : 0, f : 0,
+-      is2D : true, isIdentity : true,
+-      m11 : 1, m12 : 0, m13 : 0, m14 : 0,
+-      m21 : 0, m22 : 1, m23 : 0, m24 : 0,
+-      m31 : 0, m32 : 0, m33 : 1, m34 : 0,
+-      m41 : 0, m42 : 0, m43 : 0, m44 : 1});
+-}, "DOMMatrixReadOnly toJSON() - identity matrix");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 3.1, 2, 1]);
+-  assert_true(matrix2d.is2D);
+-  assert_object_equals(matrix2d.toJSON(),
+-    { a : 1, b : 2, c : 3, d : 3.1, e : 2, f : 1,
+-      is2D : true, isIdentity : false,
+-      m11 : 1, m12 : 2, m13 : 0, m14 : 0,
+-      m21 : 3, m22 : 3.1, m23 : 0, m24 : 0,
+-      m31 : 0, m32 : 0, m33 : 1, m34 : 0,
+-      m41 : 2, m42 : 1, m43 : 0, m44 : 1});
+-}, "DOMMatrixReadOnly toJSON() - 2D matrix");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10.1, 11, 12, 13, 14, 15, 16.6]);
+-  assert_false(matrix3d.is2D);
+-  assert_object_equals(matrix3d.toJSON(),
+-    { a : 1, b : 2, c : 5, d : 6, e : 13, f : 14,
+-      is2D : false, isIdentity : false,
+-      m11 : 1, m12 : 2, m13 : 3, m14 : 4,
+-      m21 : 5, m22 : 6, m23 : 7, m24 : 8,
+-      m31 : 9, m32 : 10.1, m33 : 11, m34 : 12,
+-      m41 : 13, m42 : 14, m43 : 15, m44 : 16.6});
+-}, "DOMMatrixReadOnly toJSON() - 3D matrix");
 -
 -test(() => {
 -  assert_throws(new TypeError(), () => { new DOMMatrixReadOnly(1, 2, 3, 4, 5, 6); },
@@ -13339,32 +12300,536 @@ index ed4dcf582b98529a3cd3d0d35cae1e23e50ce795..00000000000000000000000000000000
 -}, "DOMMatrixReadOnly.fromMatrix(): Exception test.");
 -
 -</script>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-rotate.html b/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-rotate.html
+deleted file mode 100644
+index f0e93ca7d135b67e8d788c3f589a6fa3b5b64db8..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-rotate.html
++++ /dev/null
+@@ -1,456 +0,0 @@
+-<!DOCTYPE HTML>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<script src="./resources/geometry-interfaces-test-helpers.js"></script>
+-<script>
+-
+-function deg2rad(degrees) {
+-  return degrees * Math.PI / 180;
+-}
+-
+-function rad2deg(radians) {
+-  return radians * 180 / Math.PI;
+-}
+-
+-function getRotationMatrix(x, y, z, alpha_in_degrees) {
+-  // Vector normalizing
+-  var nx = x;
+-  var ny = y;
+-  var nz = z;
+-  var length = Math.sqrt(x * x + y * y + z * z);
+-  if (length) {
+-    nx = x / length;
+-    ny = y / length;
+-    nz = z / length;
+-  }
+-
+-  // The 3D rotation matrix is described in CSS Transforms with alpha.
+-  // Please see: https://drafts.csswg.org/css-transforms-1/#Rotate3dDefined
+-  var alpha_in_radians = deg2rad(alpha_in_degrees / 2);
+-  var sc = Math.sin(alpha_in_radians) * Math.cos(alpha_in_radians);
+-  var sq = Math.sin(alpha_in_radians) * Math.sin(alpha_in_radians);
+-
+-  var m11 = 1 - 2 * (ny * ny + nz * nz) * sq;
+-  var m12 = 2 * (nx * ny * sq + nz * sc);
+-  var m13 = 2 * (nx * nz * sq - ny * sc);
+-  var m14 = 0;
+-  var m21 = 2 * (nx * ny * sq - nz * sc);
+-  var m22 = 1 - 2 * (nx * nx + nz * nz) * sq;
+-  var m23 = 2 * (ny * nz * sq + nx * sc);
+-  var m24 = 0;
+-  var m31 = 2 * (nx * nz * sq + ny * sc);
+-  var m32 = 2 * (ny * nz * sq - nx * sc);
+-  var m33 = 1 - 2 * (nx * nx + ny * ny) * sq;
+-  var m34 = 0;
+-  var m41 = 0;
+-  var m42 = 0;
+-  var m43 = 0;
+-  var m44 = 1;
+-
+-  return new DOMMatrix([m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44]);
+-}
+-
+-test(() => {
+-  var matrix = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  var rotateResult = matrix.rotate(60);
+-  matrix.rotateSelf(60);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 1, 60));
+-  assert_matrix_almost_equals(rotateResult, expectedResult);
+-  assert_matrix_almost_equals(matrix, expectedResult);
+-}, "DOMMatrix 2d - rotate(rotX) and rotateSelf(rotX)");
+-
+-test(() => {
+-  var matrix = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var rotateResult = matrix.rotate(77);
+-  matrix.rotateSelf(77);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 1, 77));
+-  assert_matrix_almost_equals(rotateResult, expectedResult);
+-  assert_matrix_almost_equals(matrix, expectedResult);
+-}, "DOMMatrix 3d - rotate(rotX) and rotateSelf(rotX)");
+-
+-test(() => {
+-  var matrix = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  var rotateResult = matrix.rotate(10, 20);
+-  matrix.rotateSelf(10, 20);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 1, 0, 20));
+-  expectedResult.multiplySelf(getRotationMatrix(1, 0, 0, 10));
+-  assert_matrix_almost_equals(rotateResult, expectedResult);
+-  assert_matrix_almost_equals(matrix, expectedResult);
+-}, "DOMMatrix 2d - rotate(rotX, rotY) and rotateSelf(rotX, rotY)");
+-
+-test(() => {
+-  var matrix = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var rotateResult = matrix.rotate(23, 50);
+-  matrix.rotateSelf(23, 50);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 1, 0, 50));
+-  expectedResult.multiplySelf(getRotationMatrix(1, 0, 0, 23));
+-  assert_matrix_almost_equals(rotateResult, expectedResult);
+-  assert_matrix_almost_equals(matrix, expectedResult);
+-}, "DOMMatrix 3d - rotate(rotX, rotY) and rotateSelf(rotX, rotY)");
+-
+-test(() => {
+-  var matrix = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  var rotateResult = matrix.rotate(39, 10, 50);
+-  matrix.rotateSelf(39, 10, 50);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 1, 50));
+-  expectedResult.multiplySelf(getRotationMatrix(0, 1, 0, 10));
+-  expectedResult.multiplySelf(getRotationMatrix(1, 0, 0, 39));
+-  assert_matrix_almost_equals(rotateResult, expectedResult);
+-  assert_matrix_almost_equals(matrix, expectedResult);
+-}, "DOMMatrix 2d - rotate(rotX, rotY, rotX) and rotateSelf(rotX, rotY, rotX)");
+-
+-test(() => {
+-  var matrix = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var rotateResult = matrix.rotate(55, 66, 88);
+-  matrix.rotateSelf(55, 66, 88);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 1, 88));
+-  expectedResult.multiplySelf(getRotationMatrix(0, 1, 0, 66));
+-  expectedResult.multiplySelf(getRotationMatrix(1, 0, 0, 55));
+-  assert_matrix_almost_equals(rotateResult, expectedResult);
+-  assert_matrix_almost_equals(matrix, expectedResult);
+-}, "DOMMatrix 3d - rotate(rotX, rotY, rotX) and rotateSelf(rotX, rotY, rotX)");
+-
+-test(function() {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  var rotateResult = matrix2d.rotateFromVector(4, 7);
+-  var expected = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expected.rotateSelf(rad2deg(Math.atan2(7, 4)));
+-  assert_matrix_almost_equals(rotateResult, expected);
+-  matrix2d.rotateFromVectorSelf(4, 7);
+-  assert_matrix_almost_equals(matrix2d, expected);
+-}, "DOMMatrix 2d - rotateFromVector(x, y) and rotateFromVectorSelf(x, y)");
+-
+-test(function() {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var rotateResult = matrix3d.rotateFromVector(4, 7);
+-  var expected = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expected.rotateSelf(rad2deg(Math.atan2(7, 4)));
+-  assert_matrix_almost_equals(rotateResult, expected);
+-  matrix3d.rotateFromVectorSelf(4, 7);
+-  assert_matrix_almost_equals(matrix3d, expected);
+-}, "DOMMatrix 3d - rotateFromVector(x, y) rotateFromVectorSelf(x, y)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  matrix2d.rotateAxisAngleSelf();
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 0, 0));
+-  assert_true(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrix 2d - rotateAxisAngleSelf()");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  matrix2d.rotateAxisAngleSelf(0, 0, 1);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 1, 0));
+-  assert_true(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrix 2d - rotateAxisAngleSelf(0, 0, 1)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  matrix2d.rotateAxisAngleSelf(1, 1, 1);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(1, 1, 1, 0));
+-  assert_false(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrix 2d - rotateAxisAngleSelf(1, 1, 1, 0)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  matrix2d.rotateAxisAngleSelf(1, 0, 0, 10);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(1, 0, 0, 10));
+-  assert_false(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrix 2d - rotateAxisAngleSelf(1, 0, 0, 10)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  matrix2d.rotateAxisAngleSelf(0, 1, 0, 27);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 1, 0, 27));
+-  assert_false(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrix 2d - rotateAxisAngleSelf(0, 1, 0, 27)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  matrix2d.rotateAxisAngleSelf(0, 0, 1, 38);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 1, 38));
+-  assert_true(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrix 2d - rotateAxisAngleSelf(0, 0, 1, 38)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  matrix2d.rotateAxisAngleSelf(1, 1, 1, 45);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  expectedResult.multiplySelf(getRotationMatrix(1, 1, 1, 45));
+-  assert_false(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrix 2d - rotateAxisAngleSelf(1, 1, 1, 45)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d.rotateAxisAngleSelf();
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 0, 0));
+-    assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrix 3d - rotateAxisAngleSelf()");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d.rotateAxisAngleSelf(0, 0, 1);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 1, 0));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrix 3d - rotateAxisAngleSelf(0, 0, 1)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d.rotateAxisAngleSelf(0, 0, 1, 0);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 1, 0));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrix 3d - rotateAxisAngleSelf(0, 0, 1, 0)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d.rotateAxisAngleSelf(1, 0, 0, 19);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(1, 0, 0, 19));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrix 3d - rotateAxisAngleSelf(1, 0, 0, 19)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d.rotateAxisAngleSelf(0, 1, 0, 46);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 1, 0, 46));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrix 3d - rotateAxisAngleSelf(0, 1, 0, 46)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d.rotateAxisAngleSelf(0, 0, 1, 65);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(0, 0, 1, 65));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrix 3d - rotateAxisAngleSelf(0, 0, 1, 65)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d.rotateAxisAngleSelf(1, 1, 1, 67);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult.multiplySelf(getRotationMatrix(1, 1, 1, 67));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrix 3d - rotateAxisAngleSelf(1, 1, 1, 67)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  matrix2d = matrix2d.rotateAxisAngle();
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(0, 0, 0, 0));
+-  assert_true(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrixReadOnly 2d - rotateAxisAngle()");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  matrix2d = matrix2d.rotateAxisAngle(0, 0, 1);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(0, 0, 1, 0));
+-  assert_true(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrixReadOnly 2d - rotateAxisAngle(0, 0, 1)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  matrix2d = matrix2d.rotateAxisAngle(1, 1, 1);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(1, 1, 1, 0));
+-}, "DOMMatrixReadOnly 2d - rotateAxisAngle(1, 1, 1, 0)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  matrix2d = matrix2d.rotateAxisAngle(1, 0, 0, 21);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(1, 0, 0, 21));
+-  assert_false(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrixReadOnly 2d - rotateAxisAngle(1, 0, 0, 21)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  matrix2d = matrix2d.rotateAxisAngle(0, 1, 0, 35);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(0, 1, 0, 35));
+-  assert_false(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrixReadOnly 2d - rotateAxisAngle(0, 1, 0, 35)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  matrix2d = matrix2d.rotateAxisAngle(0, 0, 1, 55);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(0, 0, 1, 55));
+-  assert_true(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrixReadOnly 2d - rotateAxisAngle(0, 0, 1, 55)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  matrix2d = matrix2d.rotateAxisAngle(1, 1, 1, 75);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(1, 1, 1, 75));
+-  assert_false(matrix2d.is2D);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrixReadOnly 2d - rotateAxisAngle(1, 1, 1, 75)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d = matrix3d.rotateAxisAngle();
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(0, 0, 0, 0));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrixReadOnly 3d - rotateAxisAngle()");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d = matrix3d.rotateAxisAngle(0, 0, 1);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(0, 0, 1, 0));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrixReadOnly 3d - rotateAxisAngle(0, 0, 1)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d = matrix3d.rotateAxisAngle(0, 0, 1, 0);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(0, 0, 1, 0));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrixReadOnly 3d - rotateAxisAngle(0, 0, 1, 0)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d = matrix3d.rotateAxisAngle(1, 1, 1, 0);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(1, 1, 1, 0));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrixReadOnly 3d - rotateAxisAngle(1, 1, 1, 0)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d = matrix3d.rotateAxisAngle(1, 0, 0, 105);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(1, 0, 0, 105));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrixReadOnly 3d - rotateAxisAngle(1, 0, 0, 105)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d = matrix3d.rotateAxisAngle(0, 1, 0, 45);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(0, 1, 0, 45));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrixReadOnly 3d - rotateAxisAngle(0, 1, 0, 45)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d = matrix3d.rotateAxisAngle(0, 0, 1, 65);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(0, 0, 1, 65));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrixReadOnly 3d - rotateAxisAngle(0, 0, 1, 65)");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d = matrix3d.rotateAxisAngle(1, 1, 1, 78);
+-  var expectedResult = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  expectedResult = expectedResult.multiply(getRotationMatrix(1, 1, 1, 78));
+-  assert_false(matrix3d.is2D);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrixReadOnly 3d - rotateAxisAngle(1, 1, 1, 78)");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  matrix2d.rotateAxisAngleSelf(1, 0, 0, 90);
+-  matrix2d.rotateAxisAngleSelf(1, 0, 0, -90);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrix 2d - rotateAxisAngleSelf() - do rotate +90,-90");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  matrix2d = matrix2d.rotateAxisAngle(0, 1, 0, -180);
+-  matrix2d = matrix2d.rotateAxisAngle(0, 1, 0, +180);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  assert_matrix_almost_equals(matrix2d, expectedResult);
+-}, "DOMMatrix 2d - rotateAxisAngle() - do rotate -180,+180" );
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d.rotateAxisAngleSelf(1, 1, 0, 90);
+-  matrix3d.rotateAxisAngleSelf(1, 1, 0, -90);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrix 3d - rotateAxisAngleSelf() - do rotate +90,-90");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  matrix3d = matrix3d.rotateAxisAngle(1, 1, 1, -180);
+-  matrix3d = matrix3d.rotateAxisAngle(1, 1, 1, +180);
+-  var expectedResult = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  assert_matrix_almost_equals(matrix3d, expectedResult);
+-}, "DOMMatrix 3d - rotateAxisAngle() - do rotate -180,+180");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+-  matrix3d = matrix3d.rotateAxisAngle(0, 0, 1, -90);
+-  var expectedResult1 = new DOMMatrix([0, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0]);
+-  assert_matrix_almost_equals(matrix3d, expectedResult1);
+-  matrix3d = matrix3d.rotateAxisAngle(1, 0, 0, -90);
+-  var expectedResult2 = new DOMMatrix([0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0]);
+-  assert_matrix_almost_equals(matrix3d, expectedResult2);
+-  matrix3d = matrix3d.rotateAxisAngle(0, 1, 0, -90);
+-  var expectedResult3 = new DOMMatrix([1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+-  assert_matrix_almost_equals(matrix3d, expectedResult3);
+-}, "DOMMatrix 3d - rotateAxisAngle()");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+-  matrix3d.rotateAxisAngleSelf(0, 0, 1, -90);
+-  var expectedResult1 = new DOMMatrix([0, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0]);
+-  assert_matrix_almost_equals(matrix3d, expectedResult1);
+-  matrix3d.rotateAxisAngleSelf(1, 0, 0, -90);
+-  var expectedResult2 = new DOMMatrix([0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0]);
+-  assert_matrix_almost_equals(matrix3d, expectedResult2);
+-  matrix3d.rotateAxisAngleSelf(0, 1, 0, -90);
+-  var expectedResult3 = new DOMMatrix([1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+-  assert_matrix_almost_equals(matrix3d, expectedResult3);
+-}, "DOMMatrix 3d - rotateAxisAngleSelf()");
+-
+-</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-scale.html b/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-scale.html
 deleted file mode 100644
-index 0ed32141b4f88647d1627e5430a5376b600d9b58..0000000000000000000000000000000000000000
+index 86f874dce912d801eea224e9195b57d0ab967e93..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-scale.html
 +++ /dev/null
-@@ -1,93 +0,0 @@
+@@ -1,155 +0,0 @@
 -<!DOCTYPE html>
 -<script src="../../resources/testharness.js"></script>
 -<script src="../../resources/testharnessreport.js"></script>
 -<script src="./resources/geometry-interfaces-test-helpers.js"></script>
 -<script>
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.scale();
+-  assert_identity_2d_matrix(result);
+-  assert_identity_2d_matrix(matrix);
+-  assert_not_equals(result, matrix, 'result and matrix should be different object');
+-}, "DOMMatrix.scale()");
+-
 -test(function() {
 -  var matrix = new DOMMatrix();
 -  assert_identity_2d_matrix(matrix);
 -  var result = matrix.scale(3);
 -  assert_2d_matrix_equals(result, [3, 0, 0, 3, 0, 0]);
 -  assert_identity_2d_matrix(matrix);
--}, "DOMMatrix.scale(scale)");
+-}, "DOMMatrix.scale(sx)");
 -
 -test(function() {
 -  var matrix = new DOMMatrix();
 -  assert_identity_2d_matrix(matrix);
--  var result = matrix.scale(3, 4, 2);
+-  var result = matrix.scale(3, 3);
+-  assert_2d_matrix_equals(result, [3, 0, 0, 3, 0, 0]);
+-  assert_identity_2d_matrix(matrix);
+-}, "DOMMatrix.scale(sx, sy)");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.scale(3, 8);
+-  assert_2d_matrix_equals(result, [3, 0, 0, 8, 0, 0]);
+-  assert_identity_2d_matrix(matrix);
+-}, "DOMMatrix.scale(sx, sy)");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.scale(3, 3, 1, 4, 2);
 -  assert_2d_matrix_equals(result, [3, 0, 0, 3, -8, -4]);
 -  assert_identity_2d_matrix(matrix);
--}, "DOMMatrix.scale(scale, ox, oy)");
+-}, "DOMMatrix.scale(sx, sy, sz, ox, oy)");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.scale(2, 3, 0.5, 2, -4, -1);
+-  assert_3d_matrix_equals(result, [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0.5, 0, -2, 8, -0.5, 1]);
+-  assert_identity_2d_matrix(matrix);
+-}, "DOMMatrix.scale(sx, sy, sz, ox, oy, oz)");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.scale3d();
+-  assert_identity_2d_matrix(result);
+-  assert_identity_2d_matrix(matrix);
+-}, "DOMMatrix.scale3d()");
 -
 -test(function() {
 -  var matrix = new DOMMatrix();
@@ -13385,33 +12850,68 @@ index 0ed32141b4f88647d1627e5430a5376b600d9b58..00000000000000000000000000000000
 -test(function() {
 -  var matrix = new DOMMatrix();
 -  assert_identity_2d_matrix(matrix);
--  var result = matrix.scaleNonUniform(2, 3, 0.5, 2, -4, -1);
--  assert_3d_matrix_equals(result, [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0.5, 0, -2, 8, -0.5, 1]);
--  assert_identity_2d_matrix(matrix);
--}, "DOMMatrix.scaleNonUniform(sx, sy, sz, ox, oy, oz)");
+-  var result = matrix.scaleSelf();
+-  assert_identity_2d_matrix(result);
+-  assert_equals(result, matrix, 'result and matrix should be the exact same object');
+-}, "DOMMatrix.scaleSelf()");
 -
 -test(function() {
 -  var matrix = new DOMMatrix();
 -  assert_identity_2d_matrix(matrix);
 -  var result = matrix.scaleSelf(3);
 -  assert_2d_matrix_equals(result, [3, 0, 0, 3, 0, 0]);
--  assert_2d_matrix_equals(matrix, [3, 0, 0, 3, 0, 0]);
--}, "DOMMatrix.scaleSelf(scale)");
+-  assert_equals(result, matrix, 'result and matrix should be the exact same object');
+-}, "DOMMatrix.scaleSelf(sx)");
 -
 -test(function() {
 -  var matrix = new DOMMatrix();
 -  assert_identity_2d_matrix(matrix);
--  var result = matrix.scaleSelf(3, 4, 2);
+-  var result = matrix.scaleSelf(3, 3);
+-  assert_2d_matrix_equals(result, [3, 0, 0, 3, 0, 0]);
+-  assert_equals(result, matrix, 'result and matrix should be the exact same object');
+-}, "DOMMatrix.scaleSelf(sx, sy)");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.scaleSelf(3, 7);
+-  assert_2d_matrix_equals(result, [3, 0, 0, 7, 0, 0]);
+-  assert_equals(result, matrix, 'result and matrix should be the exact same object');
+-}, "DOMMatrix.scaleSelf(sx, sy)");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.scaleSelf(3, 3, 1, 4, 2);
 -  assert_2d_matrix_equals(result, [3, 0, 0, 3, -8, -4]);
--  assert_2d_matrix_equals(matrix, [3, 0, 0, 3, -8, -4]);
--}, "DOMMatrix.scaleSelf(scale)");
+-  assert_equals(result, matrix, 'result and matrix should be the exact same object');
+-}, "DOMMatrix.scaleSelf(sx, sy, sz, ox, oy)");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.scaleSelf(2, 3, 0.5, 2, -4, -1);
+-  assert_3d_matrix_equals(result, [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0.5, 0, -2, 8, -0.5, 1]);
+-  assert_equals(result, matrix, 'result and matrix should be the exact same object');
+-}, "DOMMatrix.scaleSelf(sx, sy, sz, ox, oy, oz)");
+-
+-// origin value is used to move base point before scale.
+-// after scale, base point is return to negative origin value.
+-// if scale value were 1, value of matrix should be same before scale.
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.scaleSelf(1, 1, 1, 2, -4, -1);
+-  assert_identity_3d_matrix(result);
+-  assert_equals(result, matrix, 'result and matrix should be the exact same object');
+-}, "DOMMatrix.scaleSelf(1, 1, 1, ox, oy, oz)");
 -
 -test(function() {
 -  var matrix = new DOMMatrix();
 -  assert_identity_2d_matrix(matrix);
 -  var result = matrix.scale3dSelf(3);
 -  assert_3d_matrix_equals(result, [3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 1]);
--  assert_3d_matrix_equals(matrix, [3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 1]);
+-  assert_equals(result, matrix, 'result and matrix should be the exact same object');
 -}, "DOMMatrix.scale3dSelf(scale)");
 -
 -test(function() {
@@ -13419,24 +12919,308 @@ index 0ed32141b4f88647d1627e5430a5376b600d9b58..00000000000000000000000000000000
 -  assert_identity_2d_matrix(matrix);
 -  var result = matrix.scale3dSelf(3, 2, 7, -1);
 -  assert_3d_matrix_equals(result, [3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 3, 0, -4, -14, 2, 1]);
--  assert_3d_matrix_equals(matrix, [3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 3, 0, -4, -14, 2, 1]);
+-  assert_equals(result, matrix, 'result and matrix should be the exact same object');
 -}, "DOMMatrix.scale3dSelf(scale, ox, oy, oz)");
 -
--test(function() {
--  var matrix = new DOMMatrix();
--  assert_identity_2d_matrix(matrix);
--  var result = matrix.scaleNonUniformSelf(2, 3, 0.5, 2, -4, -1);
--  assert_3d_matrix_equals(result, [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0.5, 0, -2, 8, -0.5, 1]);
--  assert_3d_matrix_equals(matrix, [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0.5, 0, -2, 8, -0.5, 1]);
--}, "DOMMatrix.scaleNonUniformSelf(sx, sy, sz, ox, oy, oz)");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-setMatrixValue.html b/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-setMatrixValue.html
+deleted file mode 100644
+index 8aa4e182ad06a02cfdce41f8d13ab0b356d23ef4..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-setMatrixValue.html
++++ /dev/null
+@@ -1,293 +0,0 @@
+-<!DOCTYPE HTML>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<script src="./resources/geometry-interfaces-test-helpers.js"></script>
+-<script>
 -
--test(function() {
--  var matrix = new DOMMatrix();
--  assert_identity_2d_matrix(matrix);
--  var result = matrix.scaleNonUniformSelf(1, 1, 1, 2, -4, -1);
--  assert_identity_3d_matrix(result);
--  assert_identity_3d_matrix(matrix);
--}, "DOMMatrix.scaleNonUniformSelf(1, 1, 1, ox, oy, oz)");
+-var matrix2d = [5, 4, 11, 34, 55, 11];
+-var matrix3d = [5, 11, 55, 77, 44, 33, 55, 75, 88, 99, 12, 43, 65, 36, 85, 25];
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("");
+-  assert_true(actualMatrix1.is2D);
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  actualMatrix2.setMatrixValue("");
+-  assert_true(actualMatrix2.is2D);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix(EmptyString)");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("none");
+-  assert_true(actualMatrix1.is2D);
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  actualMatrix2.setMatrixValue("none");
+-  assert_true(actualMatrix2.is2D);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('none')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("matrix(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("matrix(1.0, 2.0, 3.0, 4.0, 5.0, 6.0)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.multiplySelf(new DOMMatrix([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('matrix')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("translate(44px, 55px)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("translate(44px, 55px)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.translateSelf(44, 55)
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('translate')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("translateX(35px)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("translateX(35px)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.translateSelf(35, 0)
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('translateX')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("translateY(77px)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("translateY(77px)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.translateSelf(0, 77)
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('translateY')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("scale(2, 2)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("scale(2, 2)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.scaleSelf(2, 2);
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('scale')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("scaleX(2)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("scaleX(2)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.scaleSelf(2, 1);
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('scaleX')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("scaleY(2)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("scaleY(2)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.scaleSelf(1, 2);
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('scaleY')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("rotate(90deg)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("rotate(90deg)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.rotateAxisAngleSelf(0, 0, 1, 90);
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('rotate')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("skewX(30deg)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("skewX(30deg)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.skewXSelf(30);
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('skewX')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("skewY(40deg)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("skewY(40deg)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.skewYSelf(40);
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('skewY')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("matrix3d(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0)");
+-  assert_false(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("matrix3d(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0)");
+-  assert_false(actualMatrix2.is2D);
+-  expectedMatrix.multiplySelf(new DOMMatrix([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0]))
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix(matrix3d)");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("translate3d(10px, 20px, 30px)");
+-  assert_false(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("translate3d(10px, 20px, 30px)");
+-  assert_false(actualMatrix2.is2D);
+-  expectedMatrix.translateSelf(10, 20, 30)
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix(translate3d)");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("translateZ(88px)");
+-  assert_false(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("translateZ(88px)");
+-  assert_false(actualMatrix2.is2D);
+-  expectedMatrix.translateSelf(0, 0, 88)
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix('translateY')");
+-
+-test(() => {
+-  var actualMatrix1 = new DOMMatrix(matrix2d);
+-  var actualMatrix2 = new DOMMatrix(matrix3d);
+-  var expectedMatrix = new DOMMatrix();
+-  actualMatrix1.setMatrixValue("matrix(1.0, 2.0, 3.0, 4.0, 5.0, 6.0) translate(44px, 55px) skewX(30deg)");
+-  assert_true(actualMatrix1.is2D);
+-  actualMatrix2.setMatrixValue("matrix(1.0, 2.0, 3.0, 4.0, 5.0, 6.0) translate(44px, 55px) skewX(30deg)");
+-  assert_true(actualMatrix2.is2D);
+-  expectedMatrix.multiplySelf(new DOMMatrix([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+-  expectedMatrix.translateSelf(44, 55)
+-  expectedMatrix.skewXSelf(30);
+-  assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-  assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-}, "DOMMatrix setMatrix(multiple value)");
+-
+-// TODO(hs1217.lee) : calc() function take only absolute unit. should be pass this test.
+-// but calc() function is not supported not yet.
+-// refer to hasRelativeLengths() in TransformBuilder.cpp
+-// test(() => {
+-//   var actualMatrix1 = new DOMMatrix(matrix2d);
+-//   var actualMatrix2 = new DOMMatrix(matrix3d);
+-//   var expectedMatrix = new DOMMatrix();
+-//   actualMatrix1.setMatrixValue("translateX(calc(10px + 1px))");
+-//   assert_true(actualMatrix1.is2D);
+-//   actualMatrix2.setMatrixValue("translateX(calc(10px + 1px))");
+-//   assert_true(actualMatrix2.is2D);
+-//   expectedMatrix.translateSelf(11, 0)
+-//   assert_matrix_almost_equals(actualMatrix1, expectedMatrix);
+-//   assert_matrix_almost_equals(actualMatrix2, expectedMatrix);
+-// }, "DOMMatrix setMatrix(multiple value)");
+-
+-test(() => {
+-
+-  var actualMatrix = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-  var expectedMatrix = new DOMMatrix([1, 2, 3, 4, 5, 6]);
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("initial");
+-  }, "CSS-wide keywords are disallowed.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("notExistFunction()");
+-  }, "can't parse not exist function.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateY(50%)");
+-  }, "Can't parse without absolute unit.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateX(1.2em)");
+-  }, "Can't parse without absolute unit.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateX(10ex)");
+-  }, "Can't parse without absolute unit.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateX(10ch)");
+-  }, "Can't parse without absolute unit.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateX(10rem)");
+-  }, "Can't parse without absolute unit.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateX(10vw)");
+-  }, "Can't parse without absolute unit.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateX(10vh)");
+-  }, "Can't parse without absolute unit.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateX(10vmin)");
+-  }, "Can't parse without absolute unit.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateX(10vmax)");
+-  }, "Can't parse without absolute unit.");
+-
+-  assert_throws(new SyntaxError(), () => {
+-    actualMatrix.setMatrixValue("translateX(calc(10px + 1em))");
+-  }, "Can't parse without absolute unit.");
+-
+-  //actualMatrix should be not changed.
+-  assert_true(actualMatrix.is2D);
+-  assert_matrix_almost_equals(actualMatrix, expectedMatrix);
+-
+-}, "DOMMatrix.setMatrix(): Exception test.");
+-
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-skew.html b/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-skew.html
 deleted file mode 100644
@@ -13498,17 +13282,142 @@ index 788d4258e5172814302efb8524b2c691acc8e2d4..00000000000000000000000000000000
 -  assert_3d_matrix_equals(matrix3d, [2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
 -}, "DOMMatrix skewY(45) - 3D matrix");
 -</script>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-transformPoint.html b/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-transformPoint.html
+deleted file mode 100644
+index 1463a00b9ac5012477b492e39dcc86f05685aafa..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-transformPoint.html
++++ /dev/null
+@@ -1,102 +0,0 @@
+-<!DOCTYPE HTML>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<script src="./resources/geometry-interfaces-test-helpers.js"></script>
+-<script>
+-
+-test(function() {
+-  var matrix2d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6]);
+-  var point = matrix2d.transformPoint();
+-  assert_point_equals(point, new DOMPoint(5, 6, 0, 1));
+-}, "DOMMatrixReadOnly transformPoint() - 2d matrix ");
+-
+-test(function() {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var point = matrix3d.transformPoint();
+-  assert_point_equals(point, new DOMPoint(13, 14, 15, 16));
+-}, "DOMMatrixReadOnly transformPoint() - 3d matrix");
+-
+-test(function() {
+-  var matrix2d = new DOMMatrixReadOnly([2, 0, 0, 2, 10, 10]);
+-  var point = matrix2d.transformPoint(new DOMPoint(5));
+-  assert_point_equals(point, new DOMPoint(20, 10, 0, 1));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x)) - 2d matrix");
+-
+-test(function() {
+-  var matrix2d = new DOMMatrixReadOnly([2, 0, 0, 2, 10, 10]);
+-  var point = matrix2d.transformPoint(new DOMPoint(5, 0, 0, 0));
+-  assert_point_equals(point, new DOMPoint(10, 0, 0, 0));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, 0, 0, 0)) - 2d matrix");
+-
+-test(function() {
+-  var matrix2d = new DOMMatrixReadOnly([2, 0, 0, 2, 10, 10]);
+-  var point = matrix2d.transformPoint(new DOMPoint(5, 4));
+-  assert_point_equals(point, new DOMPoint(20, 18, 0, 1));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y)) - 2d matrix");
+-
+-test(function() {
+-  var matrix2d = new DOMMatrixReadOnly([2, 0, 0, 2, 10, 10]);
+-  var point = matrix2d.transformPoint(new DOMPoint(5, 4, 0, 0));
+-  assert_point_equals(point, new DOMPoint(10, 8, 0, 0));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y, 0, 0)) - 2d matrix");
+-
+-test(function() {
+-  var matrix2d = new DOMMatrixReadOnly([2, 0, 0, 2, 10, 10]);
+-  var point = matrix2d.transformPoint(new DOMPoint(5, 4, 3));
+-  assert_point_equals(point, new DOMPoint(20, 18, 3, 1));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y, z)) - 2d matrix");
+-
+-test(function() {
+-  var matrix2d = new DOMMatrixReadOnly([2, 0, 0, 2, 10, 10]);
+-  var point = matrix2d.transformPoint(new DOMPoint(5, 4, 3, 0));
+-  assert_point_equals(point, new DOMPoint(10, 8, 3, 0));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y, z, 0)) - 2d matrix");
+-
+-test(function() {
+-  var matrix2d = new DOMMatrixReadOnly([2, 0, 0, 2, 10, 10]);
+-  var point = matrix2d.transformPoint(new DOMPoint(5, 4, 14, 5));
+-  assert_point_equals(point, new DOMPoint(60, 58, 14, 5));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y, z, w)) - 2d matrix");
+-
+-test(function() {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var point = matrix3d.transformPoint(new DOMPoint(5));
+-  assert_point_equals(point, new DOMPoint(18, 24, 30, 36));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x)) - 3d matrix");
+-
+-test(function() {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var point = matrix3d.transformPoint(new DOMPoint(5, 0, 0, 0));
+-  assert_point_equals(point, new DOMPoint(5, 10, 15, 20));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, 0, 0, 0)) - 3d matrix");
+-
+-test(function() {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var point = matrix3d.transformPoint(new DOMPoint(5, 4));
+-  assert_point_equals(point, new DOMPoint(38, 48, 58, 68));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y)) - 3d matrix");
+-
+-test(function() {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var point = matrix3d.transformPoint(new DOMPoint(5, 4, 0, 0));
+-  assert_point_equals(point, new DOMPoint(25, 34, 43, 52));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y, 0, 0)) - 3d matrix");
+-
+-test(function() {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var point = matrix3d.transformPoint(new DOMPoint(5, 4, 3));
+-  assert_point_equals(point, new DOMPoint(65, 78, 91, 104));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y, z)) - 3d matrix");
+-
+-test(function() {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var point = matrix3d.transformPoint(new DOMPoint(5, 4, 3, 0));
+-  assert_point_equals(point, new DOMPoint(52, 64, 76, 88));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y, z, 0)) - 3d matrix");
+-
+-test(function() {
+-  var matrix3d = new DOMMatrixReadOnly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+-  var point = matrix3d.transformPoint(new DOMPoint(5, 4, 14, 5));
+-  assert_point_equals(point, new DOMPoint(216, 244, 272, 300));
+-}, "DOMMatrixReadOnly transformPoint(DOMPoint(x, y, z, w)) - 3d matrix");
+-</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-translate.html b/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-translate.html
 deleted file mode 100644
-index e65a0eea6a51417677ce28c540a750846290ab74..0000000000000000000000000000000000000000
+index 984ad636251e06b4299054139b5941e9d6283c8b..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix-translate.html
 +++ /dev/null
-@@ -1,67 +0,0 @@
+@@ -1,100 +0,0 @@
 -<!DOCTYPE html>
 -<script src="../../resources/testharness.js"></script>
 -<script src="../../resources/testharnessreport.js"></script>
 -<script src="./resources/geometry-interfaces-test-helpers.js"></script>
 -<script>
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.translate();
+-  assert_identity_2d_matrix(result);
+-  assert_identity_2d_matrix(matrix);
+-}, "DOMMatrix.translate()");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.translate(6);
+-  assert_2d_matrix_equals(result, [1, 0, 0, 1, 6, 0]);
+-  assert_identity_2d_matrix(matrix);
+-}, "DOMMatrix.translate(tx)");
+-
 -test(function() {
 -  var matrix = new DOMMatrix();
 -  assert_identity_2d_matrix(matrix);
@@ -13525,6 +13434,22 @@ index e65a0eea6a51417677ce28c540a750846290ab74..00000000000000000000000000000000
 -  assert_2d_matrix_equals(result, [1, 0, 0, 1, 6, 5]);
 -  assert_2d_matrix_equals(matrix, [1, 0, 0, 1, 2, 3]);
 -}, "DOMMatrix.translate(tx, ty) with non-identity");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.translateSelf();
+-  assert_identity_2d_matrix(result);
+-  assert_identity_2d_matrix(matrix);
+-}, "DOMMatrix.translateSelf()");
+-
+-test(function() {
+-  var matrix = new DOMMatrix();
+-  assert_identity_2d_matrix(matrix);
+-  var result = matrix.translateSelf(5);
+-  assert_2d_matrix_equals(result, [1, 0, 0, 1, 5, 0]);
+-  assert_2d_matrix_equals(matrix, [1, 0, 0, 1, 5, 0]);
+-}, "DOMMatrix.translateSelf(tx)");
 -
 -test(function() {
 -  var matrix = new DOMMatrix();
@@ -13573,10 +13498,10 @@ index e65a0eea6a51417677ce28c540a750846290ab74..00000000000000000000000000000000
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix.html b/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix.html
 deleted file mode 100644
-index 3d230cbcce9281e274f8fd4b33b7f384477ccef9..0000000000000000000000000000000000000000
+index ee37c502e139f7c5ff40109b24d97a618d258e47..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/fast/dom/geometry-interfaces-dom-matrix.html
 +++ /dev/null
-@@ -1,171 +0,0 @@
+@@ -1,195 +0,0 @@
 -<!DOCTYPE html>
 -<script src="../../resources/testharness.js"></script>
 -<script src="../../resources/testharnessreport.js"></script>
@@ -13586,18 +13511,6 @@ index 3d230cbcce9281e274f8fd4b33b7f384477ccef9..00000000000000000000000000000000
 -  var matrix = new DOMMatrix();
 -  assert_identity_2d_matrix(matrix);
 -}, "DOMMatrix() constructor");
--
--test(() => {
--  var other = new DOMMatrix();
--  other.m11 = 10;
--  other.m12 = 20;
--  other.m24 = 2;
--  other.m33 = 3;
--  other.m42 = 3;
--  other.m44 = 9;
--  var matrix = new DOMMatrix(other);
--  assert_3d_matrix_equals(matrix, [10, 20, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 3, 0, 9]);
--}, "DOMMatrix(other) constructor");
 -
 -test(() => {
 -  var float32Array = new Float32Array([1, 2, 3, 4, 5, 6]);
@@ -13738,6 +13651,42 @@ index 3d230cbcce9281e274f8fd4b33b7f384477ccef9..00000000000000000000000000000000
 -  });
 -  assert_3d_matrix_equals(matrix, [NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN]);
 -}, "DOMMatrix.fromMatrix(): NaN test");
+-
+-test(() => {
+-  var identity_matrix = DOMMatrix.fromMatrix();
+-  assert_true(identity_matrix.is2D);
+-  assert_object_equals(identity_matrix.toJSON(),
+-    { a : 1, b : 0, c : 0, d : 1, e : 0, f : 0,
+-      is2D : true, isIdentity : true,
+-      m11 : 1, m12 : 0, m13 : 0, m14 : 0,
+-      m21 : 0, m22 : 1, m23 : 0, m24 : 0,
+-      m31 : 0, m32 : 0, m33 : 1, m34 : 0,
+-      m41 : 0, m42 : 0, m43 : 0, m44 : 1});
+-}, "DOMMatrix toJSON() - identity matrix");
+-
+-test(() => {
+-  var matrix2d = new DOMMatrix([1, 2, 3, 3.1, 2, 1]);
+-  assert_true(matrix2d.is2D);
+-  assert_object_equals(matrix2d.toJSON(),
+-    { a : 1, b : 2, c : 3, d : 3.1, e : 2, f : 1,
+-      is2D : true, isIdentity : false,
+-      m11 : 1, m12 : 2, m13 : 0, m14 : 0,
+-      m21 : 3, m22 : 3.1, m23 : 0, m24 : 0,
+-      m31 : 0, m32 : 0, m33 : 1, m34 : 0,
+-      m41 : 2, m42 : 1, m43 : 0, m44 : 1});
+-}, "DOMMatrix toJSON() - 2D matrix");
+-
+-test(() => {
+-  var matrix3d = new DOMMatrix([1, 2, 3, 4, 5, 6, 7, 8, 9, 10.1, 11, 12, 13, 14, 15, 16.6]);
+-  assert_false(matrix3d.is2D);
+-  assert_object_equals(matrix3d.toJSON(),
+-    { a : 1, b : 2, c : 5, d : 6, e : 13, f : 14,
+-      is2D : false, isIdentity : false,
+-      m11 : 1, m12 : 2, m13 : 3, m14 : 4,
+-      m21 : 5, m22 : 6, m23 : 7, m24 : 8,
+-      m31 : 9, m32 : 10.1, m33 : 11, m34 : 12,
+-      m41 : 13, m42 : 14, m43 : 15, m44 : 16.6});
+-}, "DOMMatrix toJSON() - 3D matrix");
 -
 -test(() => {
 -  assert_throws(new TypeError(), () => {
@@ -22198,5 +22147,739 @@ index 4f08704f4b561b6b8d48fef6decf4ef871c9b3d6..00000000000000000000000000000000
 -shouldBe('Object.getPrototypeOf(EventTarget)', 'Function.prototype');
 -
 -</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/isEqualNode-after-removeAttribute-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/isEqualNode-after-removeAttribute-expected.txt
+deleted file mode 100644
+index 17e1be07fffd94597d23de83ba6ef9b16006afa8..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/isEqualNode-after-removeAttribute-expected.txt
++++ /dev/null
+@@ -1,15 +0,0 @@
+-Tests that Node.isEqualNode behaves correctly after an element that originally had attributes has had them removed.
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS e1.isEqualNode(e2) is true
+-PASS e1.isEqualNode(e2) is false
+-PASS e1.isEqualNode(e2) is true
+-PASS e1.isEqualNode(e2) is true
+-PASS e1.isEqualNode(e2) is false
+-PASS e1.isEqualNode(e2) is true
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/isEqualNode-after-removeAttribute.html b/third_party/WebKit/LayoutTests/fast/dom/isEqualNode-after-removeAttribute.html
+deleted file mode 100644
+index cb0e4dfc3446f8f6c1dd0ad4ce41eafe57136949..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/isEqualNode-after-removeAttribute.html
++++ /dev/null
+@@ -1,32 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<head>
+-<meta charset="utf-8">
+-<script src="../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<script>
+-
+-description("Tests that Node.isEqualNode behaves correctly after an element that originally had attributes has had them removed.");
+-
+-e1 = document.createElement('span');
+-e2 = document.createElement('span');
+-
+-shouldBe("e1.isEqualNode(e2)", "true");
+-e2.setAttribute("foo", "bar");
+-shouldBe("e1.isEqualNode(e2)", "false");
+-e2.removeAttribute("foo");
+-shouldBe("e1.isEqualNode(e2)", "true");
+-
+-e1 = document.createElement('span');
+-e2 = document.createElement('span');
+-
+-shouldBe("e1.isEqualNode(e2)", "true");
+-e1.setAttribute("foo", "bar");
+-shouldBe("e1.isEqualNode(e2)", "false");
+-e1.removeAttribute("foo");
+-shouldBe("e1.isEqualNode(e2)", "true");
+-
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/javascript-backslash-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/javascript-backslash-expected.txt
+deleted file mode 100644
+index bd9c02269dffd91c2a1ea24478cbb1f4cbd37068..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/javascript-backslash-expected.txt
++++ /dev/null
+@@ -1,13 +0,0 @@
+-This tests \ characters being changed to / in all different scenarios.
+-
+-If it works you should see seven messages below that have \ or / characters as specified.
+-
+-1 2 3 4 5 6 7
+-javascript: function argument containing a backslash (\) should not be converted to a slash (/): "alert('to be\\not')"
+-http: base should convert a \ to a / : "http://apple.com/support"
+-https: base should also convert a \ to a / : "https://login.apple.com/support/"
+-file: base should convert a \ to a / : "file:///Users/"
+-any other valid base except javascript: should convert a \ to a / : "ftp://apple.com/support/"
+-query strings should be left alone: "http://apple.com/support?path=\\myshare\myfolder\myfile\"
+-anchors should be left alone as well: "http://apple.com/support#path=\\myshare\myfolder\myfile\"
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/javascript-backslash.html b/third_party/WebKit/LayoutTests/fast/dom/javascript-backslash.html
+deleted file mode 100644
+index d1416cda2adaebf7989b2faec5fbf127c64a93b6..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/javascript-backslash.html
++++ /dev/null
+@@ -1,38 +0,0 @@
+-<html>
+-    <head>
+-        <script type="text/javascript">
+-            function log(message)
+-            {
+-                var item = document.createElement("li");
+-                item.appendChild(document.createTextNode(message));
+-                document.getElementById("console").appendChild(item);
+-            }
+-            function test()
+-            {
+-                if (window.testRunner)
+-                    testRunner.dumpAsText();
+-                log("javascript: function argument containing a backslash (\\) should not be converted to a slash (/): \"" + document.getElementById("1").pathname + "\"");
+-                log("http: base should convert a \\ to a / : \"" + document.getElementById("2").href + "\"");
+-                log("https: base should also convert a \\ to a / : \"" + document.getElementById("3").href + "\"");
+-                log("file: base should convert a \\ to a / : \"" + document.getElementById("4").href + "\"");
+-                log("any other valid base except javascript: should convert a \\ to a / : \"" + document.getElementById("5").href + "\"");
+-                log("query strings should be left alone: \"" + document.getElementById("6").href + "\"");
+-                log("anchors should be left alone as well: \"" + document.getElementById("7").href + "\"");
+-            }
+-        </script>
+-    </head>
+-    <body onload="test()">
+-        <p>This tests \ characters being changed to / in all different scenarios.</p>
+-        <p>If it works you should see seven messages below that have \ or / characters as specified.</p>
+-        <hr>
+-        <a id="1" href="javascript:alert('to be\\not')">1</a>
+-        <a id="2" href="http://apple.com\support">2</a>
+-        <a id="3" href="https:\\login.apple.com\support/">3</a>
+-        <a id="4" href="file:///Users\">4</a>
+-        <a id="5" href="ftp://apple.com\support/">5</a>
+-        <a id="6" href="http://apple.com\support?path=\\myshare\myfolder\myfile\">6</a>
+-        <a id="7" href="http://apple.com\support#path=\\myshare\myfolder\myfile\">7</a>
+-        <hr>
+-        <p><ol id="console"></ol></p>
+-    </body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/javascript-url-crash-function-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/javascript-url-crash-function-expected.txt
+deleted file mode 100644
+index ee3eb763e519a4741cda8ab23bf960b18379f873..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/javascript-url-crash-function-expected.txt
++++ /dev/null
+@@ -1,8 +0,0 @@
+-This page tests whether loading a javascript: URL into an iframe while the iframe is calling a JavaScript function causes a crash.
+-
+-
+-
+---------
+-Frame: '<!--framePath //<!--frame0-->-->'
+---------
+-PASS: You didn't crash.
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/javascript-url-crash-function.html b/third_party/WebKit/LayoutTests/fast/dom/javascript-url-crash-function.html
+deleted file mode 100644
+index 5f117421b5e63ca7087feaa52aa586793bcf27f1..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/javascript-url-crash-function.html
++++ /dev/null
+@@ -1,14 +0,0 @@
+-<p>
+-This page tests whether loading a javascript: URL into an iframe while the
+-iframe is calling a JavaScript function causes a crash.
+-</p>
+-
+-<iframe src="resources/javascript-url-crash-function-iframe.html"></iframe>
+-
+-<script>
+-if (window.testRunner) {
+-    testRunner.dumpAsText();
+-    testRunner.dumpChildFramesAsText();
+-    testRunner.waitUntilDone();
+-}
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/javascript-url-exception-isolation-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/javascript-url-exception-isolation-expected.txt
+deleted file mode 100644
+index a2abd230822b0491277f19972bcacc784bdfb24d..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/javascript-url-exception-isolation-expected.txt
++++ /dev/null
+@@ -1,13 +0,0 @@
+-CONSOLE ERROR: line 1: Uncaught 42
+-CONSOLE ERROR: line 1: Uncaught SyntaxError: Unexpected token <
+-Exceptions thrown in javascript URLs should not propagate to the main script.
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS caughtException is false
+-PASS caughtException is false
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/javascript-url-exception-isolation.html b/third_party/WebKit/LayoutTests/fast/dom/javascript-url-exception-isolation.html
+deleted file mode 100644
+index e79c6f5689427a7597cba7b88cdac4628b3848b3..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/javascript-url-exception-isolation.html
++++ /dev/null
+@@ -1,9 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<script src="script-tests/javascript-url-exception-isolation.js"></script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/jsDevicePixelRatio-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/jsDevicePixelRatio-expected.txt
+deleted file mode 100644
+index e78cad7b7688d77e29228b42b29278cf581807f7..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/jsDevicePixelRatio-expected.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-The user interface scale factor is 1.
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/jsDevicePixelRatio.html b/third_party/WebKit/LayoutTests/fast/dom/jsDevicePixelRatio.html
+deleted file mode 100644
+index 8ecb5ff0c1bdab755fcccbef40a24766093de130..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/jsDevicePixelRatio.html
++++ /dev/null
+@@ -1,11 +0,0 @@
+-<html>
+-<body>
+-
+-<script>
+-    if (window.testRunner)
+-        testRunner.dumpAsText();
+-    document.write("The user interface scale factor is " + devicePixelRatio + ".");
+-</script>
+-
+-</body>
+-</html>
+\ No newline at end of file
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/left-overflow-in-ltr-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/left-overflow-in-ltr-expected.txt
+deleted file mode 100644
+index fbac4d123b599896beb8acccf8fc5b0c1622988f..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/left-overflow-in-ltr-expected.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-test left overflow in LTR page.
+-scroll: Success
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/left-overflow-in-ltr.html b/third_party/WebKit/LayoutTests/fast/dom/left-overflow-in-ltr.html
+deleted file mode 100644
+index d1588253ff19c79eaa25dfb370d7ab744b82ca8a..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/left-overflow-in-ltr.html
++++ /dev/null
+@@ -1,38 +0,0 @@
+-﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+-<html xmlns="http://www.w3.org/1999/xhtml" >
+-    <head>
+-        <title>Test left overflow in LTR page</title>
+-        <script>
+-            function log(str)
+-            {
+-                var li = document.createElement("li");
+-                li.appendChild(document.createTextNode(str));
+-                var console = document.getElementById("console");
+-                console.appendChild(li);
+-            }
+-            
+-            function assertEqual(message, actual, expected)
+-            {
+-                if (actual != expected)
+-                    log("\n" + message + ": Failure, actual: " + actual + "; expected: " + expected);
+-                else
+-                    log("\n" + message + ": Success");
+-            }
+-    
+-            onload = function()
+-            {
+-                if (window.testRunner)
+-                    testRunner.dumpAsText();
+-                var div = document.getElementById("div");
+-                var original = window.scrollX;
+-                window.scrollTo(-1, 0);
+-                assertEqual("scroll", window.scrollX, 0);
+-    
+-            }
+-        </script>
+-    </head>
+-    <body>
+-        <div id="div" style="position:relative; right:40px">test left overflow in LTR page.</div>
+-        <ul id="console"></ul>
+-    </body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/legend-control-character-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/legend-control-character-expected.txt
+deleted file mode 100644
+index de691ec96aa46ca2716fe59bd017ce3f3709e7ec..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/legend-control-character-expected.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-Test for http://crbug.com/366571. This test should not hit an assertion on debug build.
+-
+-
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/legend-control-character.html b/third_party/WebKit/LayoutTests/fast/dom/legend-control-character.html
+deleted file mode 100644
+index 7fa7232ab40f5f272be2bb094c99ee31dbdf8730..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/legend-control-character.html
++++ /dev/null
+@@ -1,8 +0,0 @@
+-<!DOCTYPE html>
+-<script>
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-</script>
+-<p>Test for http://crbug.com/366571. This test should not hit an assertion on debug build.</p>
+-<legend><li>
+-<div>PASS</div>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/legend-display-inline-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/legend-display-inline-expected.txt
+deleted file mode 100644
+index bcf930ff41c62db5fde3343cef7cefe4df2f3ac0..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/legend-display-inline-expected.txt
++++ /dev/null
+@@ -1,4 +0,0 @@
+-foo
+-Bug 23753: Assertion failure in LayoutBlockFlow::createLineBoxes() when a legend has display: inline
+-
+-This test PASSED if it did not crash
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/legend-display-inline.html b/third_party/WebKit/LayoutTests/fast/dom/legend-display-inline.html
+deleted file mode 100644
+index aa17cc7a075375266a59d37bca0f594f0f2eca61..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/legend-display-inline.html
++++ /dev/null
+@@ -1,6 +0,0 @@
+-<fieldset><legend style="display: inline">foo</legend></fieldset>
+-<p>Bug <a href="https://bugs.webkit.org/show_bug.cgi?id=23753">23753</a>: Assertion failure in LayoutBlockFlow::createLineBoxes() when a legend has display: inline</p>
+-<p>This test PASSED if it did not crash</p> <script>
+-    if (window.testRunner)
+-        testRunner.dumpAsText();
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/length-attribute-mapping-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/length-attribute-mapping-expected.txt
+deleted file mode 100644
+index 94e0f2e329ad64ea0b2f3a37128a716e69374cb5..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/length-attribute-mapping-expected.txt
++++ /dev/null
+@@ -1,20 +0,0 @@
+-This tests the mapping of length-type attributes to CSS length values.
+-
+-<img>:
+-PASS: 90zz is mapped to 90px
+-PASS: 80% is mapped to 80%
+-PASS: 70%5 is mapped to 70%
+-PASS: 60%% is mapped to 60%
+-PASS: 50* is not mapped
+-PASS: 40*5 is not mapped
+-PASS: 30.5 is mapped to 30.5px
+-
+-<col>:
+-PASS: 90zz is mapped to 90px
+-PASS: 80% is mapped to 80%
+-PASS: 70%5 is mapped to 70%
+-PASS: 60%% is mapped to 60%
+-PASS: 50* is not mapped
+-PASS: 40*5 is not mapped
+-PASS: 30.5 is mapped to 30.5px
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/length-attribute-mapping.html b/third_party/WebKit/LayoutTests/fast/dom/length-attribute-mapping.html
+deleted file mode 100644
+index 7e491a6c2030460e3af7dd242c8658882a582271..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/length-attribute-mapping.html
++++ /dev/null
+@@ -1,48 +0,0 @@
+-<p>
+-    This tests the mapping of length-type attributes to CSS length values.
+-</p>
+-<pre id="console"></pre>
+-<img id="img" style="display: none;">
+-<table><col id="col" style="display: none;"></table>
+-<script>
+-    if (window.testRunner)
+-        testRunner.dumpAsText();
+-
+-    var console = document.getElementById("console");
+-    function log(message)
+-    {
+-        console.appendChild(document.createTextNode(message + "\n"));
+-    }
+-
+-    function test(target, value, expected)
+-    {
+-        target.setAttribute("height", value);
+-        var actual = getComputedStyle(target, null).height;
+-        var mapping = actual == "auto" ? "not mapped" : "mapped to " + actual;
+-        if (actual == (expected ? expected : "auto"))
+-            log("PASS: " + value + " is " + mapping);
+-        else
+-            log("FAIL: " + value + " is " + mapping + " instead of " + (expected ? expected : "not being mapped"));
+-    }
+-
+-    var img = document.getElementById("img");
+-    log ("<img>:");
+-    test(img, "90zz", "90px");
+-    test(img, "80%", "80%");
+-    test(img, "70%5", "70%");
+-    test(img, "60%%", "60%");
+-    test(img, "50*");
+-    test(img, "40*5");
+-    test(img, "30.5", "30.5px");
+-    log("");
+-
+-    var col = document.getElementById("col");
+-    log ("<col>:");
+-    test(col, "90zz", "90px");
+-    test(col, "80%", "80%");
+-    test(col, "70%5", "70%");
+-    test(col, "60%%", "60%");
+-    test(col, "50*");
+-    test(col, "40*5");
+-    test(col, "30.5", "30.5px");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/lenient-this.html b/third_party/WebKit/LayoutTests/fast/dom/lenient-this.html
+deleted file mode 100644
+index 6931f9b0df8e7773bb6b224ffd1ef218c4bc0063..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/lenient-this.html
++++ /dev/null
+@@ -1,22 +0,0 @@
+-<!DOCTYPE html>
+-<title>[LenientThis] test</title>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<script>
+-test(function() {
+-    // GlobalEventHandlers.onmouseenter is [LenientThis].
+-    assert_equals(document.onmouseenter, null, "|this| is an appropriate object.");
+-    assert_equals(Document.prototype.onmouseenter, undefined, "|this| is not an appropriate object.");
+-    Document.prototype.onmouseenter = 'foo'; // must not throw.
+-    assert_equals(Document.prototype.onmouseenter, undefined, "the value must not change.");
+-
+-    // GlobalEventHandlers.onmousedown is NOT [LenientThis].
+-    assert_equals(document.onmousedown, null, "|this| is an appropriate object.");
+-    assert_throws(null, function() {
+-        Document.prototype.onmousedown;
+-    }, "Document.prototype is invalid as |this|.");
+-    assert_throws(null, function() {
+-        Document.prototype.onmousedown = 'foo';
+-    }, "Document.prototype is invalid as |this|.");
+-});
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/location-assign-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/location-assign-expected.txt
+deleted file mode 100644
+index fff64d41a04cae83a6c475daeb4b822449dc848c..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/location-assign-expected.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-If this text is shown, that means that the document was successfully loaded using location.assign.
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/location-assign.html b/third_party/WebKit/LayoutTests/fast/dom/location-assign.html
+deleted file mode 100644
+index 8371f0eed3cd38927324c137daf8fc9d9e097251..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/location-assign.html
++++ /dev/null
+@@ -1,15 +0,0 @@
+-<html>
+-<script>
+-if (window.testRunner) {
+-    testRunner.waitUntilDone();
+-    testRunner.dumpAsText();
+-}
+-
+-function runTests() {
+-   window.location.assign('resources/new-location.html');
+-}
+-</script>
+-<body onload="runTests();">
+-FAIL
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/location-hash-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/location-hash-expected.txt
+deleted file mode 100644
+index c48bf2c9137b8de8dabc77e20abdd7b0242c2d7a..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/location-hash-expected.txt
++++ /dev/null
+@@ -1,32 +0,0 @@
+-This tests that modifying location.hash works as it should
+-
+-PASS: window.history.length == originalHistoryLength should be true and is.
+-PASS: window.location.hash should be and is.
+-PASS: window.location.hash should be #foo and is.
+-PASS: window.location == originalLocation + '#foo' should be true and is.
+-PASS: window.history.length == originalHistoryLength + 1 should be true and is.
+-PASS: window.location.hash should be #bar and is.
+-PASS: window.location == originalLocation + '#bar' should be true and is.
+-PASS: window.history.length == originalHistoryLength + 2 should be true and is.
+-PASS: window.location.hash should be #bar and is.
+-PASS: window.location == originalLocation + '#bar' should be true and is.
+-PASS: window.history.length == originalHistoryLength + 2 should be true and is.
+-PASS: window.location.hash should be #bar and is.
+-PASS: window.location == originalLocation + '#bar' should be true and is.
+-PASS: window.location.hash should be #bar and is.
+-PASS: window.location == originalLocation + '#bar' should be true and is.
+-PASS: window.location.hash should be #foo and is.
+-PASS: window.location == originalLocation + '#foo' should be true and is.
+-PASS: window.location.hash should be #foo and is.
+-PASS: window.location == originalLocation + '#foo' should be true and is.
+-PASS: window.location.hash should be and is.
+-PASS: window.location == originalLocation should be true and is.
+-PASS: window.location.hash should be and is.
+-PASS: window.location == originalLocation should be true and is.
+-PASS: window.location.hash should be #foo and is.
+-PASS: window.location == originalLocation + '#foo' should be true and is.
+-PASS: window.location.hash should be and is.
+-PASS: window.location == originalLocation + '#' should be true and is.
+-PASS: window.location.hash should be and is.
+-PASS: window.location == originalLocation + '#' should be true and is.
+-SUCCESS!
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/location-hash.html b/third_party/WebKit/LayoutTests/fast/dom/location-hash.html
+deleted file mode 100644
+index a6018ad84ba7ba2c084f9fe97817f4fb7e9026e3..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/location-hash.html
++++ /dev/null
+@@ -1,123 +0,0 @@
+-<html>
+-<head>
+-<script>
+-    function print(message, color) 
+-    {
+-        var paragraph = document.createElement("div");
+-        paragraph.appendChild(document.createTextNode(message));
+-        paragraph.style.fontFamily = "monospace";
+-        if (color)
+-            paragraph.style.color = color;
+-            document.getElementById("console").appendChild(paragraph);
+-    }
+-
+-    function shouldBe(a, b)
+-    {
+-        var evalA = eval(a);
+-        if (evalA == b) 
+-            print("PASS: " + a + " should be " + b + " and is.", "green");
+-        else {
+-            print("FAIL: " + a + " should be " + b + " but instead is " + evalA + ".", "red");
+-            numErrors ++;
+-        }
+-    }
+-
+-    function step() {
+-        state++;
+-        switch (state) {
+-        case 1:
+-            shouldBe('window.history.length == originalHistoryLength', true);
+-            shouldBe('window.location.hash', '');
+-            window.location.hash = 'foo';
+-            shouldBe('window.location.hash', '#foo');
+-            shouldBe("window.location == originalLocation + '#foo'", true);
+-            shouldBe('window.history.length ==  originalHistoryLength + 1', true);
+-            // hashchange will jump to the next step.
+-            break;
+-        case 2:
+-            window.location.hash = 'bar';
+-            shouldBe('window.location.hash', '#bar');
+-            shouldBe("window.location == originalLocation + '#bar'", true);
+-            shouldBe('window.history.length == originalHistoryLength + 2', true);
+-            // hashchange will jump to the next step.
+-            break;
+-        case 3:
+-            window.location.hash = 'bar';
+-            shouldBe('window.location.hash', '#bar');
+-            shouldBe("window.location == originalLocation + '#bar'", true);
+-            shouldBe('window.history.length == originalHistoryLength + 2', true);
+-            step(); // No hashchange.
+-            break;
+-        case 4:
+-            shouldBe('window.location.hash', '#bar');
+-            shouldBe("window.location == originalLocation + '#bar'", true);
+-            window.history.back();
+-            // history.back() is asychronous, location should be unchanged
+-            shouldBe('window.location.hash', '#bar');
+-            shouldBe("window.location == originalLocation + '#bar'", true);
+-            // hashchange will jump to the next step.
+-            break;
+-        case 5:
+-            shouldBe('window.location.hash', '#foo');
+-            shouldBe("window.location == originalLocation + '#foo'", true);
+-            window.history.back();
+-            // history.back() is asychronous, location should be unchanged
+-            shouldBe('window.location.hash', '#foo');
+-            shouldBe("window.location == originalLocation + '#foo'", true);
+-            // hashchange will jump to the next step.
+-            break;
+-        case 6:
+-            shouldBe('window.location.hash', '');
+-            shouldBe("window.location == originalLocation", true);
+-            window.history.forward();
+-            // history.forward() is asychronous, location should be unchanged
+-            shouldBe('window.location.hash', '');
+-            shouldBe("window.location == originalLocation", true);
+-            // hashchange will jump to the next step.
+-            break;
+-        case 7:
+-            shouldBe('window.location.hash', '#foo');
+-            shouldBe("window.location == originalLocation + '#foo'", true);
+-            window.location.hash = '';
+-            shouldBe('window.location.hash', '');
+-            shouldBe("window.location == originalLocation + '#'", true);
+-            window.location.hash = '#';
+-            shouldBe('window.location.hash', '');
+-            shouldBe("window.location == originalLocation + '#'", true);
+-            if (numErrors == 0)
+-                print("SUCCESS!", "green")
+-            else
+-                print("FAILURE: one or more tests failed", "red");
+-
+-            if (window.testRunner)
+-                testRunner.notifyDone();
+-
+-            return;
+-        }
+-    }
+-
+-    function runTests() {
+-        if (window.testRunner) {
+-            testRunner.clearBackForwardList();
+-            testRunner.dumpAsText();
+-            testRunner.waitUntilDone();
+-        }
+-
+-        state = 0;
+-        numErrors = 0;
+-        originalLocation = window.location.href;
+-        originalHistoryLength = window.history.length;
+-
+-        window.onhashchange = step;
+-
+-        // Location changes need to happen outside the onload handler to generate history entries.
+-        setTimeout(step, 0);
+-    }
+-    </script>
+-</head>
+-<body onload="runTests();">
+-<p>This tests that modifying location.hash works as it should</p>
+-<div id="console">
+-</div>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/location-missing-arguments-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/location-missing-arguments-expected.txt
+deleted file mode 100644
+index e50ba65256af958f60705361a72cdc4b82123822..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/location-missing-arguments-expected.txt
++++ /dev/null
+@@ -1,6 +0,0 @@
+-PASS document.location.assign() threw exception TypeError: Failed to execute 'assign' on 'Location': 1 argument required, but only 0 present..
+-PASS document.location.replace() threw exception TypeError: Failed to execute 'replace' on 'Location': 1 argument required, but only 0 present..
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/location-missing-arguments.html b/third_party/WebKit/LayoutTests/fast/dom/location-missing-arguments.html
+deleted file mode 100644
+index 1bc127080a6ed19b62485ee99c2610526634db42..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/location-missing-arguments.html
++++ /dev/null
+@@ -1,12 +0,0 @@
+-<!doctype html>
+-<html>
+-<head>
+-<script src="../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<script>
+-shouldThrow("document.location.assign()");
+-shouldThrow("document.location.replace()");
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/location-new-window-no-crash-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/location-new-window-no-crash-expected.txt
+deleted file mode 100644
+index 0eeb7320721a11d8a3cb2394f4dc1adaa5e71580..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/location-new-window-no-crash-expected.txt
++++ /dev/null
+@@ -1,38 +0,0 @@
+-Tests that manipulating location properties in a just-created window object does not crash. Note: Turn off pop-up blocking to run this in-browser.
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS testWindow.location.toString() is 'about:blank'
+-PASS testWindow.location.href is 'about:blank'
+-PASS testWindow.location.protocol is 'about:'
+-PASS testWindow.location.host is ''
+-PASS testWindow.location.hostname is ''
+-PASS testWindow.location.port is ''
+-PASS testWindow.location.pathname is 'blank'
+-PASS testWindow.location.search is ''
+-PASS testWindow.location.hash is ''
+-PASS testWindow.location.href = 'data:text/plain,b' is 'data:text/plain,b'
+-PASS testWindow.location.protocol = 'data' is 'data'
+-PASS testWindow.location.host = 'c' is 'c'
+-PASS testWindow.location.hostname = 'd' is 'd'
+-PASS testWindow.location.port = 'e' is 'e'
+-PASS testWindow.location.pathname = 'f' is 'f'
+-PASS testWindow.location.search = 'g' is 'g'
+-PASS testWindow.location.hash = 'h' is 'h'
+-PASS testWindow.location.assign('data:text/plain,i') is undefined
+-PASS testWindow.location.replace('data:text/plain,j') is undefined
+-PASS testWindow.location.reload() is undefined
+-PASS testWindow.location.toString() is 'about:blank'
+-PASS testWindow.location.href is 'about:blank'
+-PASS testWindow.location.protocol is 'about:'
+-PASS testWindow.location.host is ''
+-PASS testWindow.location.hostname is ''
+-PASS testWindow.location.port is ''
+-PASS testWindow.location.pathname is 'blank'
+-PASS testWindow.location.search is ''
+-PASS testWindow.location.hash is ''
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/location-new-window-no-crash.html b/third_party/WebKit/LayoutTests/fast/dom/location-new-window-no-crash.html
+deleted file mode 100644
+index 22fcde2c0616ec6d0b0d5bcca7f38a81e75226c0..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/location-new-window-no-crash.html
++++ /dev/null
+@@ -1,9 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<script src="script-tests/location-new-window-no-crash.js"></script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/marquee-named-property-crash-expected.txt b/third_party/WebKit/LayoutTests/fast/dom/marquee-named-property-crash-expected.txt
+deleted file mode 100644
+index 1560d1019cd74abcf6c6d6d16fc0ed9e83f91c1b..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/marquee-named-property-crash-expected.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+- 
+-Test that a named property doesn't interfere with a private script (https://crbug.com/668552). If the test is successful, it should not crash.
+diff --git a/third_party/WebKit/LayoutTests/fast/dom/marquee-named-property-crash.html b/third_party/WebKit/LayoutTests/fast/dom/marquee-named-property-crash.html
+deleted file mode 100644
+index 1e410c0447a83fab2da5eb9fb6693d754719d9e8..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/fast/dom/marquee-named-property-crash.html
++++ /dev/null
+@@ -1,15 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-<body>
+-<script>
+-if (window.testRunner)
+-    testRunner.dumpAsText();
+-</script>
+-<img name="privateScriptController">
+-<marquee></marquee>
+-<div>
+-Test that a named property doesn't interfere with a private script (https://crbug.com/668552).
+-If the test is successful, it should not crash.
+-</div>
 -</body>
 -</html>
