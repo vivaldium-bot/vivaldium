@@ -1,34 +1,121 @@
-diff --git a/net/base/url_util.h b/net/base/url_util.h
-index 75f7b620be0686210434d30c4452d76efb40997f..6bcc5fd606315dba2d995a45e6b49099a03d8e63 100644
---- a/net/base/url_util.h
-+++ b/net/base/url_util.h
-@@ -16,6 +16,7 @@
- #include "base/strings/string16.h"
- #include "base/strings/string_piece.h"
- #include "net/base/net_export.h"
-+#include "url/gurl.h"
- #include "url/third_party/mozilla/url_parse.h"
+diff --git a/net/cert/cert_verify_proc_unittest.cc b/net/cert/cert_verify_proc_unittest.cc
+index 862f7c8690c9be6ef5cbc7bef97c145ca461084b..57c9b0759417d712366cc4b96c33a947646b7e5d 100644
+--- a/net/cert/cert_verify_proc_unittest.cc
++++ b/net/cert/cert_verify_proc_unittest.cc
+@@ -38,6 +38,7 @@
+ #endif
  
- class GURL;
-@@ -71,7 +72,7 @@ class NET_EXPORT QueryIterator {
-   void Advance();
+ #if defined(OS_MACOSX) && !defined(OS_IOS)
++#include "base/mac/mac_util.h"
+ #include "net/cert/test_keychain_search_list_mac.h"
+ #endif
  
-  private:
--  const GURL& url_;
-+  GURL url_;
-   url::Component query_;
-   bool at_end_;
-   url::Component key_;
+@@ -122,6 +123,16 @@ bool SupportsDetectingKnownRoots() {
+   return true;
+ }
+ 
++bool WeakKeysAreInvalid() {
++#if defined(OS_MACOSX) && !defined(OS_IOS)
++  // Starting with Mac OS 10.12, certs with weak keys are treated as
++  // (recoverable) invalid certificate errors.
++  return base::mac::IsAtLeastOS10_12();
++#else
++  return false;
++#endif
++}
++
+ // Template helper to load a series of certificate files into a CertificateList.
+ // Like CertTestUtil's CreateCertificateListFromFile, except it can load a
+ // series of individual certificates (to make the tests clearer).
+@@ -407,7 +418,7 @@ TEST_F(CertVerifyProcTest, RejectWeakKeys) {
+         EXPECT_NE(OK, error);
+         EXPECT_EQ(CERT_STATUS_WEAK_KEY,
+                   verify_result.cert_status & CERT_STATUS_WEAK_KEY);
+-        EXPECT_NE(CERT_STATUS_INVALID,
++        EXPECT_EQ(WeakKeysAreInvalid() ? CERT_STATUS_INVALID : 0,
+                   verify_result.cert_status & CERT_STATUS_INVALID);
+       } else {
+         EXPECT_THAT(error, IsOk());
+@@ -1392,6 +1403,11 @@ TEST_F(CertVerifyProcTest, CRLSetDuringPathBuilding) {
+ // The verifier should rollback until it just tries A(B) alone, at which point
+ // it will pull B(F) & F(E) from the keychain and succeed.
+ TEST_F(CertVerifyProcTest, MacCRLIntermediate) {
++  if (base::mac::IsAtLeastOS10_12()) {
++    // TODO(crbug.com/671889): Investigate SecTrustSetKeychains issue on Sierra.
++    LOG(INFO) << "Skipping test, SecTrustSetKeychains does not work on 10.12";
++    return;
++  }
+   const char* const kPath2Files[] = {
+       "multi-root-A-by-B.pem", "multi-root-B-by-C.pem", "multi-root-C-by-E.pem",
+       "multi-root-E-by-E.pem"};
+@@ -1795,7 +1811,8 @@ const WeakDigestTestData kVerifyEndEntityTestData[] = {
+ // Disabled on NSS - NSS caches chains/signatures in such a way that cannot
+ // be cleared until NSS is cleanly shutdown, which is not presently supported
+ // in Chromium.
+-#if defined(USE_NSS_CERTS) || defined(OS_IOS) || defined(OS_ANDROID)
++// OSX 10.12+ stops building the chain at the first weak digest.
++#if defined(USE_NSS_CERTS) || defined(OS_IOS) || defined(OS_MACOSX)
+ #define MAYBE_VerifyEndEntity DISABLED_VerifyEndEntity
+ #else
+ #define MAYBE_VerifyEndEntity VerifyEndEntity
+@@ -1843,7 +1860,8 @@ const WeakDigestTestData kVerifyIncompleteEETestData[] = {
+ };
+ // Disabled on NSS - libpkix does not return constructed chains on error,
+ // preventing us from detecting/inspecting the verified chain.
+-#if defined(USE_NSS_CERTS) || defined(OS_IOS) || defined(OS_ANDROID)
++// OSX 10.12+ stops building the chain at the first weak digest.
++#if defined(USE_NSS_CERTS) || defined(OS_IOS) || defined(OS_MACOSX)
+ #define MAYBE_VerifyIncompleteEndEntity DISABLED_VerifyIncompleteEndEntity
+ #else
+ #define MAYBE_VerifyIncompleteEndEntity VerifyIncompleteEndEntity
+@@ -1868,7 +1886,8 @@ const WeakDigestTestData kVerifyMixedTestData[] = {
+ };
+ // NSS does not support MD4 and does not enable MD2 by default, making all
+ // permutations invalid.
+-#if defined(USE_NSS_CERTS) || defined(OS_IOS) || defined(OS_ANDROID)
++// OSX 10.12+ stops building the chain at the first weak digest.
++#if defined(USE_NSS_CERTS) || defined(OS_IOS) || defined(OS_MACOSX)
+ #define MAYBE_VerifyMixed DISABLED_VerifyMixed
+ #else
+ #define MAYBE_VerifyMixed VerifyMixed
+@@ -1947,6 +1966,9 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
+ // Test that CertVerifyProcMac reacts appropriately when Apple's certificate
+ // verifier rejects a certificate with a fatal error. This is a regression
+ // test for https://crbug.com/472291.
++// (Since 10.12, this causes a recoverable error instead of a fatal one.)
++// TODO(mattm): Try to find a different way to cause a fatal error that works
++// on 10.12.
+ TEST_F(CertVerifyProcTest, LargeKey) {
+   // Load root_ca_cert.pem into the test root store.
+   ScopedTestRoot test_root(
+@@ -1963,7 +1985,7 @@ TEST_F(CertVerifyProcTest, LargeKey) {
+   int error = Verify(cert.get(), "127.0.0.1", flags, NULL, empty_cert_list_,
+                      &verify_result);
+   EXPECT_THAT(error, IsError(ERR_CERT_INVALID));
+-  EXPECT_EQ(CERT_STATUS_INVALID, verify_result.cert_status);
++  EXPECT_TRUE(verify_result.cert_status & CERT_STATUS_INVALID);
+ }
+ #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+ 
 diff --git a/net/ssl/ssl_config.cc b/net/ssl/ssl_config.cc
-index 7a4f3373bb4933da34e2ec975691b04a9669c742..43c685dc8801bd964574e81a1cd6034015485848 100644
+index 7a4f3373bb4933da34e2ec975691b04a9669c742..3c1de883dfd630fa6f1056545878112f789db549 100644
 --- a/net/ssl/ssl_config.cc
 +++ b/net/ssl/ssl_config.cc
-@@ -21,7 +21,7 @@ SSLConfig::CertAndStatus::CertAndStatus(const CertAndStatus& other)
+@@ -6,6 +6,8 @@
+ 
+ #include "net/cert/cert_verifier.h"
+ 
++#include "app/vivaldi_apptools.h"
++
+ namespace net {
+ 
+ const uint16_t kDefaultSSLVersionMin = SSL_PROTOCOL_VERSION_TLS1;
+@@ -21,7 +23,7 @@ SSLConfig::CertAndStatus::CertAndStatus(const CertAndStatus& other)
  SSLConfig::CertAndStatus::~CertAndStatus() = default;
  
  SSLConfig::SSLConfig()
 -    : rev_checking_enabled(false),
-+    : rev_checking_enabled(true),
++    : rev_checking_enabled(vivaldi::IsVivaldiRunning()), // false when testing
        rev_checking_required_local_anchors(false),
        sha1_local_anchors_enabled(false),
        version_min(kDefaultSSLVersionMin),
