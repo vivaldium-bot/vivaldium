@@ -19,7 +19,7 @@ index 21a13a6c6e189fcf2183593cffe22f3d125d01a9..9b1405eef5bb94ec0ac4118710738db2
 +*.sh text eol=lf
 diff --git a/.gitmodules b/.gitmodules
 new file mode 100644
-index 0000000000000000000000000000000000000000..1e4a63aea845dc1a59f154152baee33c424f1f40
+index 0000000000000000000000000000000000000000..fe4b3b3bd0f25e5032479d9e8a19ab1c10d94263
 --- /dev/null
 +++ b/.gitmodules
 @@ -0,0 +1,258 @@
@@ -223,7 +223,7 @@ index 0000000000000000000000000000000000000000..1e4a63aea845dc1a59f154152baee33c
 +	url = ../../external/github.com/google/shaderc.git
 +[submodule "third_party/skia"]
 +	path = third_party/skia
-+	url = ../../skia.git
++	url = ../../skia/skia.git
 +[submodule "third_party/smhasher/src"]
 +	path = third_party/smhasher/src
 +	url = ../../external/smhasher.git
@@ -338,22 +338,15 @@ index c89a3692bf4ef15e29492daa8dfb93af37162753..9b94b1409cb1b2089eb4334706fd1573
        extensions::ExtensionPrefs::Get(browser_context);
    if (WasUnloadedForReload(extension->id(), reason) &&
 diff --git a/apps/launcher.cc b/apps/launcher.cc
-index 1ac5aef27947de679163f78d81d4f6998fe81ea3..747eed3fc636faa83d0cdedd6d8bcd6993f70db9 100644
+index 1ac5aef27947de679163f78d81d4f6998fe81ea3..07e76a7205fddd679088cd87a9e290967be5ad00 100644
 --- a/apps/launcher.cc
 +++ b/apps/launcher.cc
-@@ -21,6 +21,7 @@
- #include "chrome/browser/extensions/api/file_handlers/mime_util.h"
- #include "chrome/browser/extensions/api/file_system/file_system_api.h"
- #include "chrome/browser/profiles/profile.h"
-+#include "components/url_formatter/url_fixer.h"
- #include "content/public/browser/browser_thread.h"
- #include "content/public/browser/render_process_host.h"
- #include "content/public/browser/web_contents.h"
-@@ -41,6 +42,8 @@
+@@ -41,6 +41,9 @@
  #include "net/base/filename_util.h"
  #include "url/gurl.h"
  
 +#include "app/vivaldi_apptools.h"
++#include "components/url_formatter/url_fixer.h"
 +
  #if defined(OS_CHROMEOS)
  #include "components/user_manager/user_manager.h"
@@ -387,10 +380,10 @@ index 1ac5aef27947de679163f78d81d4f6998fe81ea3..747eed3fc636faa83d0cdedd6d8bcd69
    base::CommandLine::StringType about_blank_url(
        base::ASCIIToUTF16(url::kAboutBlankURL));
 diff --git a/base/BUILD.gn b/base/BUILD.gn
-index 8f5be418e3458cdb86d54852883ae95f6d1bfd31..10784666c8af4a70d7e5bc63a942b85c077dcc7e 100644
+index 3754be5f383f24423d78018b7baef9637d0ce85e..e06e56063c4cd4b2aa086005aab86a3db889fd21 100644
 --- a/base/BUILD.gn
 +++ b/base/BUILD.gn
-@@ -308,6 +308,21 @@ component("base") {
+@@ -306,6 +306,21 @@ component("base") {
      "environment.h",
      "feature_list.cc",
      "feature_list.h",
@@ -412,38 +405,6 @@ index 8f5be418e3458cdb86d54852883ae95f6d1bfd31..10784666c8af4a70d7e5bc63a942b85c
      "file_descriptor_posix.h",
      "file_version_info.h",
      "file_version_info_mac.h",
-diff --git a/base/base_paths.cc b/base/base_paths.cc
-index 31bc55401af4a8087b3319ba4f35d796e918c376..0f0baa96fda5030c352da673b2b8463fbb29434d 100644
---- a/base/base_paths.cc
-+++ b/base/base_paths.cc
-@@ -41,6 +41,15 @@ bool PathProvider(int key, FilePath* result) {
-       *result = test_data_path;
-       return true;
-     }
-+    case DIR_VIVALDI_TEST_DATA:
-+      if (!PathService::Get(DIR_SOURCE_ROOT, result))
-+        return false;
-+      *result = result->DirName(); // Src dir is in the vivaldi chromium folder
-+      *result = result->Append(FILE_PATH_LITERAL("testdata"));
-+      *result = result->Append(FILE_PATH_LITERAL("data"));
-+      if (!PathExists(*result))  // We don't want to create this.
-+        return false;
-+      return true;
-     default:
-       return false;
-   }
-diff --git a/base/base_paths.h b/base/base_paths.h
-index ef6aa82836205b7ac7fbc270abdeec2485cc2236..695df9aa849882c9bb30f18412c6b8988d4dd567 100644
---- a/base/base_paths.h
-+++ b/base/base_paths.h
-@@ -46,6 +46,7 @@ enum BasePathKey {
- 
-   DIR_TEST_DATA,     // Used only for testing.
- 
-+  DIR_VIVALDI_TEST_DATA, // Used only for testing.
-   PATH_END
- };
- 
 diff --git a/base/base_paths_mac.mm b/base/base_paths_mac.mm
 index 9576237110c83599f0f4f4b30cf6b5ff07ff0c09..16d61b7f4d5604687b35020edb14673f5c193ed1 100644
 --- a/base/base_paths_mac.mm
@@ -493,26 +454,10 @@ index 62e1972e5f2e2ba8b2fbe807c9ac42b4a6ca0558..8c5b8eb86423c821dc9faa8cf7709f4d
      }
      case base::DIR_APP_SHORTCUTS: {
 diff --git a/base/command_line.cc b/base/command_line.cc
-index 99ea2b000324b87ea4ab11bae1f7c5374586331c..30ff1e5e8f4b9511cfc968051ac1717058717f0d 100644
+index 99ea2b000324b87ea4ab11bae1f7c5374586331c..7a4ede62cf80070f44676d67aaa135e85dba0b44 100644
 --- a/base/command_line.cc
 +++ b/base/command_line.cc
-@@ -7,6 +7,7 @@
- #include <algorithm>
- #include <ostream>
- 
-+#include "base/base64.h"
- #include "base/files/file_path.h"
- #include "base/logging.h"
- #include "base/macros.h"
-@@ -14,6 +15,7 @@
- #include "base/strings/string_util.h"
- #include "base/strings/utf_string_conversions.h"
- #include "build/build_config.h"
-+#include "third_party/zlib/zlib.h"
- 
- #if defined(OS_WIN)
- #include <windows.h>
-@@ -322,6 +324,11 @@ CommandLine::StringType CommandLine::GetSwitchValueNative(
+@@ -322,6 +322,11 @@ CommandLine::StringType CommandLine::GetSwitchValueNative(
                                                    : *(result->second);
  }
  
@@ -523,46 +468,6 @@ index 99ea2b000324b87ea4ab11bae1f7c5374586331c..30ff1e5e8f4b9511cfc968051ac17170
 +
  void CommandLine::AppendSwitch(const std::string& switch_string) {
    AppendSwitchNative(switch_string, StringType());
- }
-@@ -351,6 +358,39 @@ void CommandLine::AppendSwitchNative(const std::string& switch_string,
-     combined_switch_string = kSwitchPrefixes[0] + combined_switch_string;
-   if (!value.empty())
-     combined_switch_string += kSwitchValueSeparator + value;
-+#if defined(OS_WIN) && defined(VIVALDI_BUILD)
-+  if (switch_key.compare("--commpressed-args") == 0) {
-+    std::string zstring;
-+    std::string cstring;
-+
-+    base::Base64Decode(base::UTF16ToASCII(value), &zstring);
-+
-+    cstring.resize(zstring.length()+200);
-+
-+    z_stream stream = {0};
-+    int result = inflateInit2(&stream, 
-+                            // windowBits = 15 is default, 16 is added to
-+                            // produce a gzip header + trailer.
-+                            15 + 16);
-+    DCHECK_EQ(Z_OK, result);
-+    stream.next_out= reinterpret_cast<unsigned char*>(&cstring[0]);
-+    stream.avail_out= (uInt) cstring.length();
-+    stream.next_in = reinterpret_cast<unsigned char*>(&zstring[0]);
-+    stream.avail_in = (uInt) zstring.size();
-+    result = inflate(&stream, Z_SYNC_FLUSH);
-+    DCHECK_EQ(Z_OK, result);
-+    result = inflate(&stream, Z_FINISH);
-+    DCHECK_EQ(Z_STREAM_END, result);
-+    result = inflateEnd(&stream);
-+    DCHECK_EQ(Z_OK, result);
-+    cstring.resize(cstring.size()-stream.avail_out);
-+
-+    CommandLine decompressed_command_line = FromString(base::UTF8ToUTF16(cstring));
-+
-+    AppendArguments(decompressed_command_line, false);
-+    return;
-+  }
-+#endif
-   // Append the switch and update the switches/arguments divider |begin_args_|.
-   argv_.insert(argv_.begin() + begin_args_++, combined_switch_string);
  }
 diff --git a/base/command_line.h b/base/command_line.h
 index 3d29f8fee7fbb8de9e8c1fb691515ddb8bdccbdd..ac608b4884618803506877d63766e876cf3a3fab 100644
@@ -1411,74 +1316,8 @@ index 0000000000000000000000000000000000000000..b3d94394a3e07bcf8867d06b22751b46
 +}  // namespace base
 +
 +#endif  // BASE_FEATURES_SUBMODULE_FEATURES_H_
-diff --git a/base/file_version_info.h b/base/file_version_info.h
-index 3b9457cceace1cde6363cc06046ee0a641136537..2ef519eead934451b628cfedd3a19cb76680fcde 100644
---- a/base/file_version_info.h
-+++ b/base/file_version_info.h
-@@ -58,6 +58,7 @@ class BASE_EXPORT FileVersionInfo {
-   virtual base::string16 product_short_name() = 0;
-   virtual base::string16 internal_name() = 0;
-   virtual base::string16 product_version() = 0;
-+  virtual base::string16 source_version() = 0;
-   virtual base::string16 private_build() = 0;
-   virtual base::string16 special_build() = 0;
-   virtual base::string16 comments() = 0;
-diff --git a/base/file_version_info_mac.h b/base/file_version_info_mac.h
-index 9cc4b1074d3fe8c94ffe9f2cca3ca1809011187c..288a0608cbb50a24465d22ce5c34b63eb24178f5 100644
---- a/base/file_version_info_mac.h
-+++ b/base/file_version_info_mac.h
-@@ -27,6 +27,7 @@ class FileVersionInfoMac : public FileVersionInfo {
-   base::string16 product_short_name() override;
-   base::string16 internal_name() override;
-   base::string16 product_version() override;
-+  base::string16 source_version() override;
-   base::string16 private_build() override;
-   base::string16 special_build() override;
-   base::string16 comments() override;
-diff --git a/base/file_version_info_mac.mm b/base/file_version_info_mac.mm
-index ce4292441ed25081c52176b59c12bfeb472ae960..c9b4cf0adccd5df5b2b7b18fc45f2b249a55adec 100644
---- a/base/file_version_info_mac.mm
-+++ b/base/file_version_info_mac.mm
-@@ -92,6 +92,10 @@ base::string16 FileVersionInfoMac::file_version() {
-   return product_version();
- }
- 
-+base::string16 FileVersionInfoMac::source_version() {
-+  return GetString16Value(CFSTR("CFSourceVersionString"));
-+}
-+
- base::string16 FileVersionInfoMac::original_filename() {
-   return GetString16Value(kCFBundleNameKey);
- }
-diff --git a/base/file_version_info_win.cc b/base/file_version_info_win.cc
-index 00261b76df50b1525e84ae7b3d288d8e82eb421b..1670af789b4fee13215cdef9941a4f063268ee8a 100644
---- a/base/file_version_info_win.cc
-+++ b/base/file_version_info_win.cc
-@@ -121,6 +121,10 @@ base::string16 FileVersionInfoWin::product_version() {
-   return GetStringValue(L"ProductVersion");
- }
- 
-+base::string16 FileVersionInfoWin::source_version() {
-+  return GetStringValue(L"SourceVersion");
-+}
-+
- base::string16 FileVersionInfoWin::file_description() {
-   return GetStringValue(L"FileDescription");
- }
-diff --git a/base/file_version_info_win.h b/base/file_version_info_win.h
-index d91b67f67baf00e9525e8d06afe29ef710e13917..732be7080c6c80e902f75eb53453a60d776ad8fa 100644
---- a/base/file_version_info_win.h
-+++ b/base/file_version_info_win.h
-@@ -32,6 +32,7 @@ class BASE_EXPORT FileVersionInfoWin : public FileVersionInfo {
-   base::string16 product_short_name() override;
-   base::string16 internal_name() override;
-   base::string16 product_version() override;
-+  base::string16 source_version() override;
-   base::string16 private_build() override;
-   base::string16 special_build() override;
-   base::string16 comments() override;
 diff --git a/base/files/file_util_posix.cc b/base/files/file_util_posix.cc
-index 42de9316f1c9b02aa803feb8113c6a03d958e5c7..2e3d900df1b3e91b5c7df5529658b7dbc730e139 100644
+index a8db2599c642ff920e87533f0bcb6566a7253168..432aa7bd16c3d256831e9d3955e2164db322d2d6 100644
 --- a/base/files/file_util_posix.cc
 +++ b/base/files/file_util_posix.cc
 @@ -136,7 +136,9 @@ std::string TempFileName() {
@@ -1508,10 +1347,10 @@ index 4f6fa60afd00fdb563888cf7c5c58c2c5b5b8dcd..76620eb9be4f9f070b71b446238bb7fc
  #else
    return "org.chromium.Chromium";
 diff --git a/base/memory/shared_memory_posix.cc b/base/memory/shared_memory_posix.cc
-index d55c2df28bd7877ec23b0c42f57c50d8c1aed1e5..208d77c6632ffb67a89f2e007a41ca4dd427597b 100644
+index 783bdfce86cd13eec8c133ca36fdeeb419dfabab..0dd50b52d1e084702ec0b15d908a871a0b69c408 100644
 --- a/base/memory/shared_memory_posix.cc
 +++ b/base/memory/shared_memory_posix.cc
-@@ -452,7 +452,9 @@ bool SharedMemory::FilePathForMemoryName(const std::string& mem_name,
+@@ -453,7 +453,9 @@ bool SharedMemory::FilePathForMemoryName(const std::string& mem_name,
    if (!GetShmemTempDir(false, &temp_dir))
      return false;
  
@@ -1563,138 +1402,11 @@ index 6629f4565a74fb5e019ad05e845feba09f65625e..6acea40a0d55419009148a8bbfc76a8f
    ProcessHandle out_handle;
    if (!::DuplicateHandle(GetCurrentProcess(), handle,
                           GetCurrentProcess(), &out_handle,
-diff --git a/base/sha1.cc b/base/sha1.cc
-index a710001ab70ec7a00ec2096370d2bbc6d255c05d..85592fd2b012d09a9e2b8ddcdcbac653f2a073b1 100644
---- a/base/sha1.cc
-+++ b/base/sha1.cc
-@@ -33,38 +33,6 @@ namespace base {
- // implementation using each platform's crypto library.  See
- // http://crbug.com/47218
- 
--class SecureHashAlgorithm {
-- public:
--  SecureHashAlgorithm() { Init(); }
--
--  static const int kDigestSizeBytes;
--
--  void Init();
--  void Update(const void* data, size_t nbytes);
--  void Final();
--
--  // 20 bytes of message digest.
--  const unsigned char* Digest() const {
--    return reinterpret_cast<const unsigned char*>(H);
--  }
--
-- private:
--  void Pad();
--  void Process();
--
--  uint32_t A, B, C, D, E;
--
--  uint32_t H[5];
--
--  union {
--    uint32_t W[80];
--    uint8_t M[64];
--  };
--
--  uint32_t cursor;
--  uint64_t l;
--};
--
- static inline uint32_t f(uint32_t t, uint32_t B, uint32_t C, uint32_t D) {
-   if (t < 20) {
-     return (B & C) | ((~B) & D);
-@@ -95,6 +63,11 @@ static inline uint32_t K(uint32_t t) {
- 
- const int SecureHashAlgorithm::kDigestSizeBytes = 20;
- 
-+SecureHashAlgorithm::SecureHashAlgorithm()
-+{
-+  Init();
-+}
-+
- void SecureHashAlgorithm::Init() {
-   A = 0;
-   B = 0;
-diff --git a/base/sha1.h b/base/sha1.h
-index 902e3013318d501a7a7df6983ef75d3661d3e419..c4bc0c1b618cf4d715985186688be70e9146d403 100644
---- a/base/sha1.h
-+++ b/base/sha1.h
-@@ -6,6 +6,7 @@
- #define BASE_SHA1_H_
- 
- #include <stddef.h>
-+#include <stdint.h>
- 
- #include <string>
- 
-@@ -13,6 +14,59 @@
- 
- namespace base {
- 
-+// Implementation of SHA-1. Only handles data in byte-sized blocks,
-+// which simplifies the code a fair bit.
-+
-+// Identifier names follow notation in FIPS PUB 180-3, where you'll
-+// also find a description of the algorithm:
-+// http://csrc.nist.gov/publications/fips/fips180-3/fips180-3_final.pdf
-+
-+// Usage example:
-+//
-+// SecureHashAlgorithm sha;
-+// while(there is data to hash)
-+//   sha.Update(moredata, size of data);
-+// sha.Final();
-+// memcpy(somewhere, sha.Digest(), 20);
-+//
-+// to reuse the instance of sha, call sha.Init();
-+
-+// TODO(jhawkins): Replace this implementation with a per-platform
-+// implementation using each platform's crypto library.  See
-+// http://crbug.com/47218
-+
-+class SecureHashAlgorithm {
-+ public:
-+  BASE_EXPORT SecureHashAlgorithm();
-+
-+  static const int kDigestSizeBytes;
-+
-+  BASE_EXPORT void Init();
-+  BASE_EXPORT void Update(const void* data, size_t nbytes);
-+  BASE_EXPORT void Final();
-+
-+  // 20 bytes of message digest.
-+  const unsigned char* Digest() const {
-+    return reinterpret_cast<const unsigned char*>(H);
-+  }
-+
-+ private:
-+  void Pad();
-+  void Process();
-+
-+  uint32_t A, B, C, D, E;
-+
-+  uint32_t H[5];
-+
-+  union {
-+    uint32_t W[80];
-+    uint8_t M[64];
-+  };
-+
-+  uint32_t cursor;
-+  uint64_t l;
-+};
-+
- // These functions perform SHA-1 operations.
- 
- static const size_t kSHA1Length = 20;  // Length in bytes of a SHA-1 hash.
 diff --git a/base/test/launcher/test_launcher.cc b/base/test/launcher/test_launcher.cc
-index 4b86c5621a938f7b57b7c2300ffa5437e1a9e6c8..05e4fe939446bd74e3a5dd207013867c7dc4e54b 100644
+index 8528b1d5fd906be59fcb11b9648981ff6996eff2..5e530c0cadd5373f422de063164d2b9b051aa7ff 100644
 --- a/base/test/launcher/test_launcher.cc
 +++ b/base/test/launcher/test_launcher.cc
-@@ -786,6 +786,7 @@ bool TestLauncher::Init() {
+@@ -800,6 +800,7 @@ bool TestLauncher::Init() {
    if (command_line->HasSwitch(switches::kTestLauncherForceRunBrokenTests))
      force_run_broken_tests_ = true;
  
@@ -1702,7 +1414,7 @@ index 4b86c5621a938f7b57b7c2300ffa5437e1a9e6c8..05e4fe939446bd74e3a5dd207013867c
    if (command_line->HasSwitch(switches::kTestLauncherJobs)) {
      size_t jobs = 0U;
      if (!StringToSizeT(command_line->GetSwitchValueASCII(
-@@ -796,10 +797,12 @@ bool TestLauncher::Init() {
+@@ -810,10 +811,12 @@ bool TestLauncher::Init() {
      }
  
      parallel_jobs_ = jobs;
@@ -1716,7 +1428,7 @@ index 4b86c5621a938f7b57b7c2300ffa5437e1a9e6c8..05e4fe939446bd74e3a5dd207013867c
  
    fprintf(stdout, "Using %" PRIuS " parallel jobs.\n", parallel_jobs_);
 diff --git a/base/test/launcher/unit_test_launcher.cc b/base/test/launcher/unit_test_launcher.cc
-index b97d09f65df8f37cea66683ad557ebf26bb58be1..c77be3f7ae1128d107b6031961b81a1de03a723b 100644
+index c9f0eb0afb139f02094dcb62408f747379fdda67..15008e80bdab65bf29f8e70b682fa92c3d71c0be 100644
 --- a/base/test/launcher/unit_test_launcher.cc
 +++ b/base/test/launcher/unit_test_launcher.cc
 @@ -35,6 +35,8 @@
@@ -1728,7 +1440,7 @@ index b97d09f65df8f37cea66683ad557ebf26bb58be1..c77be3f7ae1128d107b6031961b81a1d
  namespace base {
  
  namespace {
-@@ -181,6 +183,8 @@ int LaunchUnitTestsInternal(const RunTestSuiteCallback& run_test_suite,
+@@ -182,6 +184,8 @@ int LaunchUnitTestsInternal(const RunTestSuiteCallback& run_test_suite,
                              int default_batch_limit,
                              bool use_job_objects,
                              const Closure& gtest_init) {
@@ -1738,7 +1450,7 @@ index b97d09f65df8f37cea66683ad557ebf26bb58be1..c77be3f7ae1128d107b6031961b81a1d
    // We can't easily fork on Android, just run the test suite directly.
    return run_test_suite.Run();
 diff --git a/base/test/test_suite.cc b/base/test/test_suite.cc
-index a56dc59fecceff86f96180938be3049414e62c32..0fa7b0d94719c61f45e3af47c1feb648c024410c 100644
+index 1e55e973eea49df429d0dc229d0bb33345f64449..ca559fcfd3a03452aa7d0730de811622fa358354 100644
 --- a/base/test/test_suite.cc
 +++ b/base/test/test_suite.cc
 @@ -50,6 +50,8 @@
@@ -1750,7 +1462,7 @@ index a56dc59fecceff86f96180938be3049414e62c32..0fa7b0d94719c61f45e3af47c1feb648
  #endif
  
  #if defined(OS_ANDROID)
-@@ -137,6 +139,7 @@ TestSuite::~TestSuite() {
+@@ -161,6 +163,7 @@ TestSuite::~TestSuite() {
  
  void TestSuite::InitializeFromCommandLine(int argc, char** argv) {
    initialized_command_line_ = CommandLine::Init(argc, argv);
@@ -1758,7 +1470,7 @@ index a56dc59fecceff86f96180938be3049414e62c32..0fa7b0d94719c61f45e3af47c1feb648
    testing::InitGoogleTest(&argc, argv);
    testing::InitGoogleMock(&argc, argv);
  
-@@ -149,6 +152,7 @@ void TestSuite::InitializeFromCommandLine(int argc, char** argv) {
+@@ -173,6 +176,7 @@ void TestSuite::InitializeFromCommandLine(int argc, char** argv) {
  void TestSuite::InitializeFromCommandLine(int argc, wchar_t** argv) {
    // Windows CommandLine::Init ignores argv anyway.
    initialized_command_line_ = CommandLine::Init(argc, NULL);
@@ -1766,7 +1478,7 @@ index a56dc59fecceff86f96180938be3049414e62c32..0fa7b0d94719c61f45e3af47c1feb648
    testing::InitGoogleTest(&argc, argv);
    testing::InitGoogleMock(&argc, argv);
  }
-@@ -367,6 +371,8 @@ void TestSuite::Initialize() {
+@@ -378,6 +382,8 @@ void TestSuite::Initialize() {
    if (EndsWith(default_locale, "POSIX", CompareCase::INSENSITIVE_ASCII))
      i18n::SetICUDefaultLocale("en_US");
  #endif
@@ -24947,10 +24659,10 @@ index 0000000000000000000000000000000000000000..65147900b822f037db955f75fc4dbe41
 +#endif // CLIENT_MAC_HANDLER_DYNAMIC_IMAGES_H__
 diff --git a/breakpad/src/client/mac/handler/exception_handler.cc b/breakpad/src/client/mac/handler/exception_handler.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..6928e98472b519427aebb20f4c20b2741a210576
+index 0000000000000000000000000000000000000000..0bdad4749496bab565490635bde9a88a07c5ba2a
 --- /dev/null
 +++ b/breakpad/src/client/mac/handler/exception_handler.cc
-@@ -0,0 +1,855 @@
+@@ -0,0 +1,860 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -25308,6 +25020,11 @@ index 0000000000000000000000000000000000000000..6928e98472b519427aebb20f4c20b274
 +    bool exit_after_write,
 +    bool report_current_thread) {
 +  bool result = false;
++
++#if TARGET_OS_IPHONE
++  // _exit() should never be called on iOS.
++  exit_after_write = false;
++#endif
 +
 +  if (directCallback_) {
 +    if (directCallback_(callback_context_,
@@ -28001,7 +27718,7 @@ index 0000000000000000000000000000000000000000..4e4b4a68488332a191b331d69d51eae1
 +#endif  // CLIENT_MAC_GENERATOR_MINIDUMP_GENERATOR_H__
 diff --git a/breakpad/src/client/mac/handler/minidump_test.xcodeproj/project.pbxproj b/breakpad/src/client/mac/handler/minidump_test.xcodeproj/project.pbxproj
 new file mode 100644
-index 0000000000000000000000000000000000000000..2a597d502dab2aee720ae27947f4ba4c562ec21f
+index 0000000000000000000000000000000000000000..8c0573d5cb8ba7bc1b9c49c3faf509dce0b19ec7
 --- /dev/null
 +++ b/breakpad/src/client/mac/handler/minidump_test.xcodeproj/project.pbxproj
 @@ -0,0 +1,841 @@
@@ -28075,7 +27792,7 @@ index 0000000000000000000000000000000000000000..2a597d502dab2aee720ae27947f4ba4c
 +		F93A887F0E8B4C8C0026AF89 /* macho_utilities.cc in Sources */ = {isa = PBXBuildFile; fileRef = D2F650FE0BEF947200920385 /* macho_utilities.cc */; };
 +		F93A88800E8B4C8C0026AF89 /* file_id.cc in Sources */ = {isa = PBXBuildFile; fileRef = D2F650FA0BEF947200920385 /* file_id.cc */; };
 +		F93A88860E8B4C9A0026AF89 /* dwarftests.mm in Sources */ = {isa = PBXBuildFile; fileRef = F9721F310E8B07E800D7E813 /* dwarftests.mm */; };
-+		F93A88870E8B4C9A0026AF89 /* dump_syms.mm in Sources */ = {isa = PBXBuildFile; fileRef = F9721F390E8B0D0D00D7E813 /* dump_syms.mm */; };
++		F93A88870E8B4C9A0026AF89 /* dump_syms.cc in Sources */ = {isa = PBXBuildFile; fileRef = F9721F390E8B0D0D00D7E813 /* dump_syms.cc */; };
 +		F93A88880E8B4C9A0026AF89 /* bytereader.cc in Sources */ = {isa = PBXBuildFile; fileRef = F9721F760E8B0DC700D7E813 /* bytereader.cc */; };
 +		F93A88890E8B4C9A0026AF89 /* dwarf2reader.cc in Sources */ = {isa = PBXBuildFile; fileRef = F9721F770E8B0DC700D7E813 /* dwarf2reader.cc */; };
 +		F93A888A0E8B4C9A0026AF89 /* functioninfo.cc in Sources */ = {isa = PBXBuildFile; fileRef = F9721F780E8B0DC700D7E813 /* functioninfo.cc */; };
@@ -28158,7 +27875,7 @@ index 0000000000000000000000000000000000000000..2a597d502dab2aee720ae27947f4ba4c
 +		F9721F300E8B07E800D7E813 /* dwarftests.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = dwarftests.h; sourceTree = "<group>"; };
 +		F9721F310E8B07E800D7E813 /* dwarftests.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = dwarftests.mm; sourceTree = "<group>"; };
 +		F9721F380E8B0CFC00D7E813 /* dump_syms.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = dump_syms.h; path = ../../../common/mac/dump_syms.h; sourceTree = SOURCE_ROOT; };
-+		F9721F390E8B0D0D00D7E813 /* dump_syms.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = dump_syms.mm; path = ../../../common/mac/dump_syms.mm; sourceTree = SOURCE_ROOT; };
++		F9721F390E8B0D0D00D7E813 /* dump_syms.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = dump_syms.cc; path = ../../../common/mac/dump_syms.cc; sourceTree = SOURCE_ROOT; };
 +		F9721F6B0E8B0D7000D7E813 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
 +		F9721F760E8B0DC700D7E813 /* bytereader.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = bytereader.cc; path = ../../../common/dwarf/bytereader.cc; sourceTree = SOURCE_ROOT; };
 +		F9721F770E8B0DC700D7E813 /* dwarf2reader.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = dwarf2reader.cc; path = ../../../common/dwarf/dwarf2reader.cc; sourceTree = SOURCE_ROOT; };
@@ -28247,7 +27964,7 @@ index 0000000000000000000000000000000000000000..2a597d502dab2aee720ae27947f4ba4c
 +				F9721F760E8B0DC700D7E813 /* bytereader.cc */,
 +				F9721F770E8B0DC700D7E813 /* dwarf2reader.cc */,
 +				F9721F780E8B0DC700D7E813 /* functioninfo.cc */,
-+				F9721F390E8B0D0D00D7E813 /* dump_syms.mm */,
++				F9721F390E8B0D0D00D7E813 /* dump_syms.cc */,
 +				F9721F380E8B0CFC00D7E813 /* dump_syms.h */,
 +				F917C4F70E03265A00F86017 /* breakpad_exc_server.c */,
 +				F917C4F80E03265A00F86017 /* breakpad_exc_server.h */,
@@ -28604,7 +28321,7 @@ index 0000000000000000000000000000000000000000..2a597d502dab2aee720ae27947f4ba4c
 +			buildActionMask = 2147483647;
 +			files = (
 +				F93A88860E8B4C9A0026AF89 /* dwarftests.mm in Sources */,
-+				F93A88870E8B4C9A0026AF89 /* dump_syms.mm in Sources */,
++				F93A88870E8B4C9A0026AF89 /* dump_syms.cc in Sources */,
 +				F93A88880E8B4C9A0026AF89 /* bytereader.cc in Sources */,
 +				F93A88890E8B4C9A0026AF89 /* dwarf2reader.cc in Sources */,
 +				F93A888A0E8B4C9A0026AF89 /* functioninfo.cc in Sources */,
@@ -60042,7 +59759,7 @@ index 0000000000000000000000000000000000000000..a3c123056fa954ff38518773a3fc5f0b
 +#endif  // CLIENT_WINDOWS_CRASH_GENERATION_MINIDUMP_GENERATOR_H_
 diff --git a/breakpad/src/client/windows/handler/exception_handler.cc b/breakpad/src/client/windows/handler/exception_handler.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..ef581dd3a9ac425522dff72aa93ff2dd8c9b41ff
+index 0000000000000000000000000000000000000000..fc22cd9f6ac3eb872cee4bf8a2abd3fdec9fa24a
 --- /dev/null
 +++ b/breakpad/src/client/windows/handler/exception_handler.cc
 @@ -0,0 +1,1075 @@
@@ -60088,12 +59805,6 @@ index 0000000000000000000000000000000000000000..ef581dd3a9ac425522dff72aa93ff2dd
 +#include "common/windows/guid_string.h"
 +
 +namespace google_breakpad {
-+
-+static const int kWaitForHandlerThreadMs = 60000;
-+static const int kExceptionHandlerThreadInitialStackSize = 64 * 1024;
-+
-+// As documented on MSDN, on failure SuspendThread returns (DWORD) -1
-+static const DWORD kFailedToSuspendThread = static_cast<DWORD>(-1);
 +
 +// This is passed as the context to the MinidumpWriteDump callback.
 +typedef struct {
@@ -60265,6 +59976,7 @@ index 0000000000000000000000000000000000000000..ef581dd3a9ac425522dff72aa93ff2dd
 +    // Don't attempt to create the thread if we could not create the semaphores.
 +    if (handler_finish_semaphore_ != NULL && handler_start_semaphore_ != NULL) {
 +      DWORD thread_id;
++      const int kExceptionHandlerThreadInitialStackSize = 64 * 1024;
 +      handler_thread_ = CreateThread(NULL,         // lpThreadAttributes
 +                                     kExceptionHandlerThreadInitialStackSize,
 +                                     ExceptionHandlerThreadMain,
@@ -60401,6 +60113,7 @@ index 0000000000000000000000000000000000000000..ef581dd3a9ac425522dff72aa93ff2dd
 +    // inside DllMain.
 +    is_shutdown_ = true;
 +    ReleaseSemaphore(handler_start_semaphore_, 1, NULL);
++    const int kWaitForHandlerThreadMs = 60000;
 +    WaitForSingleObject(handler_thread_, kWaitForHandlerThreadMs);
 +#else
 +    TerminateThread(handler_thread_, 1);
@@ -60528,7 +60241,9 @@ index 0000000000000000000000000000000000000000..ef581dd3a9ac425522dff72aa93ff2dd
 +  DWORD code = exinfo->ExceptionRecord->ExceptionCode;
 +  LONG action;
 +  bool is_debug_exception = (code == EXCEPTION_BREAKPOINT) ||
-+                            (code == EXCEPTION_SINGLE_STEP);
++                            (code == EXCEPTION_SINGLE_STEP) ||
++                            (code == DBG_PRINTEXCEPTION_C) ||
++                            (code == DBG_PRINTEXCEPTION_WIDE_C);
 +
 +  if (code == EXCEPTION_INVALID_HANDLE &&
 +      current_handler->consume_invalid_handle_exceptions_) {
@@ -60829,6 +60544,8 @@ index 0000000000000000000000000000000000000000..ef581dd3a9ac425522dff72aa93ff2dd
 +  EXCEPTION_RECORD ex;
 +  CONTEXT ctx;
 +  EXCEPTION_POINTERS exinfo = { NULL, NULL };
++  // As documented on MSDN, on failure SuspendThread returns (DWORD) -1
++  const DWORD kFailedToSuspendThread = static_cast<DWORD>(-1);
 +  DWORD last_suspend_count = kFailedToSuspendThread;
 +  HANDLE child_thread_handle = OpenThread(THREAD_GET_CONTEXT |
 +                                          THREAD_QUERY_INFORMATION |
@@ -71305,10 +71022,10 @@ index 0000000000000000000000000000000000000000..e66062d1fe48a35dc27000dbbec6dfbb
 +}  
 diff --git a/breakpad/src/common/dwarf/cfi_assembler.cc b/breakpad/src/common/dwarf/cfi_assembler.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..dbc2efae6fda5a0081da2138c41c7b13db74ccbb
+index 0000000000000000000000000000000000000000..2dc2208577be9282cdae02a6b3a84ffc2ba6ae12
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/cfi_assembler.cc
-@@ -0,0 +1,198 @@
+@@ -0,0 +1,204 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -71357,7 +71074,9 @@ index 0000000000000000000000000000000000000000..dbc2efae6fda5a0081da2138c41c7b13
 +                                  unsigned return_address_register,
 +                                  uint8_t version,
 +                                  const string &augmentation,
-+                                  bool dwarf64) {
++                                  bool dwarf64,
++                                  uint8_t address_size,
++                                  uint8_t segment_size) {
 +  assert(!entry_length_);
 +  entry_length_ = new PendingLength();
 +  in_fde_ = false;
@@ -71374,6 +71093,10 @@ index 0000000000000000000000000000000000000000..dbc2efae6fda5a0081da2138c41c7b13
 +  }
 +  D8(version);
 +  AppendCString(augmentation);
++  if (version >= 4) {
++    D8(address_size);
++    D8(segment_size);
++  }
 +  ULEB128(code_alignment_factor);
 +  LEB128(data_alignment_factor);
 +  if (version == 1)
@@ -71509,10 +71232,10 @@ index 0000000000000000000000000000000000000000..dbc2efae6fda5a0081da2138c41c7b13
 +} // namespace google_breakpad
 diff --git a/breakpad/src/common/dwarf/cfi_assembler.h b/breakpad/src/common/dwarf/cfi_assembler.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..227812b588e29b1412d3ad4cb3ea04ffbfce098d
+index 0000000000000000000000000000000000000000..bd7354d127536cf312fdfb4d3d3c13f9985b8d7a
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/cfi_assembler.h
-@@ -0,0 +1,269 @@
+@@ -0,0 +1,271 @@
 +// -*- mode: C++ -*-
 +
 +// Copyright (c) 2010, Google Inc.
@@ -71653,7 +71376,9 @@ index 0000000000000000000000000000000000000000..227812b588e29b1412d3ad4cb3ea04ff
 +                        unsigned return_address_register,
 +                        uint8_t version = 3,
 +                        const string &augmentation = "",
-+                        bool dwarf64 = false);
++                        bool dwarf64 = false,
++                        uint8_t address_size = 8,
++                        uint8_t segment_size = 0);
 +
 +  // Append a Frame Description Entry header to this section with the
 +  // given values. If dwarf64 is true, use the 64-bit DWARF initial
@@ -72893,10 +72618,10 @@ index 0000000000000000000000000000000000000000..db70eb31b9e3efcd176601192b20f52a
 +}
 diff --git a/breakpad/src/common/dwarf/dwarf2enums.h b/breakpad/src/common/dwarf/dwarf2enums.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..6b8a724591cd1314303768c66e9e64a98bcd4009
+index 0000000000000000000000000000000000000000..4316a89ccd6e3bb2bc05082381c407b66c08ed87
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2enums.h
-@@ -0,0 +1,675 @@
+@@ -0,0 +1,679 @@
 +// -*- mode: c++ -*-
 +
 +// Copyright (c) 2010 Google Inc. All Rights Reserved.
@@ -73131,6 +72856,8 @@ index 0000000000000000000000000000000000000000..6b8a724591cd1314303768c66e9e64a9
 +  DW_AT_call_column   = 0x57,
 +  DW_AT_call_file     = 0x58,
 +  DW_AT_call_line     = 0x59,
++  // DWARF 4
++  DW_AT_linkage_name  = 0x6e,
 +  // SGI/MIPS extensions.
 +  DW_AT_MIPS_fde = 0x2001,
 +  DW_AT_MIPS_loop_begin = 0x2002,
@@ -73398,7 +73125,7 @@ index 0000000000000000000000000000000000000000..6b8a724591cd1314303768c66e9e64a9
 +  DW_OP_call_frame_cfa               =0x9c,
 +  DW_OP_bit_piece                    =0x9d,
 +  DW_OP_lo_user                      =0xe0,
-+  DW_OP_hi_user                      =0xff,  
++  DW_OP_hi_user                      =0xff,
 +  // GNU extensions
 +  DW_OP_GNU_push_tls_address         =0xe0,
 +  // Extensions for Fission.  See http://gcc.gnu.org/wiki/DebugFission.
@@ -73441,6 +73168,8 @@ index 0000000000000000000000000000000000000000..6b8a724591cd1314303768c66e9e64a9
 +    DW_LANG_ObjC_plus_plus           =0x0011,
 +    DW_LANG_UPC                      =0x0012,
 +    DW_LANG_D                        =0x0013,
++    DW_LANG_Rust                     =0x001c,
++    DW_LANG_Swift                    =0x001e,
 +    // Implementation-defined language code range.
 +    DW_LANG_lo_user = 0x8000,
 +    DW_LANG_hi_user = 0xffff,
@@ -73567,17 +73296,17 @@ index 0000000000000000000000000000000000000000..6b8a724591cd1314303768c66e9e64a9
 +    // encoding (except DW_EH_PE_aligned), and indicates that the
 +    // encoded value represents the address at which the true address
 +    // is stored, not the true address itself.
-+    DW_EH_PE_indirect	= 0x80  
++    DW_EH_PE_indirect	= 0x80
 +  };
 +
 +}  // namespace dwarf2reader
 +#endif  // COMMON_DWARF_DWARF2ENUMS_H__
 diff --git a/breakpad/src/common/dwarf/dwarf2reader.cc b/breakpad/src/common/dwarf/dwarf2reader.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..a65b43c8a3c0a4c59a74f2f42b1525ddf6ee2905
+index 0000000000000000000000000000000000000000..fda049ddae7e4160c73c4b33e92645ac98c3e492
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2reader.cc
-@@ -0,0 +1,2734 @@
+@@ -0,0 +1,2770 @@
 +// Copyright (c) 2010 Google Inc. All Rights Reserved.
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -75833,11 +75562,11 @@ index 0000000000000000000000000000000000000000..a65b43c8a3c0a4c59a74f2f42b1525dd
 +  cursor++;
 +
 +  // If we don't recognize the version, we can't parse any more fields of the
-+  // CIE. For DWARF CFI, we handle versions 1 through 3 (there was never a
-+  // version 2 of CFI data). For .eh_frame, we handle versions 1 and 3 as well;
++  // CIE. For DWARF CFI, we handle versions 1 through 4 (there was never a
++  // version 2 of CFI data). For .eh_frame, we handle versions 1 and 4 as well;
 +  // the difference between those versions seems to be the same as for
 +  // .debug_frame.
-+  if (cie->version < 1 || cie->version > 3) {
++  if (cie->version < 1 || cie->version > 4) {
 +    reporter_->UnrecognizedVersion(cie->offset, cie->version);
 +    return false;
 +  }
@@ -75867,16 +75596,36 @@ index 0000000000000000000000000000000000000000..a65b43c8a3c0a4c59a74f2f42b1525dd
 +    }
 +  }
 +
++  if (cie->version >= 4) {
++    uint8_t address_size = *cursor++;
++    if (address_size != 8) {
++      // TODO(scottmg): Only supporting x64 for now.
++      reporter_->UnexpectedAddressSize(cie->offset, address_size);
++      return false;
++    }
++
++    uint8_t segment_size = *cursor++;
++    if (segment_size != 0) {
++      // TODO(scottmg): Only supporting x64 for now.
++      // I would have perhaps expected 4 here, but LLVM emits a 0, near
++      // http://llvm.org/docs/doxygen/html/MCDwarf_8cpp_source.html#l00606. As
++      // we are not using the value, only succeed for now if it's the expected
++      // 0.
++      reporter_->UnexpectedSegmentSize(cie->offset, segment_size);
++      return false;
++    }
++  }
++
 +  // Parse the code alignment factor.
 +  cie->code_alignment_factor = reader_->ReadUnsignedLEB128(cursor, &len);
 +  if (size_t(cie->end - cursor) < len) return ReportIncomplete(cie);
 +  cursor += len;
-+  
++
 +  // Parse the data alignment factor.
 +  cie->data_alignment_factor = reader_->ReadSignedLEB128(cursor, &len);
 +  if (size_t(cie->end - cursor) < len) return ReportIncomplete(cie);
 +  cursor += len;
-+  
++
 +  // Parse the return address register. This is a ubyte in version 1, and
 +  // a ULEB128 in version 3.
 +  if (cie->version == 1) {
@@ -75987,7 +75736,7 @@ index 0000000000000000000000000000000000000000..a65b43c8a3c0a4c59a74f2f42b1525dd
 +
 +  return true;
 +}
-+  
++
 +bool CallFrameInfo::ReadFDEFields(FDE *fde) {
 +  const uint8_t *cursor = fde->fields;
 +  size_t size;
@@ -76228,6 +75977,22 @@ index 0000000000000000000000000000000000000000..a65b43c8a3c0a4c59a74f2f42b1525dd
 +          filename_.c_str(), offset, section_.c_str(), cie_offset);
 +}
 +
++void CallFrameInfo::Reporter::UnexpectedAddressSize(uint64 offset,
++                                                    uint8_t address_size) {
++  fprintf(stderr,
++          "%s: CFI frame description entry at offset 0x%llx in '%s':"
++          " CIE specifies unexpected address size: %d\n",
++          filename_.c_str(), offset, section_.c_str(), address_size);
++}
++
++void CallFrameInfo::Reporter::UnexpectedSegmentSize(uint64 offset,
++                                                    uint8_t segment_size) {
++  fprintf(stderr,
++          "%s: CFI frame description entry at offset 0x%llx in '%s':"
++          " CIE specifies unexpected segment size: %d\n",
++          filename_.c_str(), offset, section_.c_str(), segment_size);
++}
++
 +void CallFrameInfo::Reporter::UnrecognizedVersion(uint64 offset, int version) {
 +  fprintf(stderr,
 +          "%s: CFI frame description entry at offset 0x%llx in '%s':"
@@ -76314,10 +76079,10 @@ index 0000000000000000000000000000000000000000..a65b43c8a3c0a4c59a74f2f42b1525dd
 +}  // namespace dwarf2reader
 diff --git a/breakpad/src/common/dwarf/dwarf2reader.h b/breakpad/src/common/dwarf/dwarf2reader.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..064c42bc8a50f765cf5cea73c456a9bbcf0d8663
+index 0000000000000000000000000000000000000000..5d2d7f604893d636e96d0a619db8c0258a8e221d
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2reader.h
-@@ -0,0 +1,1288 @@
+@@ -0,0 +1,1296 @@
 +// -*- mode: C++ -*-
 +
 +// Copyright (c) 2010 Google Inc. All Rights Reserved.
@@ -77547,6 +77312,14 @@ index 0000000000000000000000000000000000000000..064c42bc8a50f765cf5cea73c456a9bb
 +  // there is not a CIE.
 +  virtual void BadCIEId(uint64 offset, uint64 cie_offset);
 +
++  // The FDE at OFFSET refers to a CIE with an address size we don't know how
++  // to handle.
++  virtual void UnexpectedAddressSize(uint64 offset, uint8_t address_size);
++
++  // The FDE at OFFSET refers to a CIE with an segment descriptor size we
++  // don't know how to handle.
++  virtual void UnexpectedSegmentSize(uint64 offset, uint8_t segment_size);
++
 +  // The FDE at OFFSET refers to a CIE with version number VERSION,
 +  // which we don't recognize. We cannot parse DWARF CFI if it uses
 +  // a version number we don't recognize.
@@ -77608,10 +77381,10 @@ index 0000000000000000000000000000000000000000..064c42bc8a50f765cf5cea73c456a9bb
 +#endif  // UTIL_DEBUGINFO_DWARF2READER_H__
 diff --git a/breakpad/src/common/dwarf/dwarf2reader_cfi_unittest.cc b/breakpad/src/common/dwarf/dwarf2reader_cfi_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..e50ea5fbd3d23e16bc92ada7318a744ee0e8abaf
+index 0000000000000000000000000000000000000000..38cc7ea318d323e41d38204c99d319d6ed8d1ef1
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/dwarf2reader_cfi_unittest.cc
-@@ -0,0 +1,2468 @@
+@@ -0,0 +1,2555 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -77740,6 +77513,8 @@ index 0000000000000000000000000000000000000000..e50ea5fbd3d23e16bc92ada7318a744e
 +  MOCK_METHOD1(EarlyEHTerminator, void(uint64));
 +  MOCK_METHOD2(CIEPointerOutOfRange, void(uint64, uint64));
 +  MOCK_METHOD2(BadCIEId, void(uint64, uint64));
++  MOCK_METHOD2(UnexpectedAddressSize, void(uint64, uint8_t));
++  MOCK_METHOD2(UnexpectedSegmentSize, void(uint64, uint8_t));
 +  MOCK_METHOD2(UnrecognizedVersion, void(uint64, int version));
 +  MOCK_METHOD2(UnrecognizedAugmentation, void(uint64, const string &));
 +  MOCK_METHOD2(InvalidPointerEncoding, void(uint64, uint8));
@@ -78217,6 +77992,91 @@ index 0000000000000000000000000000000000000000..e50ea5fbd3d23e16bc92ada7318a744e
 +                       contents.size(),
 +                       &byte_reader, &handler, &reporter);
 +  EXPECT_TRUE(parser.Start());
++}
++
++TEST_F(CFI, CIEVersion4AdditionalFields) {
++  CFISection section(kBigEndian, 4);
++  Label cie;
++  section
++      .Mark(&cie)
++      // CIE version 4 with expected address and segment size.
++      .CIEHeader(0x0ab4758d, 0xc010fdf7, 0x89, 4, "", true, 8, 0)
++      .FinishEntry()
++      // FDE, citing that CIE.
++      .FDEHeader(cie, 0x86763f2b, 0x2a66dc23)
++      .FinishEntry();
++
++  PERHAPS_WRITE_DEBUG_FRAME_FILE("CIEVersion3ReturnColumn", section);
++
++  {
++    InSequence s;
++    EXPECT_CALL(handler, Entry(_, 0x86763f2b, 0x2a66dc23, 4, "", 0x89))
++        .WillOnce(Return(true));
++    EXPECT_CALL(handler, End()).WillOnce(Return(true));
++  }
++
++  string contents;
++  EXPECT_TRUE(section.GetContents(&contents));
++  ByteReader byte_reader(ENDIANNESS_BIG);
++  byte_reader.SetAddressSize(4);
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
++                       &byte_reader, &handler, &reporter);
++  EXPECT_TRUE(parser.Start());
++}
++
++TEST_F(CFI, CIEVersion4AdditionalFieldsUnexpectedAddressSize) {
++  CFISection section(kBigEndian, 4);
++  Label cie;
++
++  section
++      .Mark(&cie)
++      // Unexpected address size.
++      .CIEHeader(0x4be22f75, 0x2492236e, 0x6b6efb87, 4, "", true, 3, 0)
++      .FinishEntry()
++      // FDE, citing that CIE.
++      .FDEHeader(cie, 0x86763f2b, 0x2a66dc23)
++      .FinishEntry();
++
++  PERHAPS_WRITE_DEBUG_FRAME_FILE("AdditionalFieldsUnexpectedAddress", section);
++
++  EXPECT_CALL(reporter, UnexpectedAddressSize(_, 3))
++    .WillOnce(Return());
++
++  string contents;
++  EXPECT_TRUE(section.GetContents(&contents));
++  ByteReader byte_reader(ENDIANNESS_BIG);
++  byte_reader.SetAddressSize(8);
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
++                       &byte_reader, &handler, &reporter);
++  EXPECT_FALSE(parser.Start());
++}
++
++TEST_F(CFI, CIEVersion4AdditionalFieldsUnexpectedSegmentSize) {
++  CFISection section(kBigEndian, 4);
++  Label cie;
++
++  section
++      .Mark(&cie)
++      .CIEHeader(0xf8bc4399, 0x8cf09931, 0xf2f519b2, 4, "", true, 8, 7)
++      .FinishEntry()
++      .FDEHeader(cie, 0x7bf0fda0, 0xcbcd28d8)
++      .FinishEntry();
++
++  PERHAPS_WRITE_DEBUG_FRAME_FILE("AdditionalFieldsUnexpectedSegment", section);
++
++  EXPECT_CALL(reporter, UnexpectedSegmentSize(_, 7))
++    .WillOnce(Return());
++
++  string contents;
++  EXPECT_TRUE(section.GetContents(&contents));
++  ByteReader byte_reader(ENDIANNESS_BIG);
++  byte_reader.SetAddressSize(8);
++  CallFrameInfo parser(reinterpret_cast<const uint8_t *>(contents.data()),
++                       contents.size(),
++                       &byte_reader, &handler, &reporter);
++  EXPECT_FALSE(parser.Start());
 +}
 +
 +struct CFIInsnFixture: public CFIFixture {
@@ -80730,7 +80590,7 @@ index 0000000000000000000000000000000000000000..e91de90610de5d0de708491b444aa2a4
 +#endif // COMMON_DWARF_DWARF2READER_TEST_COMMON_H__
 diff --git a/breakpad/src/common/dwarf/elf_reader.cc b/breakpad/src/common/dwarf/elf_reader.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..56847c310b87fe902143d51ffc8946fd4f00ead6
+index 0000000000000000000000000000000000000000..4135a51a98051ffbadd5567e87f6fb80794f5b77
 --- /dev/null
 +++ b/breakpad/src/common/dwarf/elf_reader.cc
 @@ -0,0 +1,1273 @@
@@ -80783,7 +80643,8 @@ index 0000000000000000000000000000000000000000..56847c310b87fe902143d51ffc8946fd
 +
 +#include "third_party/musl/include/elf.h"
 +#include "elf_reader.h"
-+//#include "using_std_string.h"
++#include "common/using_std_string.h"
++
 +// EM_AARCH64 is not defined by elf.h of GRTE v3 on x86.
 +// TODO(dougkwan): Remove this when v17 is retired.
 +#if !defined(EM_AARCH64)
@@ -80810,7 +80671,6 @@ index 0000000000000000000000000000000000000000..56847c310b87fe902143d51ffc8946fd
 +//DEFINE_bool(elfreader_process_dynsyms, true,
 +//            "Activate PLT function processing");
 +
-+using std::string;
 +using std::vector;
 +
 +namespace {
@@ -83557,10 +83417,10 @@ index 0000000000000000000000000000000000000000..807d1b20c338f5959040cb7687cd2a7b
 +}
 diff --git a/breakpad/src/common/dwarf_cu_to_module.cc b/breakpad/src/common/dwarf_cu_to_module.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..479e39b221250bf37a84cbd8ecdbb652825757e6
+index 0000000000000000000000000000000000000000..8d87436674af2f407dffb160743599c0f9f9c779
 --- /dev/null
 +++ b/breakpad/src/common/dwarf_cu_to_module.cc
-@@ -0,0 +1,1075 @@
+@@ -0,0 +1,1082 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -83602,9 +83462,6 @@ index 0000000000000000000000000000000000000000..479e39b221250bf37a84cbd8ecdbb652
 +#include "common/dwarf_cu_to_module.h"
 +
 +#include <assert.h>
-+#if !defined(__ANDROID__)
-+#include <cxxabi.h>
-+#endif
 +#include <inttypes.h>
 +#include <stdint.h>
 +#include <stdio.h>
@@ -83913,20 +83770,22 @@ index 0000000000000000000000000000000000000000..479e39b221250bf37a84cbd8ecdbb652
 +    case dwarf2reader::DW_AT_name:
 +      name_attribute_ = AddStringToPool(data);
 +      break;
-+    case dwarf2reader::DW_AT_MIPS_linkage_name: {
-+      char* demangled = NULL;
-+      int status = -1;
-+#if !defined(__ANDROID__)  // Android NDK doesn't provide abi::__cxa_demangle.
-+      demangled = abi::__cxa_demangle(data.c_str(), NULL, NULL, &status);
-+#endif
-+      if (status != 0) {
-+        cu_context_->reporter->DemangleError(data, status);
-+        demangled_name_ = "";
-+        break;
-+      }
-+      if (demangled) {
-+        demangled_name_ = AddStringToPool(demangled);
-+        free(reinterpret_cast<void*>(demangled));
++    case dwarf2reader::DW_AT_MIPS_linkage_name:
++    case dwarf2reader::DW_AT_linkage_name: {
++      string demangled;
++      Language::DemangleResult result =
++          cu_context_->language->DemangleName(data, &demangled);
++      switch (result) {
++        case Language::kDemangleSuccess:
++          demangled_name_ = AddStringToPool(demangled);
++          break;
++
++        case Language::kDemangleFailure:
++          cu_context_->reporter->DemangleError(data);
++          // fallthrough
++        case Language::kDontDemangle:
++          demangled_name_.clear();
++          break;
 +      }
 +      break;
 +    }
@@ -84239,11 +84098,10 @@ index 0000000000000000000000000000000000000000..479e39b221250bf37a84cbd8ecdbb652
 +          filename_.c_str(), offset);
 +}
 +
-+void DwarfCUToModule::WarningReporter::DemangleError(
-+    const string &input, int error) {
++void DwarfCUToModule::WarningReporter::DemangleError(const string &input) {
 +  CUHeading();
-+  fprintf(stderr, "%s: warning: failed to demangle %s with error %d\n",
-+          filename_.c_str(), input.c_str(), error);
++  fprintf(stderr, "%s: warning: failed to demangle %s\n",
++          filename_.c_str(), input.c_str());
 +}
 +
 +void DwarfCUToModule::WarningReporter::UnhandledInterCUReference(
@@ -84324,6 +84182,7 @@ index 0000000000000000000000000000000000000000..479e39b221250bf37a84cbd8ecdbb652
 +    case dwarf2reader::DW_TAG_class_type:
 +    case dwarf2reader::DW_TAG_structure_type:
 +    case dwarf2reader::DW_TAG_union_type:
++    case dwarf2reader::DW_TAG_module:
 +      return new NamedScopeHandler(cu_context_.get(), child_context_.get(),
 +                                   offset);
 +    default:
@@ -84335,6 +84194,14 @@ index 0000000000000000000000000000000000000000..479e39b221250bf37a84cbd8ecdbb652
 +  switch (language) {
 +    case dwarf2reader::DW_LANG_Java:
 +      cu_context_->language = Language::Java;
++      break;
++
++    case dwarf2reader::DW_LANG_Swift:
++      cu_context_->language = Language::Swift;
++      break;
++
++    case dwarf2reader::DW_LANG_Rust:
++      cu_context_->language = Language::Rust;
 +      break;
 +
 +    // DWARF has no generic language code for assembly language; this is
@@ -84638,7 +84505,7 @@ index 0000000000000000000000000000000000000000..479e39b221250bf37a84cbd8ecdbb652
 +} // namespace google_breakpad
 diff --git a/breakpad/src/common/dwarf_cu_to_module.h b/breakpad/src/common/dwarf_cu_to_module.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..fca92710e6f74366d4e10a194edc41e81fd85f43
+index 0000000000000000000000000000000000000000..a36b82b0e47ef431ba64b3d057d6b6f475d4ee8d
 --- /dev/null
 +++ b/breakpad/src/common/dwarf_cu_to_module.h
 @@ -0,0 +1,320 @@
@@ -84846,7 +84713,7 @@ index 0000000000000000000000000000000000000000..fca92710e6f74366d4e10a194edc41e8
 +    virtual void UnnamedFunction(uint64 offset);
 +
 +    // __cxa_demangle() failed to demangle INPUT.
-+    virtual void DemangleError(const string &input, int error);
++    virtual void DemangleError(const string &input);
 +
 +    // The DW_FORM_ref_addr at OFFSET to TARGET was not handled because
 +    // FilePrivate did not retain the inter-CU specification data.
@@ -84964,10 +84831,10 @@ index 0000000000000000000000000000000000000000..fca92710e6f74366d4e10a194edc41e8
 +#endif  // COMMON_LINUX_DWARF_CU_TO_MODULE_H__
 diff --git a/breakpad/src/common/dwarf_cu_to_module_unittest.cc b/breakpad/src/common/dwarf_cu_to_module_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..619e90a2ee5b95e0d2159de001e9b7338b2d6630
+index 0000000000000000000000000000000000000000..2ce4a609cf560db7dbfaa98155dc993a59d5f076
 --- /dev/null
 +++ b/breakpad/src/common/dwarf_cu_to_module_unittest.cc
-@@ -0,0 +1,1804 @@
+@@ -0,0 +1,1852 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -85053,7 +84920,7 @@ index 0000000000000000000000000000000000000000..619e90a2ee5b95e0d2159de001e9b733
 +  MOCK_METHOD1(UncoveredFunction, void(const Module::Function &function));
 +  MOCK_METHOD1(UncoveredLine, void(const Module::Line &line));
 +  MOCK_METHOD1(UnnamedFunction, void(uint64 offset));
-+  MOCK_METHOD2(DemangleError, void(const string &input, int error));
++  MOCK_METHOD1(DemangleError, void(const string &input));
 +  MOCK_METHOD2(UnhandledInterCUReference, void(uint64 offset, uint64 target));
 +};
 +
@@ -86175,6 +86042,7 @@ index 0000000000000000000000000000000000000000..619e90a2ee5b95e0d2159de001e9b733
 +}
 +
 +TEST_F(Specifications, MangledName) {
++  // Language defaults to C++, so no need to set it here.
 +  PushLine(0x93cd3dfc1aa10097ULL, 0x0397d47a0b4ca0d4ULL, "line-file", 54883661);
 +
 +  StartCU();
@@ -86188,6 +86056,53 @@ index 0000000000000000000000000000000000000000..619e90a2ee5b95e0d2159de001e9b733
 +
 +  TestFunctionCount(1);
 +  TestFunction(0, "C::f(int)",
++               0x93cd3dfc1aa10097ULL, 0x0397d47a0b4ca0d4ULL);
++}
++
++TEST_F(Specifications, MangledNameSwift) {
++  // Swift mangled names should pass through untouched.
++  SetLanguage(dwarf2reader::DW_LANG_Swift);
++  PushLine(0x93cd3dfc1aa10097ULL, 0x0397d47a0b4ca0d4ULL, "line-file", 54883661);
++  StartCU();
++  const string kName = "_TFC9swifttest5Shape17simpleDescriptionfS0_FT_Si";
++  DeclarationDIE(&root_handler_, 0xcd3c51b946fb1eeeLL,
++                 dwarf2reader::DW_TAG_subprogram, "declaration-name",
++                 kName);
++  DefinitionDIE(&root_handler_, dwarf2reader::DW_TAG_subprogram,
++                0xcd3c51b946fb1eeeLL, "",
++                0x93cd3dfc1aa10097ULL, 0x0397d47a0b4ca0d4ULL);
++  root_handler_.Finish();
++
++  TestFunctionCount(1);
++  TestFunction(0, kName,
++               0x93cd3dfc1aa10097ULL, 0x0397d47a0b4ca0d4ULL);
++}
++
++TEST_F(Specifications, MangledNameRust) {
++  SetLanguage(dwarf2reader::DW_LANG_Rust);
++  PushLine(0x93cd3dfc1aa10097ULL, 0x0397d47a0b4ca0d4ULL, "line-file", 54883661);
++
++  StartCU();
++  const string kName = "_ZN14rustc_demangle8demangle17h373defa94bffacdeE";
++  DeclarationDIE(&root_handler_, 0xcd3c51b946fb1eeeLL,
++                 dwarf2reader::DW_TAG_subprogram, "declaration-name",
++                 kName);
++  DefinitionDIE(&root_handler_, dwarf2reader::DW_TAG_subprogram,
++                0xcd3c51b946fb1eeeLL, "",
++                0x93cd3dfc1aa10097ULL, 0x0397d47a0b4ca0d4ULL);
++  root_handler_.Finish();
++
++  TestFunctionCount(1);
++  TestFunction(0,
++#ifndef HAVE_RUST_DEMANGLE
++               // Rust mangled names should pass through untouched if not
++               // using rust-demangle.
++               kName,
++#else
++               // If rust-demangle is available this should be properly
++               // demangled.
++               "rustc_demangle::demangle",
++#endif
 +               0x93cd3dfc1aa10097ULL, 0x0397d47a0b4ca0d4ULL);
 +}
 +
@@ -87514,10 +87429,10 @@ index 0000000000000000000000000000000000000000..7c0fcfd35a627ae4ee27e6531678d1e0
 +}
 diff --git a/breakpad/src/common/language.cc b/breakpad/src/common/language.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c2fd81f644c21ced2abbffba67a829b3bf721db5
+index 0000000000000000000000000000000000000000..09eaceb6f80a03f8f16cb77c8ca8523bbc8b6ec6
 --- /dev/null
 +++ b/breakpad/src/common/language.cc
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,197 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -87554,18 +87469,70 @@ index 0000000000000000000000000000000000000000..c2fd81f644c21ced2abbffba67a829b3
 +
 +#include "common/language.h"
 +
++#include <stdlib.h>
++
++#if !defined(__ANDROID__)
++#include <cxxabi.h>
++#endif
++
++#if defined(HAVE_RUST_DEMANGLE)
++#include <rust_demangle.h>
++#endif
++
++#include <limits>
++
++namespace {
++
++string MakeQualifiedNameWithSeparator(const string& parent_name,
++                                      const char* separator,
++                                      const string& name) {
++  if (parent_name.empty()) {
++    return name;
++  }
++
++  return parent_name + separator + name;
++}
++
++}  // namespace
++
 +namespace google_breakpad {
 +
 +// C++ language-specific operations.
 +class CPPLanguage: public Language {
 + public:
 +  CPPLanguage() {}
++
 +  string MakeQualifiedName(const string &parent_name,
 +                           const string &name) const {
-+    if (parent_name.empty())
-+      return name;
-+    else
-+      return parent_name + "::" + name;
++    return MakeQualifiedNameWithSeparator(parent_name, "::", name);
++  }
++
++  virtual DemangleResult DemangleName(const string& mangled,
++                                      std::string* demangled) const {
++#if defined(__ANDROID__)
++    // Android NDK doesn't provide abi::__cxa_demangle.
++    demangled->clear();
++    return kDontDemangle;
++#else
++    int status;
++    char* demangled_c =
++        abi::__cxa_demangle(mangled.c_str(), NULL, NULL, &status);
++
++    DemangleResult result;
++    if (status == 0) {
++      result = kDemangleSuccess;
++      demangled->assign(demangled_c);
++    } else {
++      result = kDemangleFailure;
++      demangled->clear();
++    }
++
++    if (demangled_c) {
++      free(reinterpret_cast<void*>(demangled_c));
++    }
++
++    return result;
++#endif
 +  }
 +};
 +
@@ -87574,19 +87541,79 @@ index 0000000000000000000000000000000000000000..c2fd81f644c21ced2abbffba67a829b3
 +// Java language-specific operations.
 +class JavaLanguage: public Language {
 + public:
++  JavaLanguage() {}
++
 +  string MakeQualifiedName(const string &parent_name,
 +                           const string &name) const {
-+    if (parent_name.empty())
-+      return name;
-+    else
-+      return parent_name + "." + name;
++    return MakeQualifiedNameWithSeparator(parent_name, ".", name);
 +  }
 +};
 +
 +JavaLanguage JavaLanguageSingleton;
 +
++// Swift language-specific operations.
++class SwiftLanguage: public Language {
++ public:
++  SwiftLanguage() {}
++
++  string MakeQualifiedName(const string &parent_name,
++                           const string &name) const {
++    return MakeQualifiedNameWithSeparator(parent_name, ".", name);
++  }
++
++  virtual DemangleResult DemangleName(const string& mangled,
++                                      std::string* demangled) const {
++    // There is no programmatic interface to a Swift demangler. Pass through the
++    // mangled form because it encodes more information than the qualified name
++    // that would have been built by MakeQualifiedName(). The output can be
++    // post-processed by xcrun swift-demangle to transform mangled Swift names
++    // into something more readable.
++    demangled->assign(mangled);
++    return kDemangleSuccess;
++  }
++};
++
++SwiftLanguage SwiftLanguageSingleton;
++
++// Rust language-specific operations.
++class RustLanguage: public Language {
++ public:
++  RustLanguage() {}
++
++  string MakeQualifiedName(const string &parent_name,
++                           const string &name) const {
++    return MakeQualifiedNameWithSeparator(parent_name, ".", name);
++  }
++
++  virtual DemangleResult DemangleName(const string& mangled,
++                                      std::string* demangled) const {
++    // Rust names use GCC C++ name mangling, but demangling them with
++    // abi_demangle doesn't produce stellar results due to them having
++    // another layer of encoding.
++    // If callers provide rustc-demangle, use that.
++#if defined(HAVE_RUST_DEMANGLE)
++    char* rust_demangled = rust_demangle(mangled.c_str());
++    if (rust_demangled == nullptr) {
++      return kDemangleFailure;
++    }
++    demangled->assign(rust_demangled);
++    free_rust_demangled_name(rust_demangled);
++#else
++    // Otherwise, pass through the mangled name so callers can demangle
++    // after the fact.
++    demangled->assign(mangled);
++#endif
++    return kDemangleSuccess;
++  }
++};
++
++RustLanguage RustLanguageSingleton;
++
 +// Assembler language-specific operations.
 +class AssemblerLanguage: public Language {
++ public:
++  AssemblerLanguage() {}
++
 +  bool HasFunctions() const { return false; }
 +  string MakeQualifiedName(const string &parent_name,
 +                           const string &name) const {
@@ -87598,15 +87625,17 @@ index 0000000000000000000000000000000000000000..c2fd81f644c21ced2abbffba67a829b3
 +
 +const Language * const Language::CPlusPlus = &CPPLanguageSingleton;
 +const Language * const Language::Java = &JavaLanguageSingleton;
++const Language * const Language::Swift = &SwiftLanguageSingleton;
++const Language * const Language::Rust = &RustLanguageSingleton;
 +const Language * const Language::Assembler = &AssemblerLanguageSingleton;
 +
 +} // namespace google_breakpad
 diff --git a/breakpad/src/common/language.h b/breakpad/src/common/language.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..bbe303347a32a160f6da2aeb69284e6563620e2f
+index 0000000000000000000000000000000000000000..4ebea1ab29b4991ff6a56ed955f04b8caacfa197
 --- /dev/null
 +++ b/breakpad/src/common/language.h
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,105 @@
 +// -*- mode: c++ -*-
 +
 +// Copyright (c) 2010 Google Inc.
@@ -87686,9 +87715,26 @@ index 0000000000000000000000000000000000000000..bbe303347a32a160f6da2aeb69284e65
 +  virtual string MakeQualifiedName (const string &parent_name,
 +                                    const string &name) const = 0;
 +
++  enum DemangleResult {
++    // Demangling was not performed because it’s not appropriate to attempt.
++    kDontDemangle = -1,
++
++    kDemangleSuccess,
++    kDemangleFailure,
++  };
++
++  // Wraps abi::__cxa_demangle() or similar for languages where appropriate.
++  virtual DemangleResult DemangleName(const string& mangled,
++                                      std::string* demangled) const {
++    demangled->clear();
++    return kDontDemangle;
++  }
++
 +  // Instances for specific languages.
 +  static const Language * const CPlusPlus,
 +                        * const Java,
++                        * const Swift,
++                        * const Rust,
 +                        * const Assembler;
 +};
 +
@@ -90977,10 +91023,10 @@ index 0000000000000000000000000000000000000000..f34ba83142d34a7d5ab96f4de02ae402
 +#endif  // COMMON_LINUX_ELFUTILS_H_
 diff --git a/breakpad/src/common/linux/file_id.cc b/breakpad/src/common/linux/file_id.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..02207758acc91d6bbc54478d289455ecb4abf6ae
+index 0000000000000000000000000000000000000000..311e0302092cf78eb076353e18d5881707fc5a0f
 --- /dev/null
 +++ b/breakpad/src/common/linux/file_id.cc
-@@ -0,0 +1,203 @@
+@@ -0,0 +1,202 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -91028,9 +91074,8 @@ index 0000000000000000000000000000000000000000..02207758acc91d6bbc54478d289455ec
 +#include "common/linux/elfutils.h"
 +#include "common/linux/linux_libc_support.h"
 +#include "common/linux/memory_mapped_file.h"
++#include "common/using_std_string.h"
 +#include "third_party/lss/linux_syscall_support.h"
-+
-+using std::string;
 +
 +namespace google_breakpad {
 +
@@ -99058,7 +99103,7 @@ index 0000000000000000000000000000000000000000..b7bbc0b95bbd8c3c4fb1615ca8fb0b76
 +#endif  // COMMON_MAC_BYTESWAP_H_
 diff --git a/breakpad/src/common/mac/dump_syms.cc b/breakpad/src/common/mac/dump_syms.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..b20a055868230920a6bcb5374f6ca2f1964be008
+index 0000000000000000000000000000000000000000..eb9272929bd96bee0b082caa83b8c3c4b6acbe44
 --- /dev/null
 +++ b/breakpad/src/common/mac/dump_syms.cc
 @@ -0,0 +1,646 @@
@@ -99095,7 +99140,7 @@ index 0000000000000000000000000000000000000000..b20a055868230920a6bcb5374f6ca2f1
 +
 +// Author: Jim Blandy <jimb@mozilla.com> <jimb@red-bean.com>
 +
-+// dump_syms.mm: Create a symbol file for use with minidumps
++// dump_syms.cc: Create a symbol file for use with minidumps
 +
 +#include "common/mac/dump_syms.h"
 +
@@ -112718,7 +112763,7 @@ index 0000000000000000000000000000000000000000..a3dd50aab66c5d72ca1cb602ea3af871
 +#endif  // GOOGLE_BREAKPAD_COMMON_STDIO_WRAPPER_H
 diff --git a/breakpad/src/common/string_conversion.cc b/breakpad/src/common/string_conversion.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..9c0d623fc1043f4d1c082db447686b0797b6eb00
+index 0000000000000000000000000000000000000000..040d3e86ea3a7a8991e425ba3501244806e7b4d7
 --- /dev/null
 +++ b/breakpad/src/common/string_conversion.cc
 @@ -0,0 +1,155 @@
@@ -112781,9 +112826,9 @@ index 0000000000000000000000000000000000000000..9c0d623fc1043f4d1c082db447686b07
 +
 +int UTF8ToUTF16Char(const char *in, int in_length, uint16_t out[2]) {
 +  const UTF8 *source_ptr = reinterpret_cast<const UTF8 *>(in);
-+  const UTF8 *source_end_ptr = source_ptr + sizeof(char);
++  const UTF8 *source_end_ptr = source_ptr + 1;
 +  uint16_t *target_ptr = out;
-+  uint16_t *target_end_ptr = target_ptr + 2 * sizeof(uint16_t);
++  uint16_t *target_end_ptr = target_ptr + 2;
 +  out[0] = out[1] = 0;
 +
 +  // Process one character at a time
@@ -112827,7 +112872,7 @@ index 0000000000000000000000000000000000000000..9c0d623fc1043f4d1c082db447686b07
 +  const UTF32 *source_ptr = reinterpret_cast<const UTF32 *>(&in);
 +  const UTF32 *source_end_ptr = source_ptr + 1;
 +  uint16_t *target_ptr = out;
-+  uint16_t *target_end_ptr = target_ptr + 2 * sizeof(uint16_t);
++  uint16_t *target_end_ptr = target_ptr + 2;
 +  out[0] = out[1] = 0;
 +  ConversionResult result = ConvertUTF32toUTF16(&source_ptr, source_end_ptr,
 +                                                &target_ptr, target_end_ptr,
@@ -122863,10 +122908,10 @@ index 0000000000000000000000000000000000000000..f18ddf42472ccfe085c920def34d2627
 +#endif  /* GOOGLE_BREAKPAD_COMMON_MINIDUMP_EXCEPTION_SOLARIS_H__ */
 diff --git a/breakpad/src/google_breakpad/common/minidump_exception_win32.h b/breakpad/src/google_breakpad/common/minidump_exception_win32.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..6fa3fba444e73024d098b5e5aad5d5255b626737
+index 0000000000000000000000000000000000000000..385bfaef59dae208263f20d8423d841727abbcdf
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/common/minidump_exception_win32.h
-@@ -0,0 +1,2264 @@
+@@ -0,0 +1,2266 @@
 +/* Copyright (c) 2006, Google Inc.
 + * All rights reserved.
 + *
@@ -122963,6 +123008,8 @@ index 0000000000000000000000000000000000000000..6fa3fba444e73024d098b5e5aad5d525
 +      /* EXCEPTION_PRIV_INSTRUCTION */
 +  MD_EXCEPTION_CODE_WIN_STACK_OVERFLOW           = 0xc00000fd,
 +      /* EXCEPTION_STACK_OVERFLOW */
++  MD_EXCEPTION_CODE_WIN_BAD_FUNCTION_TABLE       = 0xc00000ff,
++      /* EXCEPTION_BAD_FUNCTION_TABLE */
 +  MD_EXCEPTION_CODE_WIN_POSSIBLE_DEADLOCK        = 0xc0000194,
 +      /* EXCEPTION_POSSIBLE_DEADLOCK */
 +  MD_EXCEPTION_CODE_WIN_STACK_BUFFER_OVERRUN     = 0xc0000409,
@@ -125133,10 +125180,10 @@ index 0000000000000000000000000000000000000000..6fa3fba444e73024d098b5e5aad5d525
 +#endif  /* GOOGLE_BREAKPAD_COMMON_MINIDUMP_EXCEPTION_WIN32_H__ */
 diff --git a/breakpad/src/google_breakpad/common/minidump_format.h b/breakpad/src/google_breakpad/common/minidump_format.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..645c56c529495e55dc2b3861408ad3d4d420bd4d
+index 0000000000000000000000000000000000000000..251e503df953dc2588d3ad5b9eef91c964ee929e
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/common/minidump_format.h
-@@ -0,0 +1,988 @@
+@@ -0,0 +1,1045 @@
 +/* Copyright (c) 2006, Google Inc.
 + * All rights reserved.
 + *
@@ -125860,6 +125907,41 @@ index 0000000000000000000000000000000000000000..645c56c529495e55dc2b3861408ad3d4
 +/* MAX_PATH from windef.h */
 +#define MD_MAX_PATH 260
 +
++/* For MDXStateConfigFeatureMscInfo.features */
++typedef struct {
++  uint32_t offset;
++  uint32_t size;
++} MDXStateFeature;
++
++/* For MDXStateConfigFeatureMscInfo.enabled_features from winnt.h */
++typedef enum {
++  MD_XSTATE_LEGACY_FLOATING_POINT = 0, /* XSTATE_LEGACY_FLOATING_POINT */
++  MD_XSTATE_LEGACY_SSE            = 1, /* XSTATE_LEGACY_SSE */
++  MD_XSTATE_GSSE                  = 2, /* XSTATE_GSSE */
++  MD_XSTATE_AVX                   = MD_XSTATE_GSSE, /* XSTATE_AVX */
++  MD_XSTATE_MPX_BNDREGS           = 3, /* XSTATE_MPX_BNDREGS */
++  MD_XSTATE_MPX_BNDCSR            = 4, /* XSTATE_MPX_BNDCSR */
++  MD_XSTATE_AVX512_KMASK          = 5, /* XSTATE_AVX512_KMASK */
++  MD_XSTATE_AVX512_ZMM_H          = 6, /* XSTATE_AVX512_ZMM_H */
++  MD_XSTATE_AVX512_ZMM            = 7, /* XSTATE_AVX512_ZMM */
++  MD_XSTATE_IPT                   = 8, /* XSTATE_IPT */
++  MD_XSTATE_LWP                   = 62 /* XSTATE_LWP */
++} MDXStateFeatureFlag;
++
++/* MAXIMUM_XSTATE_FEATURES from winnt.h */
++#define MD_MAXIMUM_XSTATE_FEATURES 64
++
++/* For MDRawMiscInfo.xstate_data */
++typedef struct {
++  uint32_t size_of_info;
++  uint32_t context_size;
++  /* An entry in the features array is valid only if the corresponding bit in
++   * the enabled_features flag is set. */
++  uint64_t enabled_features;
++  MDXStateFeature features[MD_MAXIMUM_XSTATE_FEATURES];
++} MDXStateConfigFeatureMscInfo;
++
++
 +/* The miscellaneous information stream contains a variety
 + * of small pieces of information.  A member is valid if
 + * it's within the available size and its corresponding
@@ -125920,9 +126002,22 @@ index 0000000000000000000000000000000000000000..645c56c529495e55dc2b3861408ad3d4
 +   * MD_MISCINFO_FLAGS1_BUILDSTRING. */
 +  uint16_t build_string[MD_MAX_PATH];  /* UTF-16-encoded, 0-terminated */
 +  uint16_t dbg_bld_str[40];            /* UTF-16-encoded, 0-terminated */
++
++  /* The following fields are not present in MINIDUMP_MISC_INFO_4 but are
++   * in MINIDUMP_MISC_INFO_5.  When this struct is populated, these values
++   * may not be set.  Use flags1 and size_of_info to determine whether these
++   * values are present. */
++
++  /* The following field has its own flags for establishing the validity of
++   * the structure's contents.*/
++  MDXStateConfigFeatureMscInfo xstate_data;
++
++  /* The following field is only valid if flags1 contains
++   * MD_MISCINFO_FLAGS1_PROCESS_COOKIE. */
++  uint32_t process_cookie;
 +} MDRawMiscInfo;  /* MINIDUMP_MISC_INFO, MINIDUMP_MISC_INFO_2,
 +                   * MINIDUMP_MISC_INFO_3, MINIDUMP_MISC_INFO_4,
-+                   * MINIDUMP_MISC_INFO_N */
++                   * MINIDUMP_MISC_INFO_5, MINIDUMP_MISC_INFO_N */
 +
 +static const size_t MD_MISCINFO_SIZE =
 +    offsetof(MDRawMiscInfo, processor_max_mhz);
@@ -125930,7 +126025,14 @@ index 0000000000000000000000000000000000000000..645c56c529495e55dc2b3861408ad3d4
 +    offsetof(MDRawMiscInfo, process_integrity_level);
 +static const size_t MD_MISCINFO3_SIZE =
 +    offsetof(MDRawMiscInfo, build_string[0]);
-+static const size_t MD_MISCINFO4_SIZE = sizeof(MDRawMiscInfo);
++static const size_t MD_MISCINFO4_SIZE =
++    offsetof(MDRawMiscInfo, xstate_data);
++/* Version 5 of the MDRawMiscInfo structure is not a multiple of 8 in size and
++ * yet it contains some 8-bytes sized fields. This causes many compilers to
++ * round the structure size up to a multiple of 8 by adding padding at the end.
++ * The following hack is thus required for matching the proper on-disk size. */
++static const size_t MD_MISCINFO5_SIZE =
++    offsetof(MDRawMiscInfo, process_cookie) + sizeof(uint32_t);
 +
 +/* For (MDRawMiscInfo).flags1.  These values indicate which fields in the
 + * MDRawMiscInfoStructure are valid. */
@@ -125951,6 +126053,8 @@ index 0000000000000000000000000000000000000000..645c56c529495e55dc2b3861408ad3d4
 +      /* MINIDUMP_MISC3_PROTECTED_PROCESS */
 +  MD_MISCINFO_FLAGS1_BUILDSTRING           = 0x00000100,
 +      /* MINIDUMP_MISC4_BUILDSTRING */
++  MD_MISCINFO_FLAGS1_PROCESS_COOKIE        = 0x00000200,
++      /* MINIDUMP_MISC5_PROCESS_COOKIE */
 +} MDMiscInfoFlags1;
 +
 +/*
@@ -136001,10 +136105,10 @@ index 0000000000000000000000000000000000000000..6ee1e962222ebd9b260b45c1f7779b3b
 +
 diff --git a/breakpad/src/processor/exploitability_linux.cc b/breakpad/src/processor/exploitability_linux.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c520059c10b2d386ffd48ac7a42432e82eba6da5
+index 0000000000000000000000000000000000000000..ccc9f1459ccca19b31d4e71bb6da1e8b97db088d
 --- /dev/null
 +++ b/breakpad/src/processor/exploitability_linux.cc
-@@ -0,0 +1,620 @@
+@@ -0,0 +1,626 @@
 +// Copyright (c) 2013 Google Inc.
 +// All rights reserved.
 +//
@@ -136047,11 +136151,12 @@ index 0000000000000000000000000000000000000000..c520059c10b2d386ffd48ac7a42432e8
 +#include <regex.h>
 +#include <stdio.h>
 +#include <stdlib.h>
-+#include <string.h>
 +
 +#include <sstream>
 +#include <iterator>
 +#endif  // _WIN32
++
++#include <string.h>
 +
 +#include "google_breakpad/common/minidump_exception_linux.h"
 +#include "google_breakpad/processor/call_stack.h"
@@ -136061,14 +136166,18 @@ index 0000000000000000000000000000000000000000..c520059c10b2d386ffd48ac7a42432e8
 +
 +namespace {
 +
++// Prefixes for memory mapping names.
++constexpr char kHeapPrefix[] = "[heap";
++constexpr char kStackPrefix[] =  "[stack";
++
 +// This function in libc is called if the program was compiled with
 +// -fstack-protector and a function's stack canary changes.
-+const char kStackCheckFailureFunction[] = "__stack_chk_fail";
++constexpr char kStackCheckFailureFunction[] = "__stack_chk_fail";
 +
 +// This function in libc is called if the program was compiled with
 +// -D_FORTIFY_SOURCE=2, a function like strcpy() is called, and the runtime
 +// can determine that the call would overflow the target buffer.
-+const char kBoundsCheckFailureFunction[] = "__chk_fail";
++constexpr char kBoundsCheckFailureFunction[] = "__chk_fail";
 +
 +#ifndef _WIN32
 +const unsigned int MAX_INSTRUCTION_LEN = 15;
@@ -136546,9 +136655,9 @@ index 0000000000000000000000000000000000000000..c520059c10b2d386ffd48ac7a42432e8
 +  // Checks if the stack pointer maps to a valid mapping and if the mapping
 +  // is not the stack. If the mapping has no name, it is inconclusive whether
 +  // it is off the stack.
-+  return !linux_maps ||
-+         (linux_maps->GetPathname().compare("") &&
-+          linux_maps->GetPathname().compare("[stack]"));
++  return !linux_maps || (linux_maps->GetPathname().compare("") &&
++                         linux_maps->GetPathname().compare(
++                             0, strlen(kStackPrefix), kStackPrefix));
 +}
 +
 +bool ExploitabilityLinux::ExecutableStackOrHeap() {
@@ -136558,9 +136667,10 @@ index 0000000000000000000000000000000000000000..c520059c10b2d386ffd48ac7a42432e8
 +      const MinidumpLinuxMaps *linux_maps =
 +          linux_maps_list->GetLinuxMapsAtIndex(i);
 +      // Check for executable stack or heap for each mapping.
-+      if (linux_maps &&
-+          (!linux_maps->GetPathname().compare("[stack]") ||
-+           !linux_maps->GetPathname().compare("[heap]")) &&
++      if (linux_maps && (!linux_maps->GetPathname().compare(
++                             0, strlen(kStackPrefix), kStackPrefix) ||
++                         !linux_maps->GetPathname().compare(
++                             0, strlen(kHeapPrefix), kHeapPrefix)) &&
 +          linux_maps->IsExecutable()) {
 +        return true;
 +      }
@@ -136762,10 +136872,10 @@ index 0000000000000000000000000000000000000000..e3ff13b6e07da325316639bf55739432
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_EXPLOITABILITY_LINUX_H_
 diff --git a/breakpad/src/processor/exploitability_unittest.cc b/breakpad/src/processor/exploitability_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..502edcc79504a48193d08402570eae65700294ce
+index 0000000000000000000000000000000000000000..528ee5f2137657a45b305282591c22e48033d9e5
 --- /dev/null
 +++ b/breakpad/src/processor/exploitability_unittest.cc
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,306 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -136929,6 +137039,8 @@ index 0000000000000000000000000000000000000000..502edcc79504a48193d08402570eae65
 +            ExploitabilityFor("linux_inside_module_exe_region2.dmp"));
 +  ASSERT_EQ(google_breakpad::EXPLOITABILITY_INTERESTING,
 +            ExploitabilityFor("linux_stack_pointer_in_stack.dmp"));
++  ASSERT_EQ(google_breakpad::EXPLOITABILITY_INTERESTING,
++            ExploitabilityFor("linux_stack_pointer_in_stack_alt_name.dmp"));
 +  ASSERT_EQ(google_breakpad::EXPLOITABILITY_HIGH,
 +            ExploitabilityFor("linux_stack_pointer_in_module.dmp"));
 +  ASSERT_EQ(google_breakpad::EXPLOITABILITY_HIGH,
@@ -138705,3 +138817,2015 @@ index 0000000000000000000000000000000000000000..c1eebbc22331e9786a785317899d9995
 +}
 +
 +}  // namespace google_breakpad
+diff --git a/breakpad/src/processor/logging.h b/breakpad/src/processor/logging.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..406fb67cf6efad92da947f084ab13eb763565fa3
+--- /dev/null
++++ b/breakpad/src/processor/logging.h
+@@ -0,0 +1,186 @@
++// Copyright (c) 2007, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// logging.h: Breakpad logging
++//
++// Breakpad itself uses Breakpad logging with statements of the form:
++//   BPLOG(severity) << "message";
++// severity may be INFO, ERROR, or other values defined in this file.
++//
++// BPLOG is an overridable macro so that users can customize Breakpad's
++// logging.  Left at the default, logging messages are sent to stderr along
++// with a timestamp and the source code location that produced a message.
++// The streams may be changed by redefining BPLOG_*_STREAM, the logging
++// behavior may be changed by redefining BPLOG_*, and the entire logging
++// system may be overridden by redefining BPLOG(severity).  These
++// redefinitions may be passed to the preprocessor as a command-line flag
++// (-D).
++//
++// If an additional header is required to override Breakpad logging, it can
++// be specified by the BP_LOGGING_INCLUDE macro.  If defined, this header
++// will #include the header specified by that macro.
++//
++// If any initialization is needed before logging, it can be performed by
++// a function called through the BPLOG_INIT macro.  Each main function of
++// an executable program in the Breakpad processor library calls
++// BPLOG_INIT(&argc, &argv); before any logging can be performed; define
++// BPLOG_INIT appropriately if initialization is required.
++//
++// Author: Mark Mentovai
++
++#ifndef PROCESSOR_LOGGING_H__
++#define PROCESSOR_LOGGING_H__
++
++#include <iostream>
++#include <string>
++
++#include "common/using_std_string.h"
++#include "google_breakpad/common/breakpad_types.h"
++
++#ifdef BP_LOGGING_INCLUDE
++#include BP_LOGGING_INCLUDE
++#endif  // BP_LOGGING_INCLUDE
++
++#ifndef THIRD_PARTY_BREAKPAD_GOOGLE_GLUE_LOGGING_H_
++namespace base_logging {
++
++// The open-source copy of logging.h has diverged from Google's internal copy
++// (temporarily, at least).  To support the transition to structured logging
++// a definition for base_logging::LogMessage is needed, which is a ostream-
++// like object for streaming arguments to construct a log message.
++typedef std::ostream LogMessage;
++
++}  // namespace base_logging
++#endif  // THIRD_PARTY_BREAKPAD_GOOGLE_GLUE_LOGGING_H_
++
++namespace google_breakpad {
++
++// These are defined in Microsoft headers.
++#ifdef SEVERITY_ERROR
++#undef SEVERITY_ERROR
++#endif
++
++#ifdef ERROR
++#undef ERROR
++#endif
++
++class LogStream {
++ public:
++  enum Severity {
++    SEVERITY_INFO,
++    SEVERITY_ERROR
++  };
++
++  // Begin logging a message to the stream identified by |stream|, at the
++  // indicated severity.  The file and line parameters should be set so as to
++  // identify the line of source code that is producing a message.
++  LogStream(std::ostream &stream, Severity severity,
++            const char *file, int line);
++
++  // Finish logging by printing a newline and flushing the output stream.
++  ~LogStream();
++
++  template<typename T> std::ostream& operator<<(const T &t) {
++    return stream_ << t;
++  }
++
++ private:
++  std::ostream &stream_;
++
++  // Disallow copy constructor and assignment operator
++  explicit LogStream(const LogStream &that);
++  void operator=(const LogStream &that);
++};
++
++// This class is used to explicitly ignore values in the conditional logging
++// macros.  This avoids compiler warnings like "value computed is not used"
++// and "statement has no effect".
++class LogMessageVoidify {
++ public:
++  LogMessageVoidify() {}
++
++  // This has to be an operator with a precedence lower than << but higher
++  // than ?:
++  void operator&(base_logging::LogMessage &) {}
++};
++
++// Returns number formatted as a hexadecimal string, such as "0x7b".
++string HexString(uint32_t number);
++string HexString(uint64_t number);
++string HexString(int number);
++
++// Returns the error code as set in the global errno variable, and sets
++// error_string, a required argument, to a string describing that error
++// code.
++int ErrnoString(string *error_string);
++
++}  // namespace google_breakpad
++
++#ifndef BPLOG_INIT
++#define BPLOG_INIT(pargc, pargv)
++#endif  // BPLOG_INIT
++
++#define BPLOG_LAZY_STREAM(stream, condition) \
++    !(condition) ? (void) 0 : \
++                   google_breakpad::LogMessageVoidify() & (BPLOG_ ## stream)
++
++#ifndef BPLOG_MINIMUM_SEVERITY
++#define BPLOG_MINIMUM_SEVERITY SEVERITY_INFO
++#endif
++
++#define BPLOG_LOG_IS_ON(severity) \
++    ((google_breakpad::LogStream::SEVERITY_ ## severity) >= \
++     (google_breakpad::LogStream::BPLOG_MINIMUM_SEVERITY))
++
++#ifndef BPLOG
++#define BPLOG(severity) BPLOG_LAZY_STREAM(severity, BPLOG_LOG_IS_ON(severity))
++#endif  // BPLOG
++
++#ifndef BPLOG_INFO
++#ifndef BPLOG_INFO_STREAM
++#define BPLOG_INFO_STREAM std::clog
++#endif  // BPLOG_INFO_STREAM
++#define BPLOG_INFO google_breakpad::LogStream(BPLOG_INFO_STREAM, \
++                       google_breakpad::LogStream::SEVERITY_INFO, \
++                       __FILE__, __LINE__)
++#endif  // BPLOG_INFO
++
++#ifndef BPLOG_ERROR
++#ifndef BPLOG_ERROR_STREAM
++#define BPLOG_ERROR_STREAM std::cerr
++#endif  // BPLOG_ERROR_STREAM
++#define BPLOG_ERROR google_breakpad::LogStream(BPLOG_ERROR_STREAM, \
++                        google_breakpad::LogStream::SEVERITY_ERROR, \
++                        __FILE__, __LINE__)
++#endif  // BPLOG_ERROR
++
++#define BPLOG_IF(severity, condition) \
++    BPLOG_LAZY_STREAM(severity, ((condition) && BPLOG_LOG_IS_ON(severity)))
++
++#endif  // PROCESSOR_LOGGING_H__
+diff --git a/breakpad/src/processor/map_serializers-inl.h b/breakpad/src/processor/map_serializers-inl.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..61c7bbd7c83306741a5248620d2250999d15f302
+--- /dev/null
++++ b/breakpad/src/processor/map_serializers-inl.h
+@@ -0,0 +1,266 @@
++// Copyright (c) 2010, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++//
++// map_serializers_inl.h: implementation for serializing std::map and its
++// wrapper classes.
++//
++// See map_serializers.h for documentation.
++//
++// Author: Siyang Xie (lambxsy@google.com)
++
++#ifndef PROCESSOR_MAP_SERIALIZERS_INL_H__
++#define PROCESSOR_MAP_SERIALIZERS_INL_H__
++
++#include <map>
++#include <string>
++
++#include "processor/map_serializers.h"
++#include "processor/simple_serializer.h"
++
++#include "processor/address_map-inl.h"
++#include "processor/range_map-inl.h"
++#include "processor/contained_range_map-inl.h"
++
++#include "processor/logging.h"
++
++namespace google_breakpad {
++
++template<typename Key, typename Value>
++size_t StdMapSerializer<Key, Value>::SizeOf(
++    const std::map<Key, Value> &m) const {
++  size_t size = 0;
++  size_t header_size = (1 + m.size()) * sizeof(uint32_t);
++  size += header_size;
++
++  typename std::map<Key, Value>::const_iterator iter;
++  for (iter = m.begin(); iter != m.end(); ++iter) {
++    size += key_serializer_.SizeOf(iter->first);
++    size += value_serializer_.SizeOf(iter->second);
++  }
++  return size;
++}
++
++template<typename Key, typename Value>
++char *StdMapSerializer<Key, Value>::Write(const std::map<Key, Value> &m,
++                                          char *dest) const {
++  if (!dest) {
++    BPLOG(ERROR) << "StdMapSerializer failed: write to NULL address.";
++    return NULL;
++  }
++  char *start_address = dest;
++
++  // Write header:
++  // Number of nodes.
++  dest = SimpleSerializer<uint32_t>::Write(m.size(), dest);
++  // Nodes offsets.
++  uint32_t *offsets = reinterpret_cast<uint32_t*>(dest);
++  dest += sizeof(uint32_t) * m.size();
++
++  char *key_address = dest;
++  dest += sizeof(Key) * m.size();
++
++  // Traverse map.
++  typename std::map<Key, Value>::const_iterator iter;
++  int index = 0;
++  for (iter = m.begin(); iter != m.end(); ++iter, ++index) {
++    offsets[index] = static_cast<uint32_t>(dest - start_address);
++    key_address = key_serializer_.Write(iter->first, key_address);
++    dest = value_serializer_.Write(iter->second, dest);
++  }
++  return dest;
++}
++
++template<typename Key, typename Value>
++char *StdMapSerializer<Key, Value>::Serialize(
++    const std::map<Key, Value> &m, unsigned int *size) const {
++  // Compute size of memory to be allocated.
++  unsigned int size_to_alloc = SizeOf(m);
++  // Allocate memory.
++  char *serialized_data = new char[size_to_alloc];
++  if (!serialized_data) {
++    BPLOG(INFO) << "StdMapSerializer memory allocation failed.";
++    if (size) *size = 0;
++    return NULL;
++  }
++  // Write serialized data into memory.
++  Write(m, serialized_data);
++
++  if (size) *size = size_to_alloc;
++  return serialized_data;
++}
++
++template<typename Address, typename Entry>
++size_t RangeMapSerializer<Address, Entry>::SizeOf(
++    const RangeMap<Address, Entry> &m) const {
++  size_t size = 0;
++  size_t header_size = (1 + m.map_.size()) * sizeof(uint32_t);
++  size += header_size;
++
++  typename std::map<Address, Range>::const_iterator iter;
++  for (iter = m.map_.begin(); iter != m.map_.end(); ++iter) {
++    // Size of key (high address).
++    size += address_serializer_.SizeOf(iter->first);
++    // Size of base (low address).
++    size += address_serializer_.SizeOf(iter->second.base());
++    // Size of entry.
++    size += entry_serializer_.SizeOf(iter->second.entry());
++  }
++  return size;
++}
++
++template<typename Address, typename Entry>
++char *RangeMapSerializer<Address, Entry>::Write(
++    const RangeMap<Address, Entry> &m, char *dest) const {
++  if (!dest) {
++    BPLOG(ERROR) << "RangeMapSerializer failed: write to NULL address.";
++    return NULL;
++  }
++  char *start_address = dest;
++
++  // Write header:
++  // Number of nodes.
++  dest = SimpleSerializer<uint32_t>::Write(m.map_.size(), dest);
++  // Nodes offsets.
++  uint32_t *offsets = reinterpret_cast<uint32_t*>(dest);
++  dest += sizeof(uint32_t) * m.map_.size();
++
++  char *key_address = dest;
++  dest += sizeof(Address) * m.map_.size();
++
++  // Traverse map.
++  typename std::map<Address, Range>::const_iterator iter;
++  int index = 0;
++  for (iter = m.map_.begin(); iter != m.map_.end(); ++iter, ++index) {
++    offsets[index] = static_cast<uint32_t>(dest - start_address);
++    key_address = address_serializer_.Write(iter->first, key_address);
++    dest = address_serializer_.Write(iter->second.base(), dest);
++    dest = entry_serializer_.Write(iter->second.entry(), dest);
++  }
++  return dest;
++}
++
++template<typename Address, typename Entry>
++char *RangeMapSerializer<Address, Entry>::Serialize(
++    const RangeMap<Address, Entry> &m, unsigned int *size) const {
++  // Compute size of memory to be allocated.
++  unsigned int size_to_alloc = SizeOf(m);
++  // Allocate memory.
++  char *serialized_data = new char[size_to_alloc];
++  if (!serialized_data) {
++    BPLOG(INFO) << "RangeMapSerializer memory allocation failed.";
++    if (size) *size = 0;
++    return NULL;
++  }
++
++  // Write serialized data into memory.
++  Write(m, serialized_data);
++
++  if (size) *size = size_to_alloc;
++  return serialized_data;
++}
++
++
++template<class AddrType, class EntryType>
++size_t ContainedRangeMapSerializer<AddrType, EntryType>::SizeOf(
++    const ContainedRangeMap<AddrType, EntryType> *m) const {
++  size_t size = 0;
++  size_t header_size = addr_serializer_.SizeOf(m->base_)
++                       + entry_serializer_.SizeOf(m->entry_)
++                       + sizeof(uint32_t);
++  size += header_size;
++  // In case m.map_ == NULL, we treat it as an empty map:
++  size += sizeof(uint32_t);
++  if (m->map_) {
++    size += m->map_->size() * sizeof(uint32_t);
++    typename Map::const_iterator iter;
++    for (iter = m->map_->begin(); iter != m->map_->end(); ++iter) {
++      size += addr_serializer_.SizeOf(iter->first);
++      // Recursive calculation of size:
++      size += SizeOf(iter->second);
++    }
++  }
++  return size;
++}
++
++template<class AddrType, class EntryType>
++char *ContainedRangeMapSerializer<AddrType, EntryType>::Write(
++    const ContainedRangeMap<AddrType, EntryType> *m, char *dest) const {
++  if (!dest) {
++    BPLOG(ERROR) << "StdMapSerializer failed: write to NULL address.";
++    return NULL;
++  }
++  dest = addr_serializer_.Write(m->base_, dest);
++  dest = SimpleSerializer<uint32_t>::Write(entry_serializer_.SizeOf(m->entry_),
++                                            dest);
++  dest = entry_serializer_.Write(m->entry_, dest);
++
++  // Write map<<AddrType, ContainedRangeMap*>:
++  char *map_address = dest;
++  if (m->map_ == NULL) {
++    dest = SimpleSerializer<uint32_t>::Write(0, dest);
++  } else {
++    dest = SimpleSerializer<uint32_t>::Write(m->map_->size(), dest);
++    uint32_t *offsets = reinterpret_cast<uint32_t*>(dest);
++    dest += sizeof(uint32_t) * m->map_->size();
++
++    char *key_address = dest;
++    dest += sizeof(AddrType) * m->map_->size();
++
++    // Traverse map.
++    typename Map::const_iterator iter;
++    int index = 0;
++    for (iter = m->map_->begin(); iter != m->map_->end(); ++iter, ++index) {
++      offsets[index] = static_cast<uint32_t>(dest - map_address);
++      key_address = addr_serializer_.Write(iter->first, key_address);
++      // Recursively write.
++      dest = Write(iter->second, dest);
++    }
++  }
++  return dest;
++}
++
++template<class AddrType, class EntryType>
++char *ContainedRangeMapSerializer<AddrType, EntryType>::Serialize(
++    const ContainedRangeMap<AddrType, EntryType> *m, unsigned int *size) const {
++  unsigned int size_to_alloc = SizeOf(m);
++  // Allocating memory.
++  char *serialized_data = new char[size_to_alloc];
++  if (!serialized_data) {
++    BPLOG(INFO) << "ContainedRangeMapSerializer memory allocation failed.";
++    if (size) *size = 0;
++    return NULL;
++  }
++  Write(m, serialized_data);
++  if (size) *size = size_to_alloc;
++  return serialized_data;
++}
++
++}  // namespace google_breakpad
++
++#endif  // PROCESSOR_MAP_SERIALIZERS_INL_H__
+diff --git a/breakpad/src/processor/map_serializers.h b/breakpad/src/processor/map_serializers.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..a0b9d3fd67af4dfd8b672349d14f5379edb4c4fb
+--- /dev/null
++++ b/breakpad/src/processor/map_serializers.h
+@@ -0,0 +1,168 @@
++// Copyright (c) 2010, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++//
++// map_serializers.h: defines templates for serializing std::map and its
++// wrappers: AddressMap, RangeMap, and ContainedRangeMap.
++//
++// Author: Siyang Xie (lambxsy@google.com)
++
++
++#ifndef PROCESSOR_MAP_SERIALIZERS_H__
++#define PROCESSOR_MAP_SERIALIZERS_H__
++
++#include <map>
++#include <string>
++
++#include "processor/simple_serializer.h"
++
++#include "processor/address_map-inl.h"
++#include "processor/range_map-inl.h"
++#include "processor/contained_range_map-inl.h"
++
++namespace google_breakpad {
++
++// StdMapSerializer allocates memory and serializes an std::map instance into a
++// chunk of memory data.
++template<typename Key, typename Value>
++class StdMapSerializer {
++ public:
++  // Calculate the memory size of serialized data.
++  size_t SizeOf(const std::map<Key, Value> &m) const;
++
++  // Writes the serialized data to memory with start address = dest,
++  // and returns the "end" of data, i.e., return the address follow the final
++  // byte of data.
++  // NOTE: caller has to allocate enough memory before invoke Write() method.
++  char* Write(const std::map<Key, Value> &m, char* dest) const;
++
++  // Serializes a std::map object into a chunk of memory data with format
++  // described in "StaticMap.h" comment.
++  // Returns a pointer to the serialized data.  If size != NULL, *size is set
++  // to the size of serialized data, i.e., SizeOf(m).
++  // Caller has the ownership of memory allocated as "new char[]".
++  char* Serialize(const std::map<Key, Value> &m, unsigned int *size) const;
++
++ private:
++  SimpleSerializer<Key> key_serializer_;
++  SimpleSerializer<Value> value_serializer_;
++};
++
++// AddressMapSerializer allocates memory and serializes an AddressMap into a
++// chunk of memory data.
++template<typename Addr, typename Entry>
++class AddressMapSerializer {
++ public:
++  // Calculate the memory size of serialized data.
++  size_t SizeOf(const AddressMap<Addr, Entry> &m) const {
++    return std_map_serializer_.SizeOf(m.map_);
++  }
++
++  // Write the serialized data to specified memory location.  Return the "end"
++  // of data, i.e., return the address after the final byte of data.
++  // NOTE: caller has to allocate enough memory before invoke Write() method.
++  char* Write(const AddressMap<Addr, Entry> &m, char *dest) const {
++    return std_map_serializer_.Write(m.map_, dest);
++  }
++
++  // Serializes an AddressMap object into a chunk of memory data.
++  // Returns a pointer to the serialized data.  If size != NULL, *size is set
++  // to the size of serialized data, i.e., SizeOf(m).
++  // Caller has the ownership of memory allocated as "new char[]".
++  char* Serialize(const AddressMap<Addr, Entry> &m, unsigned int *size) const {
++    return std_map_serializer_.Serialize(m.map_, size);
++  }
++
++ private:
++  // AddressMapSerializer is a simple wrapper of StdMapSerializer, just as
++  // AddressMap is a simple wrapper of std::map.
++  StdMapSerializer<Addr, Entry> std_map_serializer_;
++};
++
++// RangeMapSerializer allocates memory and serializes a RangeMap instance into a
++// chunk of memory data.
++template<typename Address, typename Entry>
++class RangeMapSerializer {
++ public:
++  // Calculate the memory size of serialized data.
++  size_t SizeOf(const RangeMap<Address, Entry> &m) const;
++
++  // Write the serialized data to specified memory location.  Return the "end"
++  // of data, i.e., return the address after the final byte of data.
++  // NOTE: caller has to allocate enough memory before invoke Write() method.
++  char* Write(const RangeMap<Address, Entry> &m, char* dest) const;
++
++  // Serializes a RangeMap object into a chunk of memory data.
++  // Returns a pointer to the serialized data.  If size != NULL, *size is set
++  // to the size of serialized data, i.e., SizeOf(m).
++  // Caller has the ownership of memory allocated as "new char[]".
++  char* Serialize(const RangeMap<Address, Entry> &m, unsigned int *size) const;
++
++ private:
++  // Convenient type name for Range.
++  typedef typename RangeMap<Address, Entry>::Range Range;
++
++  // Serializer for RangeMap's key and Range::base_.
++  SimpleSerializer<Address> address_serializer_;
++  // Serializer for RangeMap::Range::entry_.
++  SimpleSerializer<Entry> entry_serializer_;
++};
++
++// ContainedRangeMapSerializer allocates memory and serializes a
++// ContainedRangeMap instance into a chunk of memory data.
++template<class AddrType, class EntryType>
++class ContainedRangeMapSerializer {
++ public:
++  // Calculate the memory size of serialized data.
++  size_t SizeOf(const ContainedRangeMap<AddrType, EntryType> *m) const;
++
++  // Write the serialized data to specified memory location.  Return the "end"
++  // of data, i.e., return the address after the final byte of data.
++  // NOTE: caller has to allocate enough memory before invoke Write() method.
++  char* Write(const ContainedRangeMap<AddrType, EntryType> *m,
++              char* dest) const;
++
++  // Serializes a ContainedRangeMap object into a chunk of memory data.
++  // Returns a pointer to the serialized data.  If size != NULL, *size is set
++  // to the size of serialized data, i.e., SizeOf(m).
++  // Caller has the ownership of memory allocated as "new char[]".
++  char* Serialize(const ContainedRangeMap<AddrType, EntryType> *m,
++                  unsigned int *size) const;
++
++ private:
++  // Convenient type name for the underlying map type.
++  typedef std::map<AddrType, ContainedRangeMap<AddrType, EntryType>*> Map;
++
++  // Serializer for addresses and entries stored in ContainedRangeMap.
++  SimpleSerializer<AddrType> addr_serializer_;
++  SimpleSerializer<EntryType> entry_serializer_;
++};
++
++}  // namespace google_breakpad
++
++#endif  // PROCESSOR_MAP_SERIALIZERS_H__
+diff --git a/breakpad/src/processor/map_serializers_unittest.cc b/breakpad/src/processor/map_serializers_unittest.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..0d872ec2e21a6a2267284bf616508c4ad4dc1fe5
+--- /dev/null
++++ b/breakpad/src/processor/map_serializers_unittest.cc
+@@ -0,0 +1,386 @@
++// Copyright (c) 2010, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// map_serializers_unittest.cc: Unit tests for std::map serializer and
++// std::map wrapper serializers.
++//
++// Author: Siyang Xie (lambxsy@google.com)
++
++#include <climits>
++#include <map>
++#include <string>
++#include <utility>
++#include <iostream>
++#include <sstream>
++
++#include "breakpad_googletest_includes.h"
++#include "map_serializers-inl.h"
++
++#include "processor/address_map-inl.h"
++#include "processor/range_map-inl.h"
++#include "processor/contained_range_map-inl.h"
++
++typedef int32_t AddrType;
++typedef int32_t EntryType;
++
++class TestStdMapSerializer : public ::testing::Test {
++ protected:
++  void SetUp() {
++    serialized_size_ = 0;
++    serialized_data_ = NULL;
++  }
++
++  void TearDown() {
++    delete [] serialized_data_;
++  }
++
++  std::map<AddrType, EntryType> std_map_;
++  google_breakpad::StdMapSerializer<AddrType, EntryType> serializer_;
++  uint32_t serialized_size_;
++  char *serialized_data_;
++};
++
++TEST_F(TestStdMapSerializer, EmptyMapTestCase) {
++  const int32_t correct_data[] = { 0 };
++  uint32_t correct_size = sizeof(correct_data);
++
++  // std_map_ is empty.
++  serialized_data_ = serializer_.Serialize(std_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++TEST_F(TestStdMapSerializer, MapWithTwoElementsTestCase) {
++  const int32_t correct_data[] = {
++      // # of nodes
++      2,
++      // Offsets
++      20, 24,
++      // Keys
++      1, 3,
++      // Values
++      2, 6
++  };
++  uint32_t correct_size = sizeof(correct_data);
++
++  std_map_.insert(std::make_pair(1, 2));
++  std_map_.insert(std::make_pair(3, 6));
++
++  serialized_data_ = serializer_.Serialize(std_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++TEST_F(TestStdMapSerializer, MapWithFiveElementsTestCase) {
++  const int32_t correct_data[] = {
++      // # of nodes
++      5,
++      // Offsets
++      44, 48, 52, 56, 60,
++      // Keys
++      1, 2, 3, 4, 5,
++      // Values
++      11, 12, 13, 14, 15
++  };
++  uint32_t correct_size = sizeof(correct_data);
++
++  for (int i = 1; i < 6; ++i)
++    std_map_.insert(std::make_pair(i, 10 + i));
++
++  serialized_data_ = serializer_.Serialize(std_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++class TestAddressMapSerializer : public ::testing::Test {
++ protected:
++  void SetUp() {
++    serialized_size_ = 0;
++    serialized_data_ = 0;
++  }
++
++  void TearDown() {
++    delete [] serialized_data_;
++  }
++
++  google_breakpad::AddressMap<AddrType, EntryType> address_map_;
++  google_breakpad::AddressMapSerializer<AddrType, EntryType> serializer_;
++  uint32_t serialized_size_;
++  char *serialized_data_;
++};
++
++TEST_F(TestAddressMapSerializer, EmptyMapTestCase) {
++  const int32_t correct_data[] = { 0 };
++  uint32_t correct_size = sizeof(correct_data);
++
++  // std_map_ is empty.
++  serialized_data_ = serializer_.Serialize(address_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++TEST_F(TestAddressMapSerializer, MapWithTwoElementsTestCase) {
++  const int32_t correct_data[] = {
++      // # of nodes
++      2,
++      // Offsets
++      20, 24,
++      // Keys
++      1, 3,
++      // Values
++      2, 6
++  };
++  uint32_t correct_size = sizeof(correct_data);
++
++  address_map_.Store(1, 2);
++  address_map_.Store(3, 6);
++
++  serialized_data_ = serializer_.Serialize(address_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++TEST_F(TestAddressMapSerializer, MapWithFourElementsTestCase) {
++  const int32_t correct_data[] = {
++      // # of nodes
++      4,
++      // Offsets
++      36, 40, 44, 48,
++      // Keys
++      -6, -4, 8, 123,
++      // Values
++      2, 3, 5, 8
++  };
++  uint32_t correct_size = sizeof(correct_data);
++
++  address_map_.Store(-6, 2);
++  address_map_.Store(-4, 3);
++  address_map_.Store(8, 5);
++  address_map_.Store(123, 8);
++
++  serialized_data_ = serializer_.Serialize(address_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++
++class TestRangeMapSerializer : public ::testing::Test {
++ protected:
++  void SetUp() {
++    serialized_size_ = 0;
++    serialized_data_ = 0;
++  }
++
++  void TearDown() {
++    delete [] serialized_data_;
++  }
++
++  google_breakpad::RangeMap<AddrType, EntryType> range_map_;
++  google_breakpad::RangeMapSerializer<AddrType, EntryType> serializer_;
++  uint32_t serialized_size_;
++  char *serialized_data_;
++};
++
++TEST_F(TestRangeMapSerializer, EmptyMapTestCase) {
++  const int32_t correct_data[] = { 0 };
++  uint32_t correct_size = sizeof(correct_data);
++
++  // range_map_ is empty.
++  serialized_data_ = serializer_.Serialize(range_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++TEST_F(TestRangeMapSerializer, MapWithOneRangeTestCase) {
++  const int32_t correct_data[] = {
++      // # of nodes
++      1,
++      // Offsets
++      12,
++      // Keys: high address
++      10,
++      // Values: (low address, entry) pairs
++      1, 6
++  };
++  uint32_t correct_size = sizeof(correct_data);
++
++  range_map_.StoreRange(1, 10, 6);
++
++  serialized_data_ = serializer_.Serialize(range_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++TEST_F(TestRangeMapSerializer, MapWithThreeRangesTestCase) {
++  const int32_t correct_data[] = {
++      // # of nodes
++      3,
++      // Offsets
++      28,    36,    44,
++      // Keys: high address
++      5,     9,     20,
++      // Values: (low address, entry) pairs
++      2, 1,  6, 2,  10, 3
++  };
++  uint32_t correct_size = sizeof(correct_data);
++
++  ASSERT_TRUE(range_map_.StoreRange(2, 4, 1));
++  ASSERT_TRUE(range_map_.StoreRange(6, 4, 2));
++  ASSERT_TRUE(range_map_.StoreRange(10, 11, 3));
++
++  serialized_data_ = serializer_.Serialize(range_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++
++class TestContainedRangeMapSerializer : public ::testing::Test {
++ protected:
++  void SetUp() {
++    serialized_size_ = 0;
++    serialized_data_ = 0;
++  }
++
++  void TearDown() {
++    delete [] serialized_data_;
++  }
++
++  google_breakpad::ContainedRangeMap<AddrType, EntryType> crm_map_;
++  google_breakpad::ContainedRangeMapSerializer<AddrType, EntryType> serializer_;
++  uint32_t serialized_size_;
++  char *serialized_data_;
++};
++
++TEST_F(TestContainedRangeMapSerializer, EmptyMapTestCase) {
++  const int32_t correct_data[] = {
++      0,  // base address of root
++      4,  // size of entry
++      0,  // entry stored at root
++      0   // empty map stored at root
++  };
++  uint32_t correct_size = sizeof(correct_data);
++
++  // crm_map_ is empty.
++  serialized_data_ = serializer_.Serialize(&crm_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++TEST_F(TestContainedRangeMapSerializer, MapWithOneRangeTestCase) {
++  const int32_t correct_data[] = {
++      0,  // base address of root
++      4,  // size of entry
++      0,  // entry stored at root
++      // Map stored at root node:
++      1,  // # of nodes
++      12, // offset
++      9,  // key
++      // value: a child ContainedRangeMap
++      3,  // base address of child CRM
++      4,  // size of entry
++      -1, // entry stored in child CRM
++      0   // empty sub-map stored in child CRM
++  };
++  uint32_t correct_size = sizeof(correct_data);
++
++  crm_map_.StoreRange(3, 7, -1);
++
++  serialized_data_ = serializer_.Serialize(&crm_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++TEST_F(TestContainedRangeMapSerializer, MapWithTwoLevelsTestCase) {
++  // Tree structure of ranges:
++  //           root              level 0
++  //            |
++  //           map
++  //         /     \             level 1: child1, child2
++  //      2~8      10~20
++  //       |         |
++  //      map       map
++  //     /   \       |
++  //    3~4 6~7    16-20         level 2: grandchild1, grandchild2, grandchild3
++
++  const int32_t correct_data[] = {
++      // root: base, entry_size, entry
++      0, 4, 0,
++      // root's map: # of nodes, offset1, offset2, key1, key2
++      2, 20, 84, 8, 20,
++      // child1: base, entry_size, entry:
++      2, 4, -1,
++      // child1's map: # of nodes, offset1, offset2, key1, key2
++      2, 20, 36, 4, 7,
++        // grandchild1: base, entry_size, entry, empty_map
++        3, 4, -1, 0,
++        // grandchild2: base, entry_size, entry, empty_map
++        6, 4, -1, 0,
++      // child2: base, entry_size, entry:
++      10, 4, -1,
++      // child2's map: # of nodes, offset1, key1
++      1, 12, 20,
++        // grandchild3: base, entry_size, entry, empty_map
++        16, 4, -1, 0
++  };
++  uint32_t correct_size = sizeof(correct_data);
++
++  // Store child1.
++  ASSERT_TRUE(crm_map_.StoreRange(2, 7, -1));
++  // Store child2.
++  ASSERT_TRUE(crm_map_.StoreRange(10, 11, -1));
++  // Store grandchild1.
++  ASSERT_TRUE(crm_map_.StoreRange(3, 2, -1));
++  // Store grandchild2.
++  ASSERT_TRUE(crm_map_.StoreRange(6, 2, -1));
++  // Store grandchild3.
++  ASSERT_TRUE(crm_map_.StoreRange(16, 5, -1));
++
++  serialized_data_ = serializer_.Serialize(&crm_map_, &serialized_size_);
++
++  EXPECT_EQ(correct_size, serialized_size_);
++  EXPECT_EQ(memcmp(correct_data, serialized_data_, correct_size), 0);
++}
++
++
++int main(int argc, char *argv[]) {
++  ::testing::InitGoogleTest(&argc, argv);
++
++  return RUN_ALL_TESTS();
++}
+diff --git a/breakpad/src/processor/microdump.cc b/breakpad/src/processor/microdump.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..4af62f56f0c6c04978f97ddb65947dcd55eeee8d
+--- /dev/null
++++ b/breakpad/src/processor/microdump.cc
+@@ -0,0 +1,385 @@
++// Copyright (c) 2014 Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// microdump.cc: A microdump reader.
++//
++// See microdump.h for documentation.
++
++#include "google_breakpad/processor/microdump.h"
++
++#include <stdio.h>
++#include <string.h>
++
++#include <memory>
++#include <sstream>
++#include <string>
++#include <vector>
++
++#include "google_breakpad/common/minidump_cpu_arm.h"
++#include "google_breakpad/processor/code_module.h"
++#include "processor/basic_code_module.h"
++#include "processor/linked_ptr.h"
++#include "processor/logging.h"
++#include "processor/range_map-inl.h"
++
++namespace {
++static const char kGoogleBreakpadKey[] = "google-breakpad";
++static const char kMicrodumpBegin[] = "-----BEGIN BREAKPAD MICRODUMP-----";
++static const char kMicrodumpEnd[] = "-----END BREAKPAD MICRODUMP-----";
++static const char kOsKey[] = ": O ";
++static const char kCpuKey[] = ": C ";
++static const char kGpuKey[] = ": G ";
++static const char kMmapKey[] = ": M ";
++static const char kStackKey[] = ": S ";
++static const char kStackFirstLineKey[] = ": S 0 ";
++static const char kArmArchitecture[] = "arm";
++static const char kArm64Architecture[] = "arm64";
++static const char kX86Architecture[] = "x86";
++static const char kMipsArchitecture[] = "mips";
++static const char kMips64Architecture[] = "mips64";
++static const char kGpuUnknown[] = "UNKNOWN";
++
++template<typename T>
++T HexStrToL(const string& str) {
++  uint64_t res = 0;
++  std::istringstream ss(str);
++  ss >> std::hex >> res;
++  return static_cast<T>(res);
++}
++
++std::vector<uint8_t> ParseHexBuf(const string& str) {
++  std::vector<uint8_t> buf;
++  for (size_t i = 0; i < str.length(); i += 2) {
++    buf.push_back(HexStrToL<uint8_t>(str.substr(i, 2)));
++  }
++  return buf;
++}
++
++bool GetLine(std::istringstream* istream, string* str) {
++  if (std::getline(*istream, *str)) {
++    // Trim any trailing newline from the end of the line. Allows us
++    // to seamlessly handle both Windows/DOS and Unix formatted input. The
++    // adb tool generally writes logcat dumps in Windows/DOS format.
++    if (!str->empty() && str->at(str->size() - 1) == '\r') {
++      str->erase(str->size() - 1);
++    }
++    return true;
++  }
++  return false;
++}
++
++}  // namespace
++
++namespace google_breakpad {
++
++//
++// MicrodumpModules
++//
++
++void MicrodumpModules::Add(const CodeModule* module) {
++  linked_ptr<const CodeModule> module_ptr(module);
++  if (!map_.StoreRange(module->base_address(), module->size(), module_ptr)) {
++    BPLOG(ERROR) << "Module " << module->code_file() <<
++                    " could not be stored";
++  }
++}
++
++void MicrodumpModules::SetEnableModuleShrink(bool is_enabled) {
++  map_.SetEnableShrinkDown(is_enabled);
++}
++
++//
++// MicrodumpContext
++//
++
++void MicrodumpContext::SetContextARM(MDRawContextARM* arm) {
++  DumpContext::SetContextFlags(MD_CONTEXT_ARM);
++  DumpContext::SetContextARM(arm);
++  valid_ = true;
++}
++
++void MicrodumpContext::SetContextARM64(MDRawContextARM64* arm64) {
++  DumpContext::SetContextFlags(MD_CONTEXT_ARM64);
++  DumpContext::SetContextARM64(arm64);
++  valid_ = true;
++}
++
++void MicrodumpContext::SetContextX86(MDRawContextX86* x86) {
++  DumpContext::SetContextFlags(MD_CONTEXT_X86);
++  DumpContext::SetContextX86(x86);
++  valid_ = true;
++}
++
++void MicrodumpContext::SetContextMIPS(MDRawContextMIPS* mips32) {
++  DumpContext::SetContextFlags(MD_CONTEXT_MIPS);
++  DumpContext::SetContextMIPS(mips32);
++  valid_ = true;
++}
++
++void MicrodumpContext::SetContextMIPS64(MDRawContextMIPS* mips64) {
++  DumpContext::SetContextFlags(MD_CONTEXT_MIPS64);
++  DumpContext::SetContextMIPS(mips64);
++  valid_ = true;
++}
++
++
++//
++// MicrodumpMemoryRegion
++//
++
++MicrodumpMemoryRegion::MicrodumpMemoryRegion() : base_address_(0) { }
++
++void MicrodumpMemoryRegion::Init(uint64_t base_address,
++                                 const std::vector<uint8_t>& contents) {
++  base_address_ = base_address;
++  contents_ = contents;
++}
++
++uint64_t MicrodumpMemoryRegion::GetBase() const { return base_address_; }
++
++uint32_t MicrodumpMemoryRegion::GetSize() const { return contents_.size(); }
++
++bool MicrodumpMemoryRegion::GetMemoryAtAddress(uint64_t address,
++                                               uint8_t* value) const {
++  return GetMemoryLittleEndian(address, value);
++}
++
++bool MicrodumpMemoryRegion::GetMemoryAtAddress(uint64_t address,
++                                               uint16_t* value) const {
++  return GetMemoryLittleEndian(address, value);
++}
++
++bool MicrodumpMemoryRegion::GetMemoryAtAddress(uint64_t address,
++                                               uint32_t* value) const {
++  return GetMemoryLittleEndian(address, value);
++}
++
++bool MicrodumpMemoryRegion::GetMemoryAtAddress(uint64_t address,
++                                               uint64_t* value) const {
++  return GetMemoryLittleEndian(address, value);
++}
++
++template<typename ValueType>
++bool MicrodumpMemoryRegion::GetMemoryLittleEndian(uint64_t address,
++                                                  ValueType* value) const {
++  if (address < base_address_ ||
++      address - base_address_ + sizeof(ValueType) > contents_.size())
++    return false;
++  ValueType v = 0;
++  uint64_t start = address - base_address_;
++  // The loop condition is odd, but it's correct for size_t.
++  for (size_t i = sizeof(ValueType) - 1; i < sizeof(ValueType); i--)
++    v = (v << 8) | static_cast<uint8_t>(contents_[start + i]);
++  *value = v;
++  return true;
++}
++
++void MicrodumpMemoryRegion::Print() const {
++  // Not reached, just needed to honor the base class contract.
++  assert(false);
++}
++
++//
++// Microdump
++//
++Microdump::Microdump(const string& contents)
++  : context_(new MicrodumpContext()),
++    stack_region_(new MicrodumpMemoryRegion()),
++    modules_(new MicrodumpModules()),
++    system_info_(new SystemInfo()) {
++  assert(!contents.empty());
++
++  bool in_microdump = false;
++  string line;
++  uint64_t stack_start = 0;
++  std::vector<uint8_t> stack_content;
++  string arch;
++
++  std::istringstream stream(contents);
++  while (GetLine(&stream, &line)) {
++    if (line.find(kGoogleBreakpadKey) == string::npos) {
++      continue;
++    }
++    if (line.find(kMicrodumpBegin) != string::npos) {
++      in_microdump = true;
++      continue;
++    }
++    if (!in_microdump) {
++      continue;
++    }
++    if (line.find(kMicrodumpEnd) != string::npos) {
++      break;
++    }
++
++    size_t pos;
++    if ((pos = line.find(kOsKey)) != string::npos) {
++      string os_str(line, pos + strlen(kOsKey));
++      std::istringstream os_tokens(os_str);
++      string os_id;
++      string num_cpus;
++      string os_version;
++      // This reflect the actual HW arch and might not match the arch emulated
++      // for the execution (e.g., running a 32-bit binary on a 64-bit cpu).
++      string hw_arch;
++
++      os_tokens >> os_id;
++      os_tokens >> arch;
++      os_tokens >> num_cpus;
++      os_tokens >> hw_arch;
++      GetLine(&os_tokens, &os_version);
++      os_version.erase(0, 1);  // remove leading space.
++
++      system_info_->cpu = arch;
++      system_info_->cpu_count = HexStrToL<uint8_t>(num_cpus);
++      system_info_->os_version = os_version;
++
++      if (os_id == "L") {
++        system_info_->os = "Linux";
++        system_info_->os_short = "linux";
++      } else if (os_id == "A") {
++        system_info_->os = "Android";
++        system_info_->os_short = "android";
++        modules_->SetEnableModuleShrink(true);
++      }
++
++      // OS line also contains release and version for future use.
++    } else if ((pos = line.find(kStackKey)) != string::npos) {
++      if (line.find(kStackFirstLineKey) != string::npos) {
++        // The first line of the stack (S 0 stack header) provides the value of
++        // the stack pointer, the start address of the stack being dumped and
++        // the length of the stack. We could use it in future to double check
++        // that we received all the stack as expected.
++        continue;
++      }
++      string stack_str(line, pos + strlen(kStackKey));
++      std::istringstream stack_tokens(stack_str);
++      string start_addr_str;
++      string raw_content;
++      stack_tokens >> start_addr_str;
++      stack_tokens >> raw_content;
++      uint64_t start_addr = HexStrToL<uint64_t>(start_addr_str);
++
++      if (stack_start != 0) {
++        // Verify that the stack chunks in the microdump are contiguous.
++        assert(start_addr == stack_start + stack_content.size());
++      } else {
++        stack_start = start_addr;
++      }
++      std::vector<uint8_t> chunk = ParseHexBuf(raw_content);
++      stack_content.insert(stack_content.end(), chunk.begin(), chunk.end());
++
++    } else if ((pos = line.find(kCpuKey)) != string::npos) {
++      string cpu_state_str(line, pos + strlen(kCpuKey));
++      std::vector<uint8_t> cpu_state_raw = ParseHexBuf(cpu_state_str);
++      if (strcmp(arch.c_str(), kArmArchitecture) == 0) {
++        if (cpu_state_raw.size() != sizeof(MDRawContextARM)) {
++          std::cerr << "Malformed CPU context. Got " << cpu_state_raw.size()
++                    << " bytes instead of " << sizeof(MDRawContextARM)
++                    << std::endl;
++          continue;
++        }
++        MDRawContextARM* arm = new MDRawContextARM();
++        memcpy(arm, &cpu_state_raw[0], cpu_state_raw.size());
++        context_->SetContextARM(arm);
++      } else if (strcmp(arch.c_str(), kArm64Architecture) == 0) {
++        if (cpu_state_raw.size() != sizeof(MDRawContextARM64)) {
++          std::cerr << "Malformed CPU context. Got " << cpu_state_raw.size()
++                    << " bytes instead of " << sizeof(MDRawContextARM64)
++                    << std::endl;
++          continue;
++        }
++        MDRawContextARM64* arm = new MDRawContextARM64();
++        memcpy(arm, &cpu_state_raw[0], cpu_state_raw.size());
++        context_->SetContextARM64(arm);
++      } else if (strcmp(arch.c_str(), kX86Architecture) == 0) {
++        if (cpu_state_raw.size() != sizeof(MDRawContextX86)) {
++          std::cerr << "Malformed CPU context. Got " << cpu_state_raw.size()
++                    << " bytes instead of " << sizeof(MDRawContextX86)
++                    << std::endl;
++          continue;
++        }
++        MDRawContextX86* x86 = new MDRawContextX86();
++        memcpy(x86, &cpu_state_raw[0], cpu_state_raw.size());
++        context_->SetContextX86(x86);
++      } else if (strcmp(arch.c_str(), kMipsArchitecture) == 0) {
++        if (cpu_state_raw.size() != sizeof(MDRawContextMIPS)) {
++          std::cerr << "Malformed CPU context. Got " << cpu_state_raw.size()
++                    << " bytes instead of " << sizeof(MDRawContextMIPS)
++                    << std::endl;
++          continue;
++        }
++        MDRawContextMIPS* mips32 = new MDRawContextMIPS();
++        memcpy(mips32, &cpu_state_raw[0], cpu_state_raw.size());
++        context_->SetContextMIPS(mips32);
++      } else if (strcmp(arch.c_str(), kMips64Architecture) == 0) {
++        if (cpu_state_raw.size() != sizeof(MDRawContextMIPS)) {
++          std::cerr << "Malformed CPU context. Got " << cpu_state_raw.size()
++                    << " bytes instead of " << sizeof(MDRawContextMIPS)
++                    << std::endl;
++          continue;
++        }
++        MDRawContextMIPS* mips64 = new MDRawContextMIPS();
++        memcpy(mips64, &cpu_state_raw[0], cpu_state_raw.size());
++        context_->SetContextMIPS64(mips64);
++      } else {
++        std::cerr << "Unsupported architecture: " << arch << std::endl;
++      }
++    } else if ((pos = line.find(kGpuKey)) != string::npos) {
++      string gpu_str(line, pos + strlen(kGpuKey));
++      if (strcmp(gpu_str.c_str(), kGpuUnknown) != 0) {
++        std::istringstream gpu_tokens(gpu_str);
++        std::getline(gpu_tokens, system_info_->gl_version, '|');
++        std::getline(gpu_tokens, system_info_->gl_vendor, '|');
++        std::getline(gpu_tokens, system_info_->gl_renderer, '|');
++      }
++    } else if ((pos = line.find(kMmapKey)) != string::npos) {
++      string mmap_line(line, pos + strlen(kMmapKey));
++      std::istringstream mmap_tokens(mmap_line);
++      string addr, offset, size, identifier, filename;
++      mmap_tokens >> addr;
++      mmap_tokens >> offset;
++      mmap_tokens >> size;
++      mmap_tokens >> identifier;
++      mmap_tokens >> filename;
++
++      modules_->Add(new BasicCodeModule(
++          HexStrToL<uint64_t>(addr),  // base_address
++          HexStrToL<uint64_t>(size),  // size
++          filename,                   // code_file
++          identifier,                 // code_identifier
++          filename,                   // debug_file
++          identifier,                 // debug_identifier
++          ""));                       // version
++    }
++  }
++  stack_region_->Init(stack_start, stack_content);
++}
++
++}  // namespace google_breakpad
++
+diff --git a/breakpad/src/processor/microdump_processor.cc b/breakpad/src/processor/microdump_processor.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..366e3f30aa97acb7d1edf1bef1523a0d9ee44fe0
+--- /dev/null
++++ b/breakpad/src/processor/microdump_processor.cc
+@@ -0,0 +1,100 @@
++// Copyright (c) 2014, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//    * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// microdump_processor.cc: A microdump processor.
++//
++// See microdump_processor.h for documentation.
++
++#include "google_breakpad/processor/microdump_processor.h"
++
++#include <assert.h>
++
++#include <string>
++
++#include "common/using_std_string.h"
++#include "google_breakpad/processor/call_stack.h"
++#include "google_breakpad/processor/microdump.h"
++#include "google_breakpad/processor/process_state.h"
++#include "google_breakpad/processor/stackwalker.h"
++#include "google_breakpad/processor/stack_frame_symbolizer.h"
++#include "processor/logging.h"
++
++namespace google_breakpad {
++
++MicrodumpProcessor::MicrodumpProcessor(StackFrameSymbolizer* frame_symbolizer)
++    : frame_symbolizer_(frame_symbolizer) {
++  assert(frame_symbolizer);
++}
++
++MicrodumpProcessor::~MicrodumpProcessor() {}
++
++ProcessResult MicrodumpProcessor::Process(const string &microdump_contents,
++                                          ProcessState* process_state) {
++  assert(process_state);
++
++  process_state->Clear();
++
++  if (microdump_contents.empty()) {
++    BPLOG(ERROR) << "Microdump is empty.";
++    return PROCESS_ERROR_MINIDUMP_NOT_FOUND;
++  }
++
++  Microdump microdump(microdump_contents);
++  process_state->modules_ = microdump.GetModules()->Copy();
++  scoped_ptr<Stackwalker> stackwalker(
++      Stackwalker::StackwalkerForCPU(
++                            &process_state->system_info_,
++                            microdump.GetContext(),
++                            microdump.GetMemory(),
++                            process_state->modules_,
++                            frame_symbolizer_));
++
++  scoped_ptr<CallStack> stack(new CallStack());
++  if (stackwalker.get()) {
++    if (!stackwalker->Walk(stack.get(),
++                           &process_state->modules_without_symbols_,
++                           &process_state->modules_with_corrupt_symbols_)) {
++      BPLOG(INFO) << "Processing was interrupted.";
++      return PROCESS_SYMBOL_SUPPLIER_INTERRUPTED;
++    }
++  } else {
++    BPLOG(ERROR) << "No stackwalker found for microdump.";
++    return PROCESS_ERROR_NO_THREAD_LIST;
++  }
++
++  process_state->threads_.push_back(stack.release());
++  process_state->thread_memory_regions_.push_back(microdump.GetMemory());
++  process_state->crashed_ = true;
++  process_state->requesting_thread_ = 0;
++  process_state->system_info_ = *microdump.GetSystemInfo();
++
++  return PROCESS_OK;
++}
++
++}  // namespace google_breakpad
+diff --git a/breakpad/src/processor/microdump_processor_unittest.cc b/breakpad/src/processor/microdump_processor_unittest.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..af897f7dacb92ab6cd404c46803b7a65f390fe80
+--- /dev/null
++++ b/breakpad/src/processor/microdump_processor_unittest.cc
+@@ -0,0 +1,273 @@
++// Copyright (c) 2014, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// Unit test for MicrodumpProcessor.
++
++#include <fstream>
++#include <iostream>
++#include <string>
++#include <vector>
++
++#include "breakpad_googletest_includes.h"
++#include "google_breakpad/processor/basic_source_line_resolver.h"
++#include "google_breakpad/processor/call_stack.h"
++#include "google_breakpad/processor/microdump_processor.h"
++#include "google_breakpad/processor/process_state.h"
++#include "google_breakpad/processor/stack_frame.h"
++#include "google_breakpad/processor/stack_frame_symbolizer.h"
++#include "processor/simple_symbol_supplier.h"
++#include "processor/stackwalker_unittest_utils.h"
++
++namespace {
++
++using google_breakpad::BasicSourceLineResolver;
++using google_breakpad::MicrodumpProcessor;
++using google_breakpad::ProcessState;
++using google_breakpad::SimpleSymbolSupplier;
++using google_breakpad::StackFrameSymbolizer;
++
++class MicrodumpProcessorTest : public ::testing::Test {
++ public:
++  MicrodumpProcessorTest()
++    : files_path_(string(getenv("srcdir") ? getenv("srcdir") : ".") +
++                  "/src/processor/testdata/") {
++  }
++
++  void ReadFile(const string& file_name, string* file_contents) {
++    assert(file_contents);
++    std::ifstream file_stream(file_name.c_str(), std::ios::in);
++    ASSERT_TRUE(file_stream.good());
++    std::vector<char> bytes;
++    file_stream.seekg(0, std::ios_base::end);
++    ASSERT_TRUE(file_stream.good());
++    bytes.resize(file_stream.tellg());
++    file_stream.seekg(0, std::ios_base::beg);
++    ASSERT_TRUE(file_stream.good());
++    file_stream.read(&bytes[0], bytes.size());
++    ASSERT_TRUE(file_stream.good());
++    *file_contents = string(&bytes[0], bytes.size());
++  }
++
++  google_breakpad::ProcessResult ProcessMicrodump(
++      const string& symbols_file,
++      const string& microdump_contents,
++      ProcessState* state) {
++    SimpleSymbolSupplier supplier(symbols_file);
++    BasicSourceLineResolver resolver;
++    StackFrameSymbolizer frame_symbolizer(&supplier, &resolver);
++    MicrodumpProcessor processor(&frame_symbolizer);
++
++    return processor.Process(microdump_contents, state);
++  }
++
++  void AnalyzeDump(const string& microdump_file_name, bool omit_symbols,
++                   int expected_cpu_count, ProcessState* state) {
++    string symbols_file = omit_symbols ? "" : files_path_ + "symbols/microdump";
++    string microdump_file_path = files_path_ + microdump_file_name;
++    string microdump_contents;
++    ReadFile(microdump_file_path, &microdump_contents);
++
++    google_breakpad::ProcessResult result =
++        ProcessMicrodump(symbols_file, microdump_contents, state);
++
++    ASSERT_EQ(google_breakpad::PROCESS_OK, result);
++    ASSERT_TRUE(state->crashed());
++    ASSERT_EQ(0, state->requesting_thread());
++    ASSERT_EQ(1U, state->threads()->size());
++
++    ASSERT_EQ(expected_cpu_count, state->system_info()->cpu_count);
++    ASSERT_EQ("android", state->system_info()->os_short);
++    ASSERT_EQ("Android", state->system_info()->os);
++  }
++
++  string files_path_;
++};
++
++TEST_F(MicrodumpProcessorTest, TestProcess_Empty) {
++  ProcessState state;
++  google_breakpad::ProcessResult result =
++      ProcessMicrodump("", "", &state);
++  ASSERT_EQ(google_breakpad::PROCESS_ERROR_MINIDUMP_NOT_FOUND, result);
++}
++
++TEST_F(MicrodumpProcessorTest, TestProcess_Invalid) {
++  ProcessState state;
++  google_breakpad::ProcessResult result =
++      ProcessMicrodump("", "This is not a valid microdump", &state);
++  ASSERT_EQ(google_breakpad::PROCESS_ERROR_NO_THREAD_LIST, result);
++}
++
++TEST_F(MicrodumpProcessorTest, TestProcess_MissingSymbols) {
++  ProcessState state;
++  AnalyzeDump("microdump-arm64.dmp", true /* omit_symbols */,
++              2 /* expected_cpu_count */, &state);
++
++  ASSERT_EQ(8U, state.modules()->module_count());
++  ASSERT_EQ("arm64", state.system_info()->cpu);
++  ASSERT_EQ("OS 64 VERSION INFO", state.system_info()->os_version);
++  ASSERT_EQ(1U, state.threads()->size());
++  ASSERT_EQ(12U, state.threads()->at(0)->frames()->size());
++
++  ASSERT_EQ("",
++            state.threads()->at(0)->frames()->at(0)->function_name);
++  ASSERT_EQ("",
++            state.threads()->at(0)->frames()->at(3)->function_name);
++}
++
++TEST_F(MicrodumpProcessorTest, TestProcess_UnsupportedArch) {
++  string microdump_contents =
++      "W/google-breakpad(26491): -----BEGIN BREAKPAD MICRODUMP-----\n"
++      "W/google-breakpad(26491): O A \"unsupported-arch\"\n"
++      "W/google-breakpad(26491): S 0 A48BD840 A48BD000 00002000\n";
++
++  ProcessState state;
++
++  google_breakpad::ProcessResult result =
++      ProcessMicrodump("", microdump_contents, &state);
++
++  ASSERT_EQ(google_breakpad::PROCESS_ERROR_NO_THREAD_LIST, result);
++}
++
++TEST_F(MicrodumpProcessorTest, TestProcessArm) {
++  ProcessState state;
++  AnalyzeDump("microdump-arm.dmp", false /* omit_symbols */,
++              2 /* expected_cpu_count*/, &state);
++
++  ASSERT_EQ(6U, state.modules()->module_count());
++  ASSERT_EQ("arm", state.system_info()->cpu);
++  ASSERT_EQ("OpenGL ES 3.0 V@104.0 AU@  (GIT@Id3510ff6dc)",
++            state.system_info()->gl_version);
++  ASSERT_EQ("Qualcomm", state.system_info()->gl_vendor);
++  ASSERT_EQ("Adreno (TM) 330", state.system_info()->gl_renderer);
++  ASSERT_EQ("OS VERSION INFO", state.system_info()->os_version);
++  ASSERT_EQ(8U, state.threads()->at(0)->frames()->size());
++  ASSERT_EQ("MicrodumpWriterTest_Setup_Test::TestBody",
++            state.threads()->at(0)->frames()->at(0)->function_name);
++  ASSERT_EQ("testing::Test::Run",
++            state.threads()->at(0)->frames()->at(1)->function_name);
++  ASSERT_EQ("main",
++            state.threads()->at(0)->frames()->at(6)->function_name);
++  ASSERT_EQ("breakpad_unittests",
++            state.threads()->at(0)->frames()->at(6)->module->code_file());
++}
++
++TEST_F(MicrodumpProcessorTest, TestProcessArm64) {
++  ProcessState state;
++  AnalyzeDump("microdump-arm64.dmp", false /* omit_symbols */,
++              2 /* expected_cpu_count*/, &state);
++
++  ASSERT_EQ(8U, state.modules()->module_count());
++  ASSERT_EQ("arm64", state.system_info()->cpu);
++  ASSERT_EQ("OS 64 VERSION INFO", state.system_info()->os_version);
++  ASSERT_EQ(9U, state.threads()->at(0)->frames()->size());
++  ASSERT_EQ("MicrodumpWriterTest_Setup_Test::TestBody",
++            state.threads()->at(0)->frames()->at(0)->function_name);
++  ASSERT_EQ("testing::Test::Run",
++            state.threads()->at(0)->frames()->at(2)->function_name);
++  ASSERT_EQ("main",
++            state.threads()->at(0)->frames()->at(7)->function_name);
++  ASSERT_EQ("breakpad_unittests",
++            state.threads()->at(0)->frames()->at(7)->module->code_file());
++}
++
++TEST_F(MicrodumpProcessorTest, TestProcessX86) {
++  ProcessState state;
++  AnalyzeDump("microdump-x86.dmp", false /* omit_symbols */,
++              4 /* expected_cpu_count */, &state);
++
++  ASSERT_EQ(124U, state.modules()->module_count());
++  ASSERT_EQ("x86", state.system_info()->cpu);
++  ASSERT_EQ("asus/WW_Z00A/Z00A:5.0/LRX21V/2.19.40.22_20150627_5104_user:user/"
++      "release-keys", state.system_info()->os_version);
++  ASSERT_EQ(56U, state.threads()->at(0)->frames()->size());
++  ASSERT_EQ("libc.so",
++            state.threads()->at(0)->frames()->at(0)->module->debug_file());
++  // TODO(mmandlis): Get symbols for the test X86 microdump and test function
++  // names.
++}
++
++TEST_F(MicrodumpProcessorTest, TestProcessMultiple) {
++  ProcessState state;
++  AnalyzeDump("microdump-multiple.dmp", false /* omit_symbols */,
++              6 /* expected_cpu_count */, &state);
++  ASSERT_EQ(156U, state.modules()->module_count());
++  ASSERT_EQ("arm", state.system_info()->cpu);
++  ASSERT_EQ("lge/p1_tmo_us/p1:6.0/MRA58K/1603210524c8d:user/release-keys",
++            state.system_info()->os_version);
++  ASSERT_EQ(5U, state.threads()->at(0)->frames()->size());
++}
++
++TEST_F(MicrodumpProcessorTest, TestProcessMips) {
++  ProcessState state;
++  AnalyzeDump("microdump-mips32.dmp", false /* omit_symbols */,
++              2 /* expected_cpu_count */, &state);
++
++  ASSERT_EQ(7U, state.modules()->module_count());
++  ASSERT_EQ("mips", state.system_info()->cpu);
++  ASSERT_EQ("3.0.8-g893bf16 #7 SMP PREEMPT Fri Jul 10 15:20:59 PDT 2015",
++      state.system_info()->os_version);
++  ASSERT_EQ(4U, state.threads()->at(0)->frames()->size());
++
++  ASSERT_EQ("blaTest",
++            state.threads()->at(0)->frames()->at(0)->function_name);
++  ASSERT_EQ("Crash",
++            state.threads()->at(0)->frames()->at(1)->function_name);
++  ASSERT_EQ("main",
++            state.threads()->at(0)->frames()->at(2)->function_name);
++  ASSERT_EQ("crash_example",
++            state.threads()->at(0)->frames()->at(0)->module->debug_file());
++}
++
++TEST_F(MicrodumpProcessorTest, TestProcessMips64) {
++  ProcessState state;
++  AnalyzeDump("microdump-mips64.dmp", false /* omit_symbols */,
++              1 /* expected_cpu_count */, &state);
++
++  ASSERT_EQ(8U, state.modules()->module_count());
++  ASSERT_EQ("mips64", state.system_info()->cpu);
++  ASSERT_EQ("3.10.0-gf185e20 #112 PREEMPT Mon Oct 5 11:12:49 PDT 2015",
++        state.system_info()->os_version);
++  ASSERT_EQ(4U, state.threads()->at(0)->frames()->size());
++
++  ASSERT_EQ("blaTest",
++            state.threads()->at(0)->frames()->at(0)->function_name);
++  ASSERT_EQ("Crash",
++            state.threads()->at(0)->frames()->at(1)->function_name);
++  ASSERT_EQ("main",
++            state.threads()->at(0)->frames()->at(2)->function_name);
++  ASSERT_EQ("crash_example",
++            state.threads()->at(0)->frames()->at(0)->module->debug_file());
++}
++
++}  // namespace
++
++int main(int argc, char* argv[]) {
++  ::testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}
+diff --git a/breakpad/src/processor/microdump_stackwalk.cc b/breakpad/src/processor/microdump_stackwalk.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..7ea80495a6c1695d186d718fa3523341f25715f5
+--- /dev/null
++++ b/breakpad/src/processor/microdump_stackwalk.cc
+@@ -0,0 +1,151 @@
++// Copyright (c) 2014 Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// microdump_stackwalk.cc: Process a microdump with MicrodumpProcessor, printing
++// the results, including stack traces.
++
++#include <stdio.h>
++#include <string.h>
++
++#include <fstream>
++#include <string>
++#include <vector>
++
++#include "common/scoped_ptr.h"
++#include "common/using_std_string.h"
++#include "google_breakpad/processor/basic_source_line_resolver.h"
++#include "google_breakpad/processor/microdump_processor.h"
++#include "google_breakpad/processor/process_state.h"
++#include "google_breakpad/processor/stack_frame_symbolizer.h"
++#include "processor/logging.h"
++#include "processor/simple_symbol_supplier.h"
++#include "processor/stackwalk_common.h"
++
++
++namespace {
++
++using google_breakpad::BasicSourceLineResolver;
++using google_breakpad::MicrodumpProcessor;
++using google_breakpad::ProcessResult;
++using google_breakpad::ProcessState;
++using google_breakpad::scoped_ptr;
++using google_breakpad::SimpleSymbolSupplier;
++using google_breakpad::StackFrameSymbolizer;
++
++// Processes |microdump_file| using MicrodumpProcessor. |symbol_path|, if
++// non-empty, is the base directory of a symbol storage area, laid out in
++// the format required by SimpleSymbolSupplier.  If such a storage area
++// is specified, it is made available for use by the MicrodumpProcessor.
++//
++// Returns the value of MicrodumpProcessor::Process. If processing succeeds,
++// prints identifying OS and CPU information from the microdump, crash
++// information and call stacks for the crashing thread.
++// All information is printed to stdout.
++int PrintMicrodumpProcess(const char* microdump_file,
++                          const std::vector<string>& symbol_paths,
++                          bool machine_readable) {
++  std::ifstream file_stream(microdump_file);
++  std::vector<char> bytes;
++  file_stream.seekg(0, std::ios_base::end);
++  bytes.resize(file_stream.tellg());
++  file_stream.seekg(0, std::ios_base::beg);
++  file_stream.read(&bytes[0], bytes.size());
++  string microdump_content(&bytes[0], bytes.size());
++
++  scoped_ptr<SimpleSymbolSupplier> symbol_supplier;
++  if (!symbol_paths.empty()) {
++    symbol_supplier.reset(new SimpleSymbolSupplier(symbol_paths));
++  }
++
++  BasicSourceLineResolver resolver;
++  StackFrameSymbolizer frame_symbolizer(symbol_supplier.get(), &resolver);
++  ProcessState process_state;
++  MicrodumpProcessor microdump_processor(&frame_symbolizer);
++  ProcessResult res = microdump_processor.Process(microdump_content,
++                                                  &process_state);
++
++  if (res == google_breakpad::PROCESS_OK) {
++    if (machine_readable) {
++      PrintProcessStateMachineReadable(process_state);
++    } else {
++      PrintProcessState(process_state, false, &resolver);
++    }
++    return 0;
++  }
++
++  BPLOG(ERROR) << "MicrodumpProcessor::Process failed (code = " << res << ")";
++  return 1;
++}
++
++void usage(const char *program_name) {
++  fprintf(stderr, "usage: %s [-m] <microdump-file> [symbol-path ...]\n"
++          "    -m : Output in machine-readable format\n",
++          program_name);
++}
++
++}  // namespace
++
++int main(int argc, char** argv) {
++  BPLOG_INIT(&argc, &argv);
++
++  if (argc < 2) {
++    usage(argv[0]);
++    return 1;
++  }
++
++  const char* microdump_file;
++  bool machine_readable;
++  int symbol_path_arg;
++
++  if (strcmp(argv[1], "-m") == 0) {
++    if (argc < 3) {
++      usage(argv[0]);
++      return 1;
++    }
++
++    machine_readable = true;
++    microdump_file = argv[2];
++    symbol_path_arg = 3;
++  } else {
++    machine_readable = false;
++    microdump_file = argv[1];
++    symbol_path_arg = 2;
++  }
++
++  // extra arguments are symbol paths
++  std::vector<string> symbol_paths;
++  if (argc > symbol_path_arg) {
++    for (int argi = symbol_path_arg; argi < argc; ++argi)
++      symbol_paths.push_back(argv[argi]);
++  }
++
++  return PrintMicrodumpProcess(microdump_file,
++                               symbol_paths,
++                               machine_readable);
++}
+diff --git a/breakpad/src/processor/microdump_stackwalk_machine_readable_test b/breakpad/src/processor/microdump_stackwalk_machine_readable_test
+new file mode 100755
+index 0000000000000000000000000000000000000000..fadec2645650e223eec875a65fed41feb8212c39
+--- /dev/null
++++ b/breakpad/src/processor/microdump_stackwalk_machine_readable_test
+@@ -0,0 +1,43 @@
++#!/bin/sh
++
++# Copyright (c) 2014, Google Inc.
++# All rights reserved.
++#
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are
++# met:
++#
++#     * Redistributions of source code must retain the above copyright
++# notice, this list of conditions and the following disclaimer.
++#     * Redistributions in binary form must reproduce the above
++# copyright notice, this list of conditions and the following disclaimer
++# in the documentation and/or other materials provided with the
++# distribution.
++#     * Neither the name of Google Inc. nor the names of its
++# contributors may be used to endorse or promote products derived from
++# this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++source "${0%/*}/microdump_stackwalk_test_vars"  # for MICRODUMP_SUPPORTED_ARCHS.
++testdata_dir=$srcdir/src/processor/testdata
++
++set -e  # Bail out with an error if any of the commands below fails.
++for ARCH in $MICRODUMP_SUPPORTED_ARCHS; do
++  echo "Testing microdump_stackwalk -m for arch $ARCH"
++  ./src/processor/microdump_stackwalk -m $testdata_dir/microdump-${ARCH}.dmp \
++                                         $testdata_dir/symbols/microdump | \
++   tr -d '\015' | \
++   diff -u $testdata_dir/microdump.stackwalk.machine_readable-${ARCH}.out -
++done
++exit 0

@@ -1,3031 +1,3 @@
-diff --git a/native_client/pnacl/driver/tests/native_objects_test.py b/native_client/pnacl/driver/tests/native_objects_test.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..4fba87647517e7178f4797f02f56cd3e27d77ce8
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/native_objects_test.py
-@@ -0,0 +1,141 @@
-+#!/usr/bin/python
-+# Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import unittest
-+
-+from driver_env import env
-+import driver_test_utils
-+import driver_tools
-+import elftools
-+import filetype
-+import re
-+
-+class TestNativeDriverOptions(driver_test_utils.DriverTesterCommon):
-+  def setUp(self):
-+    super(TestNativeDriverOptions, self).setUp()
-+    driver_test_utils.ApplyTestEnvOverrides(env)
-+    if not driver_test_utils.CanRunHost():
-+      self.skipTest("Cannot run host binaries")
-+
-+  def getFakeSourceFile(self):
-+    with self.getTemp(suffix='.c', close=False) as s:
-+      s.write('void _start() {}')
-+      s.close()
-+      return s
-+
-+  def getBitcodeArch(self, filename):
-+    with self.getTemp(suffix='.ll') as ll:
-+      driver_tools.RunDriver('pnacl-dis', [filename, '-o', ll.name])
-+      with open(ll.name) as f:
-+        disassembly = f.read()
-+        match = re.search(r'target triple = "(.+)"', disassembly)
-+        if not match:
-+          return None
-+        triple = match.group(1)
-+        return driver_tools.ParseTriple(triple)
-+
-+  def test_bc_objects(self):
-+    s = self.getFakeSourceFile()
-+    with self.getTemp(suffix='.o') as obj:
-+      # Test that clang with "normal" args results in a portable bitcode object
-+      driver_tools.RunDriver('pnacl-clang', [s.name, '-c', '-o', obj.name])
-+      self.assertTrue(filetype.IsLLVMBitcode(obj.name))
-+      self.assertEqual(self.getBitcodeArch(obj.name), 'le32')
-+
-+      # Test that the --target flag produces biased bitcode objects
-+      test_args = [
-+          ('armv7',  'ARM',    '-gnueabihf', ['-mfloat-abi=hard']),
-+          ('i686',   'X8632',  '',           []),
-+          ('x86_64', 'X8664',  '',           []),
-+          ('mips',   'MIPS32', '',           []),
-+      ]
-+      for (target, arch, target_extra, cmd_extra) in test_args:
-+        target_arg = '--target=%s-unknown-nacl%s' % (target, target_extra)
-+        driver_tools.RunDriver('pnacl-clang',
-+          [s.name, target_arg, '-c', '-o', obj.name] + cmd_extra)
-+        self.assertTrue(filetype.IsLLVMBitcode(obj.name))
-+        self.assertEqual(self.getBitcodeArch(obj.name), arch)
-+
-+  def test_compile_native_objects(self):
-+    s = self.getFakeSourceFile()
-+    with self.getTemp(suffix='.o') as obj:
-+      # TODO(dschuff): Use something more descriptive instead of -arch
-+      # (i.e. something that indicates that a translation is requested)
-+      # and remove pnacl-allow-translate
-+      driver_tools.RunDriver('pnacl-clang',
-+          [s.name, '-c', '-o', obj.name, '--target=x86_64-unknown-nacl',
-+           '-arch', 'x86-64', '--pnacl-allow-translate'])
-+      self.assertTrue(filetype.IsNativeObject(obj.name))
-+      ehdr = elftools.GetELFHeader(obj.name)
-+      self.assertEqual(ehdr.arch, 'X8664')
-+      # ET_REL does not have program headers.
-+      self.assertEqual(ehdr.phnum, 0)
-+
-+      driver_tools.RunDriver('pnacl-clang',
-+          [s.name, '-c', '-o', obj.name, '--target=i686-unknown-nacl',
-+           '-arch', 'x86-32', '--pnacl-allow-translate'])
-+      self.assertTrue(filetype.IsNativeObject(obj.name))
-+      self.assertEqual(elftools.GetELFHeader(obj.name).arch, 'X8632')
-+
-+      driver_tools.RunDriver('pnacl-clang',
-+          [s.name, '-c', '-o', obj.name,
-+           '--target=armv7-unknown-nacl-gnueabihf', '-mfloat-abi=hard',
-+           '-arch', 'arm', '--pnacl-allow-translate'])
-+      self.assertTrue(filetype.IsNativeObject(obj.name))
-+      self.assertEqual(elftools.GetELFHeader(obj.name).arch, 'ARM')
-+
-+      # TODO(dschuff): This should be an error.
-+      driver_tools.RunDriver('pnacl-clang',
-+          [s.name, '-c', '-o', obj.name, '--target=x86_64-unknown-nacl',
-+           '-arch', 'x86-32', '--pnacl-allow-translate'])
-+      self.assertTrue(filetype.IsNativeObject(obj.name))
-+      self.assertEqual(elftools.GetELFHeader(obj.name).arch, 'X8632')
-+
-+  def test_compile_native_executables(self):
-+    s = self.getFakeSourceFile()
-+    with self.getTemp(suffix='.nexe') as obj:
-+      driver_tools.RunDriver('pnacl-clang',
-+          [s.name, '-nostdlib', '-o', obj.name, '-arch', 'x86-64'])
-+      # This test is a sanity check that the ELF header parsing code
-+      # works. If the ELF header parsing code were no longer needed
-+      # for other purposes, this test could be removed.
-+      ehdr, phdrs = elftools.GetELFAndProgramHeaders(obj.name)
-+      self.assertEqual(ehdr.arch, 'X8664')
-+      self.assertNotEqual(ehdr.phnum, 0)
-+      self.assertEqual(ehdr.phentsize, 56)
-+      self.assertNotEqual(len(phdrs), 0)
-+
-+      phdr_type_nums = {}
-+      for phdr in phdrs:
-+        phdr_type_nums[phdr.type] = phdr_type_nums.get(phdr.type, 0) + 1
-+        if phdr.type == elftools.ProgramHeader.PT_LOAD:
-+          self.assertEqual(phdr.align, 0x10000)
-+          self.assertIn(phdr.flags, xrange(8))
-+      self.assertTrue(phdr_type_nums[elftools.ProgramHeader.PT_LOAD] >= 2)
-+
-+  def test_compile_nonsfi_executables(self):
-+    s = self.getFakeSourceFile()
-+    with self.getTemp(suffix='.nexe') as obj:
-+      driver_tools.RunDriver('pnacl-clang',
-+          [s.name, '-nostdlib', '-o', obj.name, '-arch', 'x86-32-nonsfi'])
-+      ehdr, phdrs = elftools.GetELFAndProgramHeaders(obj.name)
-+      self.assertEqual(ehdr.arch, 'X8632')
-+      self.assertNotEqual(ehdr.phnum, 0)
-+      self.assertEqual(ehdr.phentsize, 32)
-+      self.assertNotEqual(len(phdrs), 0)
-+
-+      phdr_type_nums = {}
-+      for phdr in phdrs:
-+        phdr_type_nums[phdr.type] = phdr_type_nums.get(phdr.type, 0) + 1
-+        if phdr.type == elftools.ProgramHeader.PT_LOAD:
-+          self.assertIn(phdr.flags, xrange(8))
-+      self.assertTrue(phdr_type_nums[elftools.ProgramHeader.PT_LOAD] >= 2)
-+      # Check that PT_INTERP was replaced by PT_NULL.
-+      self.assertNotIn(elftools.ProgramHeader.PT_INTERP, phdr_type_nums)
-+      self.assertEqual(phdr_type_nums[elftools.ProgramHeader.PT_NULL], 1)
-+
-+
-+if __name__ == '__main__':
-+  unittest.main()
-diff --git a/native_client/pnacl/driver/tests/path_length_test.py b/native_client/pnacl/driver/tests/path_length_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..a286563229394ae2ae2004b3a21e10eed2f784f0
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/path_length_test.py
-@@ -0,0 +1,198 @@
-+#!/usr/bin/python
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Tests of the pnacl driver.
-+
-+This tests that we give useful errors when paths are too long, and don't
-+unnecessarily generate temp file names that are too long ourselves.
-+
-+"""
-+
-+import driver_log
-+from driver_env import env
-+import driver_test_utils
-+import driver_tools
-+import filetype
-+
-+import cStringIO
-+import os
-+import shutil
-+import sys
-+
-+class TestPathNames(driver_test_utils.DriverTesterCommon):
-+  def setUp(self):
-+    super(TestPathNames, self).setUp()
-+    driver_test_utils.ApplyTestEnvOverrides(env)
-+    self.backup_exit = sys.exit
-+    sys.exit = driver_test_utils.FakeExit
-+    self.cwd_backup = os.getcwd()
-+    cwd_len = len(self.cwd_backup)
-+    # Create a directory whose path will be exactly 235 chars long
-+    assert(cwd_len < 235)
-+    shorter_dir_len = 235 - cwd_len - 1
-+    self.ShorterTempDir = os.path.join(self.cwd_backup, 'a' * shorter_dir_len)
-+    assert(235 == len(self.ShorterTempDir),
-+           "ShorterTempDir isn't 235 chars: %d" % len(self.ShorterTempDir))
-+    os.mkdir(self.ShorterTempDir)
-+    # Create a directory whose path will be exactly 240 chars long
-+    dir_len = 240 - cwd_len - 1
-+    self.LongTempDir = os.path.join(self.cwd_backup, 'a' * dir_len)
-+    assert(240 == len(self.LongTempDir),
-+           "LongTempDir isn't 240 chars: %d" % len(self.LongTempDir))
-+    os.mkdir(self.LongTempDir)
-+
-+  def tearDown(self):
-+    super(TestPathNames, self).tearDown()
-+    os.chdir(self.cwd_backup)
-+    sys.exit = self.backup_exit
-+    shutil.rmtree(self.LongTempDir)
-+    shutil.rmtree(self.ShorterTempDir)
-+
-+  def WriteCFile(self, filename):
-+    with open(filename, 'w') as f:
-+      f.write('int main() { return 0; }')
-+
-+  def AssertRaisesAndReturnOutput(self, exc, func, *args):
-+    capture_out = cStringIO.StringIO()
-+    driver_log.Log.CaptureToStream(capture_out)
-+    self.assertRaises(exc, func, *args)
-+    driver_log.Log.ResetStreams()
-+    return capture_out.getvalue()
-+
-+  def test_PathWithSpaces(self):
-+    '''Test that the driver correctly handles paths containing spaces'''
-+    if not driver_test_utils.CanRunHost():
-+      return
-+
-+    name = os.path.join(self.ShorterTempDir, 'a file')
-+    self.WriteCFile(name + '.c')
-+    driver_tools.RunDriver('pnacl-clang',
-+                           [name + '.c', '-c', '-o', name + '.o'])
-+    self.assertEqual('po', filetype.FileType(name + '.o'))
-+
-+  def test_InputPathTooLong(self):
-+    '''Test that clang and ld reject input paths that are too long
-+
-+     Test that compiling and linking paths shorter than 255 succeeds and paths
-+     longer than 255 fails.
-+     Operations in python (e.g. rename) on long paths don't work on Windows,
-+     so just run the tests on Linux/Mac (the checks are enabled in unittest
-+     mode)
-+     '''
-+    if not driver_test_utils.CanRunHost() or driver_tools.IsWindowsPython():
-+      return
-+
-+    shortname = os.path.join(self.LongTempDir, 'a' * 10)
-+    longname = os.path.join(self.LongTempDir, 'a' * 32)
-+
-+    assert len(shortname) + 2 < 255
-+    assert len(longname) + 2 > 255
-+    self.WriteCFile(shortname + '.c')
-+
-+    driver_tools.RunDriver('pnacl-clang',
-+                           [shortname + '.c', '-c', '-o', shortname + '.o'])
-+
-+    driver_tools.RunDriver('pnacl-ld',
-+                           [shortname + '.o'])
-+
-+    os.rename(shortname + '.c', longname + '.c')
-+    os.rename(shortname + '.o', longname + '.o')
-+
-+
-+    output = self.AssertRaisesAndReturnOutput(
-+        driver_test_utils.DriverExitException,
-+        driver_tools.RunDriver,
-+        'pnacl-clang',
-+        [longname + '.c', '-c', '-o', longname + '.o'])
-+
-+    self.assertIn('too long', output)
-+
-+    output = self.AssertRaisesAndReturnOutput(
-+        driver_test_utils.DriverExitException,
-+        driver_tools.RunDriver,
-+        'pnacl-ld',
-+        [longname + '.o'])
-+
-+    self.assertIn('too long', output)
-+
-+  def test_ExpandedPathTooLong(self):
-+    '''Test that the expanded path is checked with a short relative path'''
-+    if not driver_test_utils.CanRunHost() or driver_tools.IsWindowsPython():
-+      return
-+
-+    os.chdir(self.LongTempDir)
-+
-+    shortname = 'a' * 10
-+    longname = 'a' * 32
-+
-+    # Now we are in a state where the file can be referred to by a relative
-+    # path or a normalized absolute path. For 'shortname', both are short
-+    # enough
-+    assert len(os.path.join(self.LongTempDir, shortname)) + 2 < 255
-+    assert len(os.path.join(self.LongTempDir, longname)) + 2 > 255
-+    self.WriteCFile(shortname + '.c')
-+
-+    # Test that using a relative almost-too-long path works
-+    driver_tools.RunDriver('pnacl-clang',
-+                           [shortname + '.c', '-c', '-o', shortname + '.o'])
-+
-+    driver_tools.RunDriver('pnacl-ld',
-+                           [shortname + '.o'])
-+
-+    # This name has a short-enough relative path and a short-enough normalized
-+    # final path, but the intermediate concatenation of pwd + rel path is too
-+    # long
-+    name_with_traversals = os.path.join('..',
-+                                        os.path.basename(self.LongTempDir),
-+                                        shortname)
-+
-+    output = self.AssertRaisesAndReturnOutput(
-+        driver_test_utils.DriverExitException,
-+        driver_tools.RunDriver,
-+        'pnacl-clang',
-+        [name_with_traversals + '.c', '-c', '-o', shortname + '.o'])
-+    self.assertIn('expanded', output)
-+
-+    # The previous test only gives a long input name. Also test that the output
-+    # name is checked.
-+    output = self.AssertRaisesAndReturnOutput(
-+        driver_test_utils.DriverExitException,
-+        driver_tools.RunDriver,
-+        'pnacl-clang',
-+        [shortname + '.c', '-c', '-o', name_with_traversals + '.o'])
-+    self.assertIn('expanded', output)
-+
-+
-+  def test_TempFileNotTooLong(self):
-+    '''Test that temp files with too-long names are not generated'''
-+    if not driver_test_utils.CanRunHost() or driver_tools.IsWindowsPython():
-+      return
-+
-+    # This name is chosen such that the .c file has the maximum length. pnacl-ld
-+    # should not generate any temp names longer than that.
-+    shortname =  os.path.join(self.LongTempDir, 'a' * 12)
-+
-+    self.WriteCFile(shortname + '.c')
-+    driver_tools.RunDriver('pnacl-clang',
-+                           [shortname + '.c', '-c', '-o', shortname + '.o'])
-+
-+    driver_tools.RunDriver('pnacl-ld',
-+                           [shortname + '.o', '-o', shortname])
-+
-+    # If it's impossible to generate a temp file short enough using our scheme
-+    # (i.e. the directory name is so long that 8 chars will be over the limit),
-+    # make sure we still fail the right way.
-+    longerdir = os.path.join(self.LongTempDir, 'a' * 8)
-+    os.mkdir(longerdir)
-+    longname = os.path.join(longerdir, 'a' * 3)
-+    os.rename(shortname + '.o', longname + '.o')
-+
-+    output = self.AssertRaisesAndReturnOutput(
-+        driver_test_utils.DriverExitException,
-+        driver_tools.RunDriver,
-+        'pnacl-ld',
-+        [longname + '.o', '-o', longname])
-+
-+    self.assertIn('.pexe is too long', output)
-diff --git a/native_client/pnacl/driver/tests/pch_test.py b/native_client/pnacl/driver/tests/pch_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..64b584ab791c29a033d1b18d765a0cbe51252d20
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/pch_test.py
-@@ -0,0 +1,208 @@
-+#!/usr/bin/python
-+# Copyright 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import shutil
-+import sys
-+import tempfile
-+import unittest
-+
-+from driver_env import env
-+import driver_test_utils
-+import driver_tools
-+import filetype
-+
-+class TestPrecompiledHeaders(driver_test_utils.DriverTesterCommon):
-+  def setUp(self):
-+    super(TestPrecompiledHeaders, self).setUp()
-+    driver_test_utils.ApplyTestEnvOverrides(env)
-+    self.exit_backup = sys.exit
-+    sys.exit = driver_test_utils.FakeExit
-+    self.temp_dir = tempfile.mkdtemp()
-+
-+  def tearDown(self):
-+    # Reset some internal state.
-+    sys.exit = self.exit_backup
-+    filetype.ClearFileTypeCaches()
-+    filetype.SetForcedFileType(None)
-+    shutil.rmtree(self.temp_dir)
-+    super(TestPrecompiledHeaders, self).tearDown()
-+
-+  def runDriver(self, driver, flags):
-+    driver_tools.RunDriver(driver, flags)
-+    # Reset some internal state.
-+    filetype.ClearFileTypeCaches()
-+    filetype.SetForcedFileType(None)
-+
-+  def getFirstTestHeader(self, suffix='.h'):
-+    filename = os.path.join(self.temp_dir, 'test_foo' + suffix)
-+    with open(filename, 'w') as t:
-+      t.write('''
-+#ifndef _PNACL_DRIVER_TESTS_TEST_HEADER_H_
-+#define _PNACL_DRIVER_TESTS_TEST_HEADER_H_
-+#ifdef __cplusplus
-+void foo_cxx(int x, int y);
-+#else
-+void bar_c(int x);
-+#endif
-+#endif''')
-+      return t
-+
-+  def getSecondTestHeader(self, first_header, suffix='.h'):
-+    filename = os.path.join(self.temp_dir, 'test_bar' + suffix)
-+    with open(filename, 'w') as t:
-+      t.write('''
-+    #ifdef __cplusplus
-+    #include "{header}"
-+    #else
-+    #include "{header}"
-+    #endif
-+'''.format(header=first_header))
-+      return t
-+
-+  def getTestSource(self, header_name, suffix='.c'):
-+    filename = os.path.join(self.temp_dir, 'test_source' + suffix)
-+    with open(filename, 'w') as t:
-+      t.write('''#include <%s>
-+#ifdef __cplusplus
-+void cxx_func() {
-+  foo_cxx(1, 2);
-+}
-+#else
-+void c_func() {
-+  bar_c(1);
-+}
-+#endif''' % header_name)
-+      return t
-+
-+  def compileAndCheck(self, driver, header, source, is_cxx):
-+    source_base, _ = os.path.splitext(source)
-+    out = source_base + '.ll'
-+    self.runDriver(driver,
-+            ['-include', header, '-S', source, '-o', out])
-+    self.checkCompiledAs(out, is_cxx=is_cxx)
-+
-+  def checkCompiledAs(self, out, is_cxx):
-+    with open(out, 'r') as t:
-+      if is_cxx:
-+        self.assertTrue('foo_cxx' in t.read())
-+      else:
-+        self.assertTrue('bar_c' in t.read())
-+
-+  #---- Actual tests -----#
-+
-+  def test_one_with_xlang(self):
-+    """Test compiling one PCH file with an explicit -x, but no -o"""
-+    h = self.getFirstTestHeader(suffix='.h')
-+    h2 = self.getSecondTestHeader(h.name, suffix='.h')
-+    self.runDriver('pnacl-clang',
-+            ['-x', 'c-header', '-I', self.temp_dir, h2.name])
-+    s = self.getTestSource(h2.name)
-+    self.compileAndCheck('pnacl-clang', h2.name, s.name, is_cxx=False)
-+
-+  def test_one_override_output(self):
-+    """Test compiling one PCH file with an explicit -o <output>"""
-+    h = self.getFirstTestHeader(suffix='.h')
-+    h2 = self.getSecondTestHeader(h.name, suffix='.h')
-+    h2_out = h2.name + 'fancy.pch'
-+    self.assertFalse(os.path.exists(h2_out))
-+    self.runDriver('pnacl-clang',
-+            ['-x', 'c-header', '-I', self.temp_dir, h2.name,
-+             '-o', h2_out])
-+    self.assertTrue(os.path.exists(h2_out))
-+    s = self.getTestSource(h2.name)
-+    self.compileAndCheck('pnacl-clang', h2.name, s.name, is_cxx=False)
-+
-+  def test_two_with_xlang(self):
-+    """Test compiling two PCH files with an explicit -x"""
-+    # Specifying multiple header files without something like -c, or -S
-+    # should be fine. It should not attempt to compile and link like what
-+    # would happen if there were .c or .cpp files without -c, or -S.
-+    h = self.getFirstTestHeader(suffix='.h')
-+    h2 = self.getSecondTestHeader(h.name, suffix='.h')
-+    self.runDriver('pnacl-clang',
-+            ['-x', 'c-header', '-I', self.temp_dir, h.name, h2.name])
-+    self.assertTrue(os.path.exists(driver_tools.DefaultPCHOutputName(h.name)))
-+    self.assertTrue(os.path.exists(driver_tools.DefaultPCHOutputName(h2.name)))
-+    s = self.getTestSource(h2.name)
-+    self.compileAndCheck('pnacl-clang', h2.name, s.name, is_cxx=False)
-+
-+  def test_ignored_dash_mode(self):
-+    """Test that compiling PCH (essentially) ignores -c, -S, but not -E"""
-+    h = self.getFirstTestHeader(suffix='.h')
-+    self.runDriver('pnacl-clang',
-+            ['-c', '-x', 'c-header', '-I', self.temp_dir, h.name])
-+    h2 = self.getSecondTestHeader(h.name, suffix='.h')
-+    self.runDriver('pnacl-clang',
-+            ['-S', '-x', 'c-header', '-I', self.temp_dir, h2.name])
-+    s = self.getTestSource(h2.name)
-+    self.compileAndCheck('pnacl-clang', h2.name, s.name, is_cxx=False)
-+
-+  def test_not_ignore_dash_E(self):
-+    """Test that compiling PCH does not ignore -E"""
-+    h = self.getFirstTestHeader(suffix='.h')
-+    self.runDriver('pnacl-clang',
-+            ['-E', '-x', 'c-header', '-I', self.temp_dir, h.name])
-+    self.assertFalse(os.path.exists(driver_tools.DefaultPCHOutputName(h.name)))
-+
-+  def test_two_no_xlang(self):
-+    """Test compiling two PCH files without a -x (guess from suffix/driver)"""
-+    h = self.getFirstTestHeader(suffix='.h')
-+    h2 = self.getSecondTestHeader(h.name, suffix='.h')
-+    self.runDriver('pnacl-clang',
-+            ['-I', self.temp_dir, h.name, h2.name])
-+    s = self.getTestSource(h2.name)
-+    self.compileAndCheck('pnacl-clang', h2.name, s.name, is_cxx=False)
-+
-+  def test_hpp_no_xlang_clangxx(self):
-+    """Test what happens when using clang++ without a -x <...> / .hpp file"""
-+    h = self.getFirstTestHeader(suffix='.hpp')
-+    h2 = self.getSecondTestHeader(h.name, suffix='.hpp')
-+    self.runDriver('pnacl-clang++',
-+            ['-I', self.temp_dir, h2.name])
-+    s = self.getTestSource(h2.name, suffix='.cc')
-+    self.compileAndCheck('pnacl-clang++', h2.name, s.name, is_cxx=True)
-+
-+  def test_h_clangxx(self):
-+    """Test what happens when using clang++ but -x c++-header and .h file"""
-+    # We cannot test .h with clang++ and without a -x c++-header.
-+    # clang will actually say: "warning: treating 'c-header' input as
-+    # 'c++-header' when in C++ mode, this behavior is deprecated."
-+    # The way the pnacl drivers intercept -x and cache filetypes also
-+    # makes that difficult to distinguish between the -x c-header case and the
-+    # non-x-case.
-+    h = self.getFirstTestHeader(suffix='.h')
-+    h2 = self.getSecondTestHeader(h.name, suffix='.h')
-+    self.runDriver('pnacl-clang++',
-+            ['-x', 'c++-header', '-I', self.temp_dir, h2.name])
-+    s = self.getTestSource(h2.name, suffix='.cc')
-+    self.compileAndCheck('pnacl-clang++', h2.name, s.name, is_cxx=True)
-+
-+  def test_hpp_no_xlang_clang(self):
-+    """Test what happens when using clang with no -x <...> / .hpp file"""
-+    h = self.getFirstTestHeader(suffix='.hpp')
-+    h2 = self.getSecondTestHeader(h.name, suffix='.hpp')
-+    self.runDriver('pnacl-clang',
-+            ['-I', self.temp_dir, h2.name])
-+    s = self.getTestSource(h2.name, suffix='.cc')
-+    self.compileAndCheck('pnacl-clang', h2.name, s.name, is_cxx=True)
-+
-+  def test_mixed_headers_other(self):
-+    """Test that we throw an error when trying to mix doing PCH w/ compiling"""
-+    h = self.getFirstTestHeader(suffix='.hpp')
-+    h2 = self.getSecondTestHeader(h.name, suffix='.hpp')
-+    s = self.getTestSource(h2.name, suffix='.cc')
-+    self.assertRaises(driver_test_utils.DriverExitException,
-+            self.runDriver,
-+            'pnacl-clang++',
-+            ['-I', self.temp_dir, h2.name, '-c', s.name])
-+
-+  def test_relocatable_header(self):
-+    """Tests that the driver accepts --relocatable-header."""
-+    h = self.getFirstTestHeader(suffix='.h')
-+    h2 = self.getSecondTestHeader(h.name, suffix='.h')
-+    driver_tools.RunDriver('pnacl-clang',
-+            ['-x', 'c-header', '--relocatable-pch',
-+             '-isysroot', self.temp_dir, h2.name])
-diff --git a/native_client/pnacl/driver/tests/pnacl_compress_test.py b/native_client/pnacl/driver/tests/pnacl_compress_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..5bd8ae07113bc431896d9f9bf72c353b9cb67e45
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/pnacl_compress_test.py
-@@ -0,0 +1,80 @@
-+#!/usr/bin/python
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Tests pnacl-compress.
-+
-+This tests that pnacl-compress fixpoints, and is immutable after that.
-+"""
-+
-+from driver_env import env
-+import driver_test_utils
-+import driver_tools
-+import pathtools
-+
-+class TestPnaclCompress(driver_test_utils.DriverTesterCommon):
-+  def setUp(self):
-+    super(TestPnaclCompress, self).setUp()
-+    driver_test_utils.ApplyTestEnvOverrides(env)
-+    self.platform = driver_test_utils.GetPlatformToTest()
-+
-+  def getFakePexe(self):
-+    with self.getTemp(suffix='.ll', close=False) as t:
-+      with self.getTemp(suffix='.pexe') as p:
-+        t.write('''
-+define i32 @foo() {
-+  %1 = add i32 1, 1
-+  %2 = add i32 %1, %1
-+  %3 = add i32 %2, %2
-+  %4 = add i32 %3, %3
-+  %5 = add i32 %4, %4
-+  %6 = add i32 %5, %5
-+  %7 = add i32 %6, %6
-+  %8 = add i32 %7, %7
-+  %9 = add i32 %8, %8
-+  %10 = add i32 %9, %9
-+  %11 = add i32 %10, %10
-+  %12 = add i32 %11, %11
-+  %13 = add i32 %12, %12
-+  %14 = add i32 %13, %13
-+  %15 = add i32 %14, %14
-+  %16 = add i32 %15, %15
-+  ret i32 %16
-+}
-+
-+define i32 @main() {
-+  %1 = add i32 1, 1
-+  %2 = add i32 %1, %1
-+  %3 = add i32 %2, %2
-+  %4 = add i32 %3, %3
-+  %5 = add i32 %4, %4
-+  %6 = add i32 %5, %5
-+  %7 = add i32 %6, %6
-+  %8 = add i32 %7, %7
-+  %9 = add i32 %8, %8
-+  %10 = add i32 %9, %9
-+  %11 = add i32 %10, %10
-+  %12 = add i32 %11, %11
-+  %13 = add i32 %12, %12
-+  %14 = add i32 %13, %13
-+  %15 = add i32 %14, %14
-+  %16 = add i32 %15, %15
-+  %17 = call i32 @foo()
-+  %18 = add i32 %16, %17
-+  ret i32 %18
-+}
-+''')
-+        t.close()
-+        driver_tools.RunDriver('pnacl-as', [t.name, '-o', p.name])
-+        driver_tools.RunDriver('pnacl-finalize', [p.name])
-+        return p
-+
-+  def test_multiple_compresses(self):
-+    pexe = self.getFakePexe()
-+    init_size = pathtools.getsize(pexe.name)
-+    driver_tools.RunDriver('pnacl-compress', [pexe.name])
-+    shrunk_size = pathtools.getsize(pexe.name)
-+    self.assertTrue(init_size >= shrunk_size)
-+    driver_tools.RunDriver('pnacl-compress', [pexe.name])
-+    self.assertTrue(pathtools.getsize(pexe.name) == shrunk_size)
-diff --git a/native_client/pnacl/driver/tests/pnacl_ld_options_test.py b/native_client/pnacl/driver/tests/pnacl_ld_options_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..08ce2fa280fbfc0c186823a7d8f0c1c213a379f6
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/pnacl_ld_options_test.py
-@@ -0,0 +1,100 @@
-+#!/usr/bin/python
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Tests of the pnacl driver.
-+
-+This tests that pnacl-ld manages linking and LLVM opt flags correctly.
-+"""
-+
-+import cStringIO
-+import re
-+import unittest
-+
-+from driver_env import env
-+import driver_log
-+import driver_test_utils
-+import driver_tools
-+import filetype
-+
-+class TestLDOptions(driver_test_utils.DriverTesterCommon):
-+  def setUp(self):
-+    super(TestLDOptions, self).setUp()
-+    driver_test_utils.ApplyTestEnvOverrides(env)
-+
-+  def getBitcode(self, finalized=True):
-+    # Even --dry-run requires a file to exist, so make a fake bitcode file.
-+    # It even cares that the file is really bitcode.
-+    with self.getTemp(suffix='.ll', close=False) as t:
-+      with self.getTemp(suffix='.o') as o:
-+        t.write('''
-+define i32 @_start() {
-+  ret i32 0
-+}
-+''')
-+        t.close()
-+        driver_tools.RunDriver('pnacl-as', [t.name, '-o', o.name])
-+        return o
-+
-+
-+  def checkLDOptNumRuns(self, bitcode, flags, num_runs):
-+    """ Given a |bitcode| file the |arch| and additional pnacl-ld |flags|,
-+    check that opt will only be run |num_runs| times. """
-+    # TODO(jvoung): Get rid of INHERITED_DRIVER_ARGS, which leaks across runs.
-+    env.set('INHERITED_DRIVER_ARGS', '')
-+    temp_output = self.getTemp()
-+    capture_out = cStringIO.StringIO()
-+    driver_log.Log.CaptureToStream(capture_out)
-+    driver_tools.RunDriver('pnacl-ld',
-+                           ['--pnacl-driver-verbose',
-+                            '--dry-run',
-+                            bitcode.name,
-+                            '-o', temp_output.name] + flags)
-+    driver_log.Log.ResetStreams()
-+    out = capture_out.getvalue()
-+    split_out = out.splitlines()
-+    count = 0
-+    for line in split_out:
-+      if re.search('Running: .*opt( |\.exe)', line):
-+        count += 1
-+    self.assertEqual(num_runs, count)
-+
-+  def test_num_opt_runs(self):
-+    """ Test that pnacl-ld will merge or not merge runs of LLVM's opt tool"""
-+    if driver_test_utils.CanRunHost():
-+      bitcode = self.getBitcode()
-+      # Test O2, static. Opt should run all passes in one go.
-+      self.checkLDOptNumRuns(
-+          bitcode,
-+          ['-O2', '-static'],
-+          1)
-+      # Test with separate runs per pass.
-+      self.checkLDOptNumRuns(
-+          bitcode,
-+          ['-O2', '-static', '--pnacl-run-passes-separately'],
-+          3)
-+      # Same with strip-all.
-+      self.checkLDOptNumRuns(
-+          bitcode,
-+          ['-O2', '-static', '--strip-all'],
-+          1)
-+      self.checkLDOptNumRuns(
-+          bitcode,
-+          ['-O2', '-static', '--strip-all', '--pnacl-run-passes-separately'],
-+          4)
-+
-+  def test_finalize(self):
-+    """ Test that pnacl-ld will finalize the pexe when requested"""
-+    if not driver_test_utils.CanRunHost():
-+      return
-+    bitcode = self.getBitcode()
-+    with self.getTemp(suffix='.pexe') as temp_output:
-+      driver_tools.RunDriver(
-+        'pnacl-ld', ['--finalize', bitcode.name, '-o', temp_output.name])
-+      self.assertFalse(filetype.IsLLVMBitcode(temp_output.name))
-+      self.assertTrue(filetype.IsPNaClBitcode(temp_output.name))
-+
-+
-+if __name__ == '__main__':
-+  unittest.main()
-diff --git a/native_client/pnacl/driver/tests/strip_test.py b/native_client/pnacl/driver/tests/strip_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..1095389b54713514b08af99ef91d65682e507b44
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/strip_test.py
-@@ -0,0 +1,110 @@
-+#!/usr/bin/python
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Tests of the pnacl driver.
-+
-+This tests that strip works on various kinds of files.
-+"""
-+
-+
-+from driver_env import env
-+import driver_log
-+import driver_test_utils
-+import driver_tools
-+
-+import os
-+import tempfile
-+import unittest
-+
-+class TestStrip(driver_test_utils.DriverTesterCommon):
-+
-+  def setUp(self):
-+    super(TestStrip, self).setUp()
-+    driver_test_utils.ApplyTestEnvOverrides(env)
-+
-+  def getSource(self, num):
-+    with self.getTemp(suffix='.c', close=False) as t:
-+      t.write('''
-+extern void puts(const char *);
-+
-+void foo%d(void) {
-+  puts("Hello\\n");
-+}
-+''' % num)
-+      t.close()
-+      return t
-+
-+  def generateObjWithDebug(self, src, is_native):
-+    s = '.bc'
-+    if is_native:
-+      s = '.o'
-+    obj = self.getTemp(suffix=s)
-+    args = ['-c', '-g', src.name, '-o', obj.name]
-+    if is_native:
-+      args += ['-arch', 'x86-32', '--pnacl-allow-translate']
-+    driver_tools.RunDriver('pnacl-clang', args)
-+    return obj
-+
-+  def generateArchive(self, objs):
-+    a = self.getTemp(suffix='.a')
-+    # Archive file must be a valid archive (non-empty), or non-existent,
-+    # so remove it before running.
-+    os.remove(a.name)
-+    obj_names = [ obj.name for obj in objs]
-+    args = ['rcs', a.name] + obj_names
-+    driver_tools.RunDriver('pnacl-ar', args)
-+    return a
-+
-+  def getFileSize(self, f):
-+    s = os.stat(f)
-+    return s.st_size
-+
-+  def stripFileAndCheck(self, f):
-+    f_stripped = self.getTemp()
-+    driver_tools.RunDriver('pnacl-strip',
-+        ['--strip-all', f.name, '-o', f_stripped.name])
-+    self.assertTrue(self.getFileSize(f_stripped.name) <
-+                    self.getFileSize(f.name))
-+    driver_tools.RunDriver('pnacl-strip',
-+        ['--strip-debug', f.name, '-o', f_stripped.name])
-+    self.assertTrue(self.getFileSize(f_stripped.name) <
-+                    self.getFileSize(f.name))
-+    driver_tools.RunDriver('pnacl-strip',
-+        ['--strip-unneeded', f.name, '-o', f_stripped.name])
-+    self.assertTrue(self.getFileSize(f_stripped.name) <
-+                    self.getFileSize(f.name))
-+
-+  # Individual tests.
-+  # NOTE: We do not test the bitcode archive case.
-+  # Bitcode archives cannot be stripped, because the strip tool does
-+  # not understand how to do that. We cannot test this e.g., with
-+  # assertRaises() because DriverExit() is called on an error
-+  # instead of raising an exception.
-+
-+  def test_StripBitcodeObj(self):
-+    if driver_test_utils.CanRunHost():
-+      src = self.getSource(0)
-+      obj = self.generateObjWithDebug(src, is_native=False)
-+      self.stripFileAndCheck(obj)
-+
-+  def test_StripNativeObj(self):
-+    if driver_test_utils.CanRunHost():
-+      src = self.getSource(0)
-+      obj = self.generateObjWithDebug(src, is_native=True)
-+      self.stripFileAndCheck(obj)
-+
-+  def test_StripNativeArchive(self):
-+    if driver_test_utils.CanRunHost():
-+      src = self.getSource(0)
-+      obj = self.generateObjWithDebug(src, is_native=True)
-+      ar = self.generateArchive([obj])
-+      self.stripFileAndCheck(ar)
-+      src2 = self.getSource(1)
-+      obj2 = self.generateObjWithDebug(src2, is_native=True)
-+      ar2 = self.generateArchive([obj, obj2])
-+      self.stripFileAndCheck(ar2)
-+
-+if __name__ == '__main__':
-+  unittest.main()
-diff --git a/native_client/pnacl/driver/tests/translate_options_test.py b/native_client/pnacl/driver/tests/translate_options_test.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..8fd01f54866992b7ca4af051b75f703c74710504
---- /dev/null
-+++ b/native_client/pnacl/driver/tests/translate_options_test.py
-@@ -0,0 +1,373 @@
-+#!/usr/bin/python
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Tests of the pnacl driver.
-+
-+This tests that pnacl-translate options pass through to LLC and
-+Subzero correctly, and are overridden correctly.
-+"""
-+
-+from driver_env import env
-+import driver_log
-+import driver_test_utils
-+import driver_tools
-+import filetype
-+
-+import cStringIO
-+import os
-+import re
-+import sys
-+import unittest
-+
-+class TestTranslateOptions(driver_test_utils.DriverTesterCommon):
-+  def setUp(self):
-+    super(TestTranslateOptions, self).setUp()
-+    driver_test_utils.ApplyTestEnvOverrides(env)
-+    self.platform = driver_test_utils.GetPlatformToTest()
-+
-+  def getFakePexe(self, finalized=True):
-+    # Even --dry-run requires a file to exist, so make a fake pexe.
-+    # It even cares that the file is really bitcode.
-+    with self.getTemp(suffix='.ll', close=False) as t:
-+      with self.getTemp(suffix='.pexe') as p:
-+        t.write('''
-+define i32 @_start() {
-+  ret i32 0
-+}
-+''')
-+        t.close()
-+        driver_tools.RunDriver('pnacl-as', [t.name, '-o', p.name])
-+        if finalized:
-+          driver_tools.RunDriver('pnacl-finalize', [p.name])
-+          self.assertTrue(filetype.IsPNaClBitcode(p.name))
-+        else:
-+          self.assertTrue(filetype.IsLLVMBitcode(p.name))
-+        return p
-+
-+
-+  def checkCompileTranslateFlags(self, pexe, arch, flags,
-+                                 expected_flags, invert_match=False,
-+                                 expected_args=(),
-+                                 expected_output_file_count=None):
-+    ''' Given a |pexe| the |arch| for translation and additional pnacl-translate
-+    |flags|, check that the commandline for LLC really contains the
-+    |expected_flags|.  This ensures that the pnacl-translate script
-+    does not drop certain flags accidentally. '''
-+    # TODO(jvoung): Get rid of INHERITED_DRIVER_ARGS, which leaks across runs.
-+    env.set('INHERITED_DRIVER_ARGS', '')
-+    temp_output = self.getTemp()
-+    # Major hack to prevent DriverExit() from aborting the test.
-+    # The test will surely DriverLog.Fatal() because dry-run currently
-+    # does not handle anything that involves invoking a subprocess and
-+    # grepping the stdout/stderr since it never actually invokes
-+    # the subprocess. Unfortunately, pnacl-translate does grep the output of
-+    # the sandboxed LLC run, so we can only go that far with --dry-run.
-+    capture_out = cStringIO.StringIO()
-+    driver_log.Log.CaptureToStream(capture_out)
-+    backup_exit = sys.exit
-+    sys.exit = driver_test_utils.FakeExit
-+    self.assertRaises(driver_test_utils.DriverExitException,
-+                      driver_tools.RunDriver,
-+                      'pnacl-translate',
-+                      ['--pnacl-driver-verbose',
-+                       '--dry-run',
-+                       '-arch', arch,
-+                       pexe.name,
-+                       '-o', temp_output.name] + flags)
-+    driver_log.Log.ResetStreams()
-+    out = capture_out.getvalue()
-+    sys.exit = backup_exit
-+    for f in expected_flags:
-+      message = 'Searching for regex %s in %s' % (f, out)
-+      match = re.search(f, out, re.S)
-+      if not invert_match:
-+        self.assertTrue(match, msg=message)
-+      else:
-+        self.assertFalse(match, msg=message)
-+
-+    # Check for some env vars that are passed to the sandboxed translator.
-+    args_got = re.findall(
-+        r'-E NACL_IRT_PNACL_TRANSLATOR_COMPILE_ARG_\d*=([^ ]*)', out)
-+    for arg in expected_args:
-+      self.assertIn(arg, args_got, repr(out))
-+
-+    if expected_output_file_count is not None:
-+      output_files_got = re.findall(
-+          r'-E NACL_IRT_PNACL_TRANSLATOR_COMPILE_OUTPUT_\d*=([^ ]*)', out)
-+      self.assertEquals(len(output_files_got), expected_output_file_count)
-+
-+
-+  #### Individual tests.
-+
-+  def test_no_overrides(self):
-+    if driver_test_utils.CanRunHost():
-+      pexe = self.getFakePexe()
-+      if self.platform == 'arm':
-+        expected_triple_cpu = ['-mtriple=arm.*', '-mcpu=cortex.*']
-+      elif self.platform == 'x86-32':
-+        expected_triple_cpu = ['-mtriple=i686.*', '-mcpu=pentium4m.*']
-+      elif self.platform == 'x86-64':
-+        expected_triple_cpu = ['-mtriple=x86_64.*', '-mcpu=x86-64.*']
-+      elif self.platform == 'mips':
-+        expected_triple_cpu = ['-mtriple=mips.*', '-mcpu=mips32.*']
-+      else:
-+        raise Exception('Unknown platform: "%s"' % self.platform)
-+      # Test that certain defaults are set, when no flags are given.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          [],
-+          expected_triple_cpu + ['-bitcode-format=pnacl'])
-+      # Check that the driver sets the number of threads and modules
-+      # correctly (1 vs 4).
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['--pnacl-sb', '-split-module=1'],
-+          [' -E NACL_IRT_PNACL_TRANSLATOR_COMPILE_THREADS=1 '],
-+          expected_args=['-split-module=1'],
-+          expected_output_file_count=1)
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['--pnacl-sb', '-split-module=4'],
-+          [' -E NACL_IRT_PNACL_TRANSLATOR_COMPILE_THREADS=4 '],
-+          expected_args=['-split-module=4'],
-+          expected_output_file_count=4)
-+      # Check that -split-module=auto does something sensible (1, 2, 3, or 4).
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['--pnacl-sb', '-split-module=auto'],
-+          [' -E NACL_IRT_PNACL_TRANSLATOR_COMPILE_THREADS=[1234] '])
-+      # Check that omitting -split-module is the same as auto.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['--pnacl-sb'],
-+          [' -E NACL_IRT_PNACL_TRANSLATOR_COMPILE_THREADS=[1234] '])
-+      # Check that -split-module=seq is the same as -split-module=1.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['--pnacl-sb', '-split-module=seq'],
-+          [' -E NACL_IRT_PNACL_TRANSLATOR_COMPILE_THREADS=1 '],
-+          expected_args=['-split-module=1'],
-+          expected_output_file_count=1)
-+      # Check that we do not get streaming bitcode by default.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          [],
-+          ['-streaming-bitcode'], invert_match=True)
-+
-+  def test_subzero_flags(self):
-+    # Subzero only supports x86-32 for now.
-+    if self.platform != 'x86-32':
-+      return
-+    if driver_test_utils.CanRunHost():
-+      pexe = self.getFakePexe()
-+      # Test Subzero's default args. Assume default is -split-module=auto.
-+      # In that case # of modules is 1..4, and the only special param
-+      # is the optimization level.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['--pnacl-sb', '--use-sz'],
-+          [' -E NACL_IRT_PNACL_TRANSLATOR_COMPILE_THREADS=[1234] '],
-+          expected_args=['-O2'],
-+          expected_output_file_count=1)
-+      # Similar, but with explicitly set -split-module=auto.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['--pnacl-sb', '--use-sz', '-split-module=auto'],
-+          [' -E NACL_IRT_PNACL_TRANSLATOR_COMPILE_THREADS=[1234] '],
-+          expected_args=['-O2'],
-+          expected_output_file_count=1)
-+      # Similar, but with explicitly set split-module=seq.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['--pnacl-sb', '--use-sz', '-split-module=seq'],
-+          [' -E NACL_IRT_PNACL_TRANSLATOR_COMPILE_THREADS=[1234] '],
-+          expected_args=['-O2'],
-+          expected_output_file_count=1)
-+      # Test that we can bump the thread count up (e.g., up to 4).
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['--pnacl-sb', '--use-sz', '-split-module=4'],
-+          [' -E NACL_IRT_PNACL_TRANSLATOR_COMPILE_THREADS=4 '],
-+          expected_args=['-O2'],
-+          expected_output_file_count=1)
-+      # Test that you get Om1 when you ask for O0.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['-O0', '--pnacl-sb', '--use-sz'],
-+          [],
-+          expected_args=['-Om1'])
-+
-+  def test_LLVMFile(self):
-+    if not driver_test_utils.CanRunHost():
-+      return
-+    pexe = self.getFakePexe(finalized=False)
-+    # For non-sandboxed pnacl-llc, the default -bitcode-format=llvm,
-+    # so there is nothing to really check.
-+    self.checkCompileTranslateFlags(
-+        pexe,
-+        self.platform,
-+        ['--allow-llvm-bitcode-input'],
-+        ['bitcode-format'], invert_match=True)
-+    # For sandboxed pnacl-llc, the default -bitcode-format=pnacl,
-+    # so we need to set -bitcode-format=llvm to read LLVM files.
-+    self.checkCompileTranslateFlags(
-+        pexe,
-+        self.platform,
-+        ['--pnacl-sb', '--allow-llvm-bitcode-input'],
-+        ['-bitcode-format=llvm'])
-+    # Check that we do not get streaming bitcode by default.
-+    self.checkCompileTranslateFlags(
-+        pexe,
-+        self.platform,
-+        ['--allow-llvm-bitcode-input'],
-+        ['-streaming-bitcode'], invert_match=True)
-+    # Test that we get streaming bitcode when we ask for it.
-+    self.checkCompileTranslateFlags(
-+        pexe,
-+        self.platform,
-+        ['--allow-llvm-bitcode-input', '-stream-bitcode'],
-+        ['-streaming-bitcode'])
-+    # ...even when using threading
-+    self.checkCompileTranslateFlags(
-+        pexe,
-+        self.platform,
-+        ['--allow-llvm-bitcode-input', '-stream-bitcode', '-split-module=4'],
-+        ['-streaming-bitcode', '-split-module=4'])
-+
-+  def test_OverrideStreaming(self):
-+    if not driver_test_utils.CanRunHost():
-+      return
-+    pexe = self.getFakePexe()
-+    # Test that we get streaming bitcode when we ask for it.
-+    self.checkCompileTranslateFlags(
-+        pexe,
-+        self.platform,
-+        ['-stream-bitcode'],
-+        ['-streaming-bitcode'])
-+    # ...even when using threading.
-+    self.checkCompileTranslateFlags(
-+        pexe,
-+        self.platform,
-+        ['-stream-bitcode', '-split-module=4'],
-+        ['-streaming-bitcode', '-split-module=4'])
-+
-+  def test_overrideO0(self):
-+    if driver_test_utils.CanRunHost():
-+      pexe = self.getFakePexe()
-+      # Test that you get O0 when you ask for O0.
-+      # You also get no frame pointer elimination.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['-O0'],
-+          ['-O0', '-disable-fp-elim '])
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['-O0', '--pnacl-sb'],
-+          ['-O0.*-disable-fp-elim.*-mcpu=.*'])
-+
-+  def test_overrideTranslateFast(self):
-+    if driver_test_utils.CanRunHost():
-+      pexe = self.getFakePexe()
-+      # Test that you get O0 when you ask for -translate-fast.
-+      # In this case... you don't get no frame pointer elimination.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['-translate-fast'],
-+          ['-O0'])
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['-translate-fast', '--pnacl-sb'],
-+          ['-O0.*-mcpu=.*'])
-+
-+  def test_overrideTLSUseCall(self):
-+    if driver_test_utils.CanRunHost():
-+      pexe = self.getFakePexe()
-+      # Test that you -mtls-use-call, etc. when you ask for it.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['-mtls-use-call', '-fdata-sections', '-ffunction-sections'],
-+          ['-mtls-use-call', '-data-sections', '-function-sections'])
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          ['-mtls-use-call', '-fdata-sections', '-ffunction-sections',
-+           '--pnacl-sb'],
-+          ['-mtls-use-call.*-data-sections.*-function-sections'])
-+
-+  def test_overrideMCPU(self):
-+    if driver_test_utils.CanRunHost():
-+      pexe = self.getFakePexe()
-+      if self.platform == 'arm':
-+        mcpu_pattern = '-mcpu=cortex-a15'
-+      elif self.platform == 'x86-32':
-+        mcpu_pattern = '-mcpu=atom'
-+      elif self.platform == 'x86-64':
-+        mcpu_pattern = '-mcpu=corei7'
-+      elif self.platform == 'mips':
-+        mcpu_pattern = '-mcpu=mips32'
-+      else:
-+        raise Exception('Unknown platform: "%s"' % self.platform)
-+      # Test that you get the -mcpu that you ask for.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          [mcpu_pattern],
-+          [mcpu_pattern])
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          [mcpu_pattern, '--pnacl-sb'],
-+          [mcpu_pattern])
-+
-+  def test_overrideMAttr(self):
-+    if driver_test_utils.CanRunHost():
-+      pexe = self.getFakePexe()
-+      if self.platform == 'arm':
-+        mattr_flags, mattr_pat = '-mattr=+hwdiv', r'-mattr=\+hwdiv'
-+      elif self.platform == 'x86-32' or self.platform == 'x86-64':
-+        mattr_flags, mattr_pat = '-mattr=+avx2,+sse41', r'-mattr=\+avx2,\+sse41'
-+      elif self.platform == 'mips':
-+        mattr_flags, mattr_pat = '-mattr=+fp64', r'-mattr=\+fp64'
-+      else:
-+        raise Exception('Unknown platform: "%s"' % self.platform)
-+      # Test that you get the -mattr=.* that you ask for.
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          [mattr_flags],
-+          [mattr_pat])
-+      self.checkCompileTranslateFlags(
-+          pexe,
-+          self.platform,
-+          [mattr_flags, '--pnacl-sb'],
-+          [mattr_pat + '.*-mcpu=.*'])
-+      # Same for subzero (only test supported architectures).
-+      if self.platform == 'x86-32':
-+        self.checkCompileTranslateFlags(
-+            pexe,
-+            self.platform,
-+            [mattr_flags, '--pnacl-sb', '--use-sz'],
-+            [mattr_pat])
-+
-+
-+if __name__ == '__main__':
-+  unittest.main()
-diff --git a/native_client/pnacl/llvm_change_try_helper.sh b/native_client/pnacl/llvm_change_try_helper.sh
-new file mode 100755
-index 0000000000000000000000000000000000000000..0ba6298c1397fc6fcf4f686d0f278a53ae2c59ef
---- /dev/null
-+++ b/native_client/pnacl/llvm_change_try_helper.sh
-@@ -0,0 +1,57 @@
-+#!/bin/bash
-+# Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+
-+# This script allows an LLVM change to be sent to the PNaCl toolchain
-+# trybots for testing.  It packages up the LLVM Git commit as a
-+# base64-encoded Git bundle so that it can be sent to the trybots as a
-+# text-only patch file.
-+#
-+# This script assumes you are using a Git checkout of the
-+# native_client source tree.
-+#
-+# Example usage: After making changes to toolchain_build/src/llvm and committing
-+# them, you can test the changes with the following:
-+#
-+#   ./pnacl/llvm_change_try_helper.sh  # Commits a trybot-only change
-+#   git try
-+#   git reset --hard HEAD^  # Removes the trybot-only change
-+
-+
-+set -eux
-+
-+if [ "$#" = 1 ]; then
-+  component="$1"
-+elif [ "$#" = 0 ]; then
-+  # Default
-+  component=llvm
-+else
-+  echo "Usage: $0 [<component-name>]"
-+  echo "where <component-name> is the name of a subdirectory of toolchain_build/src/"
-+  exit 1
-+fi
-+
-+top_dir="$(pwd)"
-+
-+mkdir -p pnacl/not_for_commit
-+
-+pushd toolchain_build/src/${component}
-+# Save the commit ID plus its subject line to give readable context.
-+git log --no-walk --pretty="format:%H%n%ad%n%s" HEAD \
-+    > $top_dir/pnacl/not_for_commit/${component}_commit_id
-+git bundle create $top_dir/pnacl/not_for_commit/${component}_bundle \
-+    origin/master..HEAD
-+popd
-+
-+python -c "import base64, sys; base64.encode(sys.stdin, sys.stdout)" \
-+    < pnacl/not_for_commit/${component}_bundle \
-+    > pnacl/not_for_commit/${component}_bundle.b64
-+
-+git add pnacl/not_for_commit/${component}_bundle.b64
-+git add pnacl/not_for_commit/${component}_commit_id
-+
-+git commit -m "${component} patch for trybot" \
-+    pnacl/not_for_commit/${component}_bundle.b64 \
-+    pnacl/not_for_commit/${component}_commit_id
-diff --git a/native_client/pnacl/prune_test.py b/native_client/pnacl/prune_test.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..16d3632081e7f5f6ffce7925f7790b01ded55111
---- /dev/null
-+++ b/native_client/pnacl/prune_test.py
-@@ -0,0 +1,189 @@
-+#!/usr/bin/python
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Tests that a set of symbols are truly pruned from the translator.
-+
-+Compares the pruned down "on-device" translator with the "fat" host build
-+which has not been pruned down.
-+"""
-+
-+import glob
-+import re
-+import subprocess
-+import sys
-+import unittest
-+
-+class SymbolInfo(object):
-+
-+  def __init__(self, lib_name, sym_name, t, size):
-+    self.lib_name = lib_name
-+    self.sym_name = sym_name
-+    self.type = t
-+    self.size = size
-+
-+
-+def is_weak(t):
-+  t = t.upper()
-+  return t == 'V' or t == 'W'
-+
-+
-+def is_local(t):
-+  # According to the NM documentation:
-+  #   "If lowercase, the symbol is usually local...  There are however a few
-+  #   lowercase symbols that are shown for special global symbols
-+  #   ("u", "v" and "w")."
-+  return t != 'u' and not is_weak(t) and t.islower()
-+
-+
-+def merge_symbols(sdict1, sdict2):
-+  for sym_name, v2 in sdict2.iteritems():
-+    # Check for duplicate symbols.
-+    if sym_name in sdict1:
-+      v1 = sdict1[sym_name]
-+      # Only print warning if they are not weak / differently sized.
-+      if (not (is_weak(v2.type) or is_weak(v1.type)) and
-+          v1.size != v2.size):
-+        print 'Warning symbol %s defined in both %s(%d, %s) and %s(%d, %s)' % (
-+            sym_name,
-+            v1.lib_name, v1.size, v1.type,
-+            v2.lib_name, v2.size, v2.type)
-+      # Arbitrarily take the max.  The sizes are approximate anyway,
-+      # since the host binaries are built from a different compiler.
-+      v1.size = max(v1.size, v2.size)
-+      continue
-+    # Otherwise just copy info over to sdict2.
-+    sdict1[sym_name] = sdict2[sym_name]
-+  return sdict1
-+
-+
-+class TestTranslatorPruned(unittest.TestCase):
-+
-+  pruned_symbols = {}
-+  unpruned_symbols = {}
-+
-+  @classmethod
-+  def get_symbol_info(cls, nm_tool, cxxfilt_tool, bin_name):
-+    results = {}
-+    nm_cmd = [nm_tool, '--size-sort', bin_name]
-+    print 'Getting symbols and sizes by running:\n' + ' '.join(nm_cmd)
-+    nm = subprocess.Popen(nm_cmd, stdout=subprocess.PIPE)
-+    output = subprocess.check_output(cxxfilt_tool, stdin=nm.stdout)
-+    nm.wait()
-+    for line in iter(output.splitlines()):
-+      (hex_size, t, sym_name) = line.split(' ', 2)
-+      # Only track defined and non-BSS symbols.
-+      if t != 'U' and t.upper() != 'B':
-+        info = SymbolInfo(bin_name, sym_name, t, int(hex_size, 16))
-+        # For local symbols, tack the library name on as a prefix.
-+        # That should still match the regexes later.
-+        if is_local(t):
-+          key = bin_name + '$' + sym_name
-+        else:
-+          key = sym_name
-+        # The same library can have the same local symbol. Just sum up sizes.
-+        if key in results:
-+          old = results[key]
-+          old.size = old.size + info.size
-+        else:
-+          results[key] = info
-+    return results
-+
-+  @classmethod
-+  def setUpClass(cls):
-+    nm_tool = sys.argv[1]
-+    cxxfilt_tool = sys.argv[2]
-+    host_binaries = glob.glob(sys.argv[3])
-+    target_binary = sys.argv[4]
-+    print 'Getting symbol info from %s (host) and %s (target)' % (
-+        sys.argv[3], sys.argv[4])
-+    assert host_binaries, ('Did not glob any binaries from: ' % sys.argv[3])
-+    for binary in host_binaries:
-+      cls.unpruned_symbols = merge_symbols(cls.unpruned_symbols,
-+                                           cls.get_symbol_info(nm_tool,
-+                                                               cxxfilt_tool,
-+                                                               binary))
-+    cls.pruned_symbols = cls.get_symbol_info(nm_tool,
-+                                             cxxfilt_tool,
-+                                             target_binary)
-+    # Do an early check that these aren't stripped binaries.
-+    assert cls.unpruned_symbols, 'No symbols from host?'
-+    assert cls.pruned_symbols, 'No symbols from target?'
-+
-+  def size_of_matching_syms(self, sym_regex, sym_infos):
-+    # Check if a given sym_infos has symbols matching sym_regex, and
-+    # return the total size of all matching symbols.
-+    total = 0
-+    for sym_name, sym_info in sym_infos.iteritems():
-+      if re.search(sym_regex, sym_info.sym_name):
-+        total += sym_info.size
-+    return total
-+
-+  def test_prunedNotFullyStripped(self):
-+    """Make sure that the test isn't accidentally passing.
-+
-+    The test can accidentally pass if the translator is stripped of symbols.
-+    Then it would look like everything is pruned out.  Look for a symbol
-+    that's guaranteed not to be pruned out.
-+    """
-+    pruned = self.size_of_matching_syms('main',
-+                                        TestTranslatorPruned.pruned_symbols)
-+    self.assertNotEqual(pruned, 0)
-+
-+  def test_didPrune(self):
-+    """Check for classes/namespaces/symbols that we have intentionally pruned.
-+
-+    Check that the symbols are not present anymore in the translator,
-+    and check that the symbols actually do exist in the developer tools.
-+    That prevents the test from accidentally passing if the symbols
-+    have been renamed to something else.
-+    """
-+    total = 0
-+    pruned_list = [
-+        'LLParser', 'LLLexer',
-+        'MCAsmParser', '::AsmParser',
-+        'ARMAsmParser', 'X86AsmParser',
-+        'ELFAsmParser', 'COFFAsmParser', 'DarwinAsmParser',
-+        'MCAsmLexer', '::AsmLexer',
-+        # Gigantic Asm MatchTable (globbed for all targets),
-+        'MatchTable',
-+        # Pruned out PBQP mostly, except the getCustomPBQPConstraints virtual.
-+        'RegAllocPBQP', 'PBQP::RegAlloc',
-+        # Can only check *InstPrinter::print*, not *::getRegisterName():
-+        # https://code.google.com/p/nativeclient/issues/detail?id=3326
-+        'ARMInstPrinter::print', 'X86.*InstPrinter::print',
-+        # Currently pruned by hacking Triple.h. That covers most things,
-+        # but not all.  E.g., container-specific relocation handling.
-+        '.*MachObjectWriter', 'TargetLoweringObjectFileMachO',
-+        'MCMachOStreamer', '.*MCAsmInfoDarwin',
-+        '.*COFFObjectWriter', 'TargetLoweringObjectFileCOFF',
-+        '.*COFFStreamer', '.*AsmInfoGNUCOFF',
-+        # This is not pruned out: 'MCSectionMachO', 'MCSectionCOFF',
-+        # 'MachineModuleInfoMachO', ...
-+        ]
-+    for sym_regex in pruned_list:
-+      unpruned = self.size_of_matching_syms(
-+          sym_regex, TestTranslatorPruned.unpruned_symbols)
-+      pruned = self.size_of_matching_syms(
-+          sym_regex, TestTranslatorPruned.pruned_symbols)
-+      self.assertNotEqual(unpruned, 0, 'Unpruned never had ' + sym_regex)
-+      self.assertEqual(pruned, 0, 'Pruned still has ' + sym_regex)
-+      # Bytes pruned is approximate since the host build is different
-+      # from the target build (different inlining / optimizations).
-+      print 'Pruned out approx %d bytes worth of %s symbols' % (unpruned,
-+                                                                sym_regex)
-+      total += unpruned
-+    print 'Total %d bytes' % total
-+
-+
-+if __name__ == '__main__':
-+  if len(sys.argv) != 5:
-+    print 'Usage: %s <nm_tool> <cxxfilt_tool> <unpruned_host_binary> <pruned_target_binary>'
-+    sys.exit(1)
-+  suite = unittest.TestLoader().loadTestsFromTestCase(TestTranslatorPruned)
-+  result = unittest.TextTestRunner(verbosity=2).run(suite)
-+  if result.wasSuccessful():
-+    sys.exit(0)
-+  else:
-+    sys.exit(1)
-diff --git a/native_client/pnacl/scripts/common-tools.sh b/native_client/pnacl/scripts/common-tools.sh
-new file mode 100755
-index 0000000000000000000000000000000000000000..346305eb9199aacb9dd1183e8c74fce41d2db2db
---- /dev/null
-+++ b/native_client/pnacl/scripts/common-tools.sh
-@@ -0,0 +1,407 @@
-+#!/bin/bash
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+set -o nounset
-+set -o errexit
-+
-+# Turn on/off debugging mode
-+readonly PNACL_DEBUG=${PNACL_DEBUG:-false}
-+
-+# True if the scripts are running on the build bots.
-+readonly PNACL_BUILDBOT=${PNACL_BUILDBOT:-true}
-+
-+# Dump all build output to stdout
-+readonly PNACL_VERBOSE=${PNACL_VERBOSE:-true}
-+
-+readonly TIME_AT_STARTUP=$(date '+%s')
-+
-+SetScriptPath() {
-+  SCRIPT_PATH="$1"
-+}
-+
-+SetLogDirectory() {
-+  TC_LOG="$1"
-+  TC_LOG_ALL="${TC_LOG}/ALL"
-+}
-+
-+######################################################################
-+# Detect system type
-+######################################################################
-+
-+BUILD_PLATFORM=$(uname | tr '[A-Z]' '[a-z]')
-+BUILD_PLATFORM_LINUX=false
-+BUILD_PLATFORM_MAC=false
-+BUILD_PLATFORM_WIN=false
-+
-+if [ "${BUILD_PLATFORM}" == "linux" ] ; then
-+  BUILD_PLATFORM_LINUX=true
-+  SCONS_BUILD_PLATFORM=linux
-+  BUILD_ARCH=${BUILD_ARCH:-$(uname -m)}
-+  EXEC_EXT=
-+  SO_EXT=.so
-+  SO_DIR=lib
-+elif [[ "${BUILD_PLATFORM}" =~ cygwin_nt ]]; then
-+  BUILD_PLATFORM=win
-+  BUILD_PLATFORM_WIN=true
-+  SCONS_BUILD_PLATFORM=win
-+  # force 32 bit host because build is also 32 bit on windows.
-+  HOST_ARCH=${HOST_ARCH:-x86_32}
-+  BUILD_ARCH=${BUILD_ARCH:-x86_32}
-+  EXEC_EXT=.exe
-+  SO_EXT=.dll
-+  SO_DIR=bin  # On Windows, DLLs are placed in bin/
-+              # because the dynamic loader searches %PATH%
-+elif [ "${BUILD_PLATFORM}" == "darwin" ] ; then
-+  BUILD_PLATFORM=mac
-+  BUILD_PLATFORM_MAC=true
-+  SCONS_BUILD_PLATFORM=mac
-+  # On mac, uname -m is a lie. We always do 64 bit host builds, on
-+  # 64 bit build machines
-+  HOST_ARCH=${HOST_ARCH:-x86_64}
-+  BUILD_ARCH=${BUILD_ARCH:-x86_64}
-+  EXEC_EXT=
-+  SO_EXT=.dylib
-+  SO_DIR=lib
-+else
-+  echo "Unknown system '${BUILD_PLATFORM}'"
-+  exit -1
-+fi
-+
-+readonly BUILD_PLATFORM
-+readonly BUILD_PLATFORM_LINUX
-+readonly BUILD_PLATFORM_MAC
-+readonly BUILD_PLATFORM_WIN
-+readonly SCONS_BUILD_PLATFORM
-+readonly SO_EXT
-+readonly SO_DIR
-+
-+BUILD_ARCH_SHORT=${BUILD_ARCH}
-+BUILD_ARCH_X8632=false
-+BUILD_ARCH_X8664=false
-+BUILD_ARCH_ARM=false
-+BUILD_ARCH_MIPS=false
-+if [ "${BUILD_ARCH}" == "x86_32" ] ||
-+   [ "${BUILD_ARCH}" == "i386" ] ||
-+   [ "${BUILD_ARCH}" == "i686" ] ; then
-+  BUILD_ARCH=x86_32
-+  BUILD_ARCH_X8632=true
-+  BUILD_ARCH_SHORT=x86
-+elif [ "${BUILD_ARCH}" == "x86_64" ] ; then
-+  BUILD_ARCH_X8664=true
-+  BUILD_ARCH_SHORT=x86
-+elif [ "${BUILD_ARCH}" == "armv7l" ] ; then
-+  BUILD_ARCH_ARM=true
-+  BUILD_ARCH_SHORT=arm
-+elif [ "${BUILD_ARCH}" == "mips32" ] ||
-+     [ "${BUILD_ARCH}" == "mips" ] ; then
-+  BUILD_ARCH_MIPS=true
-+  BUILD_ARCH_SHORT=mips
-+else
-+  echo "Unknown build arch '${BUILD_ARCH}'"
-+  exit -1
-+fi
-+readonly BUILD_ARCH
-+readonly BUILD_ARCH_SHORT
-+readonly BUILD_ARCH_X8632
-+readonly BUILD_ARCH_X8664
-+readonly BUILD_ARCH_ARM
-+readonly BUILD_ARCH_MIPS
-+
-+
-+HOST_ARCH=${HOST_ARCH:-${BUILD_ARCH}}
-+HOST_ARCH_X8632=false
-+HOST_ARCH_X8664=false
-+HOST_ARCH_ARM=false
-+HOST_ARCH_MIPS=false
-+if [ "${HOST_ARCH}" == "x86_32" ] ||
-+   [ "${HOST_ARCH}" == "i386" ] ||
-+   [ "${HOST_ARCH}" == "i686" ] ; then
-+  HOST_ARCH=x86_32
-+  HOST_ARCH_X8632=true
-+elif [ "${HOST_ARCH}" == "x86_64" ] ; then
-+  HOST_ARCH_X8664=true
-+elif [ "${HOST_ARCH}" == "armv7l" ] ; then
-+  HOST_ARCH_ARM=true
-+elif [ "${HOST_ARCH}" == "mips32" ] ||
-+     [ "${HOST_ARCH}" == "mips" ] ; then
-+  HOST_ARCH_MIPS=true
-+else
-+  echo "Unknown host arch '${HOST_ARCH}'"
-+  exit -1
-+fi
-+readonly HOST_ARCH
-+readonly HOST_ARCH_X8632
-+readonly HOST_ARCH_X8664
-+readonly HOST_ARCH_ARM
-+readonly HOST_ARCH_MIPS
-+
-+if [ "${BUILD_ARCH}" != "${HOST_ARCH}" ]; then
-+  if ! { ${BUILD_ARCH_X8664} && ${HOST_ARCH_X8632}; }; then
-+    echo "Cross builds other than build=x86_64 with host=x86_32 not supported"
-+    exit -1
-+  fi
-+fi
-+
-+# On Windows, scons expects Windows-style paths (C:\foo\bar)
-+# This function converts cygwin posix paths to Windows-style paths.
-+# On all other platforms, this function does nothing to the path.
-+PosixToSysPath() {
-+  local path="$1"
-+  if ${BUILD_PLATFORM_WIN}; then
-+    cygpath -w "$(GetAbsolutePath "${path}")"
-+  else
-+    echo "${path}"
-+  fi
-+}
-+
-+######################################################################
-+# Logging tools
-+######################################################################
-+
-+# Logged pushd
-+spushd() {
-+  LogEcho "-------------------------------------------------------------------"
-+  LogEcho "ENTERING: $1"
-+  pushd "$1" > /dev/null
-+}
-+
-+# Logged popd
-+spopd() {
-+  LogEcho "LEAVING: $(pwd)"
-+  popd > /dev/null
-+  LogEcho "-------------------------------------------------------------------"
-+  LogEcho "ENTERING: $(pwd)"
-+}
-+
-+LogEcho() {
-+  mkdir -p "${TC_LOG}"
-+  echo "$*" >> "${TC_LOG_ALL}"
-+}
-+
-+RunWithLog() {
-+  local log="${TC_LOG}/$1"
-+
-+  mkdir -p "${TC_LOG}"
-+
-+  shift 1
-+  local ret=1
-+  if ${PNACL_VERBOSE}; then
-+    echo "RUNNING: " "$@" | tee "${log}" | tee -a "${TC_LOG_ALL}"
-+    "$@" 2>&1 | tee "${log}" | tee -a "${TC_LOG_ALL}"
-+    ret=${PIPESTATUS[0]}
-+  else
-+    echo "RUNNING: " "$@" | tee -a "${TC_LOG_ALL}" &> "${log}"
-+    "$@" 2>&1 | tee -a "${TC_LOG_ALL}" &> "${log}"
-+    ret=${PIPESTATUS[0]}
-+  fi
-+  if [ ${ret} -ne 0 ]; then
-+    echo
-+    Banner "ERROR"
-+    echo -n "COMMAND:"
-+    PrettyPrint "$@"
-+    echo
-+    echo "LOGFILE: ${log}"
-+    echo
-+    echo "PWD: $(pwd)"
-+    echo
-+    if ${PNACL_BUILDBOT}; then
-+      echo "BEGIN LOGFILE Contents."
-+      cat "${log}"
-+      echo "END LOGFILE Contents."
-+    fi
-+    return 1
-+  fi
-+  return 0
-+}
-+
-+PrettyPrint() {
-+  # Pretty print, respecting parameter grouping
-+  for I in "$@"; do
-+    local has_space=$(echo "$I" | grep " ")
-+    if [ ${#has_space} -gt 0 ]; then
-+      echo -n ' "'
-+      echo -n "$I"
-+      echo -n '"'
-+    else
-+      echo -n " $I"
-+    fi
-+  done
-+  echo
-+}
-+
-+assert-dir() {
-+  local dir="$1"
-+  local msg="$2"
-+
-+  if [ ! -d "${dir}" ]; then
-+    Banner "ERROR: ${msg}"
-+    exit -1
-+  fi
-+}
-+
-+assert-file() {
-+  local fn="$1"
-+  local msg="$2"
-+
-+  if [ ! -f "${fn}" ]; then
-+    Banner "ERROR: ${fn} does not exist. ${msg}"
-+    exit -1
-+  fi
-+}
-+
-+Usage() {
-+  egrep "^#@" "${SCRIPT_PATH}" | cut -b 3-
-+}
-+
-+Usage2() {
-+  egrep "^#(@|\+)" "${SCRIPT_PATH}" | cut -b 3-
-+}
-+
-+Banner() {
-+  echo ""
-+  echo " *********************************************************************"
-+  echo " | "
-+  for arg in "$@" ; do
-+    echo " | ${arg}"
-+  done
-+  echo " | "
-+  echo " *********************************************************************"
-+}
-+
-+StepBanner() {
-+  local module="$1"
-+  if [ $# -eq 1 ]; then
-+    echo ""
-+    echo "-------------------------------------------------------------------"
-+    local padding=$(RepeatStr ' ' 28)
-+    echo "${padding}${module}"
-+    echo "-------------------------------------------------------------------"
-+  else
-+    shift 1
-+    local padding=$(RepeatStr ' ' $((20-${#module})) )
-+    echo "[$(TimeStamp)] ${module}${padding}" "$@"
-+  fi
-+}
-+
-+TimeStamp() {
-+  if date --version &> /dev/null ; then
-+    # GNU 'date'
-+    date -d "now - ${TIME_AT_STARTUP}sec" '+%M:%S'
-+  else
-+    # Other 'date' (assuming BSD for now)
-+    local time_now=$(date '+%s')
-+    local time_delta=$[ ${time_now} - ${TIME_AT_STARTUP} ]
-+    date -j -f "%s" "${time_delta}" "+%M:%S"
-+  fi
-+}
-+
-+
-+SubBanner() {
-+  echo "----------------------------------------------------------------------"
-+  echo " $@"
-+  echo "----------------------------------------------------------------------"
-+}
-+
-+SkipBanner() {
-+    StepBanner "$1" "Skipping $2, already up to date."
-+}
-+
-+RepeatStr() {
-+  local str="$1"
-+  local count=$2
-+  local ret=""
-+
-+  while [ $count -gt 0 ]; do
-+    ret="${ret}${str}"
-+    count=$((count-1))
-+  done
-+  echo "$ret"
-+}
-+
-+
-+Fatal() {
-+  echo 1>&2
-+  echo "$@" 1>&2
-+  echo 1>&2
-+  exit -1
-+}
-+
-+# On Linux with GNU readlink, "readlink -f" would be a quick way
-+# of getting an absolute path, but MacOS has BSD readlink.
-+GetAbsolutePath() {
-+  local relpath=$1
-+  local reldir
-+  local relname
-+  if [ -d "${relpath}" ]; then
-+    reldir="${relpath}"
-+    relname=""
-+  else
-+    reldir="$(dirname "${relpath}")"
-+    relname="/$(basename "${relpath}")"
-+  fi
-+
-+  local absdir="$(cd "${reldir}" && pwd)"
-+  echo "${absdir}${relname}"
-+}
-+
-+
-+# The Queue* functions provide a simple way of keeping track
-+# of multiple background processes in order to ensure that:
-+# 1) they all finish successfully (with return value 0), and
-+# 2) they terminate if the master process is killed/interrupted.
-+#    (This is done using a bash "trap" handler)
-+#
-+# Example Usage:
-+#     command1 &
-+#     QueueLastProcess
-+#     command2 &
-+#     QueueLastProcess
-+#     command3 &
-+#     QueueLastProcess
-+#     echo "Waiting for commands finish..."
-+#     QueueWait
-+#
-+# TODO(pdox): Right now, this abstraction is only used for
-+# paralellizing translations in the self-build. If we're going
-+# to use this for anything more complex, then throttling the
-+# number of active processes to exactly PNACL_CONCURRENCY would
-+# be a useful feature.
-+CT_WAIT_QUEUE=""
-+QueueLastProcess() {
-+  local pid=$!
-+  CT_WAIT_QUEUE+=" ${pid}"
-+  if ! QueueConcurrent ; then
-+    QueueWait
-+  fi
-+}
-+
-+QueueConcurrent() {
-+  [ ${PNACL_CONCURRENCY} -gt 1 ]
-+}
-+
-+QueueWait() {
-+  for pid in ${CT_WAIT_QUEUE} ; do
-+    wait ${pid}
-+  done
-+  CT_WAIT_QUEUE=""
-+}
-+
-+# Add a trap so that if the user Ctrl-C's or kills
-+# this script while background processes are running,
-+# the background processes don't keep going.
-+trap 'QueueKill' SIGINT SIGTERM SIGHUP
-+QueueKill() {
-+  echo
-+  echo "Killing queued processes: ${CT_WAIT_QUEUE}"
-+  for pid in ${CT_WAIT_QUEUE} ; do
-+    kill ${pid} &> /dev/null || true
-+  done
-+  echo
-+  CT_WAIT_QUEUE=""
-+}
-+
-+QueueEmpty() {
-+  [ "${CT_WAIT_QUEUE}" == "" ]
-+}
-diff --git a/native_client/pnacl/scripts/libcxx_known_failures.txt b/native_client/pnacl/scripts/libcxx_known_failures.txt
-new file mode 100644
-index 0000000000000000000000000000000000000000..668c66cc900580e6aea9d3d65b27690ed0086034
---- /dev/null
-+++ b/native_client/pnacl/scripts/libcxx_known_failures.txt
-@@ -0,0 +1,94 @@
-+# Newlib is missing <fenv.h>, which is currently very platform-specific.
-+libc++::depr/depr.c.headers/fenv_h.pass.cpp
-+libc++::numerics/cfenv/cfenv.syn/cfenv.pass.cpp
-+libc++::numerics/cfenv/version.pass.cpp
-+
-+# Newlib doesn't have support for long double in <math.h>. <cmath> was
-+# modified to work around these issues. Discuss fixing the test with
-+# libc++ folks?
-+libc++::depr/depr.c.headers/math_h.pass.cpp
-+libc++::numerics/c.math/cmath.pass.cpp
-+
-+# The test is run without __STRICT_ANSI__ (-std=gnu++11 instead of
-+# -std=c++11) which makes us define what shouldn't be defined in
-+# clang/3.3/include/stdbool.h.
-+libc++::depr/depr.c.headers/stdbool_h.pass.cpp
-+
-+# Newlib doesn't have the C Unicode TR header <uchar.h>.
-+libc++::depr/depr.c.headers/uchar_h.pass.cpp
-+
-+# Newlib defines clearerr, feof and ferror as macro which shadows the
-+# functions it also declares. <cstdio> was patched to undef the macros,
-+# but the test includes <stdio.h> instead. Discuss fixing the test with
-+# libc++ folks?
-+libc++::depr/depr.c.headers/stdio_h.pass.cpp
-+
-+# Need to investigate these.
-+libc++::diagnostics/syserr/syserr.errcat/syserr.errcat.objects/system_category.pass.cpp
-+libc++::localization/locale.categories/category.numeric/locale.nm.put/facet.num.put.members/put_long_double.pass.cpp
-+libc++::localization/locale.categories/category.time/locale.time.put/locale.time.put.members/put2.pass.cpp
-+libc++::re/re.traits/isctype.pass.cpp
-+libc++::re/re.traits/lookup_classname.pass.cpp
-+libc++::strings/string.conversions/stod.pass.cpp
-+libc++::strings/string.conversions/stof.pass.cpp
-+libc++::strings/string.conversions/stold.pass.cpp
-+
-+# terminating with uncaught exception of type std::runtime_error:
-+# <some class> failed to construct for <some locale like en_US.UTF-8>
-+libc++::input.output/file.streams/fstreams/filebuf.virtuals/overflow.pass.cpp
-+libc++::input.output/file.streams/fstreams/filebuf.virtuals/underflow.pass.cpp
-+libc++::input.output/iostream.format/ext.manip/get_money.pass.cpp
-+libc++::input.output/iostream.format/ext.manip/get_time.pass.cpp
-+libc++::input.output/iostream.format/ext.manip/put_money.pass.cpp
-+libc++::input.output/iostream.format/ext.manip/put_time.pass.cpp
-+libc++::input.output/iostreams.base/ios.base/ios.base.callback/register_callback.pass.cpp
-+libc++::input.output/iostreams.base/ios.base/ios.base.locales/imbue.pass.cpp
-+libc++::input.output/iostreams.base/ios/basic.ios.members/copyfmt.pass.cpp
-+libc++::input.output/iostreams.base/ios/basic.ios.members/imbue.pass.cpp
-+libc++::input.output/iostreams.base/ios/basic.ios.members/move.pass.cpp
-+libc++::input.output/iostreams.base/ios/basic.ios.members/swap.pass.cpp
-+libc++::input.output/stream.buffers/streambuf/streambuf.cons/copy.pass.cpp
-+libc++::input.output/stream.buffers/streambuf/streambuf.cons/default.pass.cpp
-+libc++::input.output/stream.buffers/streambuf/streambuf.members/streambuf.locales/locales.pass.cpp
-+libc++::input.output/stream.buffers/streambuf/streambuf.protected/streambuf.assign/assign.pass.cpp
-+libc++::input.output/stream.buffers/streambuf/streambuf.protected/streambuf.assign/swap.pass.cpp
-+libc++::localization/locale.categories/category.collate/locale.collate.byname/compare.pass.cpp
-+libc++::localization/locale.categories/category.collate/locale.collate.byname/hash.pass.cpp
-+libc++::localization/locale.categories/category.collate/locale.collate.byname/transform.pass.cpp
-+libc++::localization/locale.categories/category.collate/locale.collate.byname/types.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.codecvt.byname/ctor_wchar_t.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/is_1.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/is_many.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/scan_is.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/scan_not.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/tolower_1.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/tolower_many.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/toupper_1.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/toupper_many.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/types.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/widen_1.pass.cpp
-+libc++::localization/locale.categories/category.ctype/locale.ctype.byname/widen_many.pass.cpp
-+libc++::localization/locale.categories/category.monetary/locale.money.get/locale.money.get.members/get_long_double_en_US.pass.cpp
-+libc++::localization/locale.categories/category.monetary/locale.money.get/locale.money.get.members/get_long_double_fr_FR.pass.cpp
-+libc++::localization/locale.categories/category.monetary/locale.money.get/locale.money.get.members/get_string_en_US.pass.cpp
-+libc++::localization/locale.categories/category.monetary/locale.money.put/locale.money.put.members/put_long_double_en_US.pass.cpp
-+libc++::localization/locale.categories/category.monetary/locale.money.put/locale.money.put.members/put_long_double_fr_FR.pass.cpp
-+libc++::localization/locale.categories/category.monetary/locale.money.put/locale.money.put.members/put_string_en_US.pass.cpp
-+libc++::localization/locale.categories/category.time/locale.time.put.byname/put1.pass.cpp
-+libc++::localization/locale.categories/facet.numpunct/locale.numpunct.byname/decimal_point.pass.cpp
-+libc++::localization/locale.categories/facet.numpunct/locale.numpunct.byname/grouping.pass.cpp
-+libc++::localization/locale.categories/facet.numpunct/locale.numpunct.byname/thousands_sep.pass.cpp
-+libc++::localization/locales/locale/locale.cons/copy.pass.cpp
-+libc++::localization/locales/locale/locale.cons/default.pass.cpp
-+libc++::localization/locales/locale/locale.members/name.pass.cpp
-+libc++::localization/locales/locale/locale.operators/eq.pass.cpp
-+libc++::localization/locales/locale/locale.statics/classic.pass.cpp
-+libc++::localization/locales/locale/locale.statics/global.pass.cpp
-+libc++::re/re.regex/re.regex.locale/imbue.pass.cpp
-+libc++::re/re.traits/default.pass.cpp
-+libc++::re/re.traits/getloc.pass.cpp
-+libc++::re/re.traits/imbue.pass.cpp
-+libc++::re/re.traits/translate_nocase.pass.cpp
-+
-+# This relies on sigaction to capture SIGALRM.
-+libc++::thread/thread.threads/thread.thread.this/sleep_for.pass.cpp
-diff --git a/native_client/pnacl/scripts/libgcc-newlib.mvars b/native_client/pnacl/scripts/libgcc-newlib.mvars
-new file mode 100644
-index 0000000000000000000000000000000000000000..e95203bab3346e9eaa5c33f81a06ff1c8f9fc265
---- /dev/null
-+++ b/native_client/pnacl/scripts/libgcc-newlib.mvars
-@@ -0,0 +1,14 @@
-+# This file is required by libgcc make.
-+# It is normally generated by GCC make/install.
-+# This is a minimal version required for building libgcc_eh.a
-+# This file may have to be regenerated for building libgcc_s.so
-+
-+LIB2ADDEH = $(gcc_srcdir)/unwind-dw2.c $(gcc_srcdir)/unwind-dw2-fde-glibc.c $(gcc_srcdir)/unwind-sjlj.c $(gcc_srcdir)/gthr-gnat.c $(gcc_srcdir)/unwind-c.c $(gcc_srcdir)/emutls.c
-+LIB2ADDEHSTATIC = $(gcc_srcdir)/unwind-dw2.c $(gcc_srcdir)/unwind-dw2-fde-glibc.c $(gcc_srcdir)/unwind-sjlj.c $(gcc_srcdir)/gthr-gnat.c $(gcc_srcdir)/unwind-c.c $(gcc_srcdir)/emutls.c
-+LIB2ADDEHSHARED = $(gcc_srcdir)/unwind-dw2.c $(gcc_srcdir)/unwind-dw2-fde-glibc.c $(gcc_srcdir)/unwind-sjlj.c $(gcc_srcdir)/gthr-gnat.c $(gcc_srcdir)/unwind-c.c $(gcc_srcdir)/emutls.c
-+GCC_EXTRA_PARTS =
-+LIBGCC2_CFLAGS = -O2  -g -O2 -DIN_GCC -DCROSS_DIRECTORY_STRUCTURE  -W -Wall -Wwrite-strings -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes -Wold-style-definition  -isystem ./include  -fPIC -g  -DIN_LIBGCC2 -D__GCC_FLOAT_NOT_NEEDED -fno-stack-protector -Dinhibit_libc
-+TARGET_LIBGCC2_CFLAGS = -fPIC
-+SHLIB_LINK = $(CC) -DIN_GCC -W -Wall -fPIC -g -nodefaultlibs -Wt,-nodefaultlibs -shared -Wl,--soname=@shlib_base_name@.so.1 -Wl,--version-script=@shlib_map_file@ -o @shlib_base_name@.so.1 @multilib_flags@ @shlib_objs@ -lc
-+SHLIB_INSTALL = invalid_install_tool
-+SHLIB_EXT = .so
-diff --git a/native_client/pnacl/scripts/libgcc-tconfig.h b/native_client/pnacl/scripts/libgcc-tconfig.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..91ea8d3642b2e24aaca6d2ede536844f18f80447
---- /dev/null
-+++ b/native_client/pnacl/scripts/libgcc-tconfig.h
-@@ -0,0 +1,10 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+#define ATTRIBUTE_UNUSED __attribute__((unused))
-+
-+#define EH_RETURN_STACKADJ_RTX 1
-+
-+#include "unwind-pnacl.h"
-diff --git a/native_client/pnacl/scripts/llvm-test.py b/native_client/pnacl/scripts/llvm-test.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..81a9d35df918805999f0b58696a9dac150e4bc28
---- /dev/null
-+++ b/native_client/pnacl/scripts/llvm-test.py
-@@ -0,0 +1,534 @@
-+#!/usr/bin/python
-+# Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""This script runs the LLVM regression tests and the LLVM testsuite.
-+   These tests are tightly coupled to the LLVM build, and require that
-+   LLVM has been built on this host by build.sh.  It also assumes that
-+   the test suite source has been checked out using gclient (build.sh
-+   git-sync).
-+
-+   The testsuite must be configured, then run, then reported.
-+   Currently it requires clean in between runs of different arches.
-+
-+   The regression tests require nothing more than running 'make check'
-+   in the build directory, but currently not all of the upstream tests
-+   pass in our source tree, so we currently use the same
-+   known-failures mechanism that the testsuite uses. Once we eliminate
-+   the locally-caused failures, we should expect 'make check' to
-+   always pass and can get rid of the regression known failures.
-+"""
-+
-+import contextlib
-+import datetime
-+import os
-+import optparse
-+import shutil
-+import subprocess
-+import sys
-+import parse_llvm_test_report
-+
-+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-+import pynacl.platform
-+
-+@contextlib.contextmanager
-+def remember_cwd():
-+  """Provides a shell 'pushd'/'popd' pattern.
-+
-+  Use as:
-+      with remember_cwd():
-+        os.chdir(...)
-+        ...
-+      # Original cwd restored here
-+  """
-+  curdir = os.getcwd()
-+  try:
-+    yield
-+  finally:
-+    os.chdir(curdir)
-+
-+
-+def ParseCommandLine(argv):
-+  usage = """%prog [options]
-+
-+Specify the tests or test subsets in the options; common tests are
-+--llvm-regression and --testsuite-all.
-+
-+The --opt arguments control the frontend/backend optimization flags.
-+The default set is {O3f,O2b}, other options are {O0f,O0b,O2b_sz,O0b_sz}.
-+"""
-+  parser = optparse.OptionParser(usage=usage)
-+  parser.add_option('--arch', dest='arch',
-+                    help=('Architecture to test, e.g. x86-32, x86-64, arm; ' +
-+                          'required for most tests'))
-+  parser.add_option('--opt', dest='opt_attributes', action='append',
-+                    default=[],
-+                    help=('Add optimization level attribute of ' +
-+                          'test configuration'))
-+  parser.add_option('--llvm-regression', dest='run_llvm_regression',
-+                    action='store_true', default=False,
-+                    help='Run the LLVM regression tests')
-+  parser.add_option('--libcxx-tests', dest='run_libcxx_tests',
-+                    action='store_true', default=False,
-+                    help='Run the libc++ tests')
-+  parser.add_option('--testsuite-clean', dest='testsuite_clean',
-+                    action='store_true', default=False,
-+                    help='Clean the testsuite build directory')
-+  parser.add_option('--testsuite-prereq', dest='testsuite_prereq',
-+                    action='store_true', default=False,
-+                    help='Build the testsuite prerequisites')
-+  parser.add_option('--testsuite-configure', dest='testsuite_configure',
-+                    action='store_true', default=False,
-+                    help='Configure the testsuite build directory')
-+  parser.add_option('--testsuite-run', dest='testsuite_run',
-+                    action='store_true', default=False,
-+                    help='Run the testsuite (requires <arch> argument)')
-+  parser.add_option('--testsuite-report', dest='testsuite_report',
-+                    action='store_true', default=False,
-+                    help=('Generate the testsuite report ' +
-+                          '(requires <arch> argument)'))
-+  parser.add_option('--testsuite-all', dest='testsuite_all',
-+                    action='store_true', default=False,
-+                    help='Run all testsuite steps (requires <arch> argument)')
-+  parser.add_option('--llvm-buildpath', dest='llvm_buildpath',
-+                    help='Path to the LLVM build directory')
-+  parser.add_option('-v', '--verbose', action='store_true',
-+                    default=False, dest='verbose',
-+                    help=('[--testsuite-report/regression option] ' +
-+                          'Print compilation/run logs of failing tests in'
-+                          'testsuite report and print all regression output'))
-+  # The following options are specific to parse_llvm_test_report.
-+  parser.add_option('-x', '--exclude', action='append', dest='excludes',
-+                    default=[],
-+                    help=('[--testsuite-report option] ' +
-+                          'Add list of excluded tests (expected fails)'))
-+  parser.add_option('-c', '--check-excludes', action='store_true',
-+                    default=False, dest='check_excludes',
-+                    help=('[--testsuite-report option] ' +
-+                          'Report tests which unexpectedly pass'))
-+  parser.add_option('-p', '--build-path', dest='buildpath',
-+                    help=('[--testsuite-report option] ' +
-+                          'Path to test-suite build directory'))
-+  parser.add_option('-a', '--attribute', dest='attributes', action='append',
-+                    default=[],
-+                    help=('[--testsuite-report option] ' +
-+                          'Add attribute of test configuration (e.g. arch)'))
-+  parser.add_option('-t', '--testsuite', action='store_true', dest='testsuite',
-+                    default=False,
-+                    help=('[--testsuite-report option] ' +
-+                          'Signify LLVM testsuite tests'))
-+  parser.add_option('-l', '--lit', action='store_true', dest='lit',
-+                    default=False,
-+                    help=('[--testsuite-report option] ' +
-+                          'Signify LLVM LIT regression tests'))
-+
-+  options, args = parser.parse_args(argv)
-+  return options, args
-+
-+
-+def Fatal(text):
-+  """Prints an error message and exits."""
-+  print >> sys.stderr, text
-+  sys.exit(1)
-+
-+
-+def ParseConfig(options):
-+  """Constructs a frontend/backend dict based on --opt arguments.
-+
-+  Args:
-+    options: The result of OptionParser().parse_args().
-+
-+  Returns:
-+    A simple dict containing keys 'frontend_opt', 'frontend_attr',
-+    'backend_opt', and 'backend_attr', each mapped to a valid string
-+    value.  The result is a function of the --opt command-line
-+    arguments, with defaults in place when there are too few --opt
-+    arguments.
-+  """
-+  configs = dict(O0f={'frontend_opt': '-O0', 'frontend_attr': 'O0f'},
-+                 O3f={'frontend_opt': '-O3', 'frontend_attr': 'O3f'},
-+                 O0b={'backend_opt': '-translate-fast',
-+                      'backend_attr': 'O0b'},
-+                 O2b={'backend_opt': '-O2', 'backend_attr': 'O2b'},
-+                 O0b_sz={'backend_opt': '-translate-fast --use-sz',
-+                         'backend_attr': 'O0b_sz'},
-+                 O2b_sz={'backend_opt': '-O2 --use-sz',
-+                         'backend_attr': 'O2b_sz'},
-+                 )
-+  result = {}
-+  # Default is pnacl-clang -O3, pnacl-translate -O2
-+  for attr in ['O3f', 'O2b'] + options.opt_attributes:
-+    if attr in configs:
-+      result.update(configs[attr])
-+  return result
-+
-+
-+def GetConfigSuffix(config):
-+  """Create a string to be used as a file suffix.
-+
-+  Args:
-+    config: A dict that was the result of ParseConfig().
-+
-+  Returns:
-+    A string that concatenates the frontend and backend attributes.
-+  """
-+  return config['frontend_attr'] + '_' + config['backend_attr']
-+
-+def SetupEnvironment(options):
-+  """Create an environment.
-+
-+  This is based on the current system, various defaults, and various
-+  environment variables.
-+
-+  Args:
-+    options: The result of OptionParser.parse_args()
-+  Returns:
-+    A dict with various string->string mappings.
-+  """
-+  env = {}
-+  pwd = os.getcwd()
-+  if not pwd.endswith(os.sep + 'native_client'):
-+    Fatal("ERROR: must be run in native_client/ directory!\n" +
-+          "       (Current directory is " + pwd + ")")
-+  # Simulate what's needed from common-tools.sh.
-+  # We need PNACL_BUILDBOT, BUILD_PLATFORM, and HOST_ARCH.
-+  # TODO(dschuff): This should come from toolchain_build or the upcoming common
-+  # python infrastructure.
-+  env['PNACL_BUILDBOT'] = os.environ.get('PNACL_BUILDBOT', 'false')
-+  if sys.platform == 'linux2':
-+    env['BUILD_PLATFORM'] = 'linux'
-+    env['BUILD_ARCH'] = os.environ.get(
-+        'BUILD_ARCH',
-+        'x86_64' if pynacl.platform.IsArch64Bit() else 'i686')
-+    env['HOST_ARCH'] = os.environ.get('HOST_ARCH', env['BUILD_ARCH'])
-+    env['HOST_TRIPLE'] = env['HOST_ARCH'] + '_linux'
-+  elif sys.platform == 'cygwin':
-+    env['BUILD_PLATFORM'] = 'win'
-+    env['HOST_ARCH'] = os.environ.get('HOST_ARCH', 'x86_32')
-+    env['HOST_TRIPLE'] = 'i686_pc_cygwin'
-+  elif sys.platform == 'darwin':
-+    env['BUILD_PLATFORM'] = 'mac'
-+    env['HOST_ARCH'] = os.environ.get('HOST_ARCH', 'x86_64')
-+    env['HOST_TRIPLE'] = 'x86_64_apple_darwin'
-+  elif sys.platform == 'win32':
-+    env['BUILD_PLATFORM'] = 'win'
-+    env['HOST_ARCH'] = os.environ.get('HOST_ARCH', 'x86_64')
-+    env['HOST_TRIPLE'] = 'i686_w64_mingw32'
-+    # TODO(dschuff) unify this with toolchain_build_pnacl
-+    msys_path = os.environ.get(
-+        'MSYS',
-+        os.path.join(os.getcwd(), 'mingw32', 'msys', 'bin'))
-+    os.environ['PATH'] = os.pathsep.join([os.environ['PATH'], msys_path])
-+  else:
-+    Fatal("Unknown system " + sys.platform)
-+  if env['HOST_ARCH'] in ['i386', 'i686']:
-+    env['HOST_ARCH'] = 'x86_32'
-+
-+
-+  # Set up the rest of the environment.
-+  env['NACL_ROOT'] = pwd
-+  env['LLVM_TESTSUITE_SRC'] = (
-+    '{NACL_ROOT}/toolchain_build/src/llvm-test-suite'.format(**env))
-+  env['LLVM_TESTSUITE_BUILD'] = (
-+    '{NACL_ROOT}/pnacl/build/llvm-test-suite'.format(**env))
-+  env['TC_SRC_LLVM'] = (
-+    '{NACL_ROOT}/toolchain_build/src/llvm'.format(**env))
-+  env['TC_BUILD_LLVM'] = options.llvm_buildpath or (
-+    '{NACL_ROOT}/toolchain_build/out/llvm_{HOST_TRIPLE}_work'.format(**env))
-+  env['TC_BUILD_LIBCXX'] = (
-+    ('{NACL_ROOT}/toolchain_build/out/' +
-+     'libcxx_le32_work/').format(**env))
-+  env['PNACL_CONCURRENCY'] = os.environ.get('PNACL_CONCURRENCY', '8')
-+
-+  # The toolchain used may not be the one downloaded, but one that is freshly
-+  # built into a different directory,
-+  # Overriding the default here will not affect the sel_ldr
-+  # and IRT used to run the tests (they are controlled by run.py)
-+  env['PNACL_TOOLCHAIN_DIR'] = (
-+    os.environ.get('PNACL_TOOLCHAIN_DIR',
-+                   '{BUILD_PLATFORM}_x86/pnacl_newlib'.format(**env)))
-+  env['PNACL_BIN'] = (
-+    '{NACL_ROOT}/toolchain/{PNACL_TOOLCHAIN_DIR}/bin'.format(**env))
-+  env['PNACL_SDK_DIR'] = (
-+    '{NACL_ROOT}/toolchain/{PNACL_TOOLCHAIN_DIR}/le32-nacl/lib'
-+    .format(**env))
-+  env['PNACL_SCRIPTS'] = '{NACL_ROOT}/pnacl/scripts'.format(**env)
-+  env['LLVM_REGRESSION_KNOWN_FAILURES'] = (
-+      '{pwd}/pnacl/scripts/llvm_regression_known_failures.txt'.format(pwd=pwd))
-+  env['LIBCXX_KNOWN_FAILURES'] = (
-+      '{pwd}/pnacl/scripts/libcxx_known_failures.txt'.format(pwd=pwd))
-+  return env
-+
-+
-+def ToolchainWorkDirExists(work_dir):
-+  # TODO(dschuff): Because this script is run directly from the buildbot
-+  # script and not as part of a toolchain_build rule, we do not know
-+  # whether the llvm target was actually built (in which case the working
-+  # directory is still there) or whether it was just retrieved from cache
-+  # (in which case it was clobbered, since the bots run with --clobber).
-+  # Check if ninja or make rule exists.
-+  return (os.path.isfile(os.path.join(work_dir, 'build.ninja')) or
-+          os.path.isfile(os.path.join(work_dir, 'Makefile')))
-+
-+
-+def RunLitTest(testdir, testarg, lit_failures, env, options):
-+  """Run LLVM lit tests, and check failures against known failures.
-+
-+  Args:
-+    testdir: Directory with the make/ninja file to test.
-+    testarg: argument to pass to make/ninja.
-+    env: The result of SetupEnvironment().
-+    options: The result of OptionParser().parse_args().
-+
-+  Returns:
-+    0 always
-+  """
-+  with remember_cwd():
-+    if not ToolchainWorkDirExists(testdir):
-+      print 'Working directory %s is empty. Not running tests' % testdir
-+      if env['PNACL_BUILDBOT'] != 'false' or options.verbose:
-+        print '@@@STEP_TEXT (skipped)@@@'
-+      return 0
-+    os.chdir(testdir)
-+
-+    sub_env = os.environ.copy()
-+    # Tell run.py to use the architecture specified by --arch, or the
-+    # current host architecture if none was provided.
-+    sub_env['PNACL_RUN_ARCH'] = options.arch or env['HOST_ARCH']
-+
-+    maker = 'ninja' if os.path.isfile('./build.ninja') else 'make'
-+    cmd = [maker, testarg, '-v' if maker == 'ninja' else 'VERBOSE=1']
-+    print 'Running lit test:', ' '.join(cmd)
-+    make_pipe = subprocess.Popen(cmd, env=sub_env, stdout=subprocess.PIPE)
-+
-+    lines = []
-+    # When run by a buildbot, we need to incrementally tee the 'make'
-+    # stdout to our stdout, rather than collect its entire stdout and
-+    # print it at the end.  Otherwise the watchdog may try to kill the
-+    # process after too long without any output.
-+    #
-+    # Note: We use readline instead of 'for line in make_pipe.stdout'
-+    # because otherwise the process on the Cygwin bot seems to hang
-+    # when the 'make' process completes (with slightly truncated
-+    # output).  The readline avoids buffering when reading from a
-+    # pipe in Python 2, which may be complicit in the problem.
-+    for line in iter(make_pipe.stdout.readline, ''):
-+      if env['PNACL_BUILDBOT'] != 'false' or options.verbose:
-+        # The buildbots need to be fully verbose and print all output.
-+        print str(datetime.datetime.now()) + ' ' + line,
-+      lines.append(line)
-+    print (str(datetime.datetime.now()) + ' ' +
-+           "Waiting for '%s' to complete." % cmd)
-+    make_pipe.wait()
-+    make_stdout = ''.join(lines)
-+
-+    parse_options = vars(options)
-+    parse_options['lit'] = True
-+    parse_options['excludes'].append(env[lit_failures])
-+    parse_options['attributes'].append(env['BUILD_PLATFORM'])
-+    parse_options['attributes'].append(env['HOST_ARCH'])
-+    print (str(datetime.datetime.now()) + ' ' +
-+           'Parsing LIT test report output.')
-+    ret = parse_llvm_test_report.Report(parse_options, filecontents=make_stdout)
-+  return ret
-+
-+
-+def EnsureSdkExists(env):
-+  """Ensure that a build of the SDK exists.  Exits if not.
-+
-+  Args:
-+    env: The result of SetupEnvironment().
-+  """
-+  libnacl_path = os.path.join(env['PNACL_SDK_DIR'], 'libnacl.a')
-+  if not os.path.isfile(libnacl_path):
-+    Fatal("""
-+ERROR: libnacl does not seem to exist in %s
-+ERROR: have you run 'pnacl/build.sh sdk' ?
-+    """ % libnacl_path)
-+
-+
-+def TestsuitePrereq(env, options):
-+  """Run the LLVM test suite prerequisites.
-+
-+  Args:
-+    env: The result of SetupEnvironment().
-+    options: The result of OptionParser().parse_args().
-+
-+  Returns:
-+    0 for success, non-zero integer on failure.
-+  """
-+  arch = options.arch or Fatal("Error: missing --arch argument")
-+  return subprocess.call(['./scons',
-+                          'platform=' + arch,
-+                          'irt_core',
-+                          'sel_ldr',
-+                          'elf_loader',
-+                          '-j{PNACL_CONCURRENCY}'.format(**env)])
-+
-+
-+def TestsuiteRun(env, config, options):
-+  """Run the LLVM test suite.
-+
-+  Args:
-+    env: The result of SetupEnvironment().
-+    config: A dict that was the result of ParseConfig().  This
-+        determines the specific optimization levels.
-+    options: The result of OptionParser().parse_args().
-+
-+  Returns:
-+    0 for success, non-zero integer on failure.
-+  """
-+  arch = options.arch or Fatal("Error: missing --arch argument")
-+  EnsureSdkExists(env)
-+  suffix = GetConfigSuffix(config)
-+  opt_clang = config['frontend_opt']
-+  opt_trans = config['backend_opt']
-+  build_path = env['LLVM_TESTSUITE_BUILD']
-+  if not os.path.isdir(build_path):
-+    os.makedirs(build_path)
-+  with remember_cwd():
-+    os.chdir(build_path)
-+    if not os.path.exists('Makefile'):
-+      result = TestsuiteConfigure(env)
-+      if result:
-+        return result
-+    result = subprocess.call(['make',
-+                              '-j{PNACL_CONCURRENCY}'.format(**env),
-+                              'OPTFLAGS=' + opt_clang,
-+                              'PNACL_TRANSLATE_FLAGS=' + opt_trans,
-+                              'PNACL_BIN={PNACL_BIN}'.format(**env),
-+                              'PNACL_RUN={NACL_ROOT}/run.py'.format(**env),
-+                              'COLLATE=true',
-+                              'PNACL_ARCH=' + arch,
-+                              'ENABLE_PARALLEL_REPORT=true',
-+                              'DISABLE_CBE=true',
-+                              'DISABLE_JIT=true',
-+                              'RUNTIMELIMIT=850',
-+                              'TEST=pnacl',
-+                              'report.csv'])
-+    if result:
-+      return result
-+    os.rename('report.pnacl.csv', 'report.pnacl.{arch}.{suffix}.csv'
-+              .format(arch=arch, suffix=suffix))
-+    os.rename('report.pnacl.raw.out',
-+              ('report.pnacl.{arch}.{suffix}.raw.out'
-+               .format(arch=arch, suffix=suffix)))
-+  return 0
-+
-+
-+def TestsuiteConfigure(env):
-+  """Run the LLVM test suite configure script.
-+
-+  Args:
-+    env: The result of SetupEnvironment().
-+
-+  Returns:
-+    0 for success, non-zero integer on failure.
-+  """
-+  build_path = env['LLVM_TESTSUITE_BUILD']
-+  if not os.path.isdir(build_path):
-+    os.makedirs(build_path)
-+  with remember_cwd():
-+    os.chdir(build_path)
-+    args = ['{LLVM_TESTSUITE_SRC}/configure'.format(**env),
-+            '--with-llvmcc=clang',
-+            '--with-clang={PNACL_BIN}/pnacl-clang'.format(**env),
-+            '--with-llvmsrc={TC_SRC_LLVM}'.format(**env),
-+            '--with-llvmobj={TC_BUILD_LLVM}'.format(**env)]
-+    result = subprocess.call(args)
-+  return result
-+
-+
-+def TestsuiteClean(env):
-+  """Clean the LLVM test suite build directory.
-+
-+  Args:
-+    env: The result of SetupEnvironment().
-+
-+  Returns:
-+    0 always
-+
-+  Raises:
-+    OSError: The LLVM_TESTSUITE_BUILD directory couldn't be removed
-+    for some reason.
-+  """
-+  if os.path.isdir(env['LLVM_TESTSUITE_BUILD']):
-+    shutil.rmtree(env['LLVM_TESTSUITE_BUILD'])
-+  elif os.path.isfile(env['LLVM_TESTSUITE_BUILD']):
-+    os.remove(env['LLVM_TESTSUITE_BUILD'])
-+  return 0
-+
-+
-+def TestsuiteReport(env, config, options):
-+  """Generate a report from the prior LLVM test suite run.
-+
-+  Args:
-+    env: The result of SetupEnvironment().
-+    config: A dict that was the result of ParseConfig().  This
-+        determines the specific optimization levels.
-+    options: The result of OptionParser().parse_args().
-+
-+  Returns:
-+    0 for success, non-zero integer on failure.
-+  """
-+  arch = options.arch or Fatal("Error: missing --arch argument")
-+  suffix = GetConfigSuffix(config)
-+  report_file = ('{LLVM_TESTSUITE_BUILD}/report.pnacl.{arch}.{suffix}.csv'
-+                 .format(arch=arch, suffix=suffix, **env))
-+  failures1 = '{PNACL_SCRIPTS}/testsuite_known_failures_base.txt'.format(**env)
-+  failures2 = '{PNACL_SCRIPTS}/testsuite_known_failures_pnacl.txt'.format(**env)
-+  parse_options = vars(options)
-+  parse_options['excludes'].extend([failures1, failures2])
-+  parse_options['buildpath'] = env['LLVM_TESTSUITE_BUILD']
-+  parse_options['attributes'].extend([arch,
-+                                      config['frontend_attr'],
-+                                      config['backend_attr']])
-+  parse_options['testsuite'] = True
-+  return parse_llvm_test_report.Report(parse_options, filename=report_file)
-+
-+
-+def RunTestsuiteSteps(env, config, options):
-+  result = 0
-+  if not ToolchainWorkDirExists(env['TC_BUILD_LLVM']):
-+    print ('LLVM build directory %s is empty. Skipping testsuite' %
-+           env['TC_BUILD_LLVM'])
-+    if env['PNACL_BUILDBOT'] != 'false' or options.verbose:
-+      print '@@@STEP_TEXT (skipped)@@@'
-+    return result
-+  if options.testsuite_all or options.testsuite_prereq:
-+    result = result or TestsuitePrereq(env, options)
-+  if options.testsuite_all or options.testsuite_clean:
-+    result = result or TestsuiteClean(env)
-+  if options.testsuite_all or options.testsuite_configure:
-+    result = result or TestsuiteConfigure(env)
-+  if options.testsuite_all or options.testsuite_run:
-+    result = result or TestsuiteRun(env, config, options)
-+  if options.testsuite_all or options.testsuite_report:
-+    result = result or TestsuiteReport(env, config, options)
-+  return result
-+
-+
-+def main(argv):
-+  options, args = ParseCommandLine(argv[1:])
-+  if len(args):
-+    Fatal("Unknown arguments: " + ', '.join(args))
-+  config = ParseConfig(options)
-+  env = SetupEnvironment(options)
-+  result = 0
-+  # Run each specified test in sequence, and return on the first failure.
-+  if options.run_llvm_regression:
-+    result = result or RunLitTest(env['TC_BUILD_LLVM'], 'check-all',
-+                                  'LLVM_REGRESSION_KNOWN_FAILURES',
-+                                  env, options)
-+  if options.run_libcxx_tests:
-+    EnsureSdkExists(env)
-+    result = result or RunLitTest(env['TC_BUILD_LIBCXX'], 'check-libcxx',
-+                                  'LIBCXX_KNOWN_FAILURES',
-+                                  env, options)
-+
-+  result = result or RunTestsuiteSteps(env, config, options)
-+  return result
-+
-+if __name__ == '__main__':
-+  sys.exit(main(sys.argv))
-diff --git a/native_client/pnacl/scripts/llvm_regression_known_failures.txt b/native_client/pnacl/scripts/llvm_regression_known_failures.txt
-new file mode 100644
-index 0000000000000000000000000000000000000000..86b840d0728153b0ea64fb3100a91241e0d66683
---- /dev/null
-+++ b/native_client/pnacl/scripts/llvm_regression_known_failures.txt
-@@ -0,0 +1,55 @@
-+###
-+### Mac-only failures
-+###
-+
-+# Failing only on the mac bot. I suspect it's just because the
-+# .macosx_version_min on that output has a 10 in it (i.e. it's not hermetic).
-+# TODO(dschuff): prove it.
-+LLVM::CodeGen/X86/2008-11-03-F80VAARG.ll mac
-+
-+###
-+### Windows-only failures
-+###
-+# For now we have both cygwin and msys failures in here.
-+# TODO(dschuff): once we switch to msys only, remove the cygwin failures.
-+# also run the script with --check-excludes (however some failures seem flaky on
-+# msys)
-+# These seem specific to cygwin
-+Clang::Driver/crash-report.c win
-+Clang::Driver/output-file-cleanup.c win
-+# These pass unexpectedly under cygwin:
-+LLVM::ExecutionEngine/MCJIT/eh.ll win
-+LLVM::ExecutionEngine/MCJIT/multi-module-eh-a.ll win
-+
-+# These seem specific to msys; however they are flaky
-+Clang::PCH/case-insensitive-include.c win
-+Clang::Index/complete-exprs.c win
-+Clang::Index/complete-macros.c win
-+Clang::Index/complete-macro-args.c win
-+
-+# These are specific to msys but do not seem flaky
-+LLVM::BugPoint/crash-narrowfunctiontest.ll win
-+LLVM::BugPoint/metadata.ll win
-+LLVM::BugPoint/remove_arguments_test.ll win
-+
-+# These fail under cygwin (I've not tried them under msys):
-+Clang::Analysis/crash-trace.c win
-+Clang::Parser/crash-report.c win
-+# These tests appear to be flaky:
-+Clang::Analysis/taint-tester.c win
-+Clang::Index/index-module.m win
-+Clang::Index/targeted-annotation.c win
-+Clang::Index/targeted-cursor.c win
-+Clang::Index/targeted-file-refs.c win
-+# Fails with a crash in llvm-rtdyld, which we don't care about for PNaCl.
-+LLVM::DebugInfo/debuglineinfo.test win
-+# Tries to open LLVMHello.dll, but that apparently does not get built.
-+LLVM::Feature/load_module.ll win
-+
-+###
-+### Post LLVM 3.5 merge failures.
-+###
-+
-+# Failure on mac introduced by the update to clang for the host build
-+LLVM::ExecutionEngine/MCJIT/eh-sm-pic.ll mac
-+LLVM::ExecutionEngine/OrcMCJIT/eh-sm-pic.ll mac
-diff --git a/native_client/pnacl/scripts/myg++32 b/native_client/pnacl/scripts/myg++32
-new file mode 100755
-index 0000000000000000000000000000000000000000..59301f9470c84d74ff2b8f97f5e8a44ffc111cef
---- /dev/null
-+++ b/native_client/pnacl/scripts/myg++32
-@@ -0,0 +1,2 @@
-+#!/bin/bash
-+exec g++ "$@" -m32
-diff --git a/native_client/pnacl/scripts/mygcc32 b/native_client/pnacl/scripts/mygcc32
-new file mode 100755
-index 0000000000000000000000000000000000000000..f703899e97b7ba3175a08b867e78c2e4e4bc6ac6
---- /dev/null
-+++ b/native_client/pnacl/scripts/mygcc32
-@@ -0,0 +1,2 @@
-+#!/bin/bash
-+exec gcc "$@" -m32
-diff --git a/native_client/pnacl/scripts/parse_llvm_test_report.py b/native_client/pnacl/scripts/parse_llvm_test_report.py
-new file mode 100755
-index 0000000000000000000000000000000000000000..fae13805703fbeba79e8066bf4e4a045c6df10cf
---- /dev/null
-+++ b/native_client/pnacl/scripts/parse_llvm_test_report.py
-@@ -0,0 +1,296 @@
-+#!/usr/bin/python
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""Parse the report output of the llvm test suite or regression tests,
-+   filter out known failures, and check for new failures
-+
-+pnacl/scripts/parse_llvm_test_report.py [options]+ reportfile
-+
-+"""
-+
-+import csv
-+import logging
-+import optparse
-+import os
-+import sys
-+import StringIO
-+
-+# exclude these tests
-+EXCLUDES = {}
-+
-+def ParseCommandLine(argv):
-+  parser = optparse.OptionParser(prog=argv[0])
-+  parser.add_option('-x', '--exclude', action='append', dest='excludes',
-+                    default=[],
-+                    help='Add list of excluded tests (expected fails)')
-+  parser.add_option('-c', '--check-excludes', action='store_true',
-+                    default=False, dest='check_excludes',
-+                    help='Report tests which unexpectedly pass')
-+  parser.add_option('-v', '--verbose', action='store_true',
-+                    default=False, dest='verbose',
-+                    help='Print compilation/run logs of failing tests')
-+  parser.add_option('-p', '--build-path', dest='buildpath',
-+                    help='Path to test-suite build directory')
-+  parser.add_option('-a', '--attribute', dest='attributes', action='append',
-+                    default=[],
-+                    help='Add attribute of test configuration (e.g. arch)')
-+  parser.add_option('-t', '--testsuite', action='store_true', dest='testsuite',
-+                    default=False)
-+  parser.add_option('-l', '--lit', action='store_true', dest='lit',
-+                    default=False)
-+
-+  options, args = parser.parse_args(argv[1:])
-+  return options, args
-+
-+def Fatal(text):
-+  print >> sys.stderr, text
-+  sys.exit(1)
-+
-+def IsFullname(name):
-+  return name.find('/') != -1
-+
-+def GetShortname(fullname):
-+  return fullname.split('/')[-1]
-+
-+def ParseTestsuiteCSV(filecontents):
-+  ''' Parse a CSV file output by llvm testsuite with a record for each test.
-+      returns 2 dictionaries:
-+      1) a mapping from the short name of the test (without the path) to
-+       a list of full pathnames that match it. It contains all the tests.
-+      2) a mapping of all test failures, mapping full test path to the type
-+       of failure (compile or exec)
-+  '''
-+  alltests = {}
-+  failures = {}
-+  reader = csv.DictReader(StringIO.StringIO(filecontents))
-+
-+  testcount = 0
-+  for row in reader:
-+    testcount += 1
-+    fullname = row['Program']
-+    shortname = GetShortname(fullname)
-+    fullnames = alltests.get(shortname, [])
-+    fullnames.append(fullname)
-+    alltests[shortname] = fullnames
-+
-+    if row['CC'] == '*':
-+      failures[fullname] = 'compile'
-+    elif row['Exec'] == '*':
-+      failures[fullname] = 'exec'
-+
-+  logging.info('%d tests, %d failures', testcount, len(failures))
-+  return alltests, failures
-+
-+def ParseLit(filecontents):
-+  ''' Parse the output of the LLVM regression test runner (lit/make check).
-+      returns a dictionary mapping test name to the type of failure
-+      (Clang, LLVM, LLVMUnit, etc)
-+  '''
-+  alltests = {}
-+  failures = {}
-+  testcount = 0
-+  for line in filecontents.splitlines():
-+    l = line.split()
-+    if len(l) < 4:
-+      continue
-+    if l[0] in ('PASS:', 'FAIL:', 'XFAIL:', 'XPASS:', 'UNSUPPORTED:'):
-+      testcount += 1
-+      fullname = ''.join(l[1:4])
-+      shortname = GetShortname(fullname)
-+      fullnames = alltests.get(shortname, [])
-+      fullnames.append(fullname)
-+      alltests[shortname] = fullnames
-+    if l[0] in ('FAIL:', 'XPASS:'):
-+      failures[fullname] = l[1]
-+  logging.info('%d tests, %d failures', testcount, len(failures))
-+  return alltests, failures
-+
-+def ParseExcludeFile(filename, config_attributes,
-+                     check_test_names=False, alltests=None):
-+  ''' Parse a list of excludes (known test failures). Excludes can be specified
-+      by shortname (e.g. fbench) or by full path
-+      (e.g. SingleSource/Benchmarks/Misc/fbench) but if there is more than
-+      one test with the same shortname, the full name must be given.
-+      Errors are reported if an exclude does not match exactly one test
-+      in alltests, or if there are duplicate excludes.
-+
-+      Returns:
-+        Number of failures in the exclusion file.
-+  '''
-+  errors = 0
-+  f = open(filename)
-+  for line in f:
-+    line = line.strip()
-+    if not line: continue
-+    if line.startswith('#'): continue
-+    tokens = line.split()
-+    if len(tokens) > 1:
-+      testname = tokens[0]
-+      attributes = set(tokens[1].split(','))
-+      if not attributes.issubset(config_attributes):
-+        continue
-+    else:
-+      testname = line
-+    if testname in EXCLUDES:
-+      logging.error('Duplicate exclude: %s', line)
-+      errors += 1
-+    if IsFullname(testname):
-+      shortname = GetShortname(testname)
-+      if shortname not in alltests or testname not in alltests[shortname]:
-+        logging.error('Exclude %s not found in list of tests', line)
-+        errors += 1
-+      fullname = testname
-+    else:
-+      # short name is specified
-+      shortname = testname
-+      if shortname not in alltests:
-+        logging.error('Exclude %s not found in list of tests', shortname)
-+        errors += 1
-+      if len(alltests[shortname]) > 1:
-+        logging.error('Exclude %s matches more than one test: %s. ' +
-+                      'Specify full name in exclude file.',
-+                      shortname, str(alltests[shortname]))
-+        errors += 1
-+      fullname = alltests[shortname][0]
-+
-+    if fullname in EXCLUDES:
-+      logging.error('Duplicate exclude %s', fullname)
-+      errors += 1
-+
-+    EXCLUDES[fullname] = filename
-+  f.close()
-+  logging.info('Parsed %s: now %d total excludes', filename, len(EXCLUDES))
-+  return errors
-+
-+def DumpFileContents(name):
-+  error = not os.path.exists(name)
-+  logging.debug(name)
-+  try:
-+    logging.debug(open(name, 'rb').read())
-+  except IOError:
-+    error = True
-+  if error:
-+    logging.error("Couldn't open file: %s", name)
-+    # Make the bots go red
-+    logging.error('@@@STEP_FAILURE@@@')
-+
-+def PrintTestsuiteCompilationResult(path, test):
-+  ''' Print the compilation and run results for the specified test in the
-+      LLVM testsuite.
-+      These results are left in several different log files by the testsuite
-+      driver, and are different for MultiSource/SingleSource tests
-+  '''
-+  logging.debug('RESULTS for %s', test)
-+  testpath = os.path.join(path, test)
-+  testdir, testname = os.path.split(testpath)
-+  outputdir = os.path.join(testdir, 'Output')
-+
-+  logging.debug('COMPILE phase')
-+  logging.debug('OBJECT file phase')
-+  if test.startswith('MultiSource'):
-+    for f in os.listdir(outputdir):
-+      if f.endswith('llvm.o.compile'):
-+        DumpFileContents(os.path.join(outputdir, f))
-+  elif test.startswith('SingleSource'):
-+    DumpFileContents(os.path.join(outputdir, testname + '.llvm.o.compile'))
-+  else:
-+    Fatal('ERROR: unrecognized test type ' + test)
-+
-+  logging.debug('PEXE generation phase')
-+  DumpFileContents(os.path.join(outputdir,
-+                                testname + '.nonfinal.pexe.compile'))
-+
-+  logging.debug('PEXE finalization phase')
-+  DumpFileContents(os.path.join(outputdir, testname + '.final.pexe.finalize'))
-+
-+  logging.debug('TRANSLATION phase')
-+  DumpFileContents(os.path.join(outputdir, testname + '.nexe.translate'))
-+
-+  logging.debug('EXECUTION phase')
-+  logging.debug('native output:')
-+  DumpFileContents(os.path.join(outputdir, testname + '.out-nat'))
-+  logging.debug('pnacl output:')
-+  DumpFileContents(os.path.join(outputdir, testname + '.out-pnacl'))
-+
-+def main(argv):
-+  options, args = ParseCommandLine(argv)
-+
-+  if len(args) != 1:
-+    Fatal('Must specify filename to parse')
-+  filename = args[0]
-+  return Report(vars(options), filename=filename)
-+
-+
-+def Report(options, filename=None, filecontents=None):
-+  loglevel = logging.INFO
-+  if options['verbose']:
-+    loglevel = logging.DEBUG
-+  logging.basicConfig(level=loglevel, format='%(message)s')
-+
-+  if not (filename or filecontents):
-+    Fatal('ERROR: must specify filename or filecontents')
-+
-+  failures = {}
-+  logging.debug('Full test results:')
-+
-+  if not filecontents:
-+    with open(filename, 'rb') as f:
-+      filecontents = f.read();
-+  # get the set of tests and failures
-+  if options['testsuite']:
-+    if options['verbose'] and options['buildpath'] is None:
-+      Fatal('ERROR: must specify build path if verbose output is desired')
-+    alltests, failures = ParseTestsuiteCSV(filecontents)
-+    check_test_names = True
-+  elif options['lit']:
-+    alltests, failures = ParseLit(filecontents)
-+    check_test_names = True
-+  else:
-+    Fatal('Must specify either testsuite (-t) or lit (-l) output format')
-+
-+  # get the set of excludes
-+  exclusion_failures = 0
-+  for f in options['excludes']:
-+    exclusion_failures += ParseExcludeFile(f, set(options['attributes']),
-+                                           check_test_names=check_test_names,
-+                                           alltests=alltests)
-+
-+  # Regardless of the verbose option, do a dry run of
-+  # PrintTestsuiteCompilationResult so we can catch errors when intermediate
-+  # filenames in the compilation pipeline change.
-+  # E.g. https://code.google.com/p/nativeclient/issues/detail?id=3659
-+  if len(alltests) and options['testsuite']:
-+    logging.disable(logging.INFO)
-+    PrintTestsuiteCompilationResult(options['buildpath'],
-+                                    alltests.values()[0][0])
-+    logging.disable(logging.NOTSET)
-+
-+  # intersect them and check for unexpected fails/passes
-+  unexpected_failures = 0
-+  unexpected_passes = 0
-+  for tests in alltests.itervalues():
-+    for test in tests:
-+      if test in failures:
-+        if test not in EXCLUDES:
-+          unexpected_failures += 1
-+          logging.info('[  FAILED  ] %s: %s failure', test, failures[test])
-+          if options['testsuite']:
-+            PrintTestsuiteCompilationResult(options['buildpath'], test)
-+      elif test in EXCLUDES:
-+        unexpected_passes += 1
-+        logging.info('%s: unexpected success', test)
-+
-+  logging.info('%d unexpected failures %d unexpected passes',
-+               unexpected_failures, unexpected_passes)
-+  if exclusion_failures:
-+    logging.info('%d problems in known_failures exclusion files',
-+                 exclusion_failures)
-+
-+  if options['check_excludes']:
-+    return unexpected_failures + unexpected_passes + exclusion_failures > 0
-+  return unexpected_failures + exclusion_failures > 0
-+
-+if __name__ == '__main__':
-+  sys.exit(main(sys.argv))
-diff --git a/native_client/pnacl/scripts/testsuite_known_failures_base.txt b/native_client/pnacl/scripts/testsuite_known_failures_base.txt
-new file mode 100644
-index 0000000000000000000000000000000000000000..be044d368ec19d66f9a7a7923e2f3014dd1584d6
---- /dev/null
-+++ b/native_client/pnacl/scripts/testsuite_known_failures_base.txt
-@@ -0,0 +1,44 @@
-+# Base known failures - Things which probably will not or cannot be fixed,
-+# or have a non-pnacl-related cause
-+
-+############################################################################
-+# General nacl issues (probably will never work in nacl)
-+############################################################################
-+# no fork()
-+lemon
-+paq8p
-+############################################################################
-+# Newlib related issues
-+# (in most cases, small porting efforts could make these working/testable)
-+############################################################################
-+# no sys/socket.h
-+clamscan
-+netbench-url
-+# no netinet/in.h
-+ldecod
-+hexxagon
-+consumer-lame
-+consumer-typeset
-+lencod
-+# no netinet/in.h or netdb.h
-+archie
-+# no sys/uio.h
-+make_dparser
-+# u_int8_t and friends undeclared in newlib;
-+# no sigaction, struct itimerval, random(), srandom().
-+Obsequi
-+# struct dirent fields different in nacl than linux
-+siod
-+# no err.h
-+network-patricia
-+fasta
-+# no sgtty.h
-+office-ispell
-+# random() undeclared
-+city
-+ocean
-+ft
-+# undefined re_comp (also needs regex library port?)
-+plot2fig
-+# no sys/utsname.h
-+unix-smail
 diff --git a/native_client/pnacl/scripts/testsuite_known_failures_pnacl.txt b/native_client/pnacl/scripts/testsuite_known_failures_pnacl.txt
 new file mode 100644
 index 0000000000000000000000000000000000000000..855258ad5efd381dabf4e55485be9f4080249e95
@@ -46861,10 +43833,10 @@ index 0000000000000000000000000000000000000000..faaa7d68417e04b7f99e30bd6efba8e3
 +#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_WIN_NACL_HOST_DIR_TYPES_H_ */
 diff --git a/native_client/src/shared/platform/win/nacl_secure_random.c b/native_client/src/shared/platform/win/nacl_secure_random.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..b73766fccf702e3f0891e4dac1477fb55e9256fc
+index 0000000000000000000000000000000000000000..f549441bab6d784d74a7fa1063ed5a2012cb8fab
 --- /dev/null
 +++ b/native_client/src/shared/platform/win/nacl_secure_random.c
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,85 @@
 +/*
 + * Copyright (c) 2008 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -46875,14 +43847,6 @@ index 0000000000000000000000000000000000000000..b73766fccf702e3f0891e4dac1477fb5
 + * NaCl Service Runtime.  Secure RNG implementation.
 + */
 +#include <windows.h>
-+
-+/* Work around a clang-cl bug: SecureZeroMemory() below uses __stosb() but
-+ * windows.h only declares that intrinsic and then uses `#pragma intrinsic` for
-+ * it.  clang-cl doesn't implement `#pragma intrinsic` yet; it instead defines
-+ * the function as an always-inline symbol in its intrin.h.
-+ * TODO(thakis): Remove this once http://llvm.org/PR19898 is fixed.
-+ */
-+#include <intrin.h>
 +
 +/*
 + * #define needed to link in RtlGenRandom(), a.k.a. SystemFunction036. See
@@ -92460,7 +89424,7 @@ index 0000000000000000000000000000000000000000..5ece00ef66cfd7856bc178b24e11dccc
 +}
 diff --git a/native_client/src/trusted/platform_qualify/BUILD.gn b/native_client/src/trusted/platform_qualify/BUILD.gn
 new file mode 100644
-index 0000000000000000000000000000000000000000..2098406c16fa9b8b437f510dcc06b44e0256e0cf
+index 0000000000000000000000000000000000000000..6921c1e2f6206ce6f3454053840f5e8698854788
 --- /dev/null
 +++ b/native_client/src/trusted/platform_qualify/BUILD.gn
 @@ -0,0 +1,78 @@
@@ -92522,7 +89486,7 @@ index 0000000000000000000000000000000000000000..2098406c16fa9b8b437f510dcc06b44e
 +  ]
 +}
 +
-+if (current_cpu != "arm") {
++if (current_cpu != "arm" && current_cpu != "mipsel") {
 +  static_library("vcpuid") {
 +    cflags_c = []
 +    sources = [
@@ -94096,3 +91060,1754 @@ index 0000000000000000000000000000000000000000..25b2742b4f44366b707e81fc9e63bb1b
 +  printf("[CPUID implementation looks okay]\n");
 +  return 1;
 +}
+diff --git a/native_client/src/trusted/platform_qualify/arch/x86/vcpuid.h b/native_client/src/trusted/platform_qualify/arch/x86/vcpuid.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..bd737862ac91261d0e15aa40a499d6c7679c5651
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/arch/x86/vcpuid.h
+@@ -0,0 +1,23 @@
++/*
++ * Copyright 2008 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_ARCH_X86_VCPUID_H_
++#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_ARCH_X86_VCPUID_H_
++/*
++ * vcpuid.h
++ *
++ * Verify correctness of CPUID implementation.
++ *
++ * This uses shell status code to indicate its result; non-zero return
++ * code indicates the CPUID instruction is not implemented or not
++ * implemented correctly.
++ */
++
++/* This routine routines zero if CPUID appears to be implemented correctly,
++ * and otherwise non-zero.
++ */
++int CPUIDImplIsValid(void);
++#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_ARCH_X86_VCPUID_H_ */
+diff --git a/native_client/src/trusted/platform_qualify/arch/x86_32/nacl_dep_qualify_arch.c b/native_client/src/trusted/platform_qualify/arch/x86_32/nacl_dep_qualify_arch.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..02a5b6ec7eff8ddd8eb59d8456ebc0eb65314c6e
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/arch/x86_32/nacl_dep_qualify_arch.c
+@@ -0,0 +1,43 @@
++/*
++ * Copyright 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <stddef.h>
++
++#include "native_client/src/include/build_config.h"
++
++#if !NACL_WINDOWS /* stdint is neither available nor needed on Windows */
++#include <stdint.h>
++#endif
++
++#include "native_client/src/trusted/platform_qualify/nacl_dep_qualify.h"
++#include "native_client/src/include/nacl_macros.h"
++
++/* Assembled equivalent of "ret" */
++#define INST_RET 0xC3
++
++int NaClCheckDEP(void) {
++  /*
++   * We do not require DEP, so simply report success.
++   */
++  return 1;
++}
++
++nacl_void_thunk NaClGenerateThunk(uint8_t *buf, size_t size_in_bytes) {
++  /*
++   * Place a "ret" at buf.
++   */
++  if (size_in_bytes < 1) return 0;
++
++  *buf = (uint8_t) INST_RET;
++
++  /*
++   * ISO C prevents a direct data->function cast, because the pointers aren't
++   * guaranteed to be the same size.  For our platforms this is fine, but we
++   * verify at compile time anyway before tricking the compiler:
++   */
++  NACL_ASSERT_SAME_SIZE(uint8_t *, nacl_void_thunk);
++  return (nacl_void_thunk) (uintptr_t) buf;
++}
+diff --git a/native_client/src/trusted/platform_qualify/arch/x86_64/nacl_dep_qualify_arch.c b/native_client/src/trusted/platform_qualify/arch/x86_64/nacl_dep_qualify_arch.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..2f9145b00248e94cbb9e46077381d3ed31dbc646
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/arch/x86_64/nacl_dep_qualify_arch.c
+@@ -0,0 +1,43 @@
++/*
++ * Copyright 2010 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <stddef.h>
++
++#include "native_client/src/include/build_config.h"
++
++#if !NACL_WINDOWS /* stdint is neither available nor needed on Windows */
++#include <stdint.h>
++#endif
++
++#include "native_client/src/trusted/platform_qualify/nacl_dep_qualify.h"
++#include "native_client/src/include/nacl_macros.h"
++
++/* Assembled equivalent of "ret" */
++#define INST_RET 0xC3
++
++int NaClCheckDEP(void) {
++  /*
++   * We require DEP, so forward this call to the OS-specific check routine.
++   */
++  return NaClAttemptToExecuteData();
++}
++
++nacl_void_thunk NaClGenerateThunk(uint8_t *buf, size_t size_in_bytes) {
++  /*
++   * Place a "ret" at buf.
++   */
++  if (size_in_bytes < 1) return 0;
++
++  *buf = (uint8_t) INST_RET;
++
++  /*
++   * ISO C prevents a direct data->function cast, because the pointers aren't
++   * guaranteed to be the same size.  For our platforms this is fine, but we
++   * verify at compile time anyway before tricking the compiler:
++   */
++  NACL_ASSERT_SAME_SIZE(uint8_t *, nacl_void_thunk);
++  return (nacl_void_thunk) (uintptr_t) buf;
++}
+diff --git a/native_client/src/trusted/platform_qualify/build.scons b/native_client/src/trusted/platform_qualify/build.scons
+new file mode 100644
+index 0000000000000000000000000000000000000000..6b8f232eaaef6076c992221ba65c5c4a9b0cab7a
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/build.scons
+@@ -0,0 +1,98 @@
++# -*- python -*-
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++#
++# TODO(bradchen):
++# - update plaform_qualify.gyp to be consistent with build.scons
++# - update sel_ldr to include blacklist check
++
++Import('env')
++
++
++pql_inputs = []
++extra_libs = []
++
++#
++# OS-specific qualification routines
++#
++if env.Bit('windows'):
++  pql_inputs += ['win/nacl_os_qualify.c',
++                 'win/nacl_dep_qualify.c']
++else:
++  pql_inputs += ['posix/nacl_dep_qualify.c']
++  if env.Bit('mac'):
++    pql_inputs += ['osx/nacl_os_qualify.c']
++  elif env.Bit('linux'):
++    pql_inputs += ['linux/nacl_os_qualify.c']
++
++# Convert a library name into a target specific libary name
++def TargetLib(env, name):
++  return name + '_' + env['TARGET_FULLARCH'].replace('-', '_')
++
++#
++# Architecture-specific qualification routines
++#
++if env.Bit('build_x86') and env.Bit('build_x86'):
++  pql_inputs += ['arch/x86/nacl_cpuwhitelist.c']
++
++  # Make sure CPUID is present and truthful
++  vcpuid_env = env.Clone()
++  if env.Bit('mac'):
++    vcpuid_env.Append(CCFLAGS = ['-mdynamic-no-pic'])
++    vcpuid_env.FilterOut(CCFLAGS = ['-fPIC'])
++  if env.Bit('linux'):
++    vcpuid_env.Append(CCFLAGS = ['-msse3'])
++  nacl_vcpuid = vcpuid_env.ComponentLibrary('vcpuid', 'arch/x86/vcpuid.c')
++  extra_libs += ['platform_qual_lib',
++                 'platform',
++                 'gio',
++                 'vcpuid']
++
++  if env.Bit('build_x86_64'):
++    # Compile x86-64 primitives for verifying NX functionality
++    pql_inputs += ['arch/x86_64/nacl_dep_qualify_arch.c']
++  elif env.Bit('build_x86_32'):
++    pql_inputs += ['arch/x86_32/nacl_dep_qualify_arch.c']
++
++  platform_qual_test = env.ComponentProgram(
++      'platform_qual_test', 'arch/x86/platform_qual_test.c',
++      # 'sel' is required for sel_memory.c and friends
++      EXTRA_LIBS=extra_libs + ['sel'])
++  node = env.CommandTest('platform_qual_test.out', [platform_qual_test])
++  env.AddNodeToTestSuite(
++      node, ['small_tests'], 'run_platform_qual_test',
++      is_broken=env.IsRunningUnderValgrind())
++
++  cpuwhitelist_test = env.ComponentProgram(
++      'cpuwhitelist_test', 'arch/x86/nacl_cpuwhitelist_test.c',
++      EXTRA_LIBS=extra_libs)
++  node = env.CommandTest('cpuwhitelist_test.out', [cpuwhitelist_test])
++  env.AddNodeToTestSuite(node, ['small_tests'], 'run_cpuwhitelist_test')
++
++
++if env.Bit('build_arm'):
++  # Compile ARM primitives for checking XN functionality
++  pql_inputs += ['arch/arm/nacl_dep_qualify_arch.c']
++  # Compile ARM primitives for checking VFP/vector features.
++  pql_inputs += ['arch/arm/nacl_qualify_fpu.c']
++  # Compile ARM primitives for checking sandboxing features.
++  pql_inputs += ['arch/arm/nacl_qualify_sandbox_instrs.c']
++  # Compile ARM primitives for checking alignment features.
++  pql_inputs += ['arch/arm/nacl_qualify_unaligned.c']
++
++if env.Bit('build_mips32'):
++  # Compile MIPS primitives for checking FPU presence and mode.
++  pql_inputs += ['arch/mips/nacl_qualify_fpu.c']
++
++# ----------------------------------------------------------
++#
++# ----------------------------------------------------------
++env.DualLibrary('platform_qual_lib', pql_inputs)
++
++
++# These tests use assembly which seem to make the coverage instrumentation
++# on windows unhappy. Disable them for now on coverage for windows.
++# TODO(bradnelson): figure out a way to get coverage working for these.
++if env.Bit('windows') and env.Bit('coverage_enabled'):
++  Return()
+diff --git a/native_client/src/trusted/platform_qualify/kernel_version.h b/native_client/src/trusted/platform_qualify/kernel_version.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..56b1b9a19635558151afebbe05de787d95cd839c
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/kernel_version.h
+@@ -0,0 +1,74 @@
++/*
++ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_KERNEL_VERSION_H_
++#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_KERNEL_VERSION_H_
++
++#include <stdlib.h>
++#include <string.h>
++#include "native_client/src/include/nacl_base.h"
++
++EXTERN_C_BEGIN
++
++/*
++ * Returns 1 on success and fills num1.num2.num3 appropriately.
++ */
++static INLINE int NaClParseKernelVersion(const char *version, int *num1,
++                                         int *num2, int *num3) {
++  char *next;
++  *num1 = strtol(version, &next, 10);
++  if (next == NULL || *next != '.') {
++    return 0;
++  }
++  *num2 = strtol(next + 1, &next, 10);
++  if (next == NULL) {
++    return 0;
++  }
++  if (*next != '.') {
++    *num3 = 0;
++    return 1;
++  }
++  *num3 = strtol(next + 1, &next, 10);
++  if (next == NULL) {
++    return 0;
++  }
++  /* Ignore the rest of the version string. */
++  return 1;
++}
++
++/*
++ * Returns 1 on success and fills res with -1, 0 or 1,
++ * if version1 <, == or > version2 accordingly.
++ */
++static INLINE int NaClCompareKernelVersions(const char *version1,
++                                            const char *version2,
++                                            int *res) {
++  int i;
++  int num1[3];
++  int num2[3];
++  if (!NaClParseKernelVersion(version1, &num1[0], &num1[1], &num1[2])) {
++    return 0;
++  }
++  if (!NaClParseKernelVersion(version2, &num2[0], &num2[1], &num2[2])) {
++    return 0;
++  }
++  for (i = 0; i < 3; i++) {
++    if (num1[i] < num2[i]) {
++      *res = -1;
++      return 1;
++    }
++    if (num1[i] > num2[i]) {
++      *res = 1;
++      return 1;
++    }
++  }
++  *res = 0;
++  return 1;
++}
++
++EXTERN_C_END
++
++#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_KERNEL_VERSION_H_ */
+diff --git a/native_client/src/trusted/platform_qualify/linux/nacl_os_qualify.c b/native_client/src/trusted/platform_qualify/linux/nacl_os_qualify.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..dd38c5d74b6772296f457018fea4314da5dce7fd
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/linux/nacl_os_qualify.c
+@@ -0,0 +1,68 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <string.h>
++#include <sys/utsname.h>
++
++#include "native_client/src/include/build_config.h"
++#include "native_client/src/shared/platform/nacl_log.h"
++#include "native_client/src/trusted/platform_qualify/kernel_version.h"
++#include "native_client/src/trusted/platform_qualify/nacl_os_qualify.h"
++
++
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
++
++static const char *kMinimumVersion = "2.6.27";
++
++/*
++ * Checks for this bug:
++ * http://code.google.com/p/nativeclient/issues/detail?id=2032
++ */
++static int NaClModifyLdtHasProblems(const char *version) {
++  int res;
++  if (!NaClCompareKernelVersions(version, kMinimumVersion, &res)) {
++    NaClLog(LOG_ERROR, "NaClModifyLdtHasProblems: "
++            "Couldn't parse kernel version: %s\n", version);
++    return 1;
++  }
++  return res < 0;
++}
++
++#endif
++
++/*
++ * Returns 1 if the operating system can run Native Client modules.
++ */
++int NaClOsIsSupported(void) {
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
++  struct utsname info;
++  if (uname(&info) != 0) {
++    NaClLog(LOG_ERROR, "NaClOsIsSupported: uname() failed\n");
++    return 0;
++  }
++  if (NaClModifyLdtHasProblems(info.release)) {
++    NaClLog(LOG_ERROR, "NaClOsIsSupported: This system is running an "
++            "old Linux kernel. This kernel version is buggy and "
++            "Native Client's x86-32 sandbox might be insecure on "
++            "this kernel. The fix is to upgrade the kernel to v2.6.27 "
++            "or later, or, as a workaround, to switch using a 64-bit "
++            "Native Client sandbox. For more information, see "
++            "http://code.google.com/p/nativeclient/issues/detail?id=2032\n");
++    return 0;
++  }
++#endif
++
++  return 1;
++}
++
++
++/*
++ * Returns 1 if the operating system is a 64-bit version of
++ * Windows.  For now, all of these versions are not supported.
++ */
++int NaClOsIs64BitWindows(void) {
++  return 0;
++}
+diff --git a/native_client/src/trusted/platform_qualify/nacl_cpuwhitelist.h b/native_client/src/trusted/platform_qualify/nacl_cpuwhitelist.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..ed2d432e895227765892b9c8c73330e677f12bc3
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/nacl_cpuwhitelist.h
+@@ -0,0 +1,37 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_CPUWHITELIST
++#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_CPUWHITELIST
++
++#include "native_client/src/include/nacl_base.h"
++
++/* NOTES:
++ * The blacklist/whitelist go in an array which must be kept SORTED
++ * as it is passed to bsearch.
++ * An x86 CPU ID string must be 20 bytes plus a '\0'.
++ */
++#define NACL_BLACKLIST_TEST_ENTRY "NaClBlacklistTest123"
++
++EXTERN_C_BEGIN
++
++/* Return 1 if CPU is whitelisted */
++int NaCl_ThisCPUIsWhitelisted(void);
++/* Return 1 if CPU is blacklisted */
++int NaCl_ThisCPUIsBlacklisted(void);
++
++/* Return 1 if list is well-structured. */
++int NaCl_VerifyBlacklist(void);
++int NaCl_VerifyWhitelist(void);
++
++/* Return 1 if named CPU is whitelisted */
++int NaCl_CPUIsWhitelisted(const char *myid);
++/* Return 1 if named CPU is blacklisted */
++int NaCl_CPUIsBlacklisted(const char *myid);
++
++EXTERN_C_END
++
++#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_CPUWHITELIST */
+diff --git a/native_client/src/trusted/platform_qualify/nacl_dep_qualify.h b/native_client/src/trusted/platform_qualify/nacl_dep_qualify.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..793e68a5b5ba64921cc3775062a87fbafd78e185
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/nacl_dep_qualify.h
+@@ -0,0 +1,70 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_DEP_QUALIFY_H_
++#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_DEP_QUALIFY_H_
++
++/*
++ * Two of our target architectures (x86-64 and ARM) require that data not be
++ * executable for our sandbox to hold.  Every vendor calls this something
++ * different.  For the purposes of platform qualification, we use the term
++ * 'data execution prevention,' or DEP.
++ *
++ * This file presents the common interface for DEP-check routines.  The
++ * implementations differ greatly across platforms and architectures.  See the
++ * notes on each function for details on where implementations live.
++ */
++
++#include <stddef.h>
++#include "native_client/src/include/nacl_base.h"
++#include "native_client/src/include/portability.h"
++
++EXTERN_C_BEGIN
++
++/*
++ * Checks that Data Execution Prevention is working as required by the
++ * architecture.  On some architectures this is a no-op.
++ *
++ * NOTE: the implementation of this function is architecture-specific, and can
++ * be found beneath arch/ in this directory.
++ */
++int NaClCheckDEP(void);
++
++int NaClAttemptToExecuteDataAtAddr(uint8_t *thunk_buffer, size_t size);
++
++/*
++ * Attempts to generate and execute some functions in data memory, to verify
++ * that Data Execution Prevention is working.  This is only used on platforms
++ * where DEP is required.
++ *
++ * NOTE: the implementation of this function is platform-specific, and can be
++ * found in linux/, win/, or osx/ in this directory.
++ */
++int NaClAttemptToExecuteData(void);
++
++/*
++ * A void nullary function.  We generate functions of this type in the heap and
++ * stack to prove that we cannot call them.  See NaClGenerateThunk, below.
++ */
++typedef void (*nacl_void_thunk)(void);
++
++/*
++ * Generates an architecture-specific void thunk sequence into the provided
++ * buffer.  Returns a pointer to the thunk (which may be offset into the
++ * buffer, depending on alignment constraints etc.).
++ *
++ * If the buffer is too small for the architecture's thunk sequence, returns
++ * NULL.  In general the buffer should be more than 4 bytes.
++ *
++ * NOTE: the implementation of this function is architecture-specific, and can
++ * be found beneath arch/ in this directory.
++ */
++nacl_void_thunk NaClGenerateThunk(uint8_t *buf, size_t buf_size);
++
++EXTERN_C_END
++
++#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_DEP_QUALIFY_H_ */
+diff --git a/native_client/src/trusted/platform_qualify/nacl_os_qualify.h b/native_client/src/trusted/platform_qualify/nacl_os_qualify.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..05aea0c87c3cb911576ed5dc7ecacf7780bd53af
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/nacl_os_qualify.h
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_OS_QUALIFY_H_
++#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_OS_QUALIFY_H_
++
++#include "native_client/src/include/build_config.h"
++#include "native_client/src/include/nacl_base.h"
++
++EXTERN_C_BEGIN
++
++/*
++ * Returns 1 if the operating system can run Native Client modules.
++ */
++int NaClOsIsSupported(void);
++
++/*
++ * Returns 1 if the operating system is a 64-bit version of Windows.
++ *
++ * TODO(adonovan): This is currently the only platform on which we
++ * deploy a 64-bit sel_ldr, and this function is currently used to
++ * check that.  This is not ideal; we should have a higher-level
++ * feature test interface that answers questions such as "what
++ * sel_ldr(s) are available on this system" directly, instead of
++ * strewing such assumptions throughout the code.
++ */
++int NaClOsIs64BitWindows(void);
++
++#if NACL_OSX
++/*
++ * Returns 1 if the operating system is OS X 10.10+.
++ */
++int NaClOSX10Dot10OrLater(void);
++
++/*
++ * Returns 1 if the operating system is OS X 10.7+.
++ */
++int NaClOSX10Dot7OrLater(void);
++#endif
++
++EXTERN_C_END
++
++#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_OS_QUALIFY_H_ */
+diff --git a/native_client/src/trusted/platform_qualify/osx/nacl_os_qualify.c b/native_client/src/trusted/platform_qualify/osx/nacl_os_qualify.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..3baf9bc5b2c05a37b060d1ab8a6c3f49a34eddf3
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/osx/nacl_os_qualify.c
+@@ -0,0 +1,119 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <pthread.h>
++#include <string.h>
++#include <sys/utsname.h>
++
++#include "native_client/src/include/build_config.h"
++#include "native_client/src/shared/platform/nacl_log.h"
++#include "native_client/src/trusted/platform_qualify/kernel_version.h"
++#include "native_client/src/trusted/platform_qualify/nacl_os_qualify.h"
++
++
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
++
++/*
++ * The 64-bit Mac kernel bug was fixed in kernel version 10.8.0, which
++ * is in Mac OS X 10.6.8.
++ */
++static const char *kMinimumKernelVersion = "10.8";
++
++static int KernelVersionIsBuggy(const char *version) {
++  int res;
++  if (!NaClCompareKernelVersions(version, kMinimumKernelVersion, &res)) {
++    NaClLog(LOG_ERROR, "KernelVersionIsBuggy: "
++            "Couldn't parse kernel version: %s\n", version);
++    return 1;
++  }
++  return res < 0;
++}
++
++#endif
++
++/*
++ * Returns 1 if the operating system can run Native Client modules.
++ */
++int NaClOsIsSupported(void) {
++#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
++  struct utsname info;
++  if (uname(&info) != 0) {
++    NaClLog(LOG_ERROR, "NaClOsIsSupported: uname() failed\n");
++    return 0;
++  }
++  if (strcmp(info.machine, "x86_64") == 0 &&
++      KernelVersionIsBuggy(info.release)) {
++    NaClLog(LOG_ERROR,
++            "NaClOsIsSupported: "
++            "This system is running an old 64-bit Mac OS X kernel.  "
++            "This kernel version is buggy and can crash when running "
++            "Native Client's x86-32 sandbox.  "
++            "The fix is to upgrade to Mac OS X 10.6.8 or later, or, as a "
++            "workaround, to switch to using a 32-bit kernel, which will "
++            "be capable of running Native Client.  For more information, see "
++            "http://code.google.com/p/nativeclient/issues/detail?id=1712\n");
++    return 0;
++  }
++#endif
++  return 1;
++}
++
++
++/*
++ * Returns 1 if the operating system is a 64-bit version of
++ * Windows.  For now, all of these versions are not supported.
++ */
++int NaClOsIs64BitWindows(void) {
++  return 0;
++}
++
++/*
++ * Returns the Darwin Major Version. Returns 0 on error.
++ */
++static int DarwinMajorVersion(void) {
++  struct utsname uname_info;
++  if (uname(&uname_info) != 0) {
++    NaClLog(LOG_ERROR, "uname error\n");
++    return 0;
++  }
++
++  if (strcmp(uname_info.sysname, "Darwin") != 0) {
++    NaClLog(LOG_ERROR, "unexpected uname sysname %s\n", uname_info.sysname);
++    return 0;
++  }
++
++  int major_version, minor_version, dot_version;
++  if (!NaClParseKernelVersion(uname_info.release, &major_version,
++                              &minor_version, &dot_version)) {
++    NaClLog(LOG_ERROR, "couldn't parse release %s\n", uname_info.release);
++    return 0;
++  }
++
++  return major_version;
++}
++
++static int g_darwin_major_version = 0;
++
++static void InitializeDarwinMajorVersion() {
++  g_darwin_major_version = DarwinMajorVersion();
++}
++
++/*
++ * Returns the OS X Major Version. Caches the result of DarwinMajorVersion().
++ */
++static int OSXMajorVersion(void) {
++  static pthread_once_t once_control = PTHREAD_ONCE_INIT;
++  pthread_once(&once_control, InitializeDarwinMajorVersion);
++  return g_darwin_major_version - 4;
++}
++
++int NaClOSX10Dot10OrLater(void) {
++  return OSXMajorVersion() >= 10;
++}
++
++int NaClOSX10Dot7OrLater(void) {
++  return OSXMajorVersion() >= 7;
++}
+diff --git a/native_client/src/trusted/platform_qualify/posix/nacl_dep_qualify.c b/native_client/src/trusted/platform_qualify/posix/nacl_dep_qualify.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..4e1445ab6ee370f380fa32b05f5af603de31b9a8
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/posix/nacl_dep_qualify.c
+@@ -0,0 +1,156 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * POSIX-specific routines for verifying that Data Execution Prevention is
++ * functional.
++ */
++
++#include <setjmp.h>
++#include <stdlib.h>
++#include <signal.h>
++
++#include "native_client/src/include/build_config.h"
++#include "native_client/src/include/nacl_compiler_annotations.h"
++#include "native_client/src/shared/platform/nacl_check.h"
++#include "native_client/src/trusted/platform_qualify/nacl_dep_qualify.h"
++
++#if NACL_OSX
++#include <mach/mach.h>
++#endif
++
++#if (NACL_OSX && NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && \
++     NACL_BUILD_SUBARCH == 64)
++# define EXPECTED_SIGNAL SIGBUS
++#else
++# define EXPECTED_SIGNAL SIGSEGV
++#endif
++
++static struct sigaction previous_sigaction;
++static struct sigaction try_sigaction;
++static sigjmp_buf try_state;
++
++static void signal_catch(int sig) {
++  siglongjmp(try_state, sig);
++}
++
++static void setup_signals(void) {
++  try_sigaction.sa_handler = signal_catch;
++  sigemptyset(&try_sigaction.sa_mask);
++  try_sigaction.sa_flags = SA_RESETHAND;
++
++  (void) sigaction(EXPECTED_SIGNAL, &try_sigaction, &previous_sigaction);
++}
++
++static void restore_signals(void) {
++  (void) sigaction(EXPECTED_SIGNAL, &previous_sigaction, 0);
++}
++
++#if NACL_OSX
++
++/*
++ * If present, Breakpad's handler will swallow the hardware exception that
++ * the test triggers before its signal handler can respond to it. Temporarily
++ * disable Breakpad's handler to allow the system's in-kernel handler to
++ * transform the exception into the signal that's expected here.
++ */
++
++/*
++ * <mach/mach_types.defs> says that these arrays have room for 32 elements,
++ * not EXC_TYPES_COUNT. task_swap_exception_ports expects there to be room for
++ * 32.
++ */
++#define MAX_EXCEPTION_PORTS 32
++
++typedef struct {
++  exception_mask_t masks[MAX_EXCEPTION_PORTS];
++  exception_handler_t ports[MAX_EXCEPTION_PORTS];
++  exception_behavior_t behaviors[MAX_EXCEPTION_PORTS];
++  thread_state_flavor_t flavors[MAX_EXCEPTION_PORTS];
++  mach_msg_type_number_t count;
++} MachExceptionHandlerData;
++
++static void DisableMachExceptionHandler(
++    MachExceptionHandlerData *saved_handlers) {
++  kern_return_t kr = task_swap_exception_ports(
++      mach_task_self(),
++      EXC_MASK_BAD_ACCESS,
++      MACH_PORT_NULL,
++      EXCEPTION_DEFAULT,
++      THREAD_STATE_NONE,
++      (exception_mask_array_t) &saved_handlers->masks,
++      &saved_handlers->count,
++      (exception_handler_array_t) &saved_handlers->ports,
++      (exception_behavior_array_t) &saved_handlers->behaviors,
++      (exception_flavor_array_t) &saved_handlers->flavors);
++  CHECK(kr == KERN_SUCCESS);
++}
++
++static void EnableMachExceptionHandler(
++    MachExceptionHandlerData *saved_handlers) {
++  for (size_t index = 0; index < saved_handlers->count; ++index) {
++    if (saved_handlers->ports[index] != MACH_PORT_NULL) {
++      kern_return_t kr = task_set_exception_ports(
++          mach_task_self(),
++          saved_handlers->masks[index],
++          saved_handlers->ports[index],
++          saved_handlers->behaviors[index],
++          saved_handlers->flavors[index]);
++      CHECK(kr == KERN_SUCCESS);
++    }
++  }
++}
++
++#else
++
++typedef int MachExceptionHandlerData;
++
++static void DisableMachExceptionHandler(
++    MachExceptionHandlerData *saved_handlers) {
++  UNREFERENCED_PARAMETER(saved_handlers);
++}
++
++static void EnableMachExceptionHandler(
++    MachExceptionHandlerData *saved_handlers) {
++  UNREFERENCED_PARAMETER(saved_handlers);
++}
++
++#endif
++
++int NaClAttemptToExecuteDataAtAddr(uint8_t *thunk_buffer, size_t size) {
++  int result;
++  MachExceptionHandlerData saved_handlers;
++  nacl_void_thunk thunk = NaClGenerateThunk(thunk_buffer, size);
++
++  setup_signals();
++  DisableMachExceptionHandler(&saved_handlers);
++
++  if (0 == sigsetjmp(try_state, 1)) {
++    thunk();
++    result = 0;
++  } else {
++    result = 1;
++  }
++
++  EnableMachExceptionHandler(&saved_handlers);
++  restore_signals();
++
++  return result;
++}
++
++/*
++ * Returns 1 if Data Execution Prevention is present and working.
++ */
++int NaClAttemptToExecuteData(void) {
++  int result;
++  uint8_t *thunk_buffer = malloc(64);
++  if (NULL == thunk_buffer) {
++    return 0;
++  }
++  result = NaClAttemptToExecuteDataAtAddr(thunk_buffer, 64);
++  free(thunk_buffer);
++  return result;
++}
+diff --git a/native_client/src/trusted/platform_qualify/win/nacl_dep_qualify.c b/native_client/src/trusted/platform_qualify/win/nacl_dep_qualify.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..e687fdafebd6b7a54af9e8c67f6bd919f5a7093b
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/win/nacl_dep_qualify.c
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * Windows-specific routines for verifying that Data Execution Prevention is
++ * functional.
++ */
++
++#include "native_client/src/include/portability.h"
++
++#include <setjmp.h>
++#include <stdlib.h>
++#include <stdio.h>
++
++#include "native_client/src/trusted/platform_qualify/nacl_dep_qualify.h"
++
++
++int NaClAttemptToExecuteDataAtAddr(uint8_t *thunk_buffer, size_t size) {
++  int got_fault = 0;
++  nacl_void_thunk thunk = NaClGenerateThunk(thunk_buffer, size);
++  __try {
++    thunk();
++  } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION
++              ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
++    got_fault = 1;
++  }
++  return got_fault;
++}
++
++/*
++ * Returns 1 if Data Execution Prevention is present and working.
++ */
++int NaClAttemptToExecuteData(void) {
++  int result;
++  uint8_t *thunk_buffer = malloc(64);
++  if (NULL == thunk_buffer) {
++    return 0;
++  }
++  result = NaClAttemptToExecuteDataAtAddr(thunk_buffer, 64);
++  free(thunk_buffer);
++  return result;
++}
+diff --git a/native_client/src/trusted/platform_qualify/win/nacl_os_qualify.c b/native_client/src/trusted/platform_qualify/win/nacl_os_qualify.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..76d22f42502238de0ccfef310ca32b27e651e7bd
+--- /dev/null
++++ b/native_client/src/trusted/platform_qualify/win/nacl_os_qualify.c
+@@ -0,0 +1,74 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++
++#include <stdio.h>
++#include <string.h>
++#include <windows.h>
++#include "native_client/src/include/portability.h"
++#include "native_client/src/trusted/platform_qualify/nacl_os_qualify.h"
++
++/*
++ * Returns 1 if the operating system can run Native Client modules.
++ */
++int NaClOsIsSupported(void) {
++  SYSTEM_INFO system_info;
++  OSVERSIONINFO version_info;
++
++  memset(&version_info, 0, sizeof(version_info));
++  version_info.dwOSVersionInfoSize = sizeof(version_info);
++  if (!GetVersionEx(&version_info)) {
++    /* If the API doesn't work we have to assume the worst. */
++    return 0;
++  }
++  if (5 > version_info.dwMajorVersion ||
++      ((5 == version_info.dwMajorVersion) &&
++       (0 == version_info.dwMinorVersion))) {
++    /* We do not support versions prior to Windows XP. */
++    return 0;
++  }
++  /*
++   * GetNativeSystemInfo is only available on Windows XP and after.
++   */
++  GetNativeSystemInfo(&system_info);
++  if (PROCESSOR_ARCHITECTURE_AMD64 != system_info.wProcessorArchitecture &&
++      PROCESSOR_ARCHITECTURE_INTEL != system_info.wProcessorArchitecture) {
++    /*
++     * The installed operating system processor architecture is either
++     * Itanium or unknown.
++     */
++    return 0;
++  }
++#ifndef _WIN64
++  if (NaClOsIs64BitWindows()) {
++    /*
++     * Must run 64-bit nacl on 64-bit Windows. 32-bit modules won't work
++     * due to lack of support for segment register modification.
++     */
++    return 0;
++  }
++#endif
++  return 1;
++}
++
++
++/*
++ * Returns 1 if the operating system is a 64-bit version of
++ * Windows.
++ */
++int NaClOsIs64BitWindows(void) {
++  SYSTEM_INFO system_info;
++
++  GetNativeSystemInfo(&system_info);
++  if (PROCESSOR_ARCHITECTURE_AMD64 == system_info.wProcessorArchitecture) {
++    /*
++     * The installed operating system processor architecture is x86-64.
++     * This assumes the caller already knows it's a supported architecture.
++     */
++    return 1;
++  }
++  return 0;
++}
+diff --git a/native_client/src/trusted/seccomp_bpf/build.scons b/native_client/src/trusted/seccomp_bpf/build.scons
+new file mode 100644
+index 0000000000000000000000000000000000000000..1bf955c7bdb44acb6b211b6ac2a4b250cb30c23a
+--- /dev/null
++++ b/native_client/src/trusted/seccomp_bpf/build.scons
+@@ -0,0 +1,11 @@
++# -*- python -*-
++# Copyright (c) 2013 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++Import('env')
++
++if not (env.Bit('linux') and env.Bit('build_x86_64')):
++  Return()
++
++env.DualLibrary('seccomp_bpf', ['seccomp_bpf.c'])
+diff --git a/native_client/src/trusted/seccomp_bpf/seccomp_bpf.c b/native_client/src/trusted/seccomp_bpf/seccomp_bpf.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..0c43c0b006a69595eb82333e6ce9e649916f1c6c
+--- /dev/null
++++ b/native_client/src/trusted/seccomp_bpf/seccomp_bpf.c
+@@ -0,0 +1,333 @@
++/*
++ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * Seccomp filter policy for x86-64 with BPF macros
++ */
++
++#include <linux/ptrace.h>
++
++#include "native_client/src/include/nacl_compiler_annotations.h"
++
++#if defined(PTRACE_O_TRACESECCOMP)
++#define SUPPORTED_OS 1
++#endif
++
++#if defined(SUPPORTED_OS)
++
++#include <linux/audit.h>
++#include <linux/errno.h>
++#include <linux/filter.h>
++#include <linux/seccomp.h>
++#include <linux/types.h>
++#include <linux/unistd.h>
++#include <signal.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/prctl.h>
++#include <sys/syscall.h>
++#include <unistd.h>
++
++#define SyscallArg(n) (offsetof(struct seccomp_data, args[n]))
++#define SyscallArch (offsetof(struct seccomp_data, arch))
++#define SyscallNr (offsetof(struct seccomp_data, nr))
++
++
++#define REG_RESULT  REG_RAX
++#define REG_SYSCALL  REG_RAX
++#define REG_ARG0  REG_RDI
++#define REG_ARG1  REG_RSI
++#define REG_ARG2  REG_RDX
++#define REG_ARG3  REG_R10
++#define REG_ARG4  REG_R8
++#define REG_ARG5  REG_R9
++
++#ifndef PR_SET_NO_NEW_PRIVS
++#define PR_SET_NO_NEW_PRIVS 38
++#endif
++
++#ifndef SYS_SECCOMP
++#define SYS_SECCOMP 1
++#endif
++
++#define BUF_SIZE 1024
++
++static void NaClSeccompBpfSigsysHandler(int nr, siginfo_t *info,
++                                        void *void_context) {
++  ucontext_t *ctx = (ucontext_t *) void_context;
++  int syscall;
++  char buf[BUF_SIZE];
++  int n;
++  char *filename;
++  int fatal = 1;
++  UNREFERENCED_PARAMETER(nr);
++  UNREFERENCED_PARAMETER(info);
++
++  syscall = ctx->uc_mcontext.gregs[REG_SYSCALL];
++  switch (syscall) {
++    case SYS_open:
++      filename = (char *) ctx->uc_mcontext.gregs[REG_ARG0];
++      n = snprintf(buf, BUF_SIZE,
++                   "[SECCOMP BPF] Blocked open(\"%s\")\n", filename);
++      fatal = 0;
++      break;
++    default:
++      n = snprintf(buf, BUF_SIZE, "[SECCOMP BPF] "
++                   "Linux syscall %d is not allowed by the policy\n",
++                   syscall);
++      break;
++  }
++  if (write(STDERR_FILENO, buf, n)) {}
++  if (fatal) {
++    _exit(255);
++  }
++  ctx->uc_mcontext.gregs[REG_RESULT] = -EACCES;
++}
++
++static struct sock_filter filter[] = {
++  /*
++   * Check that an x86-64 syscall is called.
++   * This will save us from the case when x86-64 process
++   * calls an x86-32 system call using int $0x80.
++   * See http://scary.beasts.org/security/CESA-2009-001.html
++   */
++  BPF_STMT(BPF_LD + BPF_W + BPF_ABS, SyscallArch),
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, AUDIT_ARCH_X86_64, 1, 0),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_KILL),
++
++  /* Grab the system call number */
++  BPF_STMT(BPF_LD + BPF_W + BPF_ABS, SyscallNr),
++  /* Jump table for the allowed syscalls */
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_rt_sigreturn, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++#ifdef __NR_sigreturn
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sigreturn, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++  /*
++   * Note that gettid is an information leak if not running
++   * under an outer sandbox that uses CLONE_NEWPID.
++   * It's allowed here for the benefit of the ASan runtime.
++   */
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_gettid, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_exit_group, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_exit, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_read, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_write, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_brk, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_mmap, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++#ifdef __NR_mmap2
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_mmap2, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_munmap, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_mprotect, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++#ifdef __NR_pread
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_pread, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++#ifdef __NR_pwrite
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_pwrite, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++#ifdef __NR_pread64
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_pread64, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++#ifdef __NR_pwrite64
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_pwrite64, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++#ifdef __NR_modify_ldt
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_modify_ldt, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_clone, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++#ifdef __NR_flock
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_flock, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_set_robust_list, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++#ifdef __NR_socketpair
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_socketpair, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++#ifdef __NR_socketcall
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_socketcall, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_close, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_dup, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_dup2, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_rt_sigaction, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_futex, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_clock_getres, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_nanosleep, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_time, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_times, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_clock_gettime, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_gettimeofday, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_fstat, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++#ifdef __NR_fstat64
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_fstat64, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_stat, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++#ifdef __NR_stat64
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_stat64, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++#ifdef __NR_sendmsg
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sendmsg, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++#ifdef __NR_recvmsg
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_recvmsg, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++#endif
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sigaltstack, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_madvise, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_exit, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sched_yield, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sched_getaffinity, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  /* for abort(), called as tgkill(pid,tid,SIGABORT) */
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_tgkill, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  /* for abort(), called as rt_sigprocmask(SIG_UNBLOCK, [ABRT], NULL, 8) */
++  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_rt_sigprocmask, 0, 1),
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
++
++  /* send SIGSYS for other syscalls, not listed above */
++  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_TRAP),
++};
++
++int NaClInstallBpfFilter(void) {
++  struct sock_fprog prog = {
++    .len = (uint16_t) (sizeof(filter) / sizeof(filter[0])),
++    .filter = filter,
++  };
++  sigset_t mask;
++  struct sigaction act;
++
++  /* Unmask SIGSYS */
++  if (sigemptyset(&mask) ||
++      sigaddset(&mask, SIGSYS)) {
++    perror("sig{empty,add}set");
++    return 1;
++  }
++
++  memset(&act, 0, sizeof(act));
++  act.sa_sigaction = &NaClSeccompBpfSigsysHandler;
++  act.sa_flags = SA_SIGINFO | SA_ONSTACK;
++  if (sigemptyset(&act.sa_mask)) {
++    perror("sigemptyset");
++    return 1;
++  }
++  if (sigaction(SIGSYS, &act, NULL) < 0) {
++    perror("sigaction");
++    return 1;
++  }
++
++  if (sigprocmask(SIG_UNBLOCK, &mask, NULL)) {
++    perror("unmasking SIGSYS");
++    return 1;
++  }
++
++  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
++    perror("prctl(NO_NEW_PRIVS)");
++    return 1;
++  }
++
++  if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)) {
++    perror("prctl");
++    return 1;
++  }
++  return 0;
++}
++
++#else   /* SUPPORTED_ARCH_AND_OS */
++
++int NaClInstallBpfFilter(void) {
++  return 1;
++}
++
++#endif  /* SUPPORTED_ARCH_AND_OS */
+diff --git a/native_client/src/trusted/seccomp_bpf/seccomp_bpf.h b/native_client/src/trusted/seccomp_bpf/seccomp_bpf.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9f04024237f77201779a92e81616bce1f099c47
+--- /dev/null
++++ b/native_client/src/trusted/seccomp_bpf/seccomp_bpf.h
+@@ -0,0 +1,22 @@
++/*
++ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_SECCOMP_BPF_SECCOMP_BPF_H_
++#define NATIVE_CLIENT_SRC_TRUSTED_SECCOMP_BPF_SECCOMP_BPF_H_ 1
++
++#include "native_client/src/include/nacl_base.h"
++
++EXTERN_C_BEGIN
++
++/*
++ * Turns on seccomp-bpf syscall policy.
++ * On success, returns 0.
++ */
++int NaClInstallBpfFilter(void);
++
++EXTERN_C_END
++
++#endif  /* NATIVE_CLIENT_SRC_TRUSTED_SECCOMP_BPF_SECCOMP_BPF_H_ */
+diff --git a/native_client/src/trusted/service_runtime/BUILD.gn b/native_client/src/trusted/service_runtime/BUILD.gn
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc0cf715e37a1bb46d6a238e0e0ad6c17b90be55
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/BUILD.gn
+@@ -0,0 +1,359 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//build/toolchain/toolchain.gni")
++import("//native_client/src/trusted/asm.gni")
++
++source_set("sel_main") {
++  sources = [
++    "sel_main.c",
++  ]
++  deps = [
++    "//build/config/nacl:nacl_base",
++    "//native_client/src/trusted/debug_stub:debug_stub",
++    ":sel",
++  ]
++}
++
++source_set("sel_main_chrome") {
++  sources = [
++    "sel_main_chrome.c",
++  ]
++  deps = [
++    "//build/config/nacl:nacl_base",
++    "//native_client/src/trusted/debug_stub:debug_stub",
++    ":sel",
++  ]
++}
++
++source_set("env_cleanser") {
++  sources = [
++    "env_cleanser.c",
++  ]
++  deps = [
++    "//build/config/nacl:nacl_base",
++  ]
++}
++
++source_set("nacl_error_code") {
++  sources = [
++    "nacl_error_code.c",
++  ]
++  deps = [
++    "//build/config/nacl:nacl_base",
++  ]
++}
++
++if (current_toolchain == nacl_asm_toolchain) {
++  source_set("sel_asm") {
++    if (current_cpu == "x86") {
++      sources = [
++        "arch/x86_32/nacl_switch_32.S",
++        "arch/x86_32/nacl_switch_all_regs_asm_32.S",
++        "arch/x86_32/nacl_syscall_32.S",
++        "arch/x86_32/springboard.S",
++        "arch/x86_32/tramp_32.S",
++      ]
++    } else if (current_cpu == "x64") {
++      sources = [
++        "arch/x86_64/nacl_switch_64.S",
++        "arch/x86_64/nacl_syscall_64.S",
++        "arch/x86_64/tramp_64.S",
++      ]
++      if (is_win) {
++        sources += [
++          "arch/x86_64/fnstcw.S",
++          "arch/x86_64/fxsaverstor.S",
++          "win/exception_patch/exit_fast.S",
++          "win/exception_patch/intercept.S",
++        ]
++      }
++    } else if (current_cpu == "arm") {
++      sources = [
++        "arch/arm/nacl_switch.S",
++        "arch/arm/nacl_syscall.S",
++        "arch/arm/tramp_arm.S",
++      ]
++    } else if (current_cpu == "mipsel") {
++      sources = [
++        "arch/mips/nacl_switch.S",
++        "arch/mips/nacl_syscall.S",
++        "arch/mips/tramp_mips.S",
++      ]
++    }
++    deps = [
++      "//build/config/nacl:nacl_base",
++    ]
++  }
++}
++
++source_set("sel") {
++  sources = [
++    "dyn_array.c",
++    "elf_util.c",
++    "filename_util.cc",
++    "load_file.c",
++    "nacl_all_modules.c",
++    "nacl_app_thread.c",
++    "nacl_copy.c",
++    "nacl_desc_effector_ldr.c",
++    "nacl_error_gio.c",
++    "nacl_error_log_hook.c",
++    "nacl_globals.c",
++    "nacl_resource.c",
++    "nacl_signal_common.c",
++    "nacl_stack_safety.c",
++    "nacl_syscall_common.c",
++    "nacl_syscall_hook.c",
++    "nacl_syscall_list.c",
++    "nacl_text.c",
++    "nacl_valgrind_hooks.c",
++    "sel_addrspace.c",
++    "sel_ldr.c",
++    "sel_ldr_filename.cc",
++    "sel_ldr_standard.c",
++    "sel_main_common.c",
++    "sel_mem.c",
++    "sel_qualify.c",
++    "sel_validate_image.c",
++    "sys_clock.c",
++    "sys_exception.c",
++    "sys_fdio.c",
++    "sys_filename.c",
++    "sys_futex.c",
++    "sys_imc.c",
++    "sys_list_mappings.c",
++    "sys_memory.c",
++    "sys_parallel_io.c",
++    "sys_random.c",
++    "thread_suspension_common.c",
++    "thread_suspension_unwind.c",
++  ]
++
++  if (is_linux) {
++    sources += [ "linux/nacl_signal.c" ]
++  }
++
++  if (is_mac) {
++    sources += [
++      "osx/crash_filter.c",
++      "osx/mach_exception_handler.c",
++      "osx/mach_thread_map.c",
++      "osx/nacl_ldt.c",
++      "osx/nacl_thread_nice.c",
++      "osx/thread_suspension.c",
++      "posix/addrspace_teardown.c",
++      "posix/sel_memory.c",
++      "posix/x86/sel_segments.c",
++    ]
++  }
++
++  if (is_win) {
++    sources += [
++      "win/addrspace_teardown.c",
++      "win/debug_exception_handler.c",
++      "win/debug_exception_handler_standalone.c",
++      "win/nacl_ldt.c",
++      "win/nacl_thread_nice.c",
++      "win/sel_memory.c",
++      "win/sel_segments.c",
++      "win/thread_handle_map.c",
++    ]
++  }
++
++  if (current_cpu == "arm") {
++    sources += [
++      "arch/arm/nacl_app.c",
++      "arch/arm/nacl_switch_to_app_arm.c",
++      "arch/arm/nacl_tls.c",
++      "arch/arm/sel_addrspace_arm.c",
++      "arch/arm/sel_ldr_arm.c",
++      "arch/arm/sel_rt.c",
++      "linux/nacl_signal_arm.c",
++    ]
++  }
++
++  if (current_cpu == "mipsel") {
++    sources += [
++      "arch/mips/nacl_app.c",
++      "arch/mips/nacl_switch_to_app_mips.c",
++      "arch/mips/nacl_tls.c",
++      "arch/mips/sel_addrspace_mips.c",
++      "arch/mips/sel_ldr_mips.c",
++      "arch/mips/sel_rt.c",
++      "linux/nacl_signal_mips.c",
++    ]
++  }
++
++  if (is_linux || is_android) {
++    sources += [
++      "linux/nacl_bootstrap_args.c",
++      "linux/nacl_thread_nice.c",
++      "linux/r_debug.c",
++      "linux/reserved_at_zero.c",
++      "linux/thread_suspension.c",
++      "posix/addrspace_teardown.c",
++      "posix/sel_memory.c",
++    ]
++    if (current_cpu == "x86" || current_cpu == "x64") {
++      sources += [
++        "linux/x86/nacl_ldt.c",
++        "posix/x86/sel_segments.c",
++      ]
++    }
++    if (current_cpu == "arm") {
++      sources += [ "linux/arm/sel_segments.c" ]
++    }
++    if (current_cpu == "mipsel") {
++      sources += [ "linux/mips/sel_segments.c" ]
++    }
++  }
++
++  if (is_posix) {
++    sources += [
++      "posix/nacl_signal_stack.c",
++      "posix/sel_addrspace_posix.c",
++    ]
++  }
++
++  if (is_win) {
++    sources += [
++      "win/nacl_signal_stack.c",
++      "win/sel_addrspace_win.c",
++      "win/thread_suspension.c",
++      "win/vm_hole.c",
++    ]
++  } else {
++    sources += [ "generic/vm_hole.c" ]
++  }
++
++  if (current_cpu == "x86" || current_cpu == "x64") {
++    sources += [
++      "arch/x86/nacl_ldt_x86.c",
++    ]
++  }
++
++  if (current_cpu == "x86") {
++    sources += [
++      "arch/x86_32/nacl_app_32.c",
++      "arch/x86_32/nacl_switch_all_regs_32.c",
++      "arch/x86_32/nacl_switch_to_app_32.c",
++      "arch/x86_32/nacl_tls_32.c",
++      "arch/x86_32/sel_addrspace_x86_32.c",
++      "arch/x86_32/sel_ldr_x86_32.c",
++      "arch/x86_32/sel_rt_32.c",
++    ]
++    if (is_mac) {
++      sources += [ "osx/nacl_signal_32.c" ]
++    }
++    if (is_linux) {
++      sources += [ "linux/nacl_signal_32.c" ]
++    }
++    if (is_win) {
++      sources += [ "win/nacl_signal_32.c" ]
++    }
++  }
++
++  if (current_cpu == "x64") {
++    sources += [
++      "arch/x86_64/nacl_app_64.c",
++      "arch/x86_64/nacl_switch_to_app_64.c",
++      "arch/x86_64/nacl_tls_64.c",
++      "arch/x86_64/sel_ldr_x86_64.c",
++      "arch/x86_64/sel_rt_64.c",
++    ]
++    if (is_mac) {
++      sources += [
++        "osx/nacl_signal_64.c",
++        "arch/x86_64/sel_addrspace_posix_x86_64.c",
++      ]
++    }
++    if (is_linux) {
++      sources += [
++        "linux/nacl_signal_64.c",
++        "arch/x86_64/sel_addrspace_posix_x86_64.c",
++      ]
++    }
++    if (is_win) {
++      sources += [
++        "win/exception_patch/ntdll_patch.c",
++        "win/nacl_signal_64.c",
++        # We assemble the .asm assembly file with the Microsoft assembler
++        # because we need to generate x86-64 Windows unwind info, which the
++        # GNU assembler we use elsewhere does not support.
++        "arch/x86_64/nacl_switch_unwind_win.asm",
++        "arch/x86_64/sel_addrspace_win_x86_64.c",
++      ]
++    }
++    defines = [ "NACL_X86_64_ZERO_BASED_SANDBOX=0" ]
++  }
++
++  deps = [
++    "//build/config/nacl:nacl_base",
++    ":sel_asm($nacl_asm_toolchain)",
++    ":nacl_error_code",
++    ":env_cleanser",
++    "//native_client/src/trusted/desc:nrd_xfer",
++    "//native_client/src/trusted/perf_counter:nacl_perf_counter",
++    "//native_client/src/trusted/nacl_base:nacl_base",
++    "//native_client/src/shared/imc:imc",
++    "//native_client/src/trusted/fault_injection:nacl_fault_inject",
++    "//native_client/src/trusted/interval_multiset:nacl_interval",
++    "//native_client/src/shared/platform:platform",
++    "//native_client/src/trusted/platform_qualify:platform_qual_lib",
++    "//native_client/src/shared/gio:gio",
++    "//native_client/src/trusted/validator:validation_cache",
++    "//native_client/src/trusted/validator:validators",
++  ]
++
++  if (current_os == "mac") {
++    deps += [ ":nacl_exc" ]
++    sources += [ "$target_gen_dir/nacl_exc_server.c" ]
++  }
++}
++
++if (current_os == "mac") {
++  import("//build/config/mac/mac_sdk.gni")
++
++  action("nacl_exc") {
++    script = "osx/run_mig.py"
++    sources = [
++      mac_sdk_path + "/usr/include/mach/exc.defs",
++    ]
++    outputs = [
++      "$target_gen_dir/nacl_exc.h",
++      "$target_gen_dir/nacl_exc_server.c",
++    ]
++    args = rebase_path(sources, root_build_dir) +
++           rebase_path(outputs, root_build_dir)
++    if (!use_system_xcode) {
++      args += [ hermetic_xcode_path ]
++    }
++  }
++}
++
++executable("sel_ldr") {
++  sources = [
++    "nacl_test_injection_main.c",
++  ]
++  deps = [
++    ":sel_main",
++
++    # All executables must have the sanitizer deps to properly link in
++    # asan mode (this target will be empty in other cases).
++    "//build/config/sanitizers:deps",
++
++    "//build/win:default_exe_manifest",
++  ]
++  if (is_linux) {
++    configs -= [ "//build/config:default_libs" ]
++    libs = [ "rt" ]
++    ldflags = [ "-pie" ]
++  }
++  if (is_linux) {
++    data_deps = [
++      "linux:bootstrap",
++    ]
++  }
++}
+diff --git a/native_client/src/trusted/service_runtime/OWNERS b/native_client/src/trusted/service_runtime/OWNERS
+new file mode 100644
+index 0000000000000000000000000000000000000000..a914a12d0f3b6db6c266703146b3c6c8ae763578
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/OWNERS
+@@ -0,0 +1,7 @@
++set noparent
++# Please keep these in alphabetical order
++bradnelson@chromium.org
++mcgrathr@chromium.org
++mseaborn@chromium.org
++phosek@chromium.org
++sehr@chromium.org
+diff --git a/native_client/src/trusted/service_runtime/README b/native_client/src/trusted/service_runtime/README
+new file mode 100644
+index 0000000000000000000000000000000000000000..60091779e328fdf07cd2a6e8fc04d96425685551
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/README
+@@ -0,0 +1,8 @@
++This directory contains code for native client's service runtime
++ which provides a limited set of operating system style services
++to native client modules.
++
++The following scons targets are used for testing this code:
++
++    * run_service_runtime_tests
++    * simple_tests

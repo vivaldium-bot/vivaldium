@@ -1,1750 +1,3 @@
-diff --git a/native_client/src/trusted/platform_qualify/arch/x86/vcpuid.h b/native_client/src/trusted/platform_qualify/arch/x86/vcpuid.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..bd737862ac91261d0e15aa40a499d6c7679c5651
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/arch/x86/vcpuid.h
-@@ -0,0 +1,23 @@
-+/*
-+ * Copyright 2008 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_ARCH_X86_VCPUID_H_
-+#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_ARCH_X86_VCPUID_H_
-+/*
-+ * vcpuid.h
-+ *
-+ * Verify correctness of CPUID implementation.
-+ *
-+ * This uses shell status code to indicate its result; non-zero return
-+ * code indicates the CPUID instruction is not implemented or not
-+ * implemented correctly.
-+ */
-+
-+/* This routine routines zero if CPUID appears to be implemented correctly,
-+ * and otherwise non-zero.
-+ */
-+int CPUIDImplIsValid(void);
-+#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_ARCH_X86_VCPUID_H_ */
-diff --git a/native_client/src/trusted/platform_qualify/arch/x86_32/nacl_dep_qualify_arch.c b/native_client/src/trusted/platform_qualify/arch/x86_32/nacl_dep_qualify_arch.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..02a5b6ec7eff8ddd8eb59d8456ebc0eb65314c6e
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/arch/x86_32/nacl_dep_qualify_arch.c
-@@ -0,0 +1,43 @@
-+/*
-+ * Copyright 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include <stddef.h>
-+
-+#include "native_client/src/include/build_config.h"
-+
-+#if !NACL_WINDOWS /* stdint is neither available nor needed on Windows */
-+#include <stdint.h>
-+#endif
-+
-+#include "native_client/src/trusted/platform_qualify/nacl_dep_qualify.h"
-+#include "native_client/src/include/nacl_macros.h"
-+
-+/* Assembled equivalent of "ret" */
-+#define INST_RET 0xC3
-+
-+int NaClCheckDEP(void) {
-+  /*
-+   * We do not require DEP, so simply report success.
-+   */
-+  return 1;
-+}
-+
-+nacl_void_thunk NaClGenerateThunk(uint8_t *buf, size_t size_in_bytes) {
-+  /*
-+   * Place a "ret" at buf.
-+   */
-+  if (size_in_bytes < 1) return 0;
-+
-+  *buf = (uint8_t) INST_RET;
-+
-+  /*
-+   * ISO C prevents a direct data->function cast, because the pointers aren't
-+   * guaranteed to be the same size.  For our platforms this is fine, but we
-+   * verify at compile time anyway before tricking the compiler:
-+   */
-+  NACL_ASSERT_SAME_SIZE(uint8_t *, nacl_void_thunk);
-+  return (nacl_void_thunk) (uintptr_t) buf;
-+}
-diff --git a/native_client/src/trusted/platform_qualify/arch/x86_64/nacl_dep_qualify_arch.c b/native_client/src/trusted/platform_qualify/arch/x86_64/nacl_dep_qualify_arch.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..2f9145b00248e94cbb9e46077381d3ed31dbc646
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/arch/x86_64/nacl_dep_qualify_arch.c
-@@ -0,0 +1,43 @@
-+/*
-+ * Copyright 2010 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include <stddef.h>
-+
-+#include "native_client/src/include/build_config.h"
-+
-+#if !NACL_WINDOWS /* stdint is neither available nor needed on Windows */
-+#include <stdint.h>
-+#endif
-+
-+#include "native_client/src/trusted/platform_qualify/nacl_dep_qualify.h"
-+#include "native_client/src/include/nacl_macros.h"
-+
-+/* Assembled equivalent of "ret" */
-+#define INST_RET 0xC3
-+
-+int NaClCheckDEP(void) {
-+  /*
-+   * We require DEP, so forward this call to the OS-specific check routine.
-+   */
-+  return NaClAttemptToExecuteData();
-+}
-+
-+nacl_void_thunk NaClGenerateThunk(uint8_t *buf, size_t size_in_bytes) {
-+  /*
-+   * Place a "ret" at buf.
-+   */
-+  if (size_in_bytes < 1) return 0;
-+
-+  *buf = (uint8_t) INST_RET;
-+
-+  /*
-+   * ISO C prevents a direct data->function cast, because the pointers aren't
-+   * guaranteed to be the same size.  For our platforms this is fine, but we
-+   * verify at compile time anyway before tricking the compiler:
-+   */
-+  NACL_ASSERT_SAME_SIZE(uint8_t *, nacl_void_thunk);
-+  return (nacl_void_thunk) (uintptr_t) buf;
-+}
-diff --git a/native_client/src/trusted/platform_qualify/build.scons b/native_client/src/trusted/platform_qualify/build.scons
-new file mode 100644
-index 0000000000000000000000000000000000000000..6b8f232eaaef6076c992221ba65c5c4a9b0cab7a
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/build.scons
-@@ -0,0 +1,98 @@
-+# -*- python -*-
-+# Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+#
-+# TODO(bradchen):
-+# - update plaform_qualify.gyp to be consistent with build.scons
-+# - update sel_ldr to include blacklist check
-+
-+Import('env')
-+
-+
-+pql_inputs = []
-+extra_libs = []
-+
-+#
-+# OS-specific qualification routines
-+#
-+if env.Bit('windows'):
-+  pql_inputs += ['win/nacl_os_qualify.c',
-+                 'win/nacl_dep_qualify.c']
-+else:
-+  pql_inputs += ['posix/nacl_dep_qualify.c']
-+  if env.Bit('mac'):
-+    pql_inputs += ['osx/nacl_os_qualify.c']
-+  elif env.Bit('linux'):
-+    pql_inputs += ['linux/nacl_os_qualify.c']
-+
-+# Convert a library name into a target specific libary name
-+def TargetLib(env, name):
-+  return name + '_' + env['TARGET_FULLARCH'].replace('-', '_')
-+
-+#
-+# Architecture-specific qualification routines
-+#
-+if env.Bit('build_x86') and env.Bit('build_x86'):
-+  pql_inputs += ['arch/x86/nacl_cpuwhitelist.c']
-+
-+  # Make sure CPUID is present and truthful
-+  vcpuid_env = env.Clone()
-+  if env.Bit('mac'):
-+    vcpuid_env.Append(CCFLAGS = ['-mdynamic-no-pic'])
-+    vcpuid_env.FilterOut(CCFLAGS = ['-fPIC'])
-+  if env.Bit('linux'):
-+    vcpuid_env.Append(CCFLAGS = ['-msse3'])
-+  nacl_vcpuid = vcpuid_env.ComponentLibrary('vcpuid', 'arch/x86/vcpuid.c')
-+  extra_libs += ['platform_qual_lib',
-+                 'platform',
-+                 'gio',
-+                 'vcpuid']
-+
-+  if env.Bit('build_x86_64'):
-+    # Compile x86-64 primitives for verifying NX functionality
-+    pql_inputs += ['arch/x86_64/nacl_dep_qualify_arch.c']
-+  elif env.Bit('build_x86_32'):
-+    pql_inputs += ['arch/x86_32/nacl_dep_qualify_arch.c']
-+
-+  platform_qual_test = env.ComponentProgram(
-+      'platform_qual_test', 'arch/x86/platform_qual_test.c',
-+      # 'sel' is required for sel_memory.c and friends
-+      EXTRA_LIBS=extra_libs + ['sel'])
-+  node = env.CommandTest('platform_qual_test.out', [platform_qual_test])
-+  env.AddNodeToTestSuite(
-+      node, ['small_tests'], 'run_platform_qual_test',
-+      is_broken=env.IsRunningUnderValgrind())
-+
-+  cpuwhitelist_test = env.ComponentProgram(
-+      'cpuwhitelist_test', 'arch/x86/nacl_cpuwhitelist_test.c',
-+      EXTRA_LIBS=extra_libs)
-+  node = env.CommandTest('cpuwhitelist_test.out', [cpuwhitelist_test])
-+  env.AddNodeToTestSuite(node, ['small_tests'], 'run_cpuwhitelist_test')
-+
-+
-+if env.Bit('build_arm'):
-+  # Compile ARM primitives for checking XN functionality
-+  pql_inputs += ['arch/arm/nacl_dep_qualify_arch.c']
-+  # Compile ARM primitives for checking VFP/vector features.
-+  pql_inputs += ['arch/arm/nacl_qualify_fpu.c']
-+  # Compile ARM primitives for checking sandboxing features.
-+  pql_inputs += ['arch/arm/nacl_qualify_sandbox_instrs.c']
-+  # Compile ARM primitives for checking alignment features.
-+  pql_inputs += ['arch/arm/nacl_qualify_unaligned.c']
-+
-+if env.Bit('build_mips32'):
-+  # Compile MIPS primitives for checking FPU presence and mode.
-+  pql_inputs += ['arch/mips/nacl_qualify_fpu.c']
-+
-+# ----------------------------------------------------------
-+#
-+# ----------------------------------------------------------
-+env.DualLibrary('platform_qual_lib', pql_inputs)
-+
-+
-+# These tests use assembly which seem to make the coverage instrumentation
-+# on windows unhappy. Disable them for now on coverage for windows.
-+# TODO(bradnelson): figure out a way to get coverage working for these.
-+if env.Bit('windows') and env.Bit('coverage_enabled'):
-+  Return()
-diff --git a/native_client/src/trusted/platform_qualify/kernel_version.h b/native_client/src/trusted/platform_qualify/kernel_version.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..56b1b9a19635558151afebbe05de787d95cd839c
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/kernel_version.h
-@@ -0,0 +1,74 @@
-+/*
-+ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_KERNEL_VERSION_H_
-+#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_KERNEL_VERSION_H_
-+
-+#include <stdlib.h>
-+#include <string.h>
-+#include "native_client/src/include/nacl_base.h"
-+
-+EXTERN_C_BEGIN
-+
-+/*
-+ * Returns 1 on success and fills num1.num2.num3 appropriately.
-+ */
-+static INLINE int NaClParseKernelVersion(const char *version, int *num1,
-+                                         int *num2, int *num3) {
-+  char *next;
-+  *num1 = strtol(version, &next, 10);
-+  if (next == NULL || *next != '.') {
-+    return 0;
-+  }
-+  *num2 = strtol(next + 1, &next, 10);
-+  if (next == NULL) {
-+    return 0;
-+  }
-+  if (*next != '.') {
-+    *num3 = 0;
-+    return 1;
-+  }
-+  *num3 = strtol(next + 1, &next, 10);
-+  if (next == NULL) {
-+    return 0;
-+  }
-+  /* Ignore the rest of the version string. */
-+  return 1;
-+}
-+
-+/*
-+ * Returns 1 on success and fills res with -1, 0 or 1,
-+ * if version1 <, == or > version2 accordingly.
-+ */
-+static INLINE int NaClCompareKernelVersions(const char *version1,
-+                                            const char *version2,
-+                                            int *res) {
-+  int i;
-+  int num1[3];
-+  int num2[3];
-+  if (!NaClParseKernelVersion(version1, &num1[0], &num1[1], &num1[2])) {
-+    return 0;
-+  }
-+  if (!NaClParseKernelVersion(version2, &num2[0], &num2[1], &num2[2])) {
-+    return 0;
-+  }
-+  for (i = 0; i < 3; i++) {
-+    if (num1[i] < num2[i]) {
-+      *res = -1;
-+      return 1;
-+    }
-+    if (num1[i] > num2[i]) {
-+      *res = 1;
-+      return 1;
-+    }
-+  }
-+  *res = 0;
-+  return 1;
-+}
-+
-+EXTERN_C_END
-+
-+#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_KERNEL_VERSION_H_ */
-diff --git a/native_client/src/trusted/platform_qualify/linux/nacl_os_qualify.c b/native_client/src/trusted/platform_qualify/linux/nacl_os_qualify.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..dd38c5d74b6772296f457018fea4314da5dce7fd
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/linux/nacl_os_qualify.c
-@@ -0,0 +1,68 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include <string.h>
-+#include <sys/utsname.h>
-+
-+#include "native_client/src/include/build_config.h"
-+#include "native_client/src/shared/platform/nacl_log.h"
-+#include "native_client/src/trusted/platform_qualify/kernel_version.h"
-+#include "native_client/src/trusted/platform_qualify/nacl_os_qualify.h"
-+
-+
-+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
-+
-+static const char *kMinimumVersion = "2.6.27";
-+
-+/*
-+ * Checks for this bug:
-+ * http://code.google.com/p/nativeclient/issues/detail?id=2032
-+ */
-+static int NaClModifyLdtHasProblems(const char *version) {
-+  int res;
-+  if (!NaClCompareKernelVersions(version, kMinimumVersion, &res)) {
-+    NaClLog(LOG_ERROR, "NaClModifyLdtHasProblems: "
-+            "Couldn't parse kernel version: %s\n", version);
-+    return 1;
-+  }
-+  return res < 0;
-+}
-+
-+#endif
-+
-+/*
-+ * Returns 1 if the operating system can run Native Client modules.
-+ */
-+int NaClOsIsSupported(void) {
-+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
-+  struct utsname info;
-+  if (uname(&info) != 0) {
-+    NaClLog(LOG_ERROR, "NaClOsIsSupported: uname() failed\n");
-+    return 0;
-+  }
-+  if (NaClModifyLdtHasProblems(info.release)) {
-+    NaClLog(LOG_ERROR, "NaClOsIsSupported: This system is running an "
-+            "old Linux kernel. This kernel version is buggy and "
-+            "Native Client's x86-32 sandbox might be insecure on "
-+            "this kernel. The fix is to upgrade the kernel to v2.6.27 "
-+            "or later, or, as a workaround, to switch using a 64-bit "
-+            "Native Client sandbox. For more information, see "
-+            "http://code.google.com/p/nativeclient/issues/detail?id=2032\n");
-+    return 0;
-+  }
-+#endif
-+
-+  return 1;
-+}
-+
-+
-+/*
-+ * Returns 1 if the operating system is a 64-bit version of
-+ * Windows.  For now, all of these versions are not supported.
-+ */
-+int NaClOsIs64BitWindows(void) {
-+  return 0;
-+}
-diff --git a/native_client/src/trusted/platform_qualify/nacl_cpuwhitelist.h b/native_client/src/trusted/platform_qualify/nacl_cpuwhitelist.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..ed2d432e895227765892b9c8c73330e677f12bc3
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/nacl_cpuwhitelist.h
-@@ -0,0 +1,37 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_CPUWHITELIST
-+#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_CPUWHITELIST
-+
-+#include "native_client/src/include/nacl_base.h"
-+
-+/* NOTES:
-+ * The blacklist/whitelist go in an array which must be kept SORTED
-+ * as it is passed to bsearch.
-+ * An x86 CPU ID string must be 20 bytes plus a '\0'.
-+ */
-+#define NACL_BLACKLIST_TEST_ENTRY "NaClBlacklistTest123"
-+
-+EXTERN_C_BEGIN
-+
-+/* Return 1 if CPU is whitelisted */
-+int NaCl_ThisCPUIsWhitelisted(void);
-+/* Return 1 if CPU is blacklisted */
-+int NaCl_ThisCPUIsBlacklisted(void);
-+
-+/* Return 1 if list is well-structured. */
-+int NaCl_VerifyBlacklist(void);
-+int NaCl_VerifyWhitelist(void);
-+
-+/* Return 1 if named CPU is whitelisted */
-+int NaCl_CPUIsWhitelisted(const char *myid);
-+/* Return 1 if named CPU is blacklisted */
-+int NaCl_CPUIsBlacklisted(const char *myid);
-+
-+EXTERN_C_END
-+
-+#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_CPUWHITELIST */
-diff --git a/native_client/src/trusted/platform_qualify/nacl_dep_qualify.h b/native_client/src/trusted/platform_qualify/nacl_dep_qualify.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..793e68a5b5ba64921cc3775062a87fbafd78e185
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/nacl_dep_qualify.h
-@@ -0,0 +1,70 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_DEP_QUALIFY_H_
-+#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_DEP_QUALIFY_H_
-+
-+/*
-+ * Two of our target architectures (x86-64 and ARM) require that data not be
-+ * executable for our sandbox to hold.  Every vendor calls this something
-+ * different.  For the purposes of platform qualification, we use the term
-+ * 'data execution prevention,' or DEP.
-+ *
-+ * This file presents the common interface for DEP-check routines.  The
-+ * implementations differ greatly across platforms and architectures.  See the
-+ * notes on each function for details on where implementations live.
-+ */
-+
-+#include <stddef.h>
-+#include "native_client/src/include/nacl_base.h"
-+#include "native_client/src/include/portability.h"
-+
-+EXTERN_C_BEGIN
-+
-+/*
-+ * Checks that Data Execution Prevention is working as required by the
-+ * architecture.  On some architectures this is a no-op.
-+ *
-+ * NOTE: the implementation of this function is architecture-specific, and can
-+ * be found beneath arch/ in this directory.
-+ */
-+int NaClCheckDEP(void);
-+
-+int NaClAttemptToExecuteDataAtAddr(uint8_t *thunk_buffer, size_t size);
-+
-+/*
-+ * Attempts to generate and execute some functions in data memory, to verify
-+ * that Data Execution Prevention is working.  This is only used on platforms
-+ * where DEP is required.
-+ *
-+ * NOTE: the implementation of this function is platform-specific, and can be
-+ * found in linux/, win/, or osx/ in this directory.
-+ */
-+int NaClAttemptToExecuteData(void);
-+
-+/*
-+ * A void nullary function.  We generate functions of this type in the heap and
-+ * stack to prove that we cannot call them.  See NaClGenerateThunk, below.
-+ */
-+typedef void (*nacl_void_thunk)(void);
-+
-+/*
-+ * Generates an architecture-specific void thunk sequence into the provided
-+ * buffer.  Returns a pointer to the thunk (which may be offset into the
-+ * buffer, depending on alignment constraints etc.).
-+ *
-+ * If the buffer is too small for the architecture's thunk sequence, returns
-+ * NULL.  In general the buffer should be more than 4 bytes.
-+ *
-+ * NOTE: the implementation of this function is architecture-specific, and can
-+ * be found beneath arch/ in this directory.
-+ */
-+nacl_void_thunk NaClGenerateThunk(uint8_t *buf, size_t buf_size);
-+
-+EXTERN_C_END
-+
-+#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_DEP_QUALIFY_H_ */
-diff --git a/native_client/src/trusted/platform_qualify/nacl_os_qualify.h b/native_client/src/trusted/platform_qualify/nacl_os_qualify.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..05aea0c87c3cb911576ed5dc7ecacf7780bd53af
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/nacl_os_qualify.h
-@@ -0,0 +1,47 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+#ifndef NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_OS_QUALIFY_H_
-+#define NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_OS_QUALIFY_H_
-+
-+#include "native_client/src/include/build_config.h"
-+#include "native_client/src/include/nacl_base.h"
-+
-+EXTERN_C_BEGIN
-+
-+/*
-+ * Returns 1 if the operating system can run Native Client modules.
-+ */
-+int NaClOsIsSupported(void);
-+
-+/*
-+ * Returns 1 if the operating system is a 64-bit version of Windows.
-+ *
-+ * TODO(adonovan): This is currently the only platform on which we
-+ * deploy a 64-bit sel_ldr, and this function is currently used to
-+ * check that.  This is not ideal; we should have a higher-level
-+ * feature test interface that answers questions such as "what
-+ * sel_ldr(s) are available on this system" directly, instead of
-+ * strewing such assumptions throughout the code.
-+ */
-+int NaClOsIs64BitWindows(void);
-+
-+#if NACL_OSX
-+/*
-+ * Returns 1 if the operating system is OS X 10.10+.
-+ */
-+int NaClOSX10Dot10OrLater(void);
-+
-+/*
-+ * Returns 1 if the operating system is OS X 10.7+.
-+ */
-+int NaClOSX10Dot7OrLater(void);
-+#endif
-+
-+EXTERN_C_END
-+
-+#endif  /* NATIVE_CLIENT_SRC_TRUSTED_PLATFORM_QUALIFY_NACL_OS_QUALIFY_H_ */
-diff --git a/native_client/src/trusted/platform_qualify/osx/nacl_os_qualify.c b/native_client/src/trusted/platform_qualify/osx/nacl_os_qualify.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..3baf9bc5b2c05a37b060d1ab8a6c3f49a34eddf3
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/osx/nacl_os_qualify.c
-@@ -0,0 +1,119 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include <pthread.h>
-+#include <string.h>
-+#include <sys/utsname.h>
-+
-+#include "native_client/src/include/build_config.h"
-+#include "native_client/src/shared/platform/nacl_log.h"
-+#include "native_client/src/trusted/platform_qualify/kernel_version.h"
-+#include "native_client/src/trusted/platform_qualify/nacl_os_qualify.h"
-+
-+
-+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
-+
-+/*
-+ * The 64-bit Mac kernel bug was fixed in kernel version 10.8.0, which
-+ * is in Mac OS X 10.6.8.
-+ */
-+static const char *kMinimumKernelVersion = "10.8";
-+
-+static int KernelVersionIsBuggy(const char *version) {
-+  int res;
-+  if (!NaClCompareKernelVersions(version, kMinimumKernelVersion, &res)) {
-+    NaClLog(LOG_ERROR, "KernelVersionIsBuggy: "
-+            "Couldn't parse kernel version: %s\n", version);
-+    return 1;
-+  }
-+  return res < 0;
-+}
-+
-+#endif
-+
-+/*
-+ * Returns 1 if the operating system can run Native Client modules.
-+ */
-+int NaClOsIsSupported(void) {
-+#if NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && NACL_BUILD_SUBARCH == 32
-+  struct utsname info;
-+  if (uname(&info) != 0) {
-+    NaClLog(LOG_ERROR, "NaClOsIsSupported: uname() failed\n");
-+    return 0;
-+  }
-+  if (strcmp(info.machine, "x86_64") == 0 &&
-+      KernelVersionIsBuggy(info.release)) {
-+    NaClLog(LOG_ERROR,
-+            "NaClOsIsSupported: "
-+            "This system is running an old 64-bit Mac OS X kernel.  "
-+            "This kernel version is buggy and can crash when running "
-+            "Native Client's x86-32 sandbox.  "
-+            "The fix is to upgrade to Mac OS X 10.6.8 or later, or, as a "
-+            "workaround, to switch to using a 32-bit kernel, which will "
-+            "be capable of running Native Client.  For more information, see "
-+            "http://code.google.com/p/nativeclient/issues/detail?id=1712\n");
-+    return 0;
-+  }
-+#endif
-+  return 1;
-+}
-+
-+
-+/*
-+ * Returns 1 if the operating system is a 64-bit version of
-+ * Windows.  For now, all of these versions are not supported.
-+ */
-+int NaClOsIs64BitWindows(void) {
-+  return 0;
-+}
-+
-+/*
-+ * Returns the Darwin Major Version. Returns 0 on error.
-+ */
-+static int DarwinMajorVersion(void) {
-+  struct utsname uname_info;
-+  if (uname(&uname_info) != 0) {
-+    NaClLog(LOG_ERROR, "uname error\n");
-+    return 0;
-+  }
-+
-+  if (strcmp(uname_info.sysname, "Darwin") != 0) {
-+    NaClLog(LOG_ERROR, "unexpected uname sysname %s\n", uname_info.sysname);
-+    return 0;
-+  }
-+
-+  int major_version, minor_version, dot_version;
-+  if (!NaClParseKernelVersion(uname_info.release, &major_version,
-+                              &minor_version, &dot_version)) {
-+    NaClLog(LOG_ERROR, "couldn't parse release %s\n", uname_info.release);
-+    return 0;
-+  }
-+
-+  return major_version;
-+}
-+
-+static int g_darwin_major_version = 0;
-+
-+static void InitializeDarwinMajorVersion() {
-+  g_darwin_major_version = DarwinMajorVersion();
-+}
-+
-+/*
-+ * Returns the OS X Major Version. Caches the result of DarwinMajorVersion().
-+ */
-+static int OSXMajorVersion(void) {
-+  static pthread_once_t once_control = PTHREAD_ONCE_INIT;
-+  pthread_once(&once_control, InitializeDarwinMajorVersion);
-+  return g_darwin_major_version - 4;
-+}
-+
-+int NaClOSX10Dot10OrLater(void) {
-+  return OSXMajorVersion() >= 10;
-+}
-+
-+int NaClOSX10Dot7OrLater(void) {
-+  return OSXMajorVersion() >= 7;
-+}
-diff --git a/native_client/src/trusted/platform_qualify/posix/nacl_dep_qualify.c b/native_client/src/trusted/platform_qualify/posix/nacl_dep_qualify.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..4e1445ab6ee370f380fa32b05f5af603de31b9a8
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/posix/nacl_dep_qualify.c
-@@ -0,0 +1,156 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * POSIX-specific routines for verifying that Data Execution Prevention is
-+ * functional.
-+ */
-+
-+#include <setjmp.h>
-+#include <stdlib.h>
-+#include <signal.h>
-+
-+#include "native_client/src/include/build_config.h"
-+#include "native_client/src/include/nacl_compiler_annotations.h"
-+#include "native_client/src/shared/platform/nacl_check.h"
-+#include "native_client/src/trusted/platform_qualify/nacl_dep_qualify.h"
-+
-+#if NACL_OSX
-+#include <mach/mach.h>
-+#endif
-+
-+#if (NACL_OSX && NACL_ARCH(NACL_BUILD_ARCH) == NACL_x86 && \
-+     NACL_BUILD_SUBARCH == 64)
-+# define EXPECTED_SIGNAL SIGBUS
-+#else
-+# define EXPECTED_SIGNAL SIGSEGV
-+#endif
-+
-+static struct sigaction previous_sigaction;
-+static struct sigaction try_sigaction;
-+static sigjmp_buf try_state;
-+
-+static void signal_catch(int sig) {
-+  siglongjmp(try_state, sig);
-+}
-+
-+static void setup_signals(void) {
-+  try_sigaction.sa_handler = signal_catch;
-+  sigemptyset(&try_sigaction.sa_mask);
-+  try_sigaction.sa_flags = SA_RESETHAND;
-+
-+  (void) sigaction(EXPECTED_SIGNAL, &try_sigaction, &previous_sigaction);
-+}
-+
-+static void restore_signals(void) {
-+  (void) sigaction(EXPECTED_SIGNAL, &previous_sigaction, 0);
-+}
-+
-+#if NACL_OSX
-+
-+/*
-+ * If present, Breakpad's handler will swallow the hardware exception that
-+ * the test triggers before its signal handler can respond to it. Temporarily
-+ * disable Breakpad's handler to allow the system's in-kernel handler to
-+ * transform the exception into the signal that's expected here.
-+ */
-+
-+/*
-+ * <mach/mach_types.defs> says that these arrays have room for 32 elements,
-+ * not EXC_TYPES_COUNT. task_swap_exception_ports expects there to be room for
-+ * 32.
-+ */
-+#define MAX_EXCEPTION_PORTS 32
-+
-+typedef struct {
-+  exception_mask_t masks[MAX_EXCEPTION_PORTS];
-+  exception_handler_t ports[MAX_EXCEPTION_PORTS];
-+  exception_behavior_t behaviors[MAX_EXCEPTION_PORTS];
-+  thread_state_flavor_t flavors[MAX_EXCEPTION_PORTS];
-+  mach_msg_type_number_t count;
-+} MachExceptionHandlerData;
-+
-+static void DisableMachExceptionHandler(
-+    MachExceptionHandlerData *saved_handlers) {
-+  kern_return_t kr = task_swap_exception_ports(
-+      mach_task_self(),
-+      EXC_MASK_BAD_ACCESS,
-+      MACH_PORT_NULL,
-+      EXCEPTION_DEFAULT,
-+      THREAD_STATE_NONE,
-+      (exception_mask_array_t) &saved_handlers->masks,
-+      &saved_handlers->count,
-+      (exception_handler_array_t) &saved_handlers->ports,
-+      (exception_behavior_array_t) &saved_handlers->behaviors,
-+      (exception_flavor_array_t) &saved_handlers->flavors);
-+  CHECK(kr == KERN_SUCCESS);
-+}
-+
-+static void EnableMachExceptionHandler(
-+    MachExceptionHandlerData *saved_handlers) {
-+  for (size_t index = 0; index < saved_handlers->count; ++index) {
-+    if (saved_handlers->ports[index] != MACH_PORT_NULL) {
-+      kern_return_t kr = task_set_exception_ports(
-+          mach_task_self(),
-+          saved_handlers->masks[index],
-+          saved_handlers->ports[index],
-+          saved_handlers->behaviors[index],
-+          saved_handlers->flavors[index]);
-+      CHECK(kr == KERN_SUCCESS);
-+    }
-+  }
-+}
-+
-+#else
-+
-+typedef int MachExceptionHandlerData;
-+
-+static void DisableMachExceptionHandler(
-+    MachExceptionHandlerData *saved_handlers) {
-+  UNREFERENCED_PARAMETER(saved_handlers);
-+}
-+
-+static void EnableMachExceptionHandler(
-+    MachExceptionHandlerData *saved_handlers) {
-+  UNREFERENCED_PARAMETER(saved_handlers);
-+}
-+
-+#endif
-+
-+int NaClAttemptToExecuteDataAtAddr(uint8_t *thunk_buffer, size_t size) {
-+  int result;
-+  MachExceptionHandlerData saved_handlers;
-+  nacl_void_thunk thunk = NaClGenerateThunk(thunk_buffer, size);
-+
-+  setup_signals();
-+  DisableMachExceptionHandler(&saved_handlers);
-+
-+  if (0 == sigsetjmp(try_state, 1)) {
-+    thunk();
-+    result = 0;
-+  } else {
-+    result = 1;
-+  }
-+
-+  EnableMachExceptionHandler(&saved_handlers);
-+  restore_signals();
-+
-+  return result;
-+}
-+
-+/*
-+ * Returns 1 if Data Execution Prevention is present and working.
-+ */
-+int NaClAttemptToExecuteData(void) {
-+  int result;
-+  uint8_t *thunk_buffer = malloc(64);
-+  if (NULL == thunk_buffer) {
-+    return 0;
-+  }
-+  result = NaClAttemptToExecuteDataAtAddr(thunk_buffer, 64);
-+  free(thunk_buffer);
-+  return result;
-+}
-diff --git a/native_client/src/trusted/platform_qualify/win/nacl_dep_qualify.c b/native_client/src/trusted/platform_qualify/win/nacl_dep_qualify.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..e687fdafebd6b7a54af9e8c67f6bd919f5a7093b
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/win/nacl_dep_qualify.c
-@@ -0,0 +1,45 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * Windows-specific routines for verifying that Data Execution Prevention is
-+ * functional.
-+ */
-+
-+#include "native_client/src/include/portability.h"
-+
-+#include <setjmp.h>
-+#include <stdlib.h>
-+#include <stdio.h>
-+
-+#include "native_client/src/trusted/platform_qualify/nacl_dep_qualify.h"
-+
-+
-+int NaClAttemptToExecuteDataAtAddr(uint8_t *thunk_buffer, size_t size) {
-+  int got_fault = 0;
-+  nacl_void_thunk thunk = NaClGenerateThunk(thunk_buffer, size);
-+  __try {
-+    thunk();
-+  } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION
-+              ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
-+    got_fault = 1;
-+  }
-+  return got_fault;
-+}
-+
-+/*
-+ * Returns 1 if Data Execution Prevention is present and working.
-+ */
-+int NaClAttemptToExecuteData(void) {
-+  int result;
-+  uint8_t *thunk_buffer = malloc(64);
-+  if (NULL == thunk_buffer) {
-+    return 0;
-+  }
-+  result = NaClAttemptToExecuteDataAtAddr(thunk_buffer, 64);
-+  free(thunk_buffer);
-+  return result;
-+}
-diff --git a/native_client/src/trusted/platform_qualify/win/nacl_os_qualify.c b/native_client/src/trusted/platform_qualify/win/nacl_os_qualify.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..76d22f42502238de0ccfef310ca32b27e651e7bd
---- /dev/null
-+++ b/native_client/src/trusted/platform_qualify/win/nacl_os_qualify.c
-@@ -0,0 +1,74 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+
-+#include <stdio.h>
-+#include <string.h>
-+#include <windows.h>
-+#include "native_client/src/include/portability.h"
-+#include "native_client/src/trusted/platform_qualify/nacl_os_qualify.h"
-+
-+/*
-+ * Returns 1 if the operating system can run Native Client modules.
-+ */
-+int NaClOsIsSupported(void) {
-+  SYSTEM_INFO system_info;
-+  OSVERSIONINFO version_info;
-+
-+  memset(&version_info, 0, sizeof(version_info));
-+  version_info.dwOSVersionInfoSize = sizeof(version_info);
-+  if (!GetVersionEx(&version_info)) {
-+    /* If the API doesn't work we have to assume the worst. */
-+    return 0;
-+  }
-+  if (5 > version_info.dwMajorVersion ||
-+      ((5 == version_info.dwMajorVersion) &&
-+       (0 == version_info.dwMinorVersion))) {
-+    /* We do not support versions prior to Windows XP. */
-+    return 0;
-+  }
-+  /*
-+   * GetNativeSystemInfo is only available on Windows XP and after.
-+   */
-+  GetNativeSystemInfo(&system_info);
-+  if (PROCESSOR_ARCHITECTURE_AMD64 != system_info.wProcessorArchitecture &&
-+      PROCESSOR_ARCHITECTURE_INTEL != system_info.wProcessorArchitecture) {
-+    /*
-+     * The installed operating system processor architecture is either
-+     * Itanium or unknown.
-+     */
-+    return 0;
-+  }
-+#ifndef _WIN64
-+  if (NaClOsIs64BitWindows()) {
-+    /*
-+     * Must run 64-bit nacl on 64-bit Windows. 32-bit modules won't work
-+     * due to lack of support for segment register modification.
-+     */
-+    return 0;
-+  }
-+#endif
-+  return 1;
-+}
-+
-+
-+/*
-+ * Returns 1 if the operating system is a 64-bit version of
-+ * Windows.
-+ */
-+int NaClOsIs64BitWindows(void) {
-+  SYSTEM_INFO system_info;
-+
-+  GetNativeSystemInfo(&system_info);
-+  if (PROCESSOR_ARCHITECTURE_AMD64 == system_info.wProcessorArchitecture) {
-+    /*
-+     * The installed operating system processor architecture is x86-64.
-+     * This assumes the caller already knows it's a supported architecture.
-+     */
-+    return 1;
-+  }
-+  return 0;
-+}
-diff --git a/native_client/src/trusted/seccomp_bpf/build.scons b/native_client/src/trusted/seccomp_bpf/build.scons
-new file mode 100644
-index 0000000000000000000000000000000000000000..1bf955c7bdb44acb6b211b6ac2a4b250cb30c23a
---- /dev/null
-+++ b/native_client/src/trusted/seccomp_bpf/build.scons
-@@ -0,0 +1,11 @@
-+# -*- python -*-
-+# Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+Import('env')
-+
-+if not (env.Bit('linux') and env.Bit('build_x86_64')):
-+  Return()
-+
-+env.DualLibrary('seccomp_bpf', ['seccomp_bpf.c'])
-diff --git a/native_client/src/trusted/seccomp_bpf/seccomp_bpf.c b/native_client/src/trusted/seccomp_bpf/seccomp_bpf.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..0c43c0b006a69595eb82333e6ce9e649916f1c6c
---- /dev/null
-+++ b/native_client/src/trusted/seccomp_bpf/seccomp_bpf.c
-@@ -0,0 +1,333 @@
-+/*
-+ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * Seccomp filter policy for x86-64 with BPF macros
-+ */
-+
-+#include <linux/ptrace.h>
-+
-+#include "native_client/src/include/nacl_compiler_annotations.h"
-+
-+#if defined(PTRACE_O_TRACESECCOMP)
-+#define SUPPORTED_OS 1
-+#endif
-+
-+#if defined(SUPPORTED_OS)
-+
-+#include <linux/audit.h>
-+#include <linux/errno.h>
-+#include <linux/filter.h>
-+#include <linux/seccomp.h>
-+#include <linux/types.h>
-+#include <linux/unistd.h>
-+#include <signal.h>
-+#include <stddef.h>
-+#include <stdint.h>
-+#include <stdio.h>
-+#include <string.h>
-+#include <sys/prctl.h>
-+#include <sys/syscall.h>
-+#include <unistd.h>
-+
-+#define SyscallArg(n) (offsetof(struct seccomp_data, args[n]))
-+#define SyscallArch (offsetof(struct seccomp_data, arch))
-+#define SyscallNr (offsetof(struct seccomp_data, nr))
-+
-+
-+#define REG_RESULT  REG_RAX
-+#define REG_SYSCALL  REG_RAX
-+#define REG_ARG0  REG_RDI
-+#define REG_ARG1  REG_RSI
-+#define REG_ARG2  REG_RDX
-+#define REG_ARG3  REG_R10
-+#define REG_ARG4  REG_R8
-+#define REG_ARG5  REG_R9
-+
-+#ifndef PR_SET_NO_NEW_PRIVS
-+#define PR_SET_NO_NEW_PRIVS 38
-+#endif
-+
-+#ifndef SYS_SECCOMP
-+#define SYS_SECCOMP 1
-+#endif
-+
-+#define BUF_SIZE 1024
-+
-+static void NaClSeccompBpfSigsysHandler(int nr, siginfo_t *info,
-+                                        void *void_context) {
-+  ucontext_t *ctx = (ucontext_t *) void_context;
-+  int syscall;
-+  char buf[BUF_SIZE];
-+  int n;
-+  char *filename;
-+  int fatal = 1;
-+  UNREFERENCED_PARAMETER(nr);
-+  UNREFERENCED_PARAMETER(info);
-+
-+  syscall = ctx->uc_mcontext.gregs[REG_SYSCALL];
-+  switch (syscall) {
-+    case SYS_open:
-+      filename = (char *) ctx->uc_mcontext.gregs[REG_ARG0];
-+      n = snprintf(buf, BUF_SIZE,
-+                   "[SECCOMP BPF] Blocked open(\"%s\")\n", filename);
-+      fatal = 0;
-+      break;
-+    default:
-+      n = snprintf(buf, BUF_SIZE, "[SECCOMP BPF] "
-+                   "Linux syscall %d is not allowed by the policy\n",
-+                   syscall);
-+      break;
-+  }
-+  if (write(STDERR_FILENO, buf, n)) {}
-+  if (fatal) {
-+    _exit(255);
-+  }
-+  ctx->uc_mcontext.gregs[REG_RESULT] = -EACCES;
-+}
-+
-+static struct sock_filter filter[] = {
-+  /*
-+   * Check that an x86-64 syscall is called.
-+   * This will save us from the case when x86-64 process
-+   * calls an x86-32 system call using int $0x80.
-+   * See http://scary.beasts.org/security/CESA-2009-001.html
-+   */
-+  BPF_STMT(BPF_LD + BPF_W + BPF_ABS, SyscallArch),
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, AUDIT_ARCH_X86_64, 1, 0),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_KILL),
-+
-+  /* Grab the system call number */
-+  BPF_STMT(BPF_LD + BPF_W + BPF_ABS, SyscallNr),
-+  /* Jump table for the allowed syscalls */
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_rt_sigreturn, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+#ifdef __NR_sigreturn
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sigreturn, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+  /*
-+   * Note that gettid is an information leak if not running
-+   * under an outer sandbox that uses CLONE_NEWPID.
-+   * It's allowed here for the benefit of the ASan runtime.
-+   */
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_gettid, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_exit_group, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_exit, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_read, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_write, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_brk, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_mmap, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+#ifdef __NR_mmap2
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_mmap2, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_munmap, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_mprotect, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+#ifdef __NR_pread
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_pread, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+#ifdef __NR_pwrite
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_pwrite, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+#ifdef __NR_pread64
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_pread64, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+#ifdef __NR_pwrite64
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_pwrite64, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+#ifdef __NR_modify_ldt
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_modify_ldt, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_clone, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+#ifdef __NR_flock
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_flock, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_set_robust_list, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+#ifdef __NR_socketpair
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_socketpair, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+#ifdef __NR_socketcall
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_socketcall, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_close, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_dup, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_dup2, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_rt_sigaction, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_futex, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_clock_getres, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_nanosleep, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_time, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_times, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_clock_gettime, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_gettimeofday, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_fstat, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+#ifdef __NR_fstat64
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_fstat64, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_stat, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+#ifdef __NR_stat64
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_stat64, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+#ifdef __NR_sendmsg
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sendmsg, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+#ifdef __NR_recvmsg
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_recvmsg, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+#endif
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sigaltstack, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_madvise, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_exit, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sched_yield, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_sched_getaffinity, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  /* for abort(), called as tgkill(pid,tid,SIGABORT) */
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_tgkill, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  /* for abort(), called as rt_sigprocmask(SIG_UNBLOCK, [ABRT], NULL, 8) */
-+  BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_rt_sigprocmask, 0, 1),
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW),
-+
-+  /* send SIGSYS for other syscalls, not listed above */
-+  BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_TRAP),
-+};
-+
-+int NaClInstallBpfFilter(void) {
-+  struct sock_fprog prog = {
-+    .len = (uint16_t) (sizeof(filter) / sizeof(filter[0])),
-+    .filter = filter,
-+  };
-+  sigset_t mask;
-+  struct sigaction act;
-+
-+  /* Unmask SIGSYS */
-+  if (sigemptyset(&mask) ||
-+      sigaddset(&mask, SIGSYS)) {
-+    perror("sig{empty,add}set");
-+    return 1;
-+  }
-+
-+  memset(&act, 0, sizeof(act));
-+  act.sa_sigaction = &NaClSeccompBpfSigsysHandler;
-+  act.sa_flags = SA_SIGINFO | SA_ONSTACK;
-+  if (sigemptyset(&act.sa_mask)) {
-+    perror("sigemptyset");
-+    return 1;
-+  }
-+  if (sigaction(SIGSYS, &act, NULL) < 0) {
-+    perror("sigaction");
-+    return 1;
-+  }
-+
-+  if (sigprocmask(SIG_UNBLOCK, &mask, NULL)) {
-+    perror("unmasking SIGSYS");
-+    return 1;
-+  }
-+
-+  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
-+    perror("prctl(NO_NEW_PRIVS)");
-+    return 1;
-+  }
-+
-+  if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)) {
-+    perror("prctl");
-+    return 1;
-+  }
-+  return 0;
-+}
-+
-+#else   /* SUPPORTED_ARCH_AND_OS */
-+
-+int NaClInstallBpfFilter(void) {
-+  return 1;
-+}
-+
-+#endif  /* SUPPORTED_ARCH_AND_OS */
-diff --git a/native_client/src/trusted/seccomp_bpf/seccomp_bpf.h b/native_client/src/trusted/seccomp_bpf/seccomp_bpf.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..c9f04024237f77201779a92e81616bce1f099c47
---- /dev/null
-+++ b/native_client/src/trusted/seccomp_bpf/seccomp_bpf.h
-@@ -0,0 +1,22 @@
-+/*
-+ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#ifndef NATIVE_CLIENT_SRC_TRUSTED_SECCOMP_BPF_SECCOMP_BPF_H_
-+#define NATIVE_CLIENT_SRC_TRUSTED_SECCOMP_BPF_SECCOMP_BPF_H_ 1
-+
-+#include "native_client/src/include/nacl_base.h"
-+
-+EXTERN_C_BEGIN
-+
-+/*
-+ * Turns on seccomp-bpf syscall policy.
-+ * On success, returns 0.
-+ */
-+int NaClInstallBpfFilter(void);
-+
-+EXTERN_C_END
-+
-+#endif  /* NATIVE_CLIENT_SRC_TRUSTED_SECCOMP_BPF_SECCOMP_BPF_H_ */
-diff --git a/native_client/src/trusted/service_runtime/BUILD.gn b/native_client/src/trusted/service_runtime/BUILD.gn
-new file mode 100644
-index 0000000000000000000000000000000000000000..268ca8940de3b5f7645b43f2a831b2328912ae1c
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/BUILD.gn
-@@ -0,0 +1,355 @@
-+# Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import("//native_client/src/trusted/asm.gni")
-+
-+source_set("sel_main") {
-+  sources = [
-+    "sel_main.c",
-+  ]
-+  deps = [
-+    "//build/config/nacl:nacl_base",
-+    "//native_client/src/trusted/debug_stub:debug_stub",
-+    ":sel",
-+  ]
-+}
-+
-+source_set("sel_main_chrome") {
-+  sources = [
-+    "sel_main_chrome.c",
-+  ]
-+  deps = [
-+    "//build/config/nacl:nacl_base",
-+    "//native_client/src/trusted/debug_stub:debug_stub",
-+    ":sel",
-+  ]
-+}
-+
-+source_set("env_cleanser") {
-+  sources = [
-+    "env_cleanser.c",
-+  ]
-+  deps = [
-+    "//build/config/nacl:nacl_base",
-+  ]
-+}
-+
-+source_set("nacl_error_code") {
-+  sources = [
-+    "nacl_error_code.c",
-+  ]
-+  deps = [
-+    "//build/config/nacl:nacl_base",
-+  ]
-+}
-+
-+if (current_toolchain == nacl_asm_toolchain) {
-+  source_set("sel_asm") {
-+    if (current_cpu == "x86") {
-+      sources = [
-+        "arch/x86_32/nacl_switch_32.S",
-+        "arch/x86_32/nacl_switch_all_regs_asm_32.S",
-+        "arch/x86_32/nacl_syscall_32.S",
-+        "arch/x86_32/springboard.S",
-+        "arch/x86_32/tramp_32.S",
-+      ]
-+    } else if (current_cpu == "x64") {
-+      sources = [
-+        "arch/x86_64/nacl_switch_64.S",
-+        "arch/x86_64/nacl_syscall_64.S",
-+        "arch/x86_64/tramp_64.S",
-+      ]
-+      if (is_win) {
-+        sources += [
-+          "arch/x86_64/fnstcw.S",
-+          "arch/x86_64/fxsaverstor.S",
-+          "win/exception_patch/exit_fast.S",
-+          "win/exception_patch/intercept.S",
-+        ]
-+      }
-+    } else if (current_cpu == "arm") {
-+      sources = [
-+        "arch/arm/nacl_switch.S",
-+        "arch/arm/nacl_syscall.S",
-+        "arch/arm/tramp_arm.S",
-+      ]
-+    } else if (current_cpu == "mipsel") {
-+      sources = [
-+        "arch/mips/nacl_switch.S",
-+        "arch/mips/nacl_syscall.S",
-+        "arch/mips/tramp_mips.S",
-+      ]
-+    }
-+    deps = [
-+      "//build/config/nacl:nacl_base",
-+    ]
-+  }
-+}
-+
-+source_set("sel") {
-+  sources = [
-+    "dyn_array.c",
-+    "elf_util.c",
-+    "filename_util.cc",
-+    "load_file.c",
-+    "nacl_all_modules.c",
-+    "nacl_app_thread.c",
-+    "nacl_copy.c",
-+    "nacl_desc_effector_ldr.c",
-+    "nacl_error_gio.c",
-+    "nacl_error_log_hook.c",
-+    "nacl_globals.c",
-+    "nacl_resource.c",
-+    "nacl_signal_common.c",
-+    "nacl_stack_safety.c",
-+    "nacl_syscall_common.c",
-+    "nacl_syscall_hook.c",
-+    "nacl_syscall_list.c",
-+    "nacl_text.c",
-+    "nacl_valgrind_hooks.c",
-+    "sel_addrspace.c",
-+    "sel_ldr.c",
-+    "sel_ldr_filename.cc",
-+    "sel_ldr_standard.c",
-+    "sel_main_common.c",
-+    "sel_mem.c",
-+    "sel_qualify.c",
-+    "sel_validate_image.c",
-+    "sys_clock.c",
-+    "sys_exception.c",
-+    "sys_fdio.c",
-+    "sys_filename.c",
-+    "sys_futex.c",
-+    "sys_imc.c",
-+    "sys_list_mappings.c",
-+    "sys_memory.c",
-+    "sys_parallel_io.c",
-+    "sys_random.c",
-+    "thread_suspension_common.c",
-+    "thread_suspension_unwind.c",
-+  ]
-+
-+  if (is_linux) {
-+    sources += [ "linux/nacl_signal.c" ]
-+  }
-+
-+  if (is_mac) {
-+    sources += [
-+      "osx/crash_filter.c",
-+      "osx/mach_exception_handler.c",
-+      "osx/mach_thread_map.c",
-+      "osx/nacl_ldt.c",
-+      "osx/nacl_thread_nice.c",
-+      "osx/thread_suspension.c",
-+      "posix/addrspace_teardown.c",
-+      "posix/sel_memory.c",
-+      "posix/x86/sel_segments.c",
-+    ]
-+  }
-+
-+  if (is_win) {
-+    sources += [
-+      "win/addrspace_teardown.c",
-+      "win/debug_exception_handler.c",
-+      "win/debug_exception_handler_standalone.c",
-+      "win/nacl_ldt.c",
-+      "win/nacl_thread_nice.c",
-+      "win/sel_memory.c",
-+      "win/sel_segments.c",
-+      "win/thread_handle_map.c",
-+    ]
-+  }
-+
-+  if (current_cpu == "arm") {
-+    sources += [
-+      "arch/arm/nacl_app.c",
-+      "arch/arm/nacl_switch_to_app_arm.c",
-+      "arch/arm/nacl_tls.c",
-+      "arch/arm/sel_addrspace_arm.c",
-+      "arch/arm/sel_ldr_arm.c",
-+      "arch/arm/sel_rt.c",
-+      "linux/nacl_signal_arm.c",
-+    ]
-+  }
-+
-+  if (current_cpu == "mipsel") {
-+    sources += [
-+      "arch/mips/nacl_app.c",
-+      "arch/mips/nacl_switch_to_app_mips.c",
-+      "arch/mips/nacl_tls.c",
-+      "arch/mips/sel_addrspace_mips.c",
-+      "arch/mips/sel_ldr_mips.c",
-+      "arch/mips/sel_rt.c",
-+      "linux/nacl_signal_mips.c",
-+    ]
-+  }
-+
-+  if (is_linux || is_android) {
-+    sources += [
-+      "linux/nacl_bootstrap_args.c",
-+      "linux/nacl_thread_nice.c",
-+      "linux/r_debug.c",
-+      "linux/reserved_at_zero.c",
-+      "linux/thread_suspension.c",
-+      "posix/addrspace_teardown.c",
-+      "posix/sel_memory.c",
-+    ]
-+    if (current_cpu == "x86" || current_cpu == "x64") {
-+      sources += [
-+        "linux/x86/nacl_ldt.c",
-+        "posix/x86/sel_segments.c",
-+      ]
-+    }
-+    if (current_cpu == "arm") {
-+      sources += [ "linux/arm/sel_segments.c" ]
-+    }
-+    if (current_cpu == "mipsel") {
-+      sources += [ "linux/mips/sel_segments.c" ]
-+    }
-+  }
-+
-+  if (is_posix) {
-+    sources += [
-+      "posix/nacl_signal_stack.c",
-+      "posix/sel_addrspace_posix.c",
-+    ]
-+  }
-+
-+  if (is_win) {
-+    sources += [
-+      "win/nacl_signal_stack.c",
-+      "win/sel_addrspace_win.c",
-+      "win/thread_suspension.c",
-+      "win/vm_hole.c",
-+    ]
-+  } else {
-+    sources += [ "generic/vm_hole.c" ]
-+  }
-+
-+  if (current_cpu == "x86" || current_cpu == "x64") {
-+    sources += [
-+      "arch/x86/nacl_ldt_x86.c",
-+    ]
-+  }
-+
-+  if (current_cpu == "x86") {
-+    sources += [
-+      "arch/x86_32/nacl_app_32.c",
-+      "arch/x86_32/nacl_switch_all_regs_32.c",
-+      "arch/x86_32/nacl_switch_to_app_32.c",
-+      "arch/x86_32/nacl_tls_32.c",
-+      "arch/x86_32/sel_addrspace_x86_32.c",
-+      "arch/x86_32/sel_ldr_x86_32.c",
-+      "arch/x86_32/sel_rt_32.c",
-+    ]
-+    if (is_mac) {
-+      sources += [ "osx/nacl_signal_32.c" ]
-+    }
-+    if (is_linux) {
-+      sources += [ "linux/nacl_signal_32.c" ]
-+    }
-+    if (is_win) {
-+      sources += [ "win/nacl_signal_32.c" ]
-+    }
-+  }
-+
-+  if (current_cpu == "x64") {
-+    sources += [
-+      "arch/x86_64/nacl_app_64.c",
-+      "arch/x86_64/nacl_switch_to_app_64.c",
-+      "arch/x86_64/nacl_tls_64.c",
-+      "arch/x86_64/sel_ldr_x86_64.c",
-+      "arch/x86_64/sel_rt_64.c",
-+    ]
-+    if (is_mac) {
-+      sources += [
-+        "osx/nacl_signal_64.c",
-+        "arch/x86_64/sel_addrspace_posix_x86_64.c",
-+      ]
-+    }
-+    if (is_linux) {
-+      sources += [
-+        "linux/nacl_signal_64.c",
-+        "arch/x86_64/sel_addrspace_posix_x86_64.c",
-+      ]
-+    }
-+    if (is_win) {
-+      sources += [
-+        "win/exception_patch/ntdll_patch.c",
-+        "win/nacl_signal_64.c",
-+        # We assemble the .asm assembly file with the Microsoft assembler
-+        # because we need to generate x86-64 Windows unwind info, which the
-+        # GNU assembler we use elsewhere does not support.
-+        "arch/x86_64/nacl_switch_unwind_win.asm",
-+        "arch/x86_64/sel_addrspace_win_x86_64.c",
-+      ]
-+    }
-+    defines = [ "NACL_X86_64_ZERO_BASED_SANDBOX=0" ]
-+  }
-+
-+  deps = [
-+    "//build/config/nacl:nacl_base",
-+    ":sel_asm($nacl_asm_toolchain)",
-+    ":nacl_error_code",
-+    ":env_cleanser",
-+    "//native_client/src/trusted/desc:nrd_xfer",
-+    "//native_client/src/trusted/perf_counter:nacl_perf_counter",
-+    "//native_client/src/trusted/nacl_base:nacl_base",
-+    "//native_client/src/shared/imc:imc",
-+    "//native_client/src/trusted/fault_injection:nacl_fault_inject",
-+    "//native_client/src/trusted/interval_multiset:nacl_interval",
-+    "//native_client/src/shared/platform:platform",
-+    "//native_client/src/trusted/platform_qualify:platform_qual_lib",
-+    "//native_client/src/shared/gio:gio",
-+    "//native_client/src/trusted/validator:validation_cache",
-+    "//native_client/src/trusted/validator:validators",
-+  ]
-+
-+  if (current_os == "mac") {
-+    deps += [ ":nacl_exc" ]
-+    sources += [ "$target_gen_dir/nacl_exc_server.c" ]
-+  }
-+}
-+
-+if (current_os == "mac") {
-+  import("//build/config/mac/mac_sdk.gni")
-+
-+  action("nacl_exc") {
-+    script = "osx/run_mig.py"
-+    sources = [
-+      mac_sdk_path + "/usr/include/mach/exc.defs",
-+    ]
-+    outputs = [
-+      "$target_gen_dir/nacl_exc.h",
-+      "$target_gen_dir/nacl_exc_server.c",
-+    ]
-+    args = rebase_path(sources, root_build_dir) +
-+           rebase_path(outputs, root_build_dir)
-+  }
-+}
-+
-+executable("sel_ldr") {
-+  sources = [
-+    "nacl_test_injection_main.c",
-+  ]
-+  deps = [
-+    ":sel_main",
-+
-+    # All executables must have the sanitizer deps to properly link in
-+    # asan mode (this target will be empty in other cases).
-+    "//build/config/sanitizers:deps",
-+
-+    "//build/win:default_exe_manifest",
-+  ]
-+  if (is_linux) {
-+    configs -= [ "//build/config:default_libs" ]
-+    libs = [ "rt" ]
-+    ldflags = [ "-pie" ]
-+  }
-+  if (is_linux) {
-+    data_deps = [
-+      "linux:bootstrap",
-+    ]
-+  }
-+}
-diff --git a/native_client/src/trusted/service_runtime/OWNERS b/native_client/src/trusted/service_runtime/OWNERS
-new file mode 100644
-index 0000000000000000000000000000000000000000..a914a12d0f3b6db6c266703146b3c6c8ae763578
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/OWNERS
-@@ -0,0 +1,7 @@
-+set noparent
-+# Please keep these in alphabetical order
-+bradnelson@chromium.org
-+mcgrathr@chromium.org
-+mseaborn@chromium.org
-+phosek@chromium.org
-+sehr@chromium.org
-diff --git a/native_client/src/trusted/service_runtime/README b/native_client/src/trusted/service_runtime/README
-new file mode 100644
-index 0000000000000000000000000000000000000000..60091779e328fdf07cd2a6e8fc04d96425685551
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/README
-@@ -0,0 +1,8 @@
-+This directory contains code for native client's service runtime
-+ which provides a limited set of operating system style services
-+to native client modules.
-+
-+The following scons targets are used for testing this code:
-+
-+    * run_service_runtime_tests
-+    * simple_tests
 diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_app.c b/native_client/src/trusted/service_runtime/arch/arm/nacl_app.c
 new file mode 100644
 index 0000000000000000000000000000000000000000..d8342f645ae706eb9001590be4b123bb65a82658
@@ -28521,10 +26774,10 @@ index 0000000000000000000000000000000000000000..74021e2d943ff86b17803c20f34f591c
 +}
 diff --git a/native_client/src/trusted/service_runtime/osx/run_mig.py b/native_client/src/trusted/service_runtime/osx/run_mig.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..94aedec3611f551984e4cfc664289817ac93c838
+index 0000000000000000000000000000000000000000..763ab4b9dd2418924cf3f0e81b7d5d13343b3b7f
 --- /dev/null
 +++ b/native_client/src/trusted/service_runtime/osx/run_mig.py
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,97 @@
 +#!/usr/bin/python
 +# Copyright (c) 2012 The Native Client Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -28610,10 +26863,13 @@ index 0000000000000000000000000000000000000000..94aedec3611f551984e4cfc664289817
 +
 +
 +def Main(args):
-+  if len(args) != 3:
++  if len(args) != 3 and len(args) != 4:
 +    sys.stderr.write(
-+        'USAGE: %s <src.defs> <dst_header> <dst_server>\n' % sys.argv[0])
++        'USAGE: %s <src.defs> <dst_header> <dst_server> [DEVELOPER_DIR] \n'
++        % sys.argv[0])
 +    sys.exit(1)
++  if len(args) == 4:
++    os.environ['DEVELOPER_DIR'] = args[3]
 +  Generate(args[0], args[1], args[2])
 +
 +
@@ -278880,3 +277136,2314 @@ index 0000000000000000000000000000000000000000..1e620fb9b3fb1ab93217ccd273de7fd2
 +   and     $sp, $sp, STORE_MASK
 +
 +end_of_code:
+diff --git a/native_client/src/trusted/validator_mips/testdata/test_sp_updates.err b/native_client/src/trusted/validator_mips/testdata/test_sp_updates.err
+new file mode 100644
+index 0000000000000000000000000000000000000000..8af0fe33048713dfa3f73649bdacfed1d9c0cc38
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/testdata/test_sp_updates.err
+@@ -0,0 +1,17 @@
++ncval: 00020000 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020004 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020008 2 kProblemUnsafeDataWrite 00000000
++ncval: 0002000C 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020010 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020014 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020018 2 kProblemUnsafeDataWrite 00000000
++ncval: 0002001C 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020020 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020024 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020028 2 kProblemUnsafeDataWrite 00000000
++ncval: 0002002C 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020030 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020030 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020038 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020068 2 kProblemUnsafeDataWrite 00000000
++ncval: 00020074 2 kProblemDataRegInDelaySlot 00000000
+diff --git a/native_client/src/trusted/validator_mips/testdata/test_stores.S b/native_client/src/trusted/validator_mips/testdata/test_stores.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..840c640207d616cbf68d67c98f9cc9f84a9f615f
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/testdata/test_stores.S
+@@ -0,0 +1,97 @@
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# Several test cases are implemented in this file:
++#  1. Test if all store instructions are recognized as such.
++#  2. Test if store from sp is allowed.
++#  3. Test if mask and instruction are split with delay slot.
++#  4. Test if mask and instruction are in the same bundle.
++
++#include "native_client/pnacl/support/nacl_mips_defs.h"
++
++  .align 4
++  .globl __start
++__start:
++  .set noreorder
++  .set mips32r2
++
++  # Check store with mask.
++
++bundle_store_mask:
++  and     $a3, $a3, STORE_MASK
++  sw      $s1, 128($a3)          # OK
++  and     $a3, $a3, $t8
++  sw      $s1, 128($a3)          # Error, incorrect mask.
++
++  # Store instructions without store mask, should report error.
++
++bundle_store_list:
++  sb      $a0, 16($a1)           # Error, unsafe store, no mask.
++  sc      $a0, 16($a1)           # Error, unsafe store, no mask.
++  sdc1    $0, 16($a1)            # Error, unsafe store, no mask.
++  sdc2    $8, 16($a1)            # Error, unsafe store, no mask.
++
++  sh      $a0, 16($a1)           # Error, unsafe store, no mask.
++  sw      $a0, 16($a1)           # Error, unsafe store, no mask.
++  swc1    $f2, 16($a1)           # Error, unsafe store, no mask.
++  swc2    $22, 16($a1)           # Error, unsafe store, no mask.
++
++  swl     $a0, 16($a1)           # Error, unsafe store, no mask.
++  swr     $a0, 16($a1)           # Error, unsafe store, no mask.
++  nop
++  nop
++
++  # A few forbidden instructions (indexed store).
++
++bundle_indexed_store:
++  sdxc1   $f6, $a2($a0)          # Error, forbidden instruction.
++  suxc1   $f4, $t8($a1)          # Error, forbidden instruction.
++  swxc1   $f4, $t8($a1)          # Error, forbidden instruction.
++  nop
++
++bundle_store_from_sp:
++  sw      $a0, 16($sp)           # OK - store from sp doesn't need a mask.
++  nop
++  nop
++  nop
++
++  # Test when store pseudo-instruction is split with delay slot.
++
++bundle_chk_delay_slot:
++  b       bundle_chk_bundle_cross_1
++   and    $s0, $s0, STORE_MASK
++  sw      $v0, 16($s0)           # OK
++  nop
++
++  # Test when store pseudo-instruction crosses bundle.
++
++bundle_chk_bundle_cross_1:
++  nop
++  nop
++  nop
++  and     $a3, $a3, STORE_MASK
++
++bundle_chk_bundle_cross_2:
++  sw      $a3, 16($a3)           # Error, pseudo-instruction crosses bundle.
++  nop
++  nop
++  nop
++
++  # Test indexed store with store mask.
++
++bundle_indexed_store_index_not_zero:
++  and     $a0, $a0, STORE_MASK
++  sdxc1   $f6, $a2($a0)          # Error, forbidden instruction.
++  nop
++  nop
++
++  # Test if base register is properly recognized.
++
++bundle_sp_1:
++  sw      $sp,0($t1)             # Error, no store mask for t1.
++  and     $sp,$sp,STORE_MASK
++  nop
++  nop
++
++end_of_code:
+diff --git a/native_client/src/trusted/validator_mips/testdata/test_stores.err b/native_client/src/trusted/validator_mips/testdata/test_stores.err
+new file mode 100644
+index 0000000000000000000000000000000000000000..684050d46485d7a735248b3f97ae05d056e37308
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/testdata/test_stores.err
+@@ -0,0 +1,17 @@
++ncval: 0002000C 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020010 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020014 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020018 2 kProblemUnsafeLoadStore 00000000
++ncval: 0002001C 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020020 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020024 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020028 2 kProblemUnsafeLoadStore 00000000
++ncval: 0002002C 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020030 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020034 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020040 1 kProblemUnsafe 00000000
++ncval: 00020044 1 kProblemUnsafe 00000000
++ncval: 00020048 1 kProblemUnsafe 00000000
++ncval: 00020094 1 kProblemUnsafe 00000000
++ncval: 000200A0 2 kProblemUnsafeLoadStore 00000000
++ncval: 00020080 2 kProblemPatternCrossesBundle 00000000
+diff --git a/native_client/src/trusted/validator_mips/testdata/test_tp_access.S b/native_client/src/trusted/validator_mips/testdata/test_tp_access.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..5871982946a13482fb34a9d4af1b50b84c0381c4
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/testdata/test_tp_access.S
+@@ -0,0 +1,72 @@
++# Copyright 2015 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# Several test cases are implemented in this file:
++#  1. Test if regular way to access thread pointers is allowed.
++#  2. Test different random examples of forbidden stores through $t8.
++#  3. Test different random examples of forbidden loads through $t8.
++
++
++   .align 4
++   .globl __start
++__start:
++   .set noreorder
++   .set mips32r2
++
++   # Test valid tp access
++valid_load_access:
++   lw      $a0, 0($t8)            # OK
++   lw      $a0, 4($t8)            # OK
++   nop
++   nop
++
++   # Test invalid tp access
++invalid_store_access:
++   sb      $a0, 4($t8)            # Error, forbidden thread pointer access.
++   sc      $a0, 4($t8)            # Error, forbidden thread pointer access.
++   sdc1    $0, 4($t8)             # Error, forbidden thread pointer access.
++   sdc2    $8, 4($t8)             # Error, forbidden thread pointer access.
++
++   sh      $a0, 4($t8)            # Error, forbidden thread pointer access.
++   sw      $a0, 4($t8)            # Error, forbidden thread pointer access.
++   swc1    $f2, 4($t8)            # Error, forbidden thread pointer access.
++   swc2    $22, 4($t8)            # Error, forbidden thread pointer access.
++
++   swl     $a0, 4($t8)            # Error, forbidden thread pointer access.
++   swr     $a0, 4($t8)            # Error, forbidden thread pointer access.
++   sdxc1   $f6, $a2($t8)          # Error, forbidden instruction.
++   suxc1   $f4, $t8($t8)          # Error, forbidden instruction.
++
++   swxc1   $f4, $t8($t8)          # Error, forbidden instruction.
++   nop
++   nop
++   nop
++
++invalid_load_access:
++   lb      $a0, 4($t8)            # Error, forbidden thread pointer access.
++   lw      $a0, 8($t8)            # Error, forbidden thread pointer access.
++   lbu     $a0, 4($t8)            # Error, forbidden thread pointer access.
++   ldc1    $f0, 4($t8)            # Error, forbidden thread pointer access.
++
++   ldc2    $10, -24($t8)          # Error, forbidden thread pointer access.
++   lh      $a0, 4($t8)            # Error, forbidden thread pointer access.
++   lhu     $a0, 4($t8)            # Error, forbidden thread pointer access.
++   ll      $a0, 4($t8)            # Error, forbidden thread pointer access.
++
++   lwc1    $f0, 4($t8)            # Error, forbidden thread pointer access.
++   lwc2    $10, 4($t8)            # Error, forbidden thread pointer access.
++   lwl     $a0, 4($t8)            # Error, forbidden thread pointer access.
++   lwr     $a0, 4($t8)            # Error, forbidden thread pointer access.
++
++   ldxc1   $f0, $0($t8)           # Error, forbidden instruction.
++   luxc1   $f0, $a2($t8)          # Error, forbidden instruction.
++   lwxc1   $f6, $v0($t8)          # Error, forbidden instruction.
++   nop
++
++   .set dsp
++   lbux    $a3, $t2($t8)          # Error, forbidden instruction.
++   lhx     $a1, $a2($t8)          # Error, forbidden instruction.
++   lwx     $t1, $t2($t8)          # Error, forbidden instruction.
++   nop
++end_of_code:
+diff --git a/native_client/src/trusted/validator_mips/testdata/test_tp_access.err b/native_client/src/trusted/validator_mips/testdata/test_tp_access.err
+new file mode 100644
+index 0000000000000000000000000000000000000000..af1b6599f763a061bb06887356938f500d64720e
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/testdata/test_tp_access.err
+@@ -0,0 +1,31 @@
++ncval: 00020010 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020014 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020018 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 0002001C 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020020 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020024 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020028 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 0002002C 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020030 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020034 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020038 1 kProblemUnsafe 00000000
++ncval: 0002003C 1 kProblemUnsafe 00000000
++ncval: 00020040 1 kProblemUnsafe 00000000
++ncval: 00020050 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020054 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020058 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 0002005C 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020060 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020064 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020068 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 0002006C 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020070 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020074 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020078 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 0002007C 2 kProblemUnsafeLoadStoreThreadPointer 00000000
++ncval: 00020080 1 kProblemUnsafe 00000000
++ncval: 00020084 1 kProblemUnsafe 00000000
++ncval: 00020088 1 kProblemUnsafe 00000000
++ncval: 00020090 1 kProblemUnsafe 00000000
++ncval: 00020094 1 kProblemUnsafe 00000000
++ncval: 00020098 1 kProblemUnsafe 00000000
+\ No newline at end of file
+diff --git a/native_client/src/trusted/validator_mips/testdata/test_unpredicted.S b/native_client/src/trusted/validator_mips/testdata/test_unpredicted.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..789a23677e4ac662db0f133b14cd9f364077ffdc
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/testdata/test_unpredicted.S
+@@ -0,0 +1,38 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#
++# Tests unpredicted situations in NaCl for Mips.
++#
++
++#include "native_client/pnacl/support/nacl_mips_defs.h"
++
++   .align 4
++   .globl __start
++__start:
++   .set noreorder
++
++   b   __start - 0x10000       # OK - trampoline start.
++    b   __start - 0x10000      # Error - branch is in the delay slot.
++   nop
++   nop
++
++   and  $v0, $v0, JUMP_MASK
++   jr   $v0                    # OK
++    jr   $v0                   # Error - jump is in the delay slot.
++   nop
++
++   and  $v0, $v0, JUMP_MASK
++   jr   $v0                    # OK
++    b   __start - 0x10000      # Error - branch is in the delay slot.
++   nop
++
++   b   __start - 0x10000       # OK - trampoline start.
++    jr   $v0                   # Error - jump is in the delay slot.
++   nop
++   nop
++
++end_of_code:
+diff --git a/native_client/src/trusted/validator_mips/testdata/test_unpredicted.err b/native_client/src/trusted/validator_mips/testdata/test_unpredicted.err
+new file mode 100644
+index 0000000000000000000000000000000000000000..0b3b6350797956ec2e3768ef3402d2738bec797e
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/testdata/test_unpredicted.err
+@@ -0,0 +1,6 @@
++ncval: 00020004 2 kProblemBranchInDelaySlot 00000000
++ncval: 00020018 2 kProblemUnsafeJumpRegister 00000000
++ncval: 00020018 2 kProblemBranchInDelaySlot 00000000
++ncval: 00020028 2 kProblemBranchInDelaySlot 00000000
++ncval: 00020034 2 kProblemUnsafeJumpRegister 00000000
++ncval: 00020034 2 kProblemBranchInDelaySlot 00000000
+diff --git a/native_client/src/trusted/validator_mips/validation-report.py b/native_client/src/trusted/validator_mips/validation-report.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..257070545e00fd3532ca5ec597631bb608ad603b
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/validation-report.py
+@@ -0,0 +1,132 @@
++#!/usr/bin/python
++#
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++#
++
++import sys
++import os
++import textwrap
++from subprocess import Popen, PIPE
++
++_OBJDUMP = 'mips-linux-gnu-objdump'
++
++
++def _objdump(binary, vaddr, ctx_before, ctx_after):
++    args = [
++        _OBJDUMP,
++        '-d',
++        '-G',
++        binary,
++        '--start-address=0x%08X' % (vaddr - (4 * ctx_before)),
++        '--stop-address=0x%08X' % (vaddr + 4 + (4 * ctx_after))]
++    highlight = ctx_before
++    lines = 0
++    for line in Popen(args, stdout=PIPE).stdout.read().split('\n'):
++        if line.startswith(' '):
++            if highlight == 0:
++                print '--> ', line
++            else:
++                print '    ', line
++            highlight -= 1
++            lines += 1
++    if not lines:
++        print '    (not found)'
++
++
++def _problem_info(code):
++    return {
++        'kProblemUnsafe': ['Instruction is unsafe', 0, 0],
++        'kProblemBranchSplitsPattern': ['The destination of this branch is '
++            'at middle of an pseudo-instruction that must be executed in full',
++            0, 0],
++        'kProblemPatternCrossesBundle': ['This instruction is part of a '
++            'sequence that must execute in full, but it spans a bundle edge '
++            '-- so an indirect branch may target it',
++            1, 1],
++        'kProblemBranchInvalidDest': ['This branch targets a location that is '
++            'outside of the application\'s executable code, over 256 MB',
++            0, 0],
++        'kProblemUnsafeLoadStore': ['This load/store instruction is not '
++            'preceded by a valid store mask instruction',
++            1, 0],
++        'kProblemUnsafeLoadStoreThreadPointer': ['This is not a valid '
++            'load/store instruction for accessing thread pointer.',
++            0, 0],
++        'kProblemUnsafeJumpRegister': ['This indirect jump instruction is not '
++            'preceded by a valid jump mask instruction',
++            1, 0],
++        'kProblemUnsafeDataWrite': ['This instruction affects a register that '
++            'must contain a valid data-region address (sp), but is not '
++            'followed by a valid store mask instruction',
++            0, 1],
++        'kProblemReadOnlyRegister': ['This instruction changes the contents of'
++            ' read-only register',
++            0, 0],
++        'kProblemMisalignedCall': ['This linking branch/jump instruction is '
++            'not at the bundle offset +8, so when its RA result is masked, the'
++            ' caller will not return to the next instruction (start of next '
++            'bundle)',
++            0, 0],
++        'kProblemUnalignedJumpToTrampoline':['The destination of this '
++            'jump/branch instruction is in trampoline code section but '
++            'address is not bundle aligned',
++            0, 0],
++        'kProblemDataRegInDelaySlot':['This instruction changes value of a '
++            'stack pointer but is located in the delay slot of jump/branch',
++            1, 0],
++        'kProblemBranchInDelaySlot':['This instruction is a jump/branch '
++            'instruction and it is located in a delay slot of the previous '
++            'jump/branch instruction',
++            1, 0],
++
++    }[code]
++
++
++def _safety_msg(val):
++    return {
++        0: 'UNKNOWN',  # Should not appear
++        1: 'is undefined',
++        2: 'has unpredictable effects',
++        3: 'is deprecated',
++        4: 'is forbidden',
++        5: 'uses forbidden operands',
++    }[val]
++
++
++def _explain_problem(binary, vaddr, safety, code, ref_vaddr):
++    msg, ctx_before, ctx_after = _problem_info(code)
++    if safety == 6:
++        msg = "At %08X: %s:" % (vaddr, msg)
++    else:
++        msg = ("At %08X: %s (%s):"
++            % (vaddr, msg, _safety_msg(safety)))
++    print '\n'.join(textwrap.wrap(msg, 70, subsequent_indent='  '))
++    _objdump(binary, vaddr, ctx_before, ctx_after)
++    if ref_vaddr:
++        print "Destination address %08X:" % ref_vaddr
++        _objdump(binary, ref_vaddr, 1, 1)
++
++
++def _parse_report(line):
++    vaddr_hex, safety, code, ref_vaddr_hex = line.split()
++    return (int(vaddr_hex, 16), int(safety), code, int(ref_vaddr_hex, 16))
++
++
++def main(argv):
++    if len(argv) != 2:
++        sys.stderr.write('Error, provide one parameter to the script.\n')
++        return 1
++    if not os.path.exists(sys.argv[1]):
++        sys.stderr.write('Error, input file does not exist.\n')
++        return 1
++    for line in sys.stdin:
++        if line.startswith('ncval: '):
++            line = line[7:].strip()
++            _explain_problem(sys.argv[1], *_parse_report(line))
++    return 0
++
++
++if __name__ == '__main__':
++  sys.exit(main(sys.argv))
+diff --git a/native_client/src/trusted/validator_mips/validator.cc b/native_client/src/trusted/validator_mips/validator.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..5b2bd880dbaa990e94072196b2a277db14a1ec12
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/validator.cc
+@@ -0,0 +1,558 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <assert.h>
++#include "native_client/src/trusted/service_runtime/nacl_config.h"
++#include "native_client/src/trusted/validator_mips/validator.h"
++#include "native_client/src/include/nacl_macros.h"
++
++
++using nacl_mips_dec::Instruction;
++using nacl_mips_dec::ClassDecoder;
++using nacl_mips_dec::Register;
++using nacl_mips_dec::RegisterList;
++
++using nacl_mips_dec::kInstrSize;
++using nacl_mips_dec::kInstrAlign;
++
++using std::vector;
++
++namespace nacl_mips_val {
++
++/*
++ * TODO(petarj): MIPS validator and runtime port need an external security
++ * review before they are delivered in products.
++ */
++
++/*********************************************************
++ * Implementations of patterns used in the first pass.
++ *
++ * N.B. IF YOU ADD A PATTERN HERE, REGISTER IT BELOW.
++ * See the list in apply_patterns.
++ *********************************************************/
++
++// A possible result from a validator pattern.
++enum PatternMatch {
++  // The pattern does not apply to the instructions it was given.
++  NO_MATCH,
++  // The pattern matches, and is safe; do not allow jumps to split it.
++  PATTERN_SAFE,
++  // The pattern matches, and has detected a problem.
++  PATTERN_UNSAFE
++};
++
++
++/*********************************************************
++ * One instruction patterns.
++ *********************************************************/
++
++/*
++ * Checks for instructions that are not allowed.
++ */
++static PatternMatch CheckSafety(const SfiValidator &sfi,
++                                const DecodedInstruction &inst,
++                                ProblemSink *out) {
++  UNREFERENCED_PARAMETER(sfi);
++  if (nacl_mips_dec::MAY_BE_SAFE != inst.safety()) {
++    out->ReportProblem(inst.addr(), inst.safety(), kProblemUnsafe);
++    return PATTERN_UNSAFE;
++  }
++  return PATTERN_SAFE;
++}
++
++/*
++ * Checks for instructions that alter read-only registers.
++ */
++static PatternMatch CheckReadOnly(const SfiValidator &sfi,
++                                  const DecodedInstruction &inst,
++                                  ProblemSink *out) {
++  if (inst.IsDestGprReg(sfi.read_only_registers())) {
++    out->ReportProblem(inst.addr(), inst.safety(), kProblemReadOnlyRegister);
++    return PATTERN_UNSAFE;
++  }
++  return NO_MATCH;
++}
++
++/*
++ * Checks the location of linking branches -- in order to be correct, the
++ * branches must be in the slot before the last slot.
++ *
++ */
++static PatternMatch CheckCallPosition(const SfiValidator &sfi,
++                                      const DecodedInstruction &inst,
++                                      ProblemSink *out) {
++  if (inst.IsJal()) {
++    uint32_t end_addr = sfi.BundleForAddress(inst.addr()).EndAddr();
++    uint32_t branch_slot = end_addr - (2 * kInstrSize);
++    if (inst.addr() != branch_slot) {
++      out->ReportProblem(inst.addr(), inst.safety(), kProblemMisalignedCall);
++      return PATTERN_UNSAFE;
++    }
++    return PATTERN_SAFE;
++  }
++  return NO_MATCH;
++}
++
++/*
++ * Checks for jumps to unsafe area.
++ */
++static PatternMatch CheckJumpDestAddr(const SfiValidator &sfi,
++                                      const DecodedInstruction &instr,
++                                      ProblemSink *out) {
++  if (instr.IsDirectJump()) {
++    uint32_t dest_addr = instr.DestAddr();
++    if (dest_addr < sfi.trampoline_region_start()) {
++      //  Safe guard region, allow jumps if somebody is suicidal.
++      return PATTERN_SAFE;
++    } else if (dest_addr < sfi.code_region_start()) {
++      //  Trampoline region, allow only 0mod16.
++      if ((dest_addr & (sfi.bytes_per_bundle() - 1)) != 0) {
++        out->ReportProblem(instr.addr(), instr.safety(),
++                           kProblemUnalignedJumpToTrampoline);
++        return PATTERN_UNSAFE;
++      }
++      return PATTERN_SAFE;
++    } else {
++      // Jumps outside of unsafe region are not allowed.
++      if ((dest_addr & ~(sfi.code_address_mask())) != 0) {
++        out->ReportProblem(instr.addr(), instr.safety(),
++                           kProblemBranchInvalidDest);
++        return PATTERN_UNSAFE;
++      }
++      //  Another pattern is responsible for checking if it lands inside of a
++      //  pseudo-instruction.
++      return PATTERN_SAFE;
++    }
++  }
++  return NO_MATCH;
++}
++
++/*********************************************************
++ * Two instruction patterns.
++ *********************************************************/
++
++/*
++ * Checks if indirect jumps are guarded properly.
++ */
++static PatternMatch CheckJmpReg(const SfiValidator &sfi,
++                                const DecodedInstruction &first,
++                                const DecodedInstruction &second,
++                                ProblemSink *out) {
++  UNREFERENCED_PARAMETER(sfi);
++  if (second.IsJmpReg()) {
++    if (first.IsMask(second.TargetReg(), Register::JumpMask())) {
++      return PATTERN_SAFE;
++    }
++    out->ReportProblem(second.addr(), second.safety(),
++                       kProblemUnsafeJumpRegister);
++    return PATTERN_UNSAFE;
++  }
++  return NO_MATCH;
++}
++
++
++/*
++ * Checks if change of the data register ($sp) is followed by load/store mask.
++ */
++static PatternMatch CheckDataRegisterUpdate(const SfiValidator &sfi,
++                                            const DecodedInstruction &first,
++                                            const DecodedInstruction &second,
++                                            ProblemSink *out) {
++  UNREFERENCED_PARAMETER(sfi);
++  if (first.DestGprReg().Equals(Register::Sp())
++      && !first.IsMask(first.DestGprReg(), Register::LoadStoreMask())) {
++    if (second.IsMask(first.DestGprReg(), Register::LoadStoreMask())) {
++      return PATTERN_SAFE;
++    }
++    out->ReportProblem(first.addr(), first.safety(), kProblemUnsafeDataWrite);
++    return PATTERN_UNSAFE;
++  }
++  return NO_MATCH;
++}
++
++/*
++ * Checks if data register ($sp) change is in the delay slot.
++ */
++static PatternMatch CheckDataRegisterDslot(const SfiValidator &sfi,
++                                           const DecodedInstruction &first,
++                                           const DecodedInstruction &second,
++                                           ProblemSink *out) {
++  UNREFERENCED_PARAMETER(sfi);
++  if (second.DestGprReg().Equals(Register::Sp())
++      && !second.IsMask(second.DestGprReg(), Register::LoadStoreMask())) {
++    if (first.HasDelaySlot()) {
++      out->ReportProblem(second.addr(), second.safety(),
++                         kProblemDataRegInDelaySlot);
++      return PATTERN_UNSAFE;
++    }
++  }
++  return NO_MATCH;
++}
++
++/*
++ * Checks if load and store instructions are preceded by load/store mask.
++ */
++static PatternMatch CheckLoadStore(const SfiValidator &sfi,
++                                   const DecodedInstruction &first,
++                                   const DecodedInstruction &second,
++                                   ProblemSink *out) {
++  if (second.IsLoadStore()) {
++    Register base_addr_reg = second.BaseAddressRegister();
++    if (!sfi.data_address_registers().
++           ContainsAll(RegisterList(base_addr_reg))) {
++      if (first.IsMask(base_addr_reg, Register::LoadStoreMask())) {
++        return PATTERN_SAFE;
++      }
++      out->ReportProblem(second.addr(), second.safety(),
++                         kProblemUnsafeLoadStore);
++      return PATTERN_UNSAFE;
++    }
++  }
++  return NO_MATCH;
++}
++
++
++/*
++ * A thread pointer access is only allowed by these two instructions:
++ * lw Rn, 0($t8)  ; load user thread pointer.
++ * lw Rn, 4($t8)  ; load IRT thread pointer.
++ */
++static PatternMatch CheckLoadThreadPointer(const SfiValidator &sfi,
++                                           const DecodedInstruction &instr,
++                                           ProblemSink *out) {
++  UNREFERENCED_PARAMETER(sfi);
++  if (!instr.IsLoadStore())
++    return NO_MATCH;
++
++  Register base_addr_reg = instr.BaseAddressRegister();
++  if (!base_addr_reg.Equals(Register::Tls()))
++    return NO_MATCH;
++
++  if (instr.IsLoadWord()) {
++    uint32_t offset = instr.GetImm();
++    if (offset == 0 || offset == 4)
++      return PATTERN_SAFE;
++  }
++
++  out->ReportProblem(instr.addr(), instr.safety(),
++                     kProblemUnsafeLoadStoreThreadPointer);
++  return PATTERN_UNSAFE;
++}
++
++/*
++ * Checks if there is jump/branch in the delay slot.
++ */
++static PatternMatch CheckBranchInDelaySlot(const SfiValidator &sfi,
++                                   const DecodedInstruction &first,
++                                   const DecodedInstruction &second,
++                                   ProblemSink *out) {
++  UNREFERENCED_PARAMETER(sfi);
++  if (first.HasDelaySlot() && second.HasDelaySlot()) {
++    out->ReportProblem(second.addr(), second.safety(),
++                       kProblemBranchInDelaySlot);
++    return PATTERN_UNSAFE;
++  }
++  return NO_MATCH;
++}
++
++
++/*********************************************************
++ * Pseudo-instruction patterns.
++ *********************************************************/
++
++/*
++ * Checks if a pseudo-instruction that starts with instr will cross bundle
++ * border (i.e. if it starts in one and ends in second).
++ * The exception to this rule are pseudo-instructions altering the data register
++ * value (because mask is the second instruction).
++ */
++static PatternMatch CheckBundleCross(const SfiValidator &sfi,
++                                     const DecodedInstruction instr,
++                                     ProblemSink *out) {
++  uint32_t begin_addr = sfi.BundleForAddress(instr.addr()).BeginAddr();
++  if ((instr.addr() == begin_addr) && !instr.IsDataRegMask()) {
++    out->ReportProblem(instr.addr(), instr.safety(),
++                       kProblemPatternCrossesBundle);
++    return PATTERN_UNSAFE;
++  }
++  return PATTERN_SAFE;
++}
++
++/*
++ * Checks if branch instruction will jump in the middle of pseudo-instruction.
++ */
++static PatternMatch CheckJumpToPseudo(const SfiValidator &sfi,
++                                      const std::vector<CodeSegment> &segms,
++                                      const DecodedInstruction pseudoinstr,
++                                      const AddressSet &branches,
++                                      const AddressSet &branch_targets,
++                                      ProblemSink *out) {
++  uint32_t target_va = pseudoinstr.addr();
++  if (branch_targets.Contains(target_va)) {
++    std::vector<DecodedInstruction> instrs;
++    if (sfi.FindBranch(segms, branches, target_va, &instrs)) {
++      for (uint32_t i = 0; i < instrs.size(); i++) {
++        out->ReportProblem(instrs[i].addr(), instrs[i].safety(),
++                           kProblemBranchSplitsPattern);
++      }
++      return PATTERN_UNSAFE;
++    } else {
++      assert(0);
++    }
++  }
++  return PATTERN_SAFE;
++}
++
++
++/*********************************************************
++ *
++ * Implementation of SfiValidator itself.
++ *
++ *********************************************************/
++SfiValidator::SfiValidator(uint32_t bytes_per_bundle,
++                           uint32_t code_region_bytes,
++                           uint32_t data_region_bytes,
++                           RegisterList read_only_registers,
++                           RegisterList data_address_registers)
++    : bytes_per_bundle_(bytes_per_bundle),
++      code_region_bytes_(code_region_bytes),
++      data_address_mask_(~(data_region_bytes - 1)),
++      code_address_mask_((code_region_bytes - 1) & kInstrAlign),  // 0x0FFFFFFC
++      read_only_registers_(read_only_registers),
++      data_address_registers_(data_address_registers),
++      decode_state_(nacl_mips_dec::init_decode()),
++      is_position_independent_(false) {}
++
++bool SfiValidator::Validate(const vector<CodeSegment> &segments,
++                            ProblemSink *out) {
++  uint32_t base = segments[0].BeginAddr();
++  uint32_t size = segments.back().EndAddr() - base;
++  AddressSet branches(base, size);
++  AddressSet branch_targets(base, size);
++  AddressSet critical(base, size);
++
++  bool complete_success = true;
++
++  for (vector<CodeSegment>::const_iterator it = segments.begin();
++      it != segments.end(); ++it) {
++    complete_success &= ValidateFallthrough(*it, out, &branches,
++                                            &branch_targets, &critical);
++
++    if (!out->ShouldContinue()) {
++      return false;
++    }
++  }
++
++  if (segments.size() == 1) {
++    bool external_target_addr = false;
++    for (AddressSet::Iterator it = branch_targets.Begin();
++         !it.Equals(branch_targets.End()); it.Next()) {
++        if (!segments[0].ContainsAddress(it.GetAddress())) {
++          external_target_addr = true;
++          break;
++        }
++    }
++    is_position_independent_ = !external_target_addr;
++  }
++
++  complete_success &= ValidatePseudos(*this, segments,
++                                      branches, branch_targets, critical, out);
++  return complete_success;
++}
++
++bool SfiValidator::ValidateFallthrough(const CodeSegment &segment,
++                                       ProblemSink *out,
++                                       AddressSet *branches,
++                                       AddressSet *branch_targets,
++                                       AddressSet *critical) {
++  bool complete_success = true;
++
++  nacl_mips_dec::Forbidden initial_decoder;
++  // Initialize the previous instruction to a syscall, so patterns all fail.
++  DecodedInstruction prev(
++      0,         // Virtual address 0, which will be in a different bundle.
++      Instruction(0x0000000c),  // syscall.
++      initial_decoder);         // and ensure that it decodes as Forbidden.
++
++  for (uint32_t va = segment.BeginAddr(); va != segment.EndAddr();
++       va += kInstrSize) {
++    DecodedInstruction inst(va, segment[va],
++                            nacl_mips_dec::decode(segment[va], decode_state_));
++
++    complete_success &= ApplyPatterns(inst, out);
++    if (!out->ShouldContinue()) return false;
++
++    complete_success &= ApplyPatterns(prev, inst, critical, out);
++    if (!out->ShouldContinue()) return false;
++
++    if (inst.IsDirectJump()) {
++      branches->Add(inst.addr());
++      branch_targets->Add(inst.DestAddr());
++    }
++
++    prev = inst;
++  }
++
++  // Validate the last instruction, paired with a nop.
++  const Instruction nop(nacl_mips_dec::kNop);
++  DecodedInstruction one_past_end(segment.EndAddr(), nop,
++                                  nacl_mips_dec::decode(nop, decode_state_));
++  complete_success &= ApplyPatterns(prev, one_past_end, critical, out);
++
++  return complete_success;
++}
++
++bool SfiValidator::ValidatePseudos(const SfiValidator &sfi,
++                                   const std::vector<CodeSegment> &segments,
++                                   const AddressSet &branches,
++                                   const AddressSet &branch_targets,
++                                   const AddressSet &critical,
++                                   ProblemSink* out) {
++  bool complete_success = true;
++  vector<CodeSegment>::const_iterator seg_it = segments.begin();
++
++  for (AddressSet::Iterator it = critical.Begin(); !it.Equals(critical.End());
++       it.Next()) {
++    uint32_t va = it.GetAddress();
++
++    while (!seg_it->ContainsAddress(va)) {
++      ++seg_it;
++    }
++
++    const CodeSegment &segment = *seg_it;
++    DecodedInstruction inst_p(va,
++                              segment[va],
++                              nacl_mips_dec::decode(segment[va],
++                              decode_state_));
++
++    //  Check if the pseudo-instruction will cross bundle borders.
++    complete_success &= CheckBundleCross(sfi, inst_p, out);
++
++    //  Check if direct jumps destination is inside of a pseudo-instruction.
++    complete_success &= CheckJumpToPseudo(sfi, segments, inst_p, branches,
++                                          branch_targets, out);
++  }
++
++  return complete_success;
++}
++
++
++bool SfiValidator::ApplyPatterns(const DecodedInstruction &inst,
++    ProblemSink *out) {
++  //  Single-instruction patterns.
++  typedef PatternMatch (*OneInstPattern)(const SfiValidator &,
++                                         const DecodedInstruction &,
++                                         ProblemSink *out);
++  static const OneInstPattern one_inst_patterns[] = {
++    &CheckSafety,
++    &CheckReadOnly,
++    &CheckCallPosition,
++    &CheckJumpDestAddr,
++    &CheckLoadThreadPointer
++  };
++
++  bool complete_success = true;
++
++  for (uint32_t i = 0; i < NACL_ARRAY_SIZE(one_inst_patterns); i++) {
++    PatternMatch r = one_inst_patterns[i](*this, inst, out);
++    switch (r) {
++      case PATTERN_SAFE:
++      case NO_MATCH:
++        break;
++
++      case PATTERN_UNSAFE:
++        complete_success = false;
++        break;
++    }
++  }
++  return complete_success;
++}
++
++bool SfiValidator::ApplyPatterns(const DecodedInstruction &first,
++    const DecodedInstruction &second, AddressSet *critical, ProblemSink *out) {
++  //  Type for two-instruction pattern functions.
++  typedef PatternMatch (*TwoInstPattern)(const SfiValidator &,
++                                         const DecodedInstruction &first,
++                                         const DecodedInstruction &second,
++                                         ProblemSink *out);
++  //  The list of patterns -- defined in static functions up top.
++  static const TwoInstPattern two_inst_patterns[] = {
++    &CheckJmpReg,
++    &CheckDataRegisterUpdate,
++    &CheckDataRegisterDslot,
++    &CheckLoadStore,
++    &CheckBranchInDelaySlot
++  };
++
++  bool complete_success = true;
++
++  for (uint32_t i = 0; i < NACL_ARRAY_SIZE(two_inst_patterns); i++) {
++    PatternMatch r = two_inst_patterns[i](*this, first, second, out);
++    switch (r) {
++      case NO_MATCH:
++         break;
++      case PATTERN_UNSAFE:
++        // Pattern is in charge of reporting specific issue.
++        complete_success = false;
++        break;
++      case PATTERN_SAFE:
++        critical->Add(second.addr());
++        break;
++    }
++  }
++  return complete_success;
++}
++
++bool SfiValidator::IsDataAddressRegister(Register reg) const {
++  return data_address_registers_[reg];
++}
++
++bool SfiValidator::IsBundleHead(uint32_t address) const {
++  return (address % bytes_per_bundle_) == 0;
++}
++
++const Bundle SfiValidator::BundleForAddress(uint32_t address) const {
++  uint32_t base = address - (address % bytes_per_bundle_);
++  return Bundle(base, bytes_per_bundle_);
++}
++
++bool SfiValidator::FindBranch(const std::vector<CodeSegment> &segments,
++                              const AddressSet &branches,
++                              uint32_t dest_address,
++                              std::vector<DecodedInstruction> *instrs) const {
++  vector<CodeSegment>::const_iterator seg_it = segments.begin();
++
++  for (AddressSet::Iterator it = branches.Begin(); !it.Equals(branches.End());
++       it.Next()) {
++    uint32_t va = it.GetAddress();
++
++    while (!seg_it->ContainsAddress(va)) {
++      ++seg_it;
++    }
++
++    const CodeSegment &segment = *seg_it;
++    DecodedInstruction instr = DecodedInstruction(va, segment[va],
++                             nacl_mips_dec::decode(segment[va], decode_state_));
++    if (instr.DestAddr() == dest_address) {
++      instrs->push_back(instr);
++    }
++  }
++  if (!instrs->empty()) return true;
++  return false;
++}
++/*
++ * DecodedInstruction.
++ */
++DecodedInstruction::DecodedInstruction(uint32_t vaddr,
++                                       Instruction inst,
++                                       const ClassDecoder &decoder)
++    : vaddr_(vaddr),
++      inst_(inst),
++      decoder_(&decoder),
++      safety_(decoder.safety(inst_))
++{}
++
++}  // namespace nacl_mips_val
+diff --git a/native_client/src/trusted/validator_mips/validator.h b/native_client/src/trusted/validator_mips/validator.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..377a2233f63ff51849a02cf29f824f8084b376f1
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/validator.h
+@@ -0,0 +1,419 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_MIPS_VALIDATOR_H
++#define NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_MIPS_VALIDATOR_H
++
++/*
++ * The SFI validator, and some utility classes it uses.
++ */
++
++#include <stdint.h>
++#include <stdlib.h>
++#include <vector>
++
++#include "native_client/src/include/nacl_string.h"
++#include "native_client/src/include/portability.h"
++#include "native_client/src/trusted/validator_mips/address_set.h"
++#include "native_client/src/trusted/validator_mips/decode.h"
++#include "native_client/src/trusted/validator_mips/inst_classes.h"
++#include "native_client/src/trusted/validator_mips/model.h"
++
++namespace nacl_mips_val {
++
++/*
++ * Forward declarations of classes used by-reference in the validator, and
++ * defined at the end of this file.
++ */
++class CodeSegment;
++class DecodedInstruction;
++class ProblemSink;
++
++
++/*
++ * A simple model of an instruction bundle.  Bundles consist of one or more
++ * instructions (two or more, in the useful case); the precise size is
++ * controlled by the parameters passed into SfiValidator, below.
++ */
++class Bundle {
++ public:
++  Bundle(uint32_t virtual_base, uint32_t size_bytes)
++      : virtual_base_(virtual_base), size_(size_bytes) {}
++
++  uint32_t BeginAddr() const { return virtual_base_; }
++  uint32_t EndAddr() const { return virtual_base_ + size_; }
++
++  bool operator!=(const Bundle &other) const {
++    // Note that all Bundles are currently assumed to be the same size.
++    return virtual_base_ != other.virtual_base_;
++  }
++
++ private:
++  uint32_t virtual_base_;
++  uint32_t size_;
++};
++
++
++/*
++ * The SFI validator itself.  The validator is controlled by the following
++ * inputs:
++ *   bytes_per_bundle: the number of bytes in each bundle of instructions.
++ *       Currently this tends to be 16, but we've evaluated alternatives.
++ *   code_region_bytes: number of bytes in the code region, starting at address
++ *       0 and including the trampolines, etc.  Must be a power of two.
++ *   data_region_bits: number of bytes in the data region, starting at address
++ *       0 and including the code region.  Must be a power of two.
++ *   read_only_registers: registers that untrusted code must not alter (but may
++ *       read).  This currently applies to t6 - jump mask, t7 - load/store mask
++ *       and t8 - tls index.
++ *   data_address_registers: registers that must contain a valid data-region
++ *       address at all times.  This currently applies to the stack pointer and
++ *       TLS register but could be extended to include a frame pointer for
++ *       C-like languages. Adding register to data_address_registers only means
++ *       that load/store access can be done without checks. Check for register
++ *       value change still needs to be executed.
++ *
++ * The values of these inputs will typically be taken from the headers of
++ * untrusted code -- either by the ABI version they indicate, or (perhaps in
++ * the future) explicit indicators of what SFI model they follow.
++ */
++class SfiValidator {
++ public:
++  SfiValidator(uint32_t bytes_per_bundle,
++               uint32_t code_region_bytes,
++               uint32_t data_region_bytes,
++               nacl_mips_dec::RegisterList read_only_registers,
++               nacl_mips_dec::RegisterList data_address_registers);
++
++  /*
++   * The main validator entry point.  Validates the provided CodeSegments,
++   * which must be in sorted order, reporting any problems through the
++   * ProblemSink.
++   *
++   * Returns true iff no problems were found.
++   */
++  bool Validate(const std::vector<CodeSegment> &, ProblemSink *out);
++
++  // Returns true if validation did not depend on the code's base address.
++  bool is_position_independent() {
++    return is_position_independent_;
++  }
++
++  /*
++   * Checks whether the given Register always holds a valid data region address.
++   * This implies that the register is safe to use in unguarded stores.
++   */
++  bool IsDataAddressRegister(nacl_mips_dec::Register) const;
++
++  uint32_t data_address_mask() const { return data_address_mask_; }
++  uint32_t code_address_mask() const { return code_address_mask_; }
++  uint32_t code_region_bytes() const { return code_region_bytes_; }
++  uint32_t bytes_per_bundle() const { return bytes_per_bundle_; }
++  uint32_t code_region_start() const { return code_region_start_; }
++  uint32_t trampoline_region_start() const { return trampoline_region_start_; }
++
++  nacl_mips_dec::RegisterList read_only_registers() const {
++    return read_only_registers_;
++  }
++  nacl_mips_dec::RegisterList data_address_registers() const {
++    return data_address_registers_;
++  }
++
++  // Returns the Bundle containing a given address.
++  const Bundle BundleForAddress(uint32_t) const;
++
++  /*
++   * Change masks: this is useful for debugging and cannot be completely
++   *               controlled with constructor arguments
++   */
++  void ChangeMasks(uint32_t code_address_mask, uint32_t data_address_mask) {
++    code_address_mask_ = code_address_mask;
++    data_address_mask_ = data_address_mask;
++  }
++
++  /*
++   * Find all the branch instructions which jump on the dest_address.
++   */
++  bool FindBranch(const std::vector<CodeSegment> &segments,
++                  const AddressSet &branches,
++                  uint32_t dest_address,
++                  std::vector<DecodedInstruction> *instrs) const;
++
++ private:
++  bool IsBundleHead(uint32_t address) const;
++
++  /*
++   * Validates a straight-line execution of the code, applying patterns.  This
++   * is the first validation pass, which fills out the AddressSets for
++   * consumption by later analyses.
++   *   branches: gets filled in with the address of every direct branch.
++   *   branch_targets: gets filled in with the target address of every direct
++   *   branch.
++   *   critical: gets filled in with every address that isn't safe to jump to,
++   *       because it would split an otherwise-safe pseudo-op.
++   *
++   * Returns true iff no problems were found.
++   */
++  bool ValidateFallthrough(const CodeSegment &, ProblemSink *,
++                           AddressSet *branches, AddressSet *branch_targets,
++                           AddressSet *critical);
++
++  /*
++   * Factor of validate_fallthrough, above.  Checks a single instruction using
++   * the instruction patterns defined in the .cc file, with two possible
++   * results:
++   *   1. No patterns matched, or all were safe: nothing happens.
++   *   2. Patterns matched and were unsafe: problems get sent to 'out'.
++   */
++  bool ApplyPatterns(const DecodedInstruction &, ProblemSink *out);
++
++  /*
++   * Factor of validate_fallthrough, above.  Checks a pair of instructions using
++   * the instruction patterns defined in the .cc file, with three possible
++   * results:
++   *   1. No patterns matched: nothing happens.
++   *   2. Patterns matched and were safe: the addresses are filled into
++   *      'critical' for use by the second pass.
++   *   3. Patterns matched and were unsafe: problems get sent to 'out'.
++   */
++  bool ApplyPatterns(const DecodedInstruction &first,
++      const DecodedInstruction &second, AddressSet *critical, ProblemSink *out);
++
++
++  /*
++   * 2nd pass - checks if some branch instruction tries to jump onto the middle
++   * of the pseudo-instruction, and if some pseudo-instruction crosses bundle
++   * borders.
++   */
++  bool ValidatePseudos(const SfiValidator &sfi,
++                       const std::vector<CodeSegment> &segments,
++                       const AddressSet &branches,
++                       const AddressSet &branch_targets,
++                       const AddressSet &critical,
++                       ProblemSink *out);
++
++  uint32_t const bytes_per_bundle_;
++  uint32_t const code_region_bytes_;
++  uint32_t data_address_mask_;
++  uint32_t code_address_mask_;
++
++  // TODO(petarj): Think about pulling these values from some config header.
++  static uint32_t const code_region_start_ = 0x20000;
++  static uint32_t const trampoline_region_start_ = 0x10000;
++
++  // Registers which cannot be modified by untrusted code.
++  nacl_mips_dec::RegisterList read_only_registers_;
++  // Registers which must always contain a valid data region address.
++  nacl_mips_dec::RegisterList data_address_registers_;
++  const nacl_mips_dec::DecoderState *decode_state_;
++  // True if validation did not depend on the code's base address.
++  bool is_position_independent_;
++};
++
++
++/*
++ * A facade that combines an Instruction with its address and a ClassDecoder.
++ * This makes the patterns substantially easier to write and read than managing
++ * all three variables separately.
++ *
++ * ClassDecoders do all decoding on-demand, with no caching.  DecodedInstruction
++ * has knowledge of the validator, and pairs a ClassDecoder with a constant
++ * Instruction -- so it can cache commonly used values, and does.  Caching
++ * safety and defs doubles validator performance.  Add other values only
++ * under guidance of a profiler.
++ */
++class DecodedInstruction {
++ public:
++  DecodedInstruction(uint32_t vaddr, nacl_mips_dec::Instruction inst,
++      const nacl_mips_dec::ClassDecoder &decoder);
++  // We permit the default copy ctor and assignment operator.
++
++  uint32_t addr() const { return vaddr_; }
++
++  // The methods below mirror those on ClassDecoder, but are cached and cheap.
++  nacl_mips_dec::SafetyLevel safety() const { return safety_; }
++
++  // The methods below pull values from ClassDecoder on demand.
++  const nacl_mips_dec::Register BaseAddressRegister() const {
++    return decoder_->BaseAddressRegister(inst_);
++  }
++
++  nacl_mips_dec::Register DestGprReg() const {
++    return decoder_->DestGprReg(inst_);
++  }
++
++  nacl_mips_dec::Register TargetReg() const {
++    return decoder_->TargetReg(inst_);
++  }
++
++  uint32_t DestAddr() const {
++    return decoder_->DestAddr(inst_, addr());
++  }
++
++  bool HasDelaySlot() const {
++    return decoder_-> HasDelaySlot();
++  }
++
++  bool IsJal() const {
++    return decoder_-> IsJal();
++  }
++
++  bool IsMask(const nacl_mips_dec::Register& dest,
++              const nacl_mips_dec::Register& mask) const {
++    return decoder_->IsMask(inst_, dest, mask);
++  }
++
++  bool IsJmpReg() const {
++    return decoder_->IsJmpReg();
++  }
++
++  bool IsLoadStore() const {
++    return decoder_->IsLoadStore();
++  }
++
++  bool IsLoadWord() const {
++    return decoder_->IsLoadWord();
++  }
++
++  uint32_t GetImm() const {
++    return decoder_->GetImm(inst_);
++  }
++
++  bool IsDirectJump() const {
++    return decoder_->IsDirectJump();
++  }
++
++  bool IsDestGprReg(nacl_mips_dec::RegisterList rl) const {
++    return rl.ContainsAny(nacl_mips_dec::RegisterList(DestGprReg()));
++  }
++
++  bool IsDataRegMask() const {
++    return IsMask(DestGprReg(), nacl_mips_dec::Register::LoadStoreMask());
++  }
++
++ private:
++  uint32_t vaddr_;
++  nacl_mips_dec::Instruction inst_;
++  const nacl_mips_dec::ClassDecoder *decoder_;
++
++  nacl_mips_dec::SafetyLevel safety_;
++};
++
++
++/*
++ * Describes a memory region that contains executable code.  Note that the code
++ * need not live in its final location -- we pretend the code lives at the
++ * provided start_addr, regardless of where the base pointer actually points.
++ */
++class CodeSegment {
++ public:
++  CodeSegment(const uint8_t *base, uint32_t start_addr, size_t size)
++      : base_(base), start_addr_(start_addr), size_(size) {}
++
++  uint32_t BeginAddr() const { return start_addr_; }
++  uint32_t EndAddr() const { return start_addr_ + size_; }
++  uint32_t size() const { return size_; }
++  bool ContainsAddress(uint32_t a) const {
++    return (a >= BeginAddr()) && (a < EndAddr());
++  }
++
++  const nacl_mips_dec::Instruction operator[](uint32_t address) const {
++    const uint8_t *element = &base_[address - start_addr_];
++    return nacl_mips_dec::Instruction(
++        *reinterpret_cast<const uint32_t *>(element));
++  }
++
++  bool operator<(const CodeSegment &other) const {
++    return start_addr_ < other.start_addr_;
++  }
++
++ private:
++  const uint8_t *base_;
++  uint32_t start_addr_;
++  size_t size_;
++};
++
++
++/*
++ * A class that consumes reports of validation problems, and may decide whether
++ * to continue validating, or early-exit.
++ *
++ * In a sel_ldr context, we early-exit at the first problem we find.  In an SDK
++ * context, however, we collect more reports to give the developer feedback;
++ * even then it may be desirable to exit after the first, say, 200 reports.
++ */
++class ProblemSink {
++ public:
++  virtual ~ProblemSink() {}
++
++  /*
++   * Reports a problem in untrusted code.
++   *  vaddr: the virtual address where the problem occurred.  Note that this is
++   *      probably not the address of memory that contains the offending
++   *      instruction, since we allow CodeSegments to lie about their base
++   *      addresses.
++   *  safety: the safety level of the instruction, as reported by the decoder.
++   *      This may be MAY_BE_SAFE while still indicating a problem.
++   *  problem_code: a constant string, defined below, that uniquely identifies
++   *      the problem.  These are not intended to be human-readable, and should
++   *      be looked up for localization and presentation to the developer.
++   *  ref_vaddr: A second virtual address of more code that affected the
++   *      decision -- typically a branch target.
++   */
++  virtual void ReportProblem(uint32_t vaddr, nacl_mips_dec::SafetyLevel safety,
++      const nacl::string &problem_code, uint32_t ref_vaddr = 0) {
++    UNREFERENCED_PARAMETER(vaddr);
++    UNREFERENCED_PARAMETER(safety);
++    UNREFERENCED_PARAMETER(problem_code);
++    UNREFERENCED_PARAMETER(ref_vaddr);
++  }
++
++  /*
++   * Called after each invocation of report_problem.  If this returns false,
++   * the validator exits.
++   */
++  virtual bool ShouldContinue() { return false; }
++};
++
++/*
++ * Strings used to describe the current set of validator problems.  These may
++ * be worth splitting into a separate header file, so that dev tools can
++ * process them into localized messages without needing to pull in the whole
++ * validator...we'll see.
++ */
++
++// An instruction is unsafe -- more information in the SafetyLevel.
++const char * const kProblemUnsafe = "kProblemUnsafe";
++// A branch would break a pseudo-operation pattern.
++const char * const kProblemBranchSplitsPattern = "kProblemBranchSplitsPattern";
++// A branch targets an invalid code address (out of segment).
++const char * const kProblemBranchInvalidDest = "kProblemBranchInvalidDest";
++// A load/store uses an unsafe (non-masked) base address.
++const char * const kProblemUnsafeLoadStore = "kProblemUnsafeLoadStore";
++// A thread pointer load/store is unsafe.
++const char * const kProblemUnsafeLoadStoreThreadPointer =
++    "kProblemUnsafeLoadStoreThreadPointer";
++// An instruction updates a data-address register (e.g. SP) without masking.
++const char * const kProblemUnsafeDataWrite = "kProblemUnsafeDataWrite";
++// An instruction updates a read-only register (e.g. t6, t7, t8).
++const char * const kProblemReadOnlyRegister = "kProblemReadOnlyRegister";
++// A pseudo-op pattern crosses a bundle boundary.
++const char * const kProblemPatternCrossesBundle =
++    "kProblemPatternCrossesBundle";
++// A linking branch instruction is not in the last bundle slot.
++const char * const kProblemMisalignedCall = "kProblemMisalignedCall";
++// A data register is found in a branch delay slot.
++const char * const kProblemDataRegInDelaySlot = "kProblemDataRegInDelaySlot";
++// A jump to trampoline instruction which is not a start of a bundle.
++const char * const kProblemUnalignedJumpToTrampoline =
++    "kProblemUnalignedJumpToTrampoline";
++// A jump register instruction is not guarded.
++const char * const kProblemUnsafeJumpRegister = "kProblemUnsafeJumpRegister";
++// Two consecutive branches/jumps. Branch/jump in the delay slot.
++const char * const kProblemBranchInDelaySlot = "kProblemBranchInDelaySlot";
++}  // namespace nacl_mips_val
++
++#endif  // NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_MIPS_VALIDATOR_H
+diff --git a/native_client/src/trusted/validator_mips/validator_tests.cc b/native_client/src/trusted/validator_mips/validator_tests.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..f13f4a5ad33cd91418eccaf61a26c8020fe9bca0
+--- /dev/null
++++ b/native_client/src/trusted/validator_mips/validator_tests.cc
+@@ -0,0 +1,465 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * Unit tests for the MIPS validator
++ *
++ * These tests use the google-test framework (gtest for short) to exercise the
++ * MIPS validator.  The tests currently fall into two rough categories:
++ *  1. Simple method-level tests that exercise the validator's primitive
++ *     capabilities, and
++ *  2. Instruction pattern tests that run the entire validator.
++ *
++ * All instruction pattern tests use hand-assembled machine code fragments,
++ * embedded as byte arrays.  This is somewhat ugly, but deliberate: it isolates
++ * these tests from gas, which may be buggy or not installed.  It also lets us
++ * hand-craft malicious bit patterns that gas may refuse to produce.
++ *
++ * To write a new instruction pattern, or make sense of an existing one, use
++ * MIPS32 Instruction Set Reference (available online). Instructions in this
++ * file are written as 32-bit integers so the hex encoding matches the docs.
++ */
++
++#include <vector>
++#include <string>
++#include <sstream>
++
++#include "gtest/gtest.h"
++#include "native_client/src/include/nacl_macros.h"
++
++#include "native_client/src/trusted/validator_mips/validator.h"
++
++using std::vector;
++using std::string;
++using std::ostringstream;
++
++using nacl_mips_dec::Register;
++using nacl_mips_dec::RegisterList;
++using nacl_mips_dec::Instruction;
++
++using nacl_mips_val::SfiValidator;
++using nacl_mips_val::ProblemSink;
++using nacl_mips_val::CodeSegment;
++using nacl_mips_dec::kInstrSize;
++using nacl_mips_dec::kNop;
++
++namespace {
++
++typedef uint32_t mips_inst;
++
++/*
++ * We use these parameters to initialize the validator, below.  They are
++ * somewhat different from the parameters used in real NaCl systems, to test
++ * degrees of validator freedom that we don't currently exercise in prod.
++ */
++// Number of bytes in each bundle.
++static const uint32_t kBytesPerBundle = 16;
++// Limit code to 256MiB.
++static const uint32_t kCodeRegionSize = 0x10000000;
++// Limit data to 1GiB.
++static const uint32_t kDataRegionSize = 0x40000000;
++
++
++/*
++ * Support code
++ */
++
++// Simply records the arguments given to report_problem, below.
++struct ProblemRecord {
++  uint32_t vaddr;
++  nacl_mips_dec::SafetyLevel safety;
++  nacl::string problem_code;
++  uint32_t ref_vaddr;
++};
++
++// A ProblemSink that records all calls (implementation of the Spy pattern)
++class ProblemSpy : public ProblemSink {
++ public:
++  virtual void ReportProblem(uint32_t vaddr, nacl_mips_dec::SafetyLevel safety,
++      const nacl::string &problem_code, uint32_t ref_vaddr = 0) {
++    _problems.push_back(
++        (ProblemRecord) { vaddr, safety, problem_code, ref_vaddr });
++  }
++
++  /*
++   * We want *all* the errors that the validator produces. Note that this means
++   * we're not testing the should_continue functionality. This is probably
++   * okay.
++   */
++  virtual bool ShouldContinue() { return true; }
++
++  vector<ProblemRecord> &problems() { return _problems; }
++
++ private:
++  vector<ProblemRecord> _problems;
++};
++
++/*
++ * Coordinates the fixture objects used by test cases below. This is
++ * forward-declared to the greatest extent possible so we can get on to the
++ * important test stuff below.
++ */
++class ValidatorTests : public ::testing::Test {
++ protected:
++  ValidatorTests();
++
++  // Utility method for validating a sequence of bytes.
++  bool Validate(const mips_inst *pattern,
++                size_t inst_count,
++                uint32_t start_addr,
++                ProblemSink *sink);
++
++  /*
++   * Tests a pattern that's expected to pass.
++   */
++  void ValidationShouldPass(const mips_inst *pattern,
++                            size_t inst_count,
++                            uint32_t base_addr,
++                            const string &msg);
++
++  /*
++   * Tests a pattern that is forbidden in the SFI model.
++   *
++   * Note that the 'msg1' and 'msg2' parameters are merely concatentated in the
++   * output.
++   */
++  vector<ProblemRecord> ValidationShouldFail(const mips_inst *pattern,
++                                             size_t inst_count,
++                                             uint32_t base_addr,
++                                             const string &msg);
++
++  SfiValidator _validator;
++};
++
++
++/*
++ * Primitive tests checking various constructor properties.  Any of these
++ * failing would be a very bad sign indeed.
++ */
++
++TEST_F(ValidatorTests, RecognizesDataAddressRegisters) {
++  /*
++   * Note that the logic below needs to be kept in sync with the implementation
++   * of RegisterList::DataAddrRegs().
++   *
++   * This test is pretty trivial -- we can exercise the data_address_register
++   * functionality more deeply with pattern tests below.
++   */
++  for (int i = 0; i < 31; i++) {
++    Register reg(i);
++    if (reg.Equals(Register::Sp()) || reg.Equals(Register::Tls())) {
++      EXPECT_TRUE(_validator.IsDataAddressRegister(reg))
++          << "Stack pointer and TLS register must be data address registers.";
++    } else {
++      EXPECT_FALSE(_validator.IsDataAddressRegister(reg))
++          << "Only the stack pointer and TLS register are data "
++             "address registers.";
++    }
++  }
++}
++
++/*
++ * Code validation tests
++ */
++
++// This is where untrusted code starts.  Most tests use this.
++static const uint32_t kDefaultBaseAddr = 0x20000;
++
++/*
++ * Here are some examples of safe stores permitted in a Native Client
++ * program for MIPS32.
++ */
++
++struct AnnotatedInstruction {
++  mips_inst inst;
++  const char *about;
++};
++
++static const AnnotatedInstruction examples_of_safe_stores[] = {
++  { 0xa1490200, "sb t1, 1024(t2) : store byte" },
++  { 0xad490200, "sw t1, 1024(t2) : store word" },
++  { 0xa5490200, "sh t1, 1024(t2) : store halfword" },
++  { 0xa9490200, "swl t1, 1024(t2) : store word left" },
++  { 0xb9490200, "swr t1, 1024(t2) : store word right" },
++};
++
++static const AnnotatedInstruction examples_of_safe_masks[] = {
++  { (10 << 21 | 15 << 16 | 10 << 11 | 36),
++    "and t2,t2,t7 : simple store masking" },
++};
++
++TEST_F(ValidatorTests, SafeMaskedStores) {
++  /*
++   * Produces examples of masked stores using the safe store table (above)
++   * and the list of possible masking instructions (above).
++   */
++
++  for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_masks); m++) {
++    for (unsigned s = 0; s < NACL_ARRAY_SIZE(examples_of_safe_stores);
++         s++) {
++      ostringstream message;
++      message << examples_of_safe_masks[m].about
++              << ", "
++              << examples_of_safe_stores[s].about;
++      mips_inst program[] = {
++        examples_of_safe_masks[m].inst,
++        examples_of_safe_stores[s].inst,
++      };
++      ValidationShouldPass(program,
++                           2,
++                           kDefaultBaseAddr,
++                           message.str());
++    }
++  }
++}
++
++TEST_F(ValidatorTests, IncorrectStores) {
++  /*
++   * Produces incorrect examples of masked stores using the safe store table
++   * (above) and the list of possible masking instructions (above).
++   * By switching order of instructions (first store, then mask instruction)
++   * we form incorrect pseudo-instruction.
++   */
++
++  for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_stores); m++) {
++     for (unsigned s = 0; s < NACL_ARRAY_SIZE(examples_of_safe_masks); s++) {
++       ostringstream bad_message;
++       bad_message << examples_of_safe_stores[m].about
++                   << ", "
++                   << examples_of_safe_masks[s].about;
++       mips_inst bad_program[] = {
++           examples_of_safe_stores[m].inst,
++           examples_of_safe_masks[s].inst,
++       };
++
++       ValidationShouldFail(bad_program,
++                            2,
++                            kDefaultBaseAddr,
++                            bad_message.str());
++    }
++  }
++}
++
++static const AnnotatedInstruction examples_of_safe_jump_masks[] = {
++  { (10 << 21 | 14 << 16 | 10 << 11 | 36),
++    "and t2,t2,t6 : simple jump masking" },
++};
++
++static const AnnotatedInstruction examples_of_safe_jumps[] = {
++  { ((10<<21| 31 << 11 |9) ), "simple jump jalr t2" },
++  { (10<<21|8),               "simple jump jr t2" },
++};
++
++TEST_F(ValidatorTests, SafeMaskedJumps) {
++  /*
++   * Produces examples of masked jumps using the safe jump table
++   * (above) and the list of possible masking instructions (above).
++   */
++  for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_jump_masks); m++) {
++    for (unsigned s = 0; s < NACL_ARRAY_SIZE(examples_of_safe_jumps); s++) {
++      ostringstream message;
++      message << examples_of_safe_jump_masks[m].about
++              << ", "
++              << examples_of_safe_jumps[s].about;
++      mips_inst program[] = {
++        kNop,
++        examples_of_safe_jump_masks[m].inst,
++        examples_of_safe_jumps[s].inst,
++      };
++      ValidationShouldPass(program,
++                           3,
++                           kDefaultBaseAddr,
++                           message.str());
++    }
++  }
++}
++
++TEST_F(ValidatorTests, IncorrectJumps) {
++  /*
++   * Produces examples of incorrect jumps using the safe jump table
++   * (above) and the list of possible masking instructions (above).
++   * By switching order of instructions (first jump, then mask instruction)
++   * we form incorrect pseudo-instruction.
++   */
++  for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_jumps); m++) {
++    for (unsigned s = 0; s < NACL_ARRAY_SIZE(examples_of_safe_jump_masks);
++         s++) {
++      ostringstream bad_message;
++      bad_message << examples_of_safe_jumps[m].about
++                  << ", "
++                  << examples_of_safe_jump_masks[s].about;
++
++      mips_inst bad_program[] = {
++        examples_of_safe_jumps[m].inst,
++        examples_of_safe_jump_masks[s].inst,
++      };
++
++      ValidationShouldFail(bad_program,
++                           3,
++                           kDefaultBaseAddr,
++                           bad_message.str());
++    }
++  }
++}
++
++static const AnnotatedInstruction examples_of_safe_stack_masks[] = {
++  { (29 << 21 | 15 << 16 | 29 << 11 | 36),
++    "and sp,sp,t7 : simple stack masking" },
++};
++
++
++static const AnnotatedInstruction examples_of_safe_stack_ops[] = {
++  { (29<<21|8<<16|29<<11|32), "add  sp,sp,t0 : stack addition" },
++  { (29<<21|8<<16|29<<11|34), "sub  sp,sp,t0 : stack substraction" },
++};
++
++TEST_F(ValidatorTests, SafeMaskedStack) {
++  /*
++   * Produces examples of safe pseudo-ops on stack using the safe stack op table
++   * and the list of possible masking instructions (above).
++   */
++  for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_stack_ops); m++) {
++    for (unsigned s = 0; s < NACL_ARRAY_SIZE(examples_of_safe_stack_masks);
++         s++) {
++      ostringstream message;
++      message << examples_of_safe_stack_ops[m].about
++              << ", "
++              << examples_of_safe_stack_masks[s].about;
++      mips_inst program[] = {
++         examples_of_safe_stack_ops[m].inst,
++         examples_of_safe_stack_masks[s].inst,
++      };
++      ValidationShouldPass(program,
++                           2,
++                           kDefaultBaseAddr,
++                           message.str());
++    }
++  }
++}
++
++TEST_F(ValidatorTests, IncorrectStackOps) {
++  /*
++   * Produces examples of incorrect pseudo-ops on stack using the safe stack op
++   * table and the list of possible masking instructions (above).
++   * With switching order of instructions (first mask instruction, then stack
++   * operation) we form incorrect pseudo-instruction.
++   */
++  for (unsigned m = 0; m < NACL_ARRAY_SIZE(examples_of_safe_stack_masks); m++) {
++    for (unsigned s = 0; s < NACL_ARRAY_SIZE(examples_of_safe_stack_ops); s++) {
++      ostringstream bad_message;
++      bad_message << examples_of_safe_stack_masks[m].about
++                  << ", "
++                  << examples_of_safe_stack_ops[s].about;
++      mips_inst bad_program[] = {
++        examples_of_safe_stack_masks[m].inst,
++        examples_of_safe_stack_ops[s].inst,
++        kNop
++      };
++
++      ValidationShouldFail(bad_program,
++                           3,
++                           kDefaultBaseAddr,
++                           bad_message.str());
++    }
++  }
++}
++
++TEST_F(ValidatorTests, NopBundle) {
++  vector<mips_inst> code(_validator.bytes_per_bundle() / kInstrSize, kNop);
++  ValidationShouldPass(&code[0], code.size(), kDefaultBaseAddr,
++                       "NOP bundle");
++}
++
++TEST_F(ValidatorTests, UnmaskedSpUpdate) {
++  vector<mips_inst> code(_validator.bytes_per_bundle() / kInstrSize, kNop);
++  for (vector<mips_inst>::size_type i = 0; i < code.size(); ++i) {
++    std::fill(code.begin(), code.end(), kNop);
++    code[i] = 0x8fbd0000;  // lw $sp, 0($sp)
++    ValidationShouldFail(&code[0], code.size(), kDefaultBaseAddr,
++                         "unmasked SP update");
++  }
++}
++
++TEST_F(ValidatorTests, MaskedSpUpdate) {
++  vector<mips_inst> code((_validator.bytes_per_bundle() / kInstrSize) * 2,
++                         kNop);
++  for (vector<mips_inst>::size_type i = 0; i < code.size() - 1; ++i) {
++    std::fill(code.begin(), code.end(), kNop);
++    code[i] = examples_of_safe_stack_ops[0].inst;
++    code[i + 1] = examples_of_safe_stack_masks[0].inst;
++    ValidationShouldPass(&code[0], code.size(), kDefaultBaseAddr,
++                         "masked SP update");
++  }
++}
++
++/*
++ * Implementation of the ValidatorTests utility methods.  These are documented
++ * toward the top of this file.
++ */
++ValidatorTests::ValidatorTests()
++  : _validator(kBytesPerBundle,
++               kCodeRegionSize,
++               kDataRegionSize,
++               RegisterList::ReservedRegs(),
++               RegisterList::DataAddrRegs()) {}
++
++bool ValidatorTests::Validate(const mips_inst *pattern,
++                              size_t inst_count,
++                              uint32_t start_addr,
++                              ProblemSink *sink) {
++  // We think in instructions; CodeSegment thinks in bytes.
++  const uint8_t *bytes = reinterpret_cast<const uint8_t *>(pattern);
++  CodeSegment segment(bytes, start_addr, inst_count * sizeof(mips_inst));
++
++  vector<CodeSegment> segments;
++  segments.push_back(segment);
++
++  return _validator.Validate(segments, sink);
++}
++
++void ValidatorTests::ValidationShouldPass(const mips_inst *pattern,
++                                          size_t inst_count,
++                                          uint32_t base_addr,
++                                          const string &msg) {
++  ASSERT_TRUE(
++      _validator.BundleForAddress(base_addr).BeginAddr() == base_addr)
++      << "base_addr parameter must be bundle-aligned";
++
++  ProblemSpy spy;
++
++  bool validation_result = Validate(pattern, inst_count, base_addr, &spy);
++  ASSERT_TRUE(validation_result) << msg << " should pass at " << base_addr;
++  vector<ProblemRecord> &problems = spy.problems();
++  EXPECT_EQ(0U, problems.size()) << msg
++      << " should have no problems when located at " << base_addr;
++}
++
++vector<ProblemRecord> ValidatorTests::ValidationShouldFail(
++    const mips_inst *pattern,
++    size_t inst_count,
++    uint32_t base_addr,
++    const string &msg) {
++
++  ProblemSpy spy;
++  bool validation_result = Validate(pattern, inst_count, base_addr, &spy);
++  EXPECT_FALSE(validation_result) << "Expected to fail: " << msg;
++
++  vector<ProblemRecord> problems = spy.problems();
++  // Would use ASSERT here, but cannot ASSERT in non-void functions :-(
++  EXPECT_NE(0U, problems.size())
++      << "Must report validation problems: " << msg;
++
++  // The rest of the checking is done in the caller.
++  return problems;
++}
++
++};  // anonymous namespace
++
++// Test driver function.
++int main(int argc, char *argv[]) {
++  testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}
+diff --git a/native_client/src/trusted/validator_ragel/BUILD.gn b/native_client/src/trusted/validator_ragel/BUILD.gn
+new file mode 100644
+index 0000000000000000000000000000000000000000..6b4ac284c0e748c9b586d012df87ff917abcd579
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/BUILD.gn
+@@ -0,0 +1,50 @@
++# Copyright (c) 2014 The Native ClientAuthors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# These objects are included in both dfa_validate_x86_xx and rdfa_validator
++# libraries, so we have to introduce intermediate scons nodes.
++validator32 = "gen/validator_x86_32.c"
++validator64 = "gen/validator_x86_64.c"
++
++if (current_cpu == "x86" || current_cpu == "x64") {
++  static_library("dfa_validate") {
++    sources = [
++      "validator_features_all.c",
++      "validator_features_validator.c",
++      "dfa_validate_common.c",
++    ]
++    if (current_cpu == "x86") {
++      sources += [
++        validator32,
++        "dfa_validate_32.c",
++      ]
++    } else {
++      sources += [
++        validator64,
++        "dfa_validate_64.c",
++      ]
++    }
++    deps = [
++      "//build/config/nacl:nacl_base",
++      "//native_client/src/trusted/cpu_features:cpu_features",
++      "//native_client/src/trusted/validator:validation_cache",
++      "//native_client/src/trusted/validator_x86:nccopy",
++    ]
++  }
++}
++
++# Low-level platform-independent interface supporting both 32 and 64 bit,
++# used in ncval and in validator_benchmark.
++static_library("rdfa_validator") {
++  sources = [
++    validator32,
++    validator64,
++    "validator_features_all.c",
++    "validator_features_validator.c",
++  ]
++  defines = [ "VALIDATOR_EXPORT=DLLEXPORT" ]
++  deps = [
++    "//build/config/nacl:nacl_base",
++  ]
++}
+diff --git a/native_client/src/trusted/validator_ragel/OWNERS b/native_client/src/trusted/validator_ragel/OWNERS
+new file mode 100644
+index 0000000000000000000000000000000000000000..45581d905c3dbe1e828979d46ce919b353bb9571
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/OWNERS
+@@ -0,0 +1,6 @@
++set noparent
++bradnelson@chromium.org
++gdeepti@chromium.org
++khim@chromium.org
++mseaborn@chromium.org
++phosek@chromium.org
+diff --git a/native_client/src/trusted/validator_ragel/PRESUBMIT.py b/native_client/src/trusted/validator_ragel/PRESUBMIT.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..a1cd9880eef38d7753421d988e0fe7199275807c
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/PRESUBMIT.py
+@@ -0,0 +1,120 @@
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# Documentation on PRESUBMIT.py can be found at:
++# http://www.chromium.org/developers/how-tos/depottools/presubmit-scripts
++
++import json
++import hashlib
++import os
++import re
++
++import gclient_utils
++
++
++def CheckChange(input_api, message_constructor):
++  """Checks for files with a modified contents.
++
++  Some checking of validator happens on builbots, but comprehensive enumeration
++  tests must be run locally.
++
++  There are two dangers:
++    1. Source code for autogenerated files can be modified without regeneration
++       of said files.
++    2. Source of validator can be changed without running the aforementioned
++       tests.
++
++  This function catches the situation when source files for validator_x86_??.c
++  are changed but files are not regenerated and it also catches the situation
++  when code is changed without running the dfacheckvalidator tests.
++  """
++
++  errors = []
++
++  changelist = input_api.change
++
++  root_path = changelist.RepositoryRoot()
++
++  if input_api.change.scm == 'svn':
++    try:
++      # With SVN you can decide to commit not all modified files but some of
++      # them thus separate GetAllModifiedFiles() and GetModifiedFiles() lists
++      # are provided.  We need to remove root_path from the name of file.
++      assert all(filename.startswith(root_path + os.path.sep)
++                 for filename in changelist.GetAllModifiedFiles())
++      all_filenames = [filename[len(root_path + os.path.sep):]
++                       for filename in changelist.GetAllModifiedFiles()]
++
++      assert all(filename.startswith(root_path + os.path.sep)
++                 for filename in changelist.GetModifiedFiles())
++      modified_filenames = [filename[len(root_path + os.path.sep):]
++                            for filename in changelist.GetModifiedFiles()]
++    except:
++      # If gcl is not available (which happens in CQ bots) then we'll try to use
++      # AffectedFiles() instead of GetAllModifiedFiles()
++      all_filenames = [file.LocalPath() for file in changelist.AffectedFiles()]
++      modified_filenames = all_filenames
++  else:
++    # With GIT you must commit all modified files thus only AffectedFiles()
++    # list is provided.
++    all_filenames = [file.LocalPath() for file in changelist.AffectedFiles()]
++    modified_filenames = all_filenames
++
++  json_filename = os.path.join(
++    'src', 'trusted', 'validator_ragel', 'gen', 'protected_files.json')
++
++  protected_files = json.loads(
++      gclient_utils.FileRead(os.path.join(root_path, json_filename)))
++
++  need_dfagen = False
++  need_dfacheckvalidator = False
++
++  canonical_prefix = 'native_client/'
++
++  for filename in sorted(all_filenames):
++    canonical_filename = canonical_prefix + filename.replace('\\', '/')
++    if canonical_filename in protected_files['validator']:
++      file_contents = gclient_utils.FileRead(os.path.join(root_path, filename))
++      sha512 = hashlib.sha512(file_contents).hexdigest()
++      if sha512 != protected_files['validator'][canonical_filename]:
++        errors.append(message_constructor(
++          'Incorrect {0} hash:\n  expected {1}\n       got {2}'.format(
++            canonical_filename,
++            protected_files['validator'][canonical_filename],
++            sha512)))
++        need_dfacheckvalidator = True
++    if canonical_filename in protected_files['generating']:
++      for automaton_filename in protected_files['generated']:
++        if (os.stat(os.path.join(root_path, filename)).st_mtime >
++            os.stat(os.path.join(root_path,
++                automaton_filename[len(canonical_prefix):])).st_mtime):
++          errors.append(message_constructor(
++            'File {0} is older then {1}'.format(
++              automaton_filename, canonical_filename)))
++          need_dfagen = True
++    if (canonical_filename in protected_files['validator'] or
++        canonical_filename in protected_files['generating'] or
++        filename == json_filename):
++      if filename not in modified_filenames:
++        errors.append(message_constructor(
++          'File {0} is changed but is excluded from this CL'.format(
++            canonical_filename)))
++
++  if need_dfagen:
++    errors.append(message_constructor(
++      'Please run "./scons dfagen" before commit!'))
++
++  if need_dfacheckvalidator:
++    errors.append(message_constructor(
++      'Please run "./scons dfacheckvalidator" before commit!'))
++
++  return errors
++
++def CheckChangeOnUpload(input_api, output_api):
++  return CheckChange(input_api,
++                     message_constructor=output_api.PresubmitPromptWarning)
++
++def CheckChangeOnCommit(input_api, output_api):
++  return CheckChange(input_api,
++                     message_constructor=output_api.PresubmitError)
+diff --git a/native_client/src/trusted/validator_ragel/README b/native_client/src/trusted/validator_ragel/README
+new file mode 100644
+index 0000000000000000000000000000000000000000..ee38fc6b86663d2d706ca78d69f09e40b9f9aa29
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/README
+@@ -0,0 +1,8 @@
++This directory contains new ragel-based validator.
++
++Currently it's not used in productions can only be tested using
++scripts from this directory.
++
++The plan is to incorporate tests from other directories to make
++sure it's production-quality before we will add it to sel_ldr and
++Chrome.
+diff --git a/native_client/src/trusted/validator_ragel/avx1_3op_simd_or_memory_others_proof.py b/native_client/src/trusted/validator_ragel/avx1_3op_simd_or_memory_others_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..96d96bf5169d83a3f9610f13f3959e3060f231bb
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/avx1_3op_simd_or_memory_others_proof.py
+@@ -0,0 +1,50 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for adding all remaining disabled 3 operand xmm/ymm/memory avx1 ops."""
++
++import proof_tools
++from proof_tools_templates import XmmOrMemory3operand
++from proof_tools_templates import XmmYmmOrMemory3operand
++
++# AVX1 Instructions of the form:
++# src1 is an xmm register.
++# src2 is an xmm register or memory operand.
++# dest is an xmm register.
++XMM_MNEMONICS = [
++    'vcvtsd2ss', 'vcvtss2sd', 'vpackssdw', 'vpacksswb', 'vpackusdw',
++    'vpackuswb', 'vpaddd', 'vpaddq', 'vpand', 'vpandn', 'vpcmpeqd',
++    'vpcmpeqq', 'vpcmpgtd', 'vpcmpgtq', 'vphaddd', 'vphsubd', 'vpmaddubsw',
++    'vpmaddwd', 'vpmaxsd', 'vpmaxud', 'vpminsd', 'vpminud', 'vpmuldq',
++    'vpmulld', 'vpmuludq', 'vpor', 'vpsadbw', 'vpsignd', 'vpsignw', 'vpslld',
++    'vpsllq', 'vpsllw', 'vpsrad', 'vpsraw', 'vpsrld', 'vpsrlq', 'vpsrlw',
++    'vpsubd', 'vpsubq', 'vpunpckhdq', 'vpunpckhqdq', 'vpunpckldq',
++    'vpunpcklqdq', 'vpxor', 'vrcpss', 'vsqrtsd', 'vsqrtss',
++]
++
++# AVX1 Instructions of the form:
++# src1 is an xmm or ymm register.
++# src2 is an xmm or ymm register or memory operand.
++# dest is an xmm or ymm register.
++XMM_YMM_MNEMONICS = [
++    'vpermilpd', 'vpermilps',
++]
++
++def Validate(trie_diffs, bitness):
++  """Validates that all allowed patterns of MNEMONICS are added."""
++  expected_adds = set()
++  for mnemonic in XMM_MNEMONICS:
++    expected_adds.update(XmmOrMemory3operand(mnemonic_name=mnemonic,
++                                             bitness=bitness))
++  for mnemonic in XMM_YMM_MNEMONICS:
++    expected_adds.update(XmmYmmOrMemory3operand(mnemonic_name=mnemonic,
++                                                bitness=bitness))
++
++  proof_tools.AssertDiffSetEquals(
++      trie_diffs,
++      expected_adds=expected_adds,
++      expected_removes=set())
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/avx1_xmm_memory_3op_fp_scalars_proof.py b/native_client/src/trusted/validator_ragel/avx1_xmm_memory_3op_fp_scalars_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..fb478972655b37f26dedc3a62f7715ebd69f1106
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/avx1_xmm_memory_3op_fp_scalars_proof.py
+@@ -0,0 +1,39 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for adding 3 operand xmm/memory fp scalar ops."""
++
++import proof_tools
++from proof_tools_templates import XmmOrMemory3operand
++
++
++# FP scalar (single operand/double operand) AVX1 Instructions of the form:
++# src1 is an xmm register.
++# src2 is an xmm register or memory operand.
++# dest is an xmm register.
++#
++# These essentially operate on the least signficant bits of the vector.
++MNEMONICS = [
++  'vaddsd', 'vaddss',
++  'vdivsd', 'vdivss',
++  'vmaxsd', 'vmaxss',
++  'vminsd', 'vminss',
++  'vmulsd', 'vmulss',
++  'vsubsd', 'vsubss'
++]
++
++def Validate(trie_diffs, bitness):
++  """Validates that all allowed patterns of MNEMONICS are added."""
++  expected_adds = set()
++  for mnemonic in MNEMONICS:
++    expected_adds.update(XmmOrMemory3operand(mnemonic_name=mnemonic,
++                                             bitness=bitness))
++
++  proof_tools.AssertDiffSetEquals(
++      trie_diffs,
++      expected_adds=expected_adds,
++      expected_removes=set())
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/avx1_xmm_memory_3op_pb_proof.py b/native_client/src/trusted/validator_ragel/avx1_xmm_memory_3op_pb_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..69f194cb994719e01c91b88723522b8d634e755a
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/avx1_xmm_memory_3op_pb_proof.py
+@@ -0,0 +1,35 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for adding 3 operand xmm/memory packed 8 bit / 1 byte integer ops."""
++
++import proof_tools
++from proof_tools_templates import XmmOrMemory3operand
++
++
++# Packed integer (8 bit) AVX1 Instructions of the form:
++# src1 is an xmm register.
++# src2 is an xmm register or memory operand.
++# dest is an xmm register.
++MNEMONICS = [
++    'vpaddb', 'vpaddsb', 'vpaddusb', 'vpavgb', 'vpcmpeqb', 'vpcmpgtb',
++    'vpmaxsb', 'vpmaxub', 'vpminsb', 'vpminub', 'vpshufb', 'vpsignb',
++    'vpsubb', 'vpsubsb', 'vpsubusb', 'vpunpckhbw', 'vpunpcklbw',
++]
++
++
++def Validate(trie_diffs, bitness):
++  """Validates that all allowed patterns of MNEMONICS are added."""
++  expected_adds = set()
++  for mnemonic in MNEMONICS:
++    expected_adds.update(XmmOrMemory3operand(mnemonic_name=mnemonic,
++                                             bitness=bitness))
++
++  proof_tools.AssertDiffSetEquals(
++      trie_diffs,
++      expected_adds=expected_adds,
++      expected_removes=set())
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/avx1_xmm_memory_3op_pi_proof.py b/native_client/src/trusted/validator_ragel/avx1_xmm_memory_3op_pi_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..767058e00c95f9570155e19f2b15e4b26e740a5d
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/avx1_xmm_memory_3op_pi_proof.py
+@@ -0,0 +1,36 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for adding 3 operand xmm/memory packed 16 bit (integer/word in x86)."""
++
++import proof_tools
++from proof_tools_templates import XmmOrMemory3operand
++
++
++# Packed integer (16 bit) AVX1 Instructions of the form:
++# src1 is an xmm register.
++# src2 is an xmm register or memory operand.
++# dest is an xmm register.
++MNEMONICS = [
++    'vpaddsw', 'vpaddusw', 'vpaddw', 'vpavgw', 'vpcmpeqw', 'vpcmpgtw',
++    'vphaddsw', 'vphaddw', 'vphsubsw', 'vphsubw', 'vpmaxsw', 'vpmaxuw',
++    'vpminsw', 'vpminuw', 'vpmulhrsw', 'vpmulhuw', 'vpmulhw', 'vpmullw',
++    'vpsubsw', 'vpsubusw', 'vpsubw', 'vpunpckhwd', 'vpunpcklwd',
++]
++
++
++def Validate(trie_diffs, bitness):
++  """Validates that all allowed patterns of MNEMONICS are added."""
++  expected_adds = set()
++  for mnemonic in MNEMONICS:
++    expected_adds.update(XmmOrMemory3operand(mnemonic_name=mnemonic,
++                                             bitness=bitness))
++
++  proof_tools.AssertDiffSetEquals(
++      trie_diffs,
++      expected_adds=expected_adds,
++      expected_removes=set())
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
