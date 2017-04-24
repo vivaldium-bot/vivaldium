@@ -1,1254 +1,3 @@
-diff --git a/native_client/pnacl/scripts/testsuite_known_failures_pnacl.txt b/native_client/pnacl/scripts/testsuite_known_failures_pnacl.txt
-new file mode 100644
-index 0000000000000000000000000000000000000000..855258ad5efd381dabf4e55485be9f4080249e95
---- /dev/null
-+++ b/native_client/pnacl/scripts/testsuite_known_failures_pnacl.txt
-@@ -0,0 +1,61 @@
-+# Failures which are probably or potentially real bugs
-+
-+# library or compiler errors
-+
-+# newlib does not have ffsl function?
-+2005-05-11-Popcount-ffs-fls
-+
-+# SSE tests use -msse* flags, which our le32 frontend doesn't understand.
-+sse.isamax
-+sse.shift
-+sse.expandfft
-+sse.stepfft
-+
-+# Assumes that pointers are 8 bytes (an x86-64 test).
-+ms_struct-bitfield-1
-+
-+# Vectors <2 x double> aren't supported yet.
-+SingleSource/Benchmarks/BenchmarkGame/partialsums
-+SingleSource/UnitTests/Vector/simple
-+SingleSource/UnitTests/Vector/sumarray-dbl
-+
-+# The following test uses packed bitfield structs which get turned into
-+# operations on i128 operands, which get rejected by PNaCl's ABI checker.
-+# However, clang -O3 precomputes the result at compile time, avoiding
-+# the ABI checker errors.
-+SingleSource/Regression/C/PR1386 O0f
-+
-+# The following tests use C++ exception handling, which is not yet
-+# supported for PNaCl's stable ABI.  When the -lowerinvoke pass is
-+# applied, the "throw" statements in these tests fail at run time.
-+SingleSource/Benchmarks/Shootout-C++/EH/except
-+SingleSource/Regression/C++/EH/class_hierarchy
-+SingleSource/Regression/C++/EH/ctor_dtor_count
-+SingleSource/Regression/C++/EH/ctor_dtor_count-2
-+SingleSource/Regression/C++/EH/exception_spec_test
-+SingleSource/Regression/C++/EH/function_try_block
-+SingleSource/Regression/C++/EH/inlined_cleanup
-+SingleSource/Regression/C++/EH/recursive-throw
-+SingleSource/Regression/C++/EH/simple_rethrow
-+SingleSource/Regression/C++/EH/simple_throw
-+SingleSource/Regression/C++/EH/throw_rethrow_test
-+
-+############################################################################
-+# TODO(stichnot)
-+# New failures in updated LLVM test suite, still to be triaged
-+############################################################################
-+# timeouts on ARM
-+SingleSource/Benchmarks/CoyoteBench/almabench arm
-+SingleSource/Benchmarks/SmallPT/smallpt arm
-+MultiSource/Benchmarks/mafft/pairlocalalign arm
-+MultiSource/Benchmarks/SciMark2-C/scimark2 arm
-+
-+# New as of LLVM 3.5 update, followed by updating test-suite to master.
-+# For all of these the native version fails, but the PNaCl version passes.
-+MultiSource/Benchmarks/Prolangs-C++/office/office
-+MultiSource/Benchmarks/Prolangs-C++/deriv2/deriv2
-+MultiSource/Benchmarks/Prolangs-C++/deriv1/deriv1
-+MultiSource/Applications/kimwitu++/kc
-+MultiSource/Benchmarks/tramp3d-v4/tramp3d-v4
-+MultiSource/Benchmarks/Prolangs-C++/employ/employ
-+MultiSource/Benchmarks/Prolangs-C++/shapes/shapes
-diff --git a/native_client/pnacl/support/DEPS b/native_client/pnacl/support/DEPS
-new file mode 100644
-index 0000000000000000000000000000000000000000..f9e4bbc539c21e797100ab9b9b3255af8cf24c74
---- /dev/null
-+++ b/native_client/pnacl/support/DEPS
-@@ -0,0 +1,5 @@
-+include_rules = [
-+  "+native_client/pnacl/support",
-+  "+native_client/src/trusted/service_runtime/include",
-+  "+native_client/src/untrusted",
-+]
-diff --git a/native_client/pnacl/support/aeabi_read_tp.S b/native_client/pnacl/support/aeabi_read_tp.S
-new file mode 100644
-index 0000000000000000000000000000000000000000..7ff29c1496b6282aec90492fcfc49b615b972fed
---- /dev/null
-+++ b/native_client/pnacl/support/aeabi_read_tp.S
-@@ -0,0 +1,22 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include "nacl_arm_defs.h"
-+
-+/* ====================================================================== */
-+/* Some runtime code for ARM */
-+/* NOTE: this code can only clobber r0 and hence is hand coded */
-+/* Access to tls. We also have an unused trampoline version of this */
-+/* ====================================================================== */
-+    .align NACL_BLOCK_SHIFT
-+    .global __aeabi_read_tp
-+
-+__aeabi_read_tp:
-+    ldr r0, [r9]
-+
-+    .align NACL_BLOCK_SHIFT
-+    bic lr, lr, #NACL_CONTROL_FLOW_MASK
-+    bx lr
-diff --git a/native_client/pnacl/support/bitcode/crt1.x b/native_client/pnacl/support/bitcode/crt1.x
-new file mode 100644
-index 0000000000000000000000000000000000000000..f2b2016bc4e3f0765dd03138ccda8872febfb369
---- /dev/null
-+++ b/native_client/pnacl/support/bitcode/crt1.x
-@@ -0,0 +1,19 @@
-+/*
-+ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This is a dummy linker script used as crt1.o when not linking with libgcc_eh.
-+ * The actual startup code is just the _start function defined in a library.
-+ * We provide this file for two purposes:
-+ * 1. To keep with the traditional linking sequence that puts crt1.o first.
-+ * 2. To generate references to the main and exit symbols like the real
-+ *    startup code would, so that they will be brought in from libraries
-+ *    before -lc is encountered in the link.  Otherwise a main defined in
-+ *    a library wouldn't be referenced until after that library had already
-+ *    been examined, and _start's call would get an undefined reference.
-+ */
-+
-+EXTERN ( main exit _exit )
-diff --git a/native_client/pnacl/support/bitcode/crt1_for_eh.x b/native_client/pnacl/support/bitcode/crt1_for_eh.x
-new file mode 100644
-index 0000000000000000000000000000000000000000..c8d58af2b6f2078789a88ca83f99ad822ab14768
---- /dev/null
-+++ b/native_client/pnacl/support/bitcode/crt1_for_eh.x
-@@ -0,0 +1,28 @@
-+/*
-+ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This is a dummy linker script used as crt1.o when linking with libgcc_eh.
-+ * It should not be used for creating stable bitcode pexes, which are not
-+ * supposed to export the symbol for libgcc_eh.
-+ *
-+ * The actual startup code is just the _start function defined in a library.
-+ * We provide this file for two purposes:
-+ * 1. To keep with the traditional linking sequence that puts crt1.o first.
-+ * 2. To generate references to the main and exit symbols like the real
-+ *    startup code would, so that they will be brought in from libraries
-+ *    before -lc is encountered in the link.  Otherwise a main defined in
-+ *    a library wouldn't be referenced until after that library had already
-+ *    been examined, and _start's call would get an undefined reference.
-+ */
-+
-+EXTERN ( main exit _exit )
-+
-+/*
-+ * We're linking with libgcc_eh, so these symbols have to be exported from
-+ * the C library contained in the pexe, since libgcc_eh needs them.
-+ */
-+EXTERN ( malloc free strlen abort )
-diff --git a/native_client/pnacl/support/bitcode/crtbegin.c b/native_client/pnacl/support/bitcode/crtbegin.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..6f33453469dca833e1697365d5c9bf11a7cfb318
---- /dev/null
-+++ b/native_client/pnacl/support/bitcode/crtbegin.c
-@@ -0,0 +1,30 @@
-+/*
-+ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This is the bitcode crtbegin (crtbegin.bc)
-+ */
-+
-+/*
-+ * References to __dso_handle are generated by the compiler front end,
-+ * which uses it when registering destructors for C++ global
-+ * variables.  The compiler will generate a function call like the
-+ * following in an initializer:
-+ *
-+ *   __cxa_atexit(destructor_func, &global_obj, &__dso_handle);
-+ *
-+ * __cxa_atexit() arranges for destructor_func(&global_obj) to be
-+ * called on exit() or when the DSO uniquely identified by
-+ * &__dso_handle is dlclose()'d.  See:
-+ * http://gcc.gnu.org/ml/gcc-patches/1999-12n/msg00664.html
-+ *
-+ * (Note that __cxa_* functions are usually provided by libsupc++ or
-+ * its equivalent, but __cxa_atexit() happens to be provided by libc.)
-+ *
-+ * __dso_handle is zero for the main executable, which is the only
-+ * case PNaCl supports because PNaCl does not support DSOs.
-+ */
-+void *__dso_handle = 0;
-diff --git a/native_client/pnacl/support/bitcode/crti.c b/native_client/pnacl/support/bitcode/crti.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..74233d47b3a3537c5a6eb3b822b9cf8f206dda82
---- /dev/null
-+++ b/native_client/pnacl/support/bitcode/crti.c
-@@ -0,0 +1,14 @@
-+/*
-+ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * PNaCl handles init/fini through the .init_array and .fini_array sections
-+ * rather than .init/.fini.  We provide stubs here because they are still
-+ * called from newlib's startup routine in libc/misc/init.c and
-+ * glibc's start routine. (csu/elf-init.c)
-+ */
-+void _init(void) { }
-+void _fini(void) { }
-diff --git a/native_client/pnacl/support/bitcode/pnaclmm.c b/native_client/pnacl/support/bitcode/pnaclmm.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..b686ca47faa781fb631ddf564df3195d4862b21e
---- /dev/null
-+++ b/native_client/pnacl/support/bitcode/pnaclmm.c
-@@ -0,0 +1,268 @@
-+/*
-+ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This file defines a set of function for performing atomic accesses on
-+ * memory locations according to the GCCMM library interface, providing
-+ * library support for the C11/C++11 atomics.
-+ *
-+ * See: http://gcc.gnu.org/wiki/Atomic/GCCMM/LIbrary
-+ *
-+ * Clang often emits atomic instructions instead of library calls when
-+ * user code does atomics (e.g. by using the ``__sync_*``
-+ * primitives). Nonetheless library calls to the functions implemented
-+ * in this file are emitted by Clang in certain circumstances, and
-+ * user/library code sometimes calls these functions directly. This file
-+ * is linked into user code before the PNaCl toolchain creates a
-+ * portable executable, and implements GCCMM's functions as calls to
-+ * PNaCl's atomic intrinsics. Failing to link with this file would lead
-+ * to undefined reference errors at link time.
-+ *
-+ * This file doesn't assume that the underlying NaCl atomic intrinsics
-+ * are/aren't lock-free: it merely punts to the translator which may
-+ * implement some of the supported sizes as lock-free.
-+ *
-+ * Note that similar functions may be implemented by backends which
-+ * don't support some lockless atomic accesses, e.g. MIPS for 64-bit
-+ * atomics. These are entirely separate from this file and should not be
-+ * confused.
-+ *
-+ * TODO(jfb) We currently don't handle 16-bit atomics or wider at all in
-+ *           the PNaCl ABI. Implementing these here requires care
-+ *           because C11/C++11 atomics that are implemented with a lock
-+ *           all need to go through the same lock (or locks, if
-+ *           sharded), and this requires a contract with Clang's code
-+ *           generation if we are to implement these in the current
-+ *           file. Implementing them here is also not forward-looking
-+ *           because hardware may support lock-free accesses for these
-+ *           sizes.
-+ */
-+
-+#include <stdbool.h>
-+#include <stdint.h>
-+#include <stdlib.h>
-+#include <unistd.h>
-+
-+/* Clang complains if we redefine builtins directly. */
-+#pragma redefine_extname __pnacl_atomic_load __atomic_load
-+#pragma redefine_extname __pnacl_atomic_store __atomic_store
-+#pragma redefine_extname __pnacl_atomic_exchange __atomic_exchange
-+#pragma redefine_extname __pnacl_atomic_compare_exchange \
-+  __atomic_compare_exchange
-+
-+/*
-+ * Memory order from GCCMM.
-+ */
-+enum AtomicOrderingKind {
-+  AO_ABI_memory_order_relaxed = 0,
-+  AO_ABI_memory_order_consume = 1,
-+  AO_ABI_memory_order_acquire = 2,
-+  AO_ABI_memory_order_release = 3,
-+  AO_ABI_memory_order_acq_rel = 4,
-+  AO_ABI_memory_order_seq_cst = 5
-+};
-+
-+/*
-+ * Part of the stable ABI from llvm/IR/NaClAtomicIntrinsics.h.
-+ */
-+enum AtomicRMWOperation {
-+  AtomicInvalid = 0, /* Invalid, keep first. */
-+  AtomicAdd,
-+  AtomicSub,
-+  AtomicOr,
-+  AtomicAnd,
-+  AtomicXor,
-+  AtomicExchange,
-+  AtomicNum /* Invalid, keep last. */
-+};
-+enum MemoryOrder {
-+  MemoryOrderInvalid = 0, /* Invalid, keep first. */
-+  MemoryOrderRelaxed,
-+  MemoryOrderConsume,
-+  MemoryOrderAcquire,
-+  MemoryOrderRelease,
-+  MemoryOrderAcquireRelease,
-+  MemoryOrderSequentiallyConsistent,
-+  MemoryOrderNum /* Invalid, keep last. */
-+};
-+
-+/*
-+ * Map GCCMM's memory order (also used by LLVM) to NaCl's stable ABI
-+ * equivalent.
-+ */
-+static enum MemoryOrder map_mem(enum AtomicOrderingKind order) {
-+  /*
-+   * TODO(jfb) For now PNaCl only supports sequentially-consistent.
-+   *           When this changes we should map AO_ABI_(.*) to MemoryOrder\1.
-+   */
-+  (void) order;
-+  return MemoryOrderSequentiallyConsistent;
-+}
-+
-+/*
-+ * All the atomic sizes currently handled by PNaCl.
-+ * Invokes DO_ATOMIC(BITS, BYTES).
-+ */
-+#define DO_FOR_ALL_ATOMIC_SIZES()               \
-+  DO_ATOMIC(8, 1)                               \
-+  DO_ATOMIC(16, 2)                              \
-+  DO_ATOMIC(32, 4)                              \
-+  DO_ATOMIC(64, 8)
-+
-+/* Convenience type definitions. */
-+#define DO_ATOMIC(BITS, BYTES)                  \
-+  typedef uint##BITS##_t I##BYTES;
-+DO_FOR_ALL_ATOMIC_SIZES()
-+#undef DO_ATOMIC
-+
-+/*
-+ * NaCl atomic intrinsics ABI from llvm/IR/Intrinsics.td:
-+ *  __llvm_nacl_atomic_{load,store,rmw,cmpxchg}_{1,2,4,8}
-+ * Used by the below optimized sized functions.
-+ * Note: these expect a memory order from the stable ABI.
-+ */
-+#define DO_ATOMIC(BITS, BYTES)                                  \
-+  I##BYTES                                                      \
-+  __llvm_nacl_atomic_load_##BYTES(                              \
-+      I##BYTES *mem, int model)                                 \
-+  asm("llvm.nacl.atomic.load.i" #BITS);                         \
-+  void                                                          \
-+  __llvm_nacl_atomic_store_##BYTES(                             \
-+      I##BYTES val, I##BYTES *mem, int model)                   \
-+      asm("llvm.nacl.atomic.store.i" #BITS);                    \
-+  I##BYTES                                                      \
-+  __llvm_nacl_atomic_rmw_##BYTES(                               \
-+      int op, I##BYTES *mem, I##BYTES val, int model)           \
-+  asm("llvm.nacl.atomic.rmw.i" #BITS);                          \
-+  I##BYTES                                                      \
-+  __llvm_nacl_atomic_cmpxchg_##BYTES(                           \
-+      I##BYTES *mem, I##BYTES expected, I##BYTES desired,       \
-+      int success, int failure)                                 \
-+  asm("llvm.nacl.atomic.cmpxchg.i" #BITS);
-+DO_FOR_ALL_ATOMIC_SIZES()
-+#undef DO_ATOMIC
-+
-+/*
-+ * GCCMM optimized sized functions:
-+ *  - __atomic_fetch_{add,sub,or,and,xor}_{1,2,4,8}.
-+ *  - __atomic_{load,store,exchange,compare_exchange}_{1,2,4,8}.
-+ * User/library accessible, and used by some of the generic function below.
-+ */
-+#define DO_ATOMIC_RMW(BITS, BYTES, OP, OPCASE)          \
-+  I##BYTES                                              \
-+  __atomic_fetch_##OP##_##BYTES(                        \
-+      I##BYTES *mem, I##BYTES val, int model) {         \
-+    return __llvm_nacl_atomic_rmw_##BYTES(              \
-+        Atomic##OPCASE, mem, val, map_mem(model));      \
-+  }
-+#define DO_ATOMIC(BITS, BYTES)                                          \
-+  I##BYTES                                                              \
-+  __atomic_load_##BYTES(                                                \
-+      I##BYTES *mem, int model) {                                       \
-+    return __llvm_nacl_atomic_load_##BYTES(mem, map_mem(model));        \
-+  }                                                                     \
-+  void                                                                  \
-+  __atomic_store_##BYTES(                                               \
-+      I##BYTES *mem, I##BYTES val, int model) {                         \
-+    __llvm_nacl_atomic_store_##BYTES(val, mem, map_mem(model));         \
-+  }                                                                     \
-+  I##BYTES                                                              \
-+  __atomic_exchange_##BYTES(                                            \
-+      I##BYTES *mem, I##BYTES val, int model) {                         \
-+    return __llvm_nacl_atomic_rmw_##BYTES(                              \
-+        AtomicExchange, mem, val, map_mem(model));                      \
-+  }                                                                     \
-+  bool                                                                  \
-+  __atomic_compare_exchange_##BYTES(                                    \
-+      I##BYTES *mem, I##BYTES *expected, I##BYTES desired,              \
-+      int success, int failure) {                                       \
-+    I##BYTES e = *expected;                                             \
-+    I##BYTES old = __llvm_nacl_atomic_cmpxchg_##BYTES(                  \
-+        mem, e, desired, map_mem(success), map_mem(failure));           \
-+    bool succeeded = old == e;                                          \
-+    *expected = old;                                                    \
-+    return succeeded;                                                   \
-+  }                                                                     \
-+  DO_ATOMIC_RMW(BITS, BYTES, add, Add)                                  \
-+  DO_ATOMIC_RMW(BITS, BYTES, sub, Sub)                                  \
-+  DO_ATOMIC_RMW(BITS, BYTES, or, Or)                                    \
-+  DO_ATOMIC_RMW(BITS, BYTES, and, And)                                  \
-+  DO_ATOMIC_RMW(BITS, BYTES, xor, Xor)
-+DO_FOR_ALL_ATOMIC_SIZES()
-+#undef DO_ATOMIC
-+#undef DO_ATOMIC_RMW
-+
-+__attribute__((noinline, noreturn))
-+static void unhandled_size(const char *error_string, size_t size) {
-+  write(2, error_string, size);
-+  abort();
-+}
-+#define UNHANDLED_SIZE(WHAT) do {                               \
-+    static const char msg[] = "Aborting: __atomic_" #WHAT       \
-+        " called with size greater than 8 bytes\n";             \
-+    unhandled_size(msg, sizeof(msg) - 1);                       \
-+  } while (0)
-+
-+/*
-+ * Generic GCCMM functions which handle objects of arbitrary size.
-+ * Calls the optimized sized functions above.
-+ */
-+void __pnacl_atomic_load(size_t size, void *mem, void *ret, int model) {
-+#define DO_ATOMIC(BITS, BYTES)                  \
-+  case BYTES: {                                 \
-+    I##BYTES res = __atomic_load_##BYTES(       \
-+        (I##BYTES*)(mem), model);               \
-+    *(I##BYTES*)(ret) = res;                    \
-+  } break;
-+  switch(size) {
-+    DO_FOR_ALL_ATOMIC_SIZES();
-+    default: UNHANDLED_SIZE(load);
-+  }
-+#undef DO_ATOMIC
-+}
-+void __pnacl_atomic_store(size_t size, void *mem, void *val, int model) {
-+#define DO_ATOMIC(BITS, BYTES)                  \
-+  case BYTES: {                                 \
-+    I##BYTES v = *(I##BYTES*)(val);             \
-+    __atomic_store_##BYTES(                     \
-+        (I##BYTES*)(mem), v, model);            \
-+  } break;
-+  switch(size) {
-+    DO_FOR_ALL_ATOMIC_SIZES();
-+    default: UNHANDLED_SIZE(store);
-+  }
-+#undef DO_ATOMIC
-+}
-+void __pnacl_atomic_exchange(size_t size, void *mem, void *val, void *ret,
-+                             int model) {
-+#define DO_ATOMIC(BITS, BYTES)                  \
-+  case BYTES: {                                 \
-+    I##BYTES v = *(I##BYTES*)(val);             \
-+    I##BYTES res = __atomic_exchange_##BYTES(   \
-+        (I##BYTES*)(mem), v, model);            \
-+    *(I##BYTES*)(ret) = res;                    \
-+  } break;
-+  switch(size) {
-+    DO_FOR_ALL_ATOMIC_SIZES();
-+    default: UNHANDLED_SIZE(exchange);
-+  }
-+#undef DO_ATOMIC
-+}
-+bool __pnacl_atomic_compare_exchange(size_t size, void *mem, void *expected,
-+                                     void *desired, int success, int failure) {
-+#define DO_ATOMIC(BITS, BYTES)                          \
-+  case BYTES: {                                         \
-+    I##BYTES d = *(I##BYTES*)(desired);                 \
-+    return __atomic_compare_exchange_##BYTES(           \
-+        (I##BYTES*)(mem), (I##BYTES*)(expected), d,     \
-+        success, failure);                              \
-+  }
-+  switch(size) {
-+    DO_FOR_ALL_ATOMIC_SIZES();
-+    default: UNHANDLED_SIZE(compare_exchange);
-+  }
-+#undef DO_ATOMIC
-+}
-diff --git a/native_client/pnacl/support/bitcode/sjlj_eh_redirect.cc b/native_client/pnacl/support/bitcode/sjlj_eh_redirect.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..3007c88a7dac7560208c8bd48c50423537c0aa19
---- /dev/null
-+++ b/native_client/pnacl/support/bitcode/sjlj_eh_redirect.cc
-@@ -0,0 +1,59 @@
-+/*
-+ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This file defines _Unwind_RaiseException() etc. using the SJLJ
-+ * (setjmp()/longjmp()-based) versions provided by PNaCl's libstdc++.
-+ *
-+ * This allows a single build of libstdc++ to support both the SJLJ
-+ * and non-SJLJ models of C++ exception handling.  The SJLJ version is
-+ * enabled by linking in this redirection file.
-+ */
-+
-+#include <stdlib.h>
-+
-+
-+extern "C" {
-+
-+struct _Unwind_Exception;
-+
-+int __pnacl_eh_sjlj_Unwind_RaiseException(struct _Unwind_Exception *exc);
-+int __pnacl_eh_sjlj_Unwind_Resume_or_Rethrow(struct _Unwind_Exception *exc);
-+void __pnacl_eh_sjlj_Unwind_DeleteException(struct _Unwind_Exception *exc);
-+void __pnacl_eh_sjlj_cxa_call_unexpected(struct _Unwind_Exception *exc);
-+
-+
-+int _Unwind_RaiseException(struct _Unwind_Exception *exc) {
-+  return __pnacl_eh_sjlj_Unwind_RaiseException(exc);
-+}
-+
-+int _Unwind_Resume_or_Rethrow(struct _Unwind_Exception *exc) {
-+  return __pnacl_eh_sjlj_Unwind_Resume_or_Rethrow(exc);
-+}
-+
-+void _Unwind_DeleteException(struct _Unwind_Exception *exc) {
-+  __pnacl_eh_sjlj_Unwind_DeleteException(exc);
-+}
-+
-+void __cxa_call_unexpected(struct _Unwind_Exception *exc) {
-+  __pnacl_eh_sjlj_cxa_call_unexpected(exc);
-+}
-+
-+/*
-+ * This is a dummy version of the C++ personality function to prevent
-+ * libstdc++'s eh_personality.cc from being linked in, since that file
-+ * also defines __cxa_call_unexpected(), which would clash with our
-+ * definition above.
-+ *
-+ * The only references to this personality function will be from LLVM
-+ * "landingpad" instructions, which will be removed by the PNaClSjLjEH
-+ * pass.
-+ */
-+void __gxx_personality_v0() {
-+  abort();
-+}
-+
-+}
-diff --git a/native_client/pnacl/support/bitcode/unwind_stubs.c b/native_client/pnacl/support/bitcode/unwind_stubs.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..b02e8c9650c2b246723e2e62ace4c89d8f24cdd7
---- /dev/null
-+++ b/native_client/pnacl/support/bitcode/unwind_stubs.c
-@@ -0,0 +1,100 @@
-+/*
-+ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This file is for linking into pexes when C++ exception handling is
-+ * disabled.  libstdc++ expects to be able to call _Unwind_*()
-+ * functions, which are normally provided by libgcc_eh, which is not
-+ * accessible in PNaCl's stable ABI.  This file provides stubs for the
-+ * _Unwind_*() functions which just abort().
-+ */
-+
-+#include <stdlib.h>
-+#include <unistd.h>
-+
-+/*
-+ * unwind.h will generate static definitions of some of the functions when
-+ * the __arm__ macro is defined but we want to provide our own, exported
-+ * stubs because this will be used as portable bitcode.
-+ */
-+#undef __arm__
-+#include <unwind.h>
-+
-+#define STUB                                                      \
-+  char msg1[] = "Aborting: ";                                     \
-+  char msg2[] = " called (C++ exception handling is disabled)\n"; \
-+  write(2, msg1, sizeof(msg1) - 1);                               \
-+  write(2, __func__, sizeof(__func__) - 1);                       \
-+  write(2, msg2, sizeof(msg2) - 1);                               \
-+  abort();
-+
-+void _Unwind_DeleteException(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetRegionStart(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetDataRelBase(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Word _Unwind_GetGR(struct _Unwind_Context *c, int i) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetIP(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetIPInfo(struct _Unwind_Context *c, int *i) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetTextRelBase(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+void *_Unwind_GetLanguageSpecificData(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+void _Unwind_SetGR(struct _Unwind_Context *c, int i, _Unwind_Word w) {
-+  STUB
-+}
-+
-+void _Unwind_SetIP(struct _Unwind_Context *c, _Unwind_Ptr p) {
-+  STUB
-+}
-+
-+void _Unwind_PNaClSetResult0(struct _Unwind_Context *c, _Unwind_Word w) {
-+  STUB
-+}
-+
-+void _Unwind_PNaClSetResult1(struct _Unwind_Context *c, _Unwind_Word w) {
-+  STUB
-+}
-+
-+_Unwind_Reason_Code _Unwind_RaiseException(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+_Unwind_Reason_Code _Unwind_Resume_or_Rethrow(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+void _Unwind_Resume(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+_Unwind_Word _Unwind_GetCFA(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Reason_Code _Unwind_Backtrace(_Unwind_Trace_Fn fn, void *p) {
-+  STUB
-+}
-diff --git a/native_client/pnacl/support/clang_direct/crtbegin.c b/native_client/pnacl/support/clang_direct/crtbegin.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..1195564ec166a49f3d091f4fb5815c7107686cdf
---- /dev/null
-+++ b/native_client/pnacl/support/clang_direct/crtbegin.c
-@@ -0,0 +1,74 @@
-+/*
-+ * Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This is nacl-clang's crtbegin file (crtbegin.o, crtbeginS.o, crtbeginT.o).
-+ * Currently we only support static linking and it only supports being used
-+ * as crtbeginT.o (see __dso_handle below).
-+ */
-+
-+/*
-+ * HACK:
-+ * The real structure is defined in unwind-dw2-fde.h
-+ * this is something that is at least twice as big.
-+ */
-+struct object {
-+  void *p[16] __attribute__((aligned(8)));
-+};
-+
-+extern void __register_frame_info(void *begin, struct object *ob);
-+extern void __deregister_frame_info(const void *begin);
-+
-+typedef void (*initfini_func_ptr) (void);
-+
-+/*
-+ * Exception handling frames are aggregated into a single section called
-+ * .eh_frame.  The runtime system needs to (1) have a symbol for the beginning
-+ * of this section, and needs to (2) mark the end of the section by a NULL.
-+ */
-+
-+static char __EH_FRAME_BEGIN__[]
-+    __attribute__((section(".eh_frame"), aligned(4)))
-+    = { };
-+
-+static void __do_eh_ctor(void) {
-+  static struct object object;
-+  __register_frame_info (__EH_FRAME_BEGIN__, &object);
-+}
-+
-+static initfini_func_ptr __do_eh_ctor_init_array_entry[]
-+    __attribute__ ((__used__, section(".init_array")))
-+    = { __do_eh_ctor };
-+
-+static void __do_eh_dtor(void) {
-+  __deregister_frame_info(__EH_FRAME_BEGIN__);
-+}
-+
-+static initfini_func_ptr __do_eh_dtor_fini_array_entry[]
-+    __attribute__ ((__used__, section(".fini_array")))
-+    = { __do_eh_dtor };
-+
-+/*
-+ * References to __dso_handle are generated by the compiler front end,
-+ * which uses it when registering destructors for C++ global
-+ * variables.  The compiler will generate a function call like the
-+ * following in an initializer:
-+ *
-+ *   __cxa_atexit(destructor_func, &global_obj, &__dso_handle);
-+ *
-+ * __cxa_atexit() arranges for destructor_func(&global_obj) to be
-+ * called on exit() or when the DSO uniquely identified by
-+ * &__dso_handle is dlclose()'d.  See:
-+ * http://gcc.gnu.org/ml/gcc-patches/1999-12n/msg00664.html
-+ *
-+ * (Note that __cxa_* functions are usually provided by libsupc++ or
-+ * its equivalent, but __cxa_atexit() happens to be provided by libc.)
-+ *
-+ * __dso_handle is zero for the main executable, which is the only
-+ * case currently supported by this crtbegin.
-+ */
-+
-+void *__dso_handle = 0;
-diff --git a/native_client/pnacl/support/clang_direct/nacl-arm-macros.s b/native_client/pnacl/support/clang_direct/nacl-arm-macros.s
-new file mode 100644
-index 0000000000000000000000000000000000000000..aff20503ae2dd39fc5a1fc6ff00665290656e4de
---- /dev/null
-+++ b/native_client/pnacl/support/clang_direct/nacl-arm-macros.s
-@@ -0,0 +1,386 @@
-+@ Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+@ Use of this source code is governed by a BSD-style license that can be
-+@ found in the LICENSE file.
-+
-+@ GAS assembler macros for NaCl ARM
-+@ NB: GCC emits code using only a few of these, noted below.
-+@ TODO(mcgrathr): not really clear if this should live with gcc or elsewhere
-+
-+@ This turns on instruction bundling in the assembler, with 16-byte bundles.
-+.bundle_align_mode 4
-+
-+.macro _sfi_cmask reg, cond=
-+	bic\cond \reg, \reg, #0xC000000F
-+.endm
-+
-+.macro _sfi_dmask reg, cond=
-+	bic\cond \reg, \reg, #0xC0000000
-+.endm
-+
-+.macro _sfi_for_each_cond macro, args:vararg
-+	\macro eq, \args
-+	\macro ne, \args
-+	\macro cs, \args
-+	\macro hs, \args
-+	\macro cc, \args
-+	\macro lo, \args
-+	\macro mi, \args
-+	\macro pl, \args
-+	\macro vs, \args
-+	\macro vc, \args
-+	\macro hi, \args
-+	\macro ls, \args
-+	\macro ge, \args
-+	\macro lt, \args
-+	\macro gt, \args
-+	\macro le, \args
-+	\macro al, \args
-+	\macro nv, \args
-+.endm
-+
-+@ Used in place of bx (indirect jump), no difference but the mnemonic.
-+@ NB: GCC output uses this.
-+.macro sfi_bx reg, cond=
-+	.bundle_lock
-+	_sfi_cmask \reg, \cond
-+	bx\cond \reg
-+	.bundle_unlock
-+.endm
-+
-+.macro _sfi_bl label, target, cond=
-+	adr\cond lr, \label
-+	b\cond \target
-+	.p2align 4
-+\label\():
-+.endm
-+
-+@ Used in place of bl (direct call), no difference but the mnemonic.
-+@ NB: GCC output uses this.
-+.macro sfi_bl target, cond=
-+	_sfi_bl .Lsfi.\@, \target, \cond
-+.endm
-+
-+.macro _sfi_blx label, reg, cond
-+	adr lr, \label
-+	.bundle_lock
-+	_sfi_cmask \reg, \cond
-+	bx\cond \reg
-+	.bundle_unlock
-+	.p2align 4
-+\label\():
-+.endm
-+
-+@ Used in place of blx (indirect call), no difference but the mnemonic.
-+@ NB: GCC output uses this.
-+.macro sfi_blx target, cond=
-+	_sfi_blx .Lsfi.\@, \target, \cond
-+.endm
-+
-+.macro _sfi_condify_1 cond, macro
-+	.macro \macro\cond args:vararg
-+	\macro \args, \cond
-+	.endm
-+.endm
-+.macro _sfi_condify macro
-+	_sfi_for_each_cond _sfi_condify_1, \macro
-+.endm
-+
-+@ Conditionalized variants of the branching macros.
-+@ NB: GCC output uses (some of) these.
-+_sfi_condify sfi_bl
-+_sfi_condify sfi_blx
-+_sfi_condify sfi_bx
-+
-+.purgem _sfi_condify_1
-+.purgem _sfi_condify
-+
-+@ ldr/str syntax cheat sheet:
-+@ [Rn, offset] => *(Rn + offset)
-+@ [Rn, offset]! => *(Rn += offset)
-+@ [Rn], offset => *Rn, Rn += offset
-+
-+@ sfi_mem* macros have the feature that they specify each parameter
-+@ only once.  They all have the form:
-+@	sfi_mem... opcode value-register, base-register [, ...]
-+@ opcode		is the normal mnemonic (ldr, str, ldrb, etc.)
-+@ value-register	is the destination for a load and source for a store
-+@ 			(i.e. the first operand in normal ARM syntax);
-+@ base-register		is the base register in the address computation;
-+@			this is what's touched by the SFI masking instruction
-+
-+@ For simple register or register+offset cases, e.g.:
-+@	sfi_mem ldr r0, r1		@ ldr r0, [r1]
-+@	sfi_mem str r1, r2, #4		@ str r1, [r2, #4]
-+.macro sfi_mem op, dest, basereg, offset=#0
-+	.bundle_lock
-+	_sfi_dmask \basereg
-+	\op \dest, [\basereg, \offset]
-+	.bundle_unlock
-+.endm
-+
-+@ For "increment before" cases, e.g.:
-+@	sfi_memib ldr r0, r1, #4	@ ldr r0, [r1, #4]!
-+.macro sfi_memib op, dest, basereg, offset
-+	.bundle_lock
-+	_sfi_dmask \basereg
-+	\op \dest, [\basereg, \offset]!
-+	.bundle_unlock
-+.endm
-+
-+@ For "increment after" cases, e.g.:
-+@	sfi_memia ldr r0, r1, #4	@ ldr r0, [r1], #4
-+.macro sfi_memia op, dest, basereg, offset
-+	.bundle_lock
-+	_sfi_dmask \basereg
-+	\op \dest, [\basereg], \offset
-+	.bundle_unlock
-+.endm
-+
-+@ For register pair cases (i.e. ldrd or strd), e.g.:
-+@	sfi_memd ldrd r2, r3, r0	@ ldrd r2, r3, [r0]
-+@ (Note we don't support the pre-indexed case.)
-+.macro sfi_memd op, dest, dest2, basereg, offset=#0
-+	.bundle_lock
-+	_sfi_dmask \basereg
-+	\op \dest,\dest2, [\basereg, \offset]
-+	.bundle_unlock
-+.endm
-+
-+@ For "increment after" register pair cases (i.e. ldrd or strd), e.g.:
-+@	sfi_memdia ldrd r2, r3, r0, -r1	@ ldrd r2, r3, [r0], -r1
-+.macro sfi_memdia op, dest, dest2, basereg, offset
-+	.bundle_lock
-+	_sfi_dmask \basereg
-+	\op \dest,\dest2, [\basereg], \offset
-+	.bundle_unlock
-+.endm
-+
-+@ For load/store multiple cases, e.g.:
-+@	sfi_memm ldm r0, {r1, r2, r3}	@ ldm r0, {r1, r2, r3}
-+@ Note you don't want to use this for sp, since SFI is not required.
-+.macro sfi_memm op basereg, reglist:vararg
-+	.bundle_lock
-+	_sfi_dmask \basereg
-+	\op \basereg, \reglist
-+	.bundle_unlock
-+.endm
-+
-+@ For "increment after" load/store multiple cases, e.g.:
-+@	sfi_memm ldmia r0!, {r5-r8}	@ ldmia r0!, {r5-r8}
-+@ Note you don't want to use this for sp, since SFI is not required.
-+.macro sfi_memmia op basereg, reglist:vararg
-+	.bundle_lock
-+	_sfi_dmask \basereg
-+	\op \basereg!, \reglist
-+	.bundle_unlock
-+.endm
-+
-+
-+@ For popping multiple registers, including sp.
-+@ Note you don't want to use this if sp is not touched.
-+.macro sfi_popm reglist:vararg
-+	.bundle_lock
-+	pop \reglist
-+	_sfi_dmask sp
-+	.bundle_unlock
-+.endm
-+
-+
-+@ Alternative scheme with just one macro.  This has the feature that
-+@ most of the line is exactly the usual ARM instruction syntax,
-+@ unmodified.  If the instruction is wholly unmodified, this has the
-+@ downside that the base register appears twice, thus introducing the
-+@ possibility of errors where the base register in the first parameter
-+@ is not the actual base register used in the addressing mode syntax.
-+@ However, you can instead modify the instruction only slightly: just
-+@ replace the base register with \B (backslash followed by capital B).
-+@ Then the instruction syntax remains normal, idiosyncrasies of ARM
-+@ addressing mode syntaxes all supported--only the base register part of
-+@ the addressing mode syntax is replaced--and there is no error-prone
-+@ duplication of the base register.
-+@ NB: GCC output uses this.
-+.macro sfi_breg basereg, insn, operands:vararg
-+	.macro _sfi_breg_doit B
-+	\insn \operands
-+	.endm
-+	.bundle_lock
-+	_sfi_breg_dmask_\insn \basereg
-+	_sfi_breg_doit \basereg
-+	.bundle_unlock
-+	.purgem _sfi_breg_doit
-+.endm
-+
-+.macro _sfi_breg_dmask_define insn, suffix1=, suffix2=
-+	_sfi_for_each_cond _sfi_breg_dmask_define_1, \insn, \suffix1, \suffix2
-+	_sfi_breg_dmask_define_1 \(), \insn, \suffix1, \suffix2
-+.endm
-+
-+.macro _sfi_breg_dmask_define_1 cond, insn, suffix1=, suffix2=
-+	.ifb \suffix1
-+	.macro _sfi_breg_dmask_\insn\cond basereg
-+	_sfi_dmask \basereg, \cond
-+	.endm
-+	.else
-+	.macro _sfi_breg_dmask_\insn\cond\suffix1\suffix2 basereg
-+	_sfi_dmask \basereg, \cond
-+	.endm
-+	.ifnb \cond
-+	.macro _sfi_breg_dmask_\insn\suffix1\cond\suffix2 basereg
-+	_sfi_dmask \basereg, \cond
-+	.endm
-+	.ifnb \suffix2
-+	.macro _sfi_breg_dmask_\insn\suffix1\suffix2\cond basereg
-+	_sfi_dmask \basereg, \cond
-+	.endm
-+	.endif
-+	.endif
-+	.endif
-+.endm
-+
-+@ We need to name here all the instructions that might appear in sfi_breg,
-+@ so as to handle all their conditionalized forms.
-+.macro _sfi_breg_dmask_define_ldst insn
-+	_sfi_breg_dmask_define \insn
-+	_sfi_breg_dmask_define \insn, h
-+	_sfi_breg_dmask_define \insn, sh
-+	_sfi_breg_dmask_define \insn, b
-+	_sfi_breg_dmask_define \insn, sb
-+	_sfi_breg_dmask_define \insn, d
-+.endm
-+.macro _sfi_breg_dmask_define_ldmstm insn, suffix=
-+	_sfi_breg_dmask_define \insn, \suffix
-+	_sfi_breg_dmask_define \insn, ia, \suffix
-+	_sfi_breg_dmask_define \insn, fd, \suffix
-+	_sfi_breg_dmask_define \insn, da, \suffix
-+	_sfi_breg_dmask_define \insn, fa, \suffix
-+	_sfi_breg_dmask_define \insn, db, \suffix
-+	_sfi_breg_dmask_define \insn, ea, \suffix
-+	_sfi_breg_dmask_define \insn, ib, \suffix
-+	_sfi_breg_dmask_define \insn, ed, \suffix
-+.endm
-+.macro _sfi_breg_dmask_define_neon insn
-+	_sfi_breg_dmask_define \insn, .8
-+	_sfi_breg_dmask_define \insn, .16
-+	_sfi_breg_dmask_define \insn, .32
-+	_sfi_breg_dmask_define \insn, .64
-+.endm
-+_sfi_breg_dmask_define_ldst ldr
-+_sfi_breg_dmask_define_ldst ldrex
-+_sfi_breg_dmask_define_ldst ldc
-+_sfi_breg_dmask_define_ldst str
-+_sfi_breg_dmask_define_ldst strex
-+_sfi_breg_dmask_define_ldst stc
-+_sfi_breg_dmask_define_ldmstm ldm
-+_sfi_breg_dmask_define_ldmstm stm
-+_sfi_breg_dmask_define pld
-+_sfi_breg_dmask_define pldw
-+_sfi_breg_dmask_define pldi
-+_sfi_breg_dmask_define_ldmstm vldm
-+_sfi_breg_dmask_define_ldmstm vldm, .32
-+_sfi_breg_dmask_define_ldmstm vldm, .64
-+_sfi_breg_dmask_define_ldmstm vstm
-+_sfi_breg_dmask_define_ldmstm vstm, .32
-+_sfi_breg_dmask_define_ldmstm vstm, .64
-+_sfi_breg_dmask_define fld, s
-+_sfi_breg_dmask_define fld, d
-+_sfi_breg_dmask_define fst, s
-+_sfi_breg_dmask_define fst, d
-+_sfi_breg_dmask_define_ldmstm fldm, s
-+_sfi_breg_dmask_define_ldmstm fldm, d
-+_sfi_breg_dmask_define_ldmstm fstm, s
-+_sfi_breg_dmask_define_ldmstm fstm, d
-+_sfi_breg_dmask_define vldr
-+_sfi_breg_dmask_define vldr, .32
-+_sfi_breg_dmask_define vldr, .64
-+_sfi_breg_dmask_define vstr
-+_sfi_breg_dmask_define vstr, .32
-+_sfi_breg_dmask_define vstr, .64
-+_sfi_breg_dmask_define_neon vld1
-+_sfi_breg_dmask_define_neon vld2
-+_sfi_breg_dmask_define_neon vld3
-+_sfi_breg_dmask_define_neon vld4
-+_sfi_breg_dmask_define_neon vst1
-+_sfi_breg_dmask_define_neon vst2
-+_sfi_breg_dmask_define_neon vst3
-+_sfi_breg_dmask_define_neon vst4
-+_sfi_breg_dmask_define ldcl
-+_sfi_breg_dmask_define stcl
-+
-+.purgem _sfi_breg_dmask_define
-+.purgem _sfi_breg_dmask_define_1
-+.purgem _sfi_breg_dmask_define_ldst
-+.purgem _sfi_breg_dmask_define_ldmstm
-+.purgem _sfi_breg_dmask_define_neon
-+
-+@ Macro to precede an instruction that touches sp.
-+@ NB: GCC output uses this.
-+.macro sfi_sp insn:vararg
-+	.bundle_lock
-+	\insn
-+	_sfi_dmask sp
-+	.bundle_unlock
-+.endm
-+
-+@ Macro to start a naturally aligned 16-byte constant pool fragment.
-+@ NB: GCC output uses this.
-+.macro sfi_constant_barrier
-+	bkpt 0x5be0
-+.endm
-+
-+@ Macro to do a guaranteed safely nonresumable trap.
-+@ There is no assembler mnemonic for the UDF instruction.
-+@ This word is chosen so that in ARM it is a UDF instruction
-+@ and in (little-endian) Thumb-2 it is a UDF followed by a branch-to-self
-+@ (and vice versa in big-endian Thumb-2).
-+@ NB: GCC output uses this.
-+.macro sfi_trap
-+	@ .inst is like .word, but doesn't emit a $d mapping symbol.
-+	.inst 0xe7fedef0
-+.endm
-+
-+.purgem _sfi_for_each_cond
-+
-+@ TODO(mcgrathr): examples don't belong here
-+.if 0
-+@ Example uses of all the macros (nops just to ease reading of disassembly)
-+	nop
-+Tbx:	sfi_bx r0
-+	nop
-+Tbl:	sfi_bl foobar
-+	nop
-+Tblx:	sfi_blx r1
-+	nop
-+Tret:	sfi_ret
-+
-+	nop
-+Tloads: sfi_mem ldr r0, r1
-+	sfi_mem ldr r0, r1, #8
-+	sfi_mem str r0, r1, #8
-+	sfi_memib ldr r0, r1, #8
-+	sfi_memia ldr r0, r1, #8
-+	sfi_memm ldm r0, {r2, r3, r4}
-+	sfi_memmia ldmia r0, {r2, r3, r4}
-+	sfi_memm stm r0, {r2, r3, r4}
-+	sfi_memmia stmia r0, {r2, r3, r4}
-+	sfi_popm {r5, sp, lr}
-+
-+Talternate:
-+	sfi_breg r1, ldr r0, [r1]
-+	sfi_breg r1, ldr r0, [r1, #8]
-+	sfi_breg r1, str r0, [r1, #8]
-+	sfi_breg r1, ldr r0, [r1, #8]!
-+	sfi_breg r1, ldr r0, [r1], #8
-+	sfi_breg r0, ldm r0, {r2, r3, r4}
-+	sfi_breg r0, ldmia r0!, {r2, r3, r4}
-+	sfi_breg r0, stm r0, {r2, r3, r4}
-+	sfi_breg r0, stmia r0!, {r2, r3, r4}
-+.endif
-+
-+.pushsection .note.NaCl.ABI.arm, "aG", %note, .note.NaCl.ABI.arm, comdat
-+	.int 1f - 0f, 3f - 2f, 1
-+	.balign 4
-+0:	.string "NaCl"
-+1:	.balign 4
-+2:	.string "arm"
-+3:	.balign 4
-+.popsection
-diff --git a/native_client/pnacl/support/clang_direct/nacl-tp-offset.c b/native_client/pnacl/support/clang_direct/nacl-tp-offset.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..0a122be6d72ac9a78836530c1b0bf107f941f25a
---- /dev/null
-+++ b/native_client/pnacl/support/clang_direct/nacl-tp-offset.c
-@@ -0,0 +1,12 @@
-+/*
-+ * Copyright (c) 2015 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * Define __nacl_tp_tls_offset and __nacl_tp_tdb_offset for MIPS32 nacl-clang.
-+ */
-+
-+#define NACL_DEFINE_EXTERNAL_NATIVE_SUPPORT_FUNCS
-+#include "native_client/src/untrusted/nacl/tls_params.h"
-diff --git a/native_client/pnacl/support/crtbegin.c b/native_client/pnacl/support/crtbegin.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..d6f9c521ded252f97be5c0aa1d25160e7c3ed218
---- /dev/null
-+++ b/native_client/pnacl/support/crtbegin.c
-@@ -0,0 +1,89 @@
-+/*
-+ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/* This is the native crtbegin (crtbegin.o).
-+ *
-+ * It contains the constructor/destructor for exception handling,
-+ * and the symbol for __EH_FRAME_BEGIN__. This is native because
-+ * exception handling is also native (externally provided).
-+ *
-+ * We also need to sneak in the native PPAPI shim library between
-+ * these bookends because otherwise the unwind tables will be messed
-+ * up, c.f.
-+ * https://chromiumcodereview.appspot.com/9909016/
-+ * TODO(robertm): see whether this problem goes away once we switch
-+ * eh_frame_headers
-+ */
-+
-+/* This goes first to ensure that tls_params.h hasn't been #included before. */
-+#define NACL_DEFINE_EXTERNAL_NATIVE_SUPPORT_FUNCS
-+#include "native_client/src/untrusted/nacl/pnacl.h"
-+#include "native_client/src/untrusted/nacl/tls_params.h"
-+
-+#include <stdint.h>
-+
-+#include "native_client/pnacl/support/pnacl_irt.h"
-+#include "native_client/pnacl/support/relocate.h"
-+
-+
-+void _pnacl_wrapper_start(uint32_t *info);
-+
-+/*
-+ * HACK:
-+ * The real structure is defined in unwind-dw2-fde.h
-+ * this is something that is at least twice as big.
-+ */
-+struct object {
-+  void *p[16] __attribute__((aligned(8)));
-+};
-+
-+/*
-+ * __[de]register_frame_info() are provided by libgcc_eh. When not linking
-+ * with libgcc_eh, dummy implementations are provided.
-+ * See: gcc/unwind-dw2-fde.c
-+ */
-+
-+#ifdef LINKING_WITH_LIBGCC_EH
-+extern void __register_frame_info(void *begin, struct object *ob);
-+extern void __deregister_frame_info(const void *begin);
-+#else /* not LINKING_WITH_LIBGCC_EH */
-+void __register_frame_info(void *begin, struct object *ob) {}
-+void __deregister_frame_info(const void *begin) {}
-+#endif /* LINKING_WITH_LIBGCC_EH */
-+
-+
-+/*
-+ * Exception handling frames are aggregated into a single section called
-+ * .eh_frame.  The runtime system needs to (1) have a symbol for the beginning
-+ * of this section, and needs to (2) mark the end of the section by a NULL.
-+ */
-+
-+static char __EH_FRAME_BEGIN__[]
-+    __attribute__((section(".eh_frame"), aligned(4)))
-+    = { };
-+
-+static void __do_eh_ctor(void) {
-+  static struct object object;
-+  __register_frame_info (__EH_FRAME_BEGIN__, &object);
-+}
-+
-+/* This defines the entry point for a nexe produced by the PNaCl translator. */
-+void __pnacl_start(uint32_t *info) {
-+#if defined(__native_client_nonsfi__)
-+  apply_relocations();
-+#endif
-+
-+  __pnacl_init_irt(info);
-+
-+  /*
-+   * We must register exception handling unwind info before calling
-+   * any user code.  Note that we do not attempt to deregister the
-+   * unwind info at exit, but there is no particular need to do so.
-+   */
-+  __do_eh_ctor();
-+
-+  _pnacl_wrapper_start(info);
-+}
 diff --git a/native_client/pnacl/support/crtend.c b/native_client/pnacl/support/crtend.c
 new file mode 100644
 index 0000000000000000000000000000000000000000..7b70ca977644d1b6c2786c3582b7acf433fd64dc
@@ -1861,10 +610,10 @@ index 0000000000000000000000000000000000000000..cac2247e4d7cbe6f54de8050e430868e
 +#endif
 diff --git a/native_client/pnacl/support/setjmp_mips32.S b/native_client/pnacl/support/setjmp_mips32.S
 new file mode 100644
-index 0000000000000000000000000000000000000000..3a906f47343a3fb4b115aefc7d818c9c30a1ceca
+index 0000000000000000000000000000000000000000..fd601b14821f690d467a943a1e35ffb82bf5aa13
 --- /dev/null
 +++ b/native_client/pnacl/support/setjmp_mips32.S
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,96 @@
 +/*
 + * Copyright (c) 2012 The Native Client Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -1884,74 +633,34 @@ index 0000000000000000000000000000000000000000..3a906f47343a3fb4b115aefc7d818c9c
 +/* int setjmp(jmp_buf env) */
 +setjmp:
 +
-+  /* The code here is grouped by instruction bundle. */
-+
 +  /* NACL_CALLEE_SAVE_LIST BEGIN */
-+  and  $a0, $a0, STORE_MASK
-+  sw   $s0, 0($a0)
-+  and  $a0, $a0, STORE_MASK
-+  sw   $s1, 4($a0)
-+
-+  and  $a0, $a0, STORE_MASK
-+  sw   $s2, 8($a0)
-+  and  $a0, $a0, STORE_MASK
-+  sw   $s3, 12($a0)
-+
-+  and  $a0, $a0, STORE_MASK
-+  sw   $s4, 16($a0)
-+  and  $a0, $a0, STORE_MASK
-+  sw   $s5, 20($a0)
-+
-+  and  $a0, $a0, STORE_MASK
-+  sw   $s6, 24($a0)
-+  and  $a0, $a0, STORE_MASK
-+  sw   $s7, 28($a0)
-+
-+  and  $a0, $a0, STORE_MASK
-+  sw   $sp, 32($a0)
-+  and  $a0, $a0, STORE_MASK
-+  sw   $fp, 36($a0)
-+
-+  and  $a0, $a0, STORE_MASK
-+  sw   $ra, 40($a0)
-+  and  $a0, $a0, STORE_MASK
++  sw   $s0,  0($a0)
++  sw   $s1,  4($a0)
++  sw   $s2,  8($a0)
++  sw   $s3,  12($a0)
++  sw   $s4,  16($a0)
++  sw   $s5,  20($a0)
++  sw   $s6,  24($a0)
++  sw   $s7,  28($a0)
++  sw   $sp,  32($a0)
++  sw   $fp,  36($a0)
++  sw   $ra,  40($a0)
 +  swc1 $f20, 44($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f21, 48($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f22, 52($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f23, 56($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f24, 60($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f25, 64($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f26, 68($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f27, 72($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f28, 76($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f29, 80($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f30, 84($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  swc1 $f31, 88($a0)
 +  /* NACL_CALLEE_SAVE_LIST END */
-+  move $v0, $zero
-+  nop
-+
-+  and  $ra, $ra, JUMP_MASK
++  move $v0,  $zero
 +  j    $ra
-+  nop
-+  nop
++  nop  /* delay slot */
 +
 +  .end setjmp
 +
@@ -1966,77 +675,38 @@ index 0000000000000000000000000000000000000000..3a906f47343a3fb4b115aefc7d818c9c
 +longjmp:
 +
 +  /* NACL_CALLEE_LOAD_LIST BEGIN */
-+  and  $a0, $a0, STORE_MASK
-+  lw   $s0, 0($a0)
-+  and  $a0, $a0, STORE_MASK
-+  lw   $s1, 4($a0)
-+
-+  and  $a0, $a0, STORE_MASK
-+  lw   $s2, 8($a0)
-+  and  $a0, $a0, STORE_MASK
-+  lw   $s3, 12($a0)
-+
-+  and  $a0, $a0, STORE_MASK
-+  lw   $s4, 16($a0)
-+  and  $a0, $a0, STORE_MASK
-+  lw   $s5, 20($a0)
-+
-+  and  $a0, $a0, STORE_MASK
-+  lw   $s6, 24($a0)
-+  and  $a0, $a0, STORE_MASK
-+  lw   $s7, 28($a0)
-+
-+  and  $a0, $a0, STORE_MASK
-+  lw   $sp, 32($a0)
-+  and  $sp, $sp, STORE_MASK
-+  nop
-+
-+  and  $a0, $a0, STORE_MASK
-+  lw   $fp, 36($a0)
-+  and  $a0, $a0, STORE_MASK
-+  lw   $ra, 40($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
++  lw   $s0,  0($a0)
++  lw   $s1,  4($a0)
++  lw   $s2,  8($a0)
++  lw   $s3,  12($a0)
++  lw   $s4,  16($a0)
++  lw   $s5,  20($a0)
++  lw   $s6,  24($a0)
++  lw   $s7,  28($a0)
++  lw   $sp,  32($a0)
++  lw   $fp,  36($a0)
++  lw   $ra,  40($a0)
 +  lwc1 $f20, 44($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f21, 48($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f22, 52($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f23, 56($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f24, 60($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f25, 64($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f26, 68($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f27, 72($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f28, 76($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f29, 80($a0)
-+
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f30, 84($a0)
-+  and  $a0,  $a0, STORE_MASK
 +  lwc1 $f31, 88($a0)
 +  /* NACL_CALLEE_LOAD_LIST END */
 +
 +  bne  $a1, $zero, 1f
-+  nop
++  nop  /* delay slot */
 +  ori  $a1, $zero, 1
 +1:
 +  move $v0, $a1
-+
-+  and  $ra, $ra, JUMP_MASK
 +  j    $ra
-+  nop
-+  nop
++  nop  /* delay slot */
 +
 +  .end longjmp
 +
@@ -92811,3 +91481,1236 @@ index 0000000000000000000000000000000000000000..60091779e328fdf07cd2a6e8fc04d964
 +
 +    * run_service_runtime_tests
 +    * simple_tests
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_app.c b/native_client/src/trusted/service_runtime/arch/arm/nacl_app.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..d8342f645ae706eb9001590be4b123bb65a82658
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_app.c
+@@ -0,0 +1,27 @@
++/*
++ * Copyright 2008 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * NaCl run time.
++ */
++#include <fcntl.h>
++#include <stdlib.h>
++
++#include "native_client/src/shared/platform/nacl_sync_checked.h"
++
++#include "native_client/src/trusted/desc/nacl_desc_io.h"
++
++#include "native_client/src/trusted/service_runtime/sel_ldr.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
++
++/*
++ * No segments:  (currently) no-op.
++ */
++NaClErrorCode NaClAppPrepareToLaunch(struct NaClApp     *nap) {
++  UNREFERENCED_PARAMETER(nap);
++
++  return LOAD_OK;
++}
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_signal_arm.h b/native_client/src/trusted/service_runtime/arch/arm/nacl_signal_arm.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..6df9015760b1862c5f72ef63ef4a62f4ce831187
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_signal_arm.h
+@@ -0,0 +1,44 @@
++/*
++ * Copyright 2010 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * NaCl Signal Context
++ */
++
++#ifndef __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_NACL_SIGNAL_ARM_H__
++#define __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_NACL_SIGNAL_ARM_H__ 1
++
++#include "native_client/src/include/portability.h"
++
++/*
++ * Architecture specific context object.  Register order matches that
++ * found in src/trusted/debug_stub/abi.cc, which allows us to use an
++ * abi context (GDB ordered context), and a signal context interchangably.
++ * In addition, we use common names for the stack and program counter to
++ * allow functions which use them to avoid conditional compilation.
++ */
++struct NaClSignalContext {
++  uint32_t r0;
++  uint32_t r1;
++  uint32_t r2;
++  uint32_t r3;
++  uint32_t r4;
++  uint32_t r5;
++  uint32_t r6;
++  uint32_t r7;
++  uint32_t r8;
++  uint32_t r9;
++  uint32_t r10;
++  uint32_t r11;
++  uint32_t r12;
++  uint32_t stack_ptr;
++  uint32_t lr;
++  uint32_t prog_ctr;
++  uint32_t cpsr;
++};
++
++
++#endif /* __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_NACL_SIGNAL_ARM_H__ */
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_switch.S b/native_client/src/trusted/service_runtime/arch/arm/nacl_switch.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..22a9b908907ecbd48202cec880a969a46c6540e9
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_switch.S
+@@ -0,0 +1,97 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "native_client/src/trusted/service_runtime/nacl_config.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
++
++.text
++.fpu neon
++
++/*
++ * This trusted code is linked into the service_runtime and
++ * executed when switching from the service runtime to a NaCl
++ * module. This happens when a main NaCl thread is created and starting to
++ * execute the NaCl code, or when NaCl module is returning from a system
++ * call. This piece of code lives in a service runtime part of address space.
++ * The one and only argument is in register r0.
++ *
++ * r0 -- address of thread context (struct NaClThreadContext)
++ */
++
++/*
++ * Here we are starting a new untrusted thread.  The callee-saved VFP/NEON
++ * registers have ambient values from trusted code, which must not leak
++ * into untrusted code.  So clear them.
++ */
++DEFINE_GLOBAL_HIDDEN_FUNCTION(NaClStartSwitch):
++  veor q4, q4, q4
++  veor q5, q5, q5
++  veor q6, q6, q6
++  veor q7, q7, q7
++
++/*
++ * Execution falls through to here.  This is also the entry point for
++ * returning from a syscall, which does not need to repeat the work of
++ * clearing the callee-saved registers because the C frames for the call
++ * to NaClSyscallCSegHook and its callees will save and restore their
++ * incoming (i.e. the untrusted) values of those registers.
++ */
++DEFINE_GLOBAL_HIDDEN_FUNCTION(NaClSwitch):
++
++/*
++ * Load the untrusted code's value of the fpscr into a scratch register.
++ */
++  ldr ip, [r0, #NACL_THREAD_CONTEXT_OFFSET_FPSCR]
++
++/*
++ * We clear registers r2, r3, lr, flag and status fields in
++ * CPSR (status register) to avoid information leaks.  The remaining
++ * registers are overwritten by the code that follows after.
++ */
++
++  mov r2, #0
++  mov r3, #0
++  mov lr, #0
++  msr cpsr_fs, #0
++
++/*
++ * Clear out the VFP/NEON state that otherwise might leak information.
++ * Registers d8-d15 (aka q4-q7) are callee-saves, so the untrusted state
++ * of those will have been saved and restored by whatever trusted code
++ * paths might have touched them.  The other VFP/NEON registers are
++ * call-clobbered, so trusted code might have left interesting bits
++ * there and we must hide that information.
++ */
++  veor q0, q0, q0
++  veor q1, q1, q1
++  veor q2, q2, q2
++  veor q3, q3, q3
++  veor q8, q8, q8
++  veor q9, q9, q9
++  veor q10, q10, q10
++  veor q11, q11, q11
++  veor q12, q12, q12
++  veor q13, q13, q13
++  veor q14, q14, q14
++  veor q15, q15, q15
++
++/*
++ * Restore the untrusted code's fpscr state.
++ */
++  fmxr fpscr, ip
++
++/*
++ * Restore register state from struct NaClThreadContext.
++ *
++ * TODO(mcgrathr): Perhaps drop callee-saved registers (r4-r8,r10-r11)
++ * from this restore and instead just clear them in NaClStartSwitch.
++ */
++  ldmia r0, NACL_CALLEE_SAVE_LIST
++  ldr sp, [r0, #NACL_THREAD_CONTEXT_OFFSET_STACK_PTR]
++  /* Loads the "sysret" field into r0 and the "new_prog_ctr" field into r1. */
++  ldrd r0, r1, [r0, #NACL_THREAD_CONTEXT_OFFSET_SYSRET]
++  /* Transfer control to untrusted code */
++  bx r1
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_switch_to_app_arm.c b/native_client/src/trusted/service_runtime/arch/arm/nacl_switch_to_app_arm.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..9abed933e59e50e4659caf97cd9030cee951825a
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_switch_to_app_arm.c
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * NaCl Service Runtime, C-level context switch code.
++ */
++
++#include "native_client/src/shared/platform/nacl_check.h"
++#include "native_client/src/trusted/service_runtime/sel_ldr.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
++#include "native_client/src/trusted/service_runtime/nacl_app_thread.h"
++#include "native_client/src/trusted/service_runtime/nacl_globals.h"
++#include "native_client/src/trusted/service_runtime/nacl_switch_to_app.h"
++
++void NaClInitSwitchToApp(struct NaClApp *nap) {
++  /*
++   * We don't need anything here.  We might need it in future if e.g.
++   * we start letting untrusted code use NEON extensions.
++   */
++  UNREFERENCED_PARAMETER(nap);
++}
++
++NORETURN void NaClStartThreadInApp(struct NaClAppThread *natp,
++                                   uint32_t             new_prog_ctr) {
++  struct NaClThreadContext  *context;
++
++  natp->user.trusted_stack_ptr = NaClGetStackPtr() & ~0xf;
++
++  context = &natp->user;
++  context->new_prog_ctr = new_prog_ctr;
++
++  /*
++   * At startup this is not the return value, but the first argument.
++   * In the initial thread, it gets the pointer to the information
++   * block on the stack.  Additional threads do not expect anything in
++   * particular in the first argument register, so we don't bother to
++   * conditionalize this.
++   */
++  context->sysret = context->stack_ptr;
++
++  NaClStartSwitch(context);
++}
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_syscall.S b/native_client/src/trusted/service_runtime/arch/arm/nacl_syscall.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..6d54a17daef42ab68990b042340872ef65f637f8
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_syscall.S
+@@ -0,0 +1,74 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
++#include "native_client/src/trusted/service_runtime/nacl_config.h"
++
++.text
++
++
++/*
++ * This trusted code is linked into the service runtime. It is executed when a
++ * nacl module performs a system call via a service runtime interface. The nacl
++ * module jumps to the trampoline corresponding to the syscall and then here.
++ * This code switches the execution contexts (registers and stack) from
++ * untrusted to trusted.
++ */
++
++DEFINE_GLOBAL_HIDDEN_FUNCTION(NaClSyscallSeg):
++  /* Set r0 to the start of the NaClThreadContext struct. */
++  sub r0, r9, #NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1
++
++  /*
++   * Check that r9 points into a valid NaClThreadContext by checking
++   * that the guard_token field matches nacl_guard_token.
++   */
++  ldr r2, [r0, #NACL_THREAD_CONTEXT_OFFSET_GUARD_TOKEN]
++  ldr r3, .L.offset.nacl_guard_token
++.LPIC1:
++  ldr r3, [pc, r3]
++  cmp r2, r3
++  bne NaClSyscallThreadCaptureFault
++
++  /* Save address of trampoline for determining which syscall was called. */
++  str lr, [sp, #-0x18]
++
++  /* store thread state to the nacl_user entry */
++  str sp, [r0, #NACL_THREAD_CONTEXT_OFFSET_STACK_PTR]
++  stmia r0, NACL_CALLEE_SAVE_LIST
++  /* if r0 is NULL, we would have faulted here */
++DEFINE_GLOBAL_HIDDEN_LOCATION(NaClSyscallSegRegsSaved):
++
++  /*
++   * Store the untrusted fpscr state and load the trusted fpscr into r2.
++   */
++  fmrx ip, fpscr
++  str ip, [r0, #NACL_THREAD_CONTEXT_OFFSET_FPSCR]
++  ldr r2, [r0, #NACL_THREAD_CONTEXT_OFFSET_SYS_FPSCR]
++
++  /* Restore the trusted stack */
++  ldr  sp, [r0, #NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR]
++
++  /* Restore the trusted fpscr. */
++  fmxr fpscr, r2
++
++  bl  NaClSyscallCSegHook
++
++  /*
++   * NaClSyscallCSegHook returned with the NaClThreadContext pointer
++   * back in r0, which is conveniently already where it's needed to
++   * be the argument to NaClSwitch.
++   */
++  b NaClSwitch
++
++DEFINE_GLOBAL_HIDDEN_LOCATION(NaClSyscallSegEnd):
++
++DEFINE_GLOBAL_HIDDEN_LOCATION(NaClSyscallThreadCaptureFault):
++  .word NACL_HALT_WORD
++
++.L.offset.nacl_guard_token:
++  .word nacl_guard_token - (.LPIC1 + 8)
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_text_pad_test.S b/native_client/src/trusted/service_runtime/arch/arm/nacl_text_pad_test.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..ad1bcbf06d7f308c689f2ed6cb78c71ef27d6417
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_text_pad_test.S
+@@ -0,0 +1,251 @@
++/*
++ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++#include "native_client/src/include/arm_sandbox.h"
++#include "native_client/src/trusted/service_runtime/include/bits/nacl_syscalls.h"
++#include "native_client/src/trusted/service_runtime/nacl_config.h"
++
++/* the macros below are used with movw/movt and absolute values */
++/* llvm-mc does not like the use of :lower16:/:upper16: with absolute values */
++/* c.f.: http://llvm.org/bugs/show_bug.cgi?id=8721 */
++#define lower_16(x) ((x) & 0xffff)
++#define upper_16(x) (((x) >> 16) & 0xffff)
++
++
++        /*
++         * Code to test various address layout boundary conditions.
++         * This is a translation from the x86-{32,64} code, and is
++         * not intended to be super efficent, just good enough to
++         * print out the values that are designed, while maintaining
++         * strict control over the address space layout.
++         */
++
++        .text
++start_of_text:
++        /*
++         * write_num_10 omitted.  __aeabi_udivmod is too long/complex
++         * to replicate, we cannot link against glibc to get _udivsi3.o
++         * and pick up transitive dependencies.  Plus, we don't actually
++         * use decimal output (yet).
++         *
++         * One alternative would be to link using:
++         *
++         * ${LD} --native-client -e _start -Ttext 0x20000 -o ${TARGET} \
++         *  ${SOURCES} ${GLIBC} ${TEXT_EXTEND}
++         *
++         * i.e., to load the text pad as a separate .o *after* external
++         * references are resolved from glibc, with link-time
++         * expansion/computation of the (TEXT_EXTEND - (. - start_of_text))/4
++         * fill expression (is that possible?).
++         */
++
++        /*
++         * write_num_16.  Write an unsigned value in hex.
++         * r0 is descriptor number, r1 is unsigned value to write.
++         */
++        .p2align 4
++write_num_16:
++        push {r4, lr}
++        mov r3, sp
++        /* r12 is caller-saved: use it as a temporary register */
++        sub r12, sp, #0x10
++        bic sp, r12, #0xc0000000
++
++        mov r2, #0
++do_digit_16:
++        sub r3, r3, #1
++        add r2, r2, #1
++        and r4, r1, #0xf
++
++        add r4, r4, #'0'
++        cmp r4, #'9'
++        ble do_digit_not_upper
++        add r4, r4, #('a'-'0'-10)
++
++do_digit_not_upper:
++        bic r3, r3, #0xc0000000
++        strb r4, [r3]
++        lsrs r1, r1, #4
++        bne do_digit_16
++
++        mov r1, r3
++        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_write))
++        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_write))
++        nop
++
++        nop
++        nop
++        bic r3, r3, #0xc000000f
++        blx r3
++
++        /* r12 is caller-saved: use it as a temporary register */
++        add r12, sp, #0x10
++        bic sp, r12, #0xc0000000
++        pop {r4, lr}
++        nop
++
++        bic lr, lr, #0xc000000f
++        bx lr
++
++        .p2align 4
++        /*
++         * r0 is descriptor number, r1 is character to write
++         */
++write_char:
++        push {lr}
++        /* r12 is caller-saved: use it as a temporary register */
++        sub r12, sp, #0x10
++        bic sp, r12, #0xc0000000
++        strb r1, [sp]
++
++        mov r1, sp
++        mov r2, #1
++        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_write))
++        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_write))
++
++        nop
++        nop
++        bic r3, r3, #0xc000000f
++        blx r3
++
++        /* r12 is caller-saved: use it as a temporary register */
++        add r12, sp, #0x10
++        bic sp, r12, #0xc0000000
++        pop {lr}
++        nop
++
++        bic lr, lr, #0xc000000f
++        bx lr
++
++        .p2align 4
++        .globl _start
++_start:
++        /* basic I/O test */
++        mov r0, #1
++        movw r1, #0xbeef
++        movt r1, #0xdead
++        bl write_num_16
++
++        mov r0, #1
++        mov r1, #'\n'
++        nop
++        bl write_char
++
++        movw r1, :lower16:(end_of_text)
++        movt r1, :upper16:(end_of_text)
++        mov r0, #1
++        bl write_num_16
++
++        mov r0, #1
++        mov r1, #'\n'
++        nop
++        bl write_char
++
++        mov r0, #0
++        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_brk))
++        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_brk))
++        nop
++
++        nop
++        nop
++        bic r3, r3, #0xc000000f
++        blx r3
++
++        mov r4, r0  /* save a copy of break addr */
++        mov r1, r0
++        mov r0, #1
++        bl write_num_16
++
++        mov r0, #1
++        mov r1, #'\n'
++        nop
++        bl write_char
++
++        mov r5, #0  /* r5 holds eventual exit status */
++        movw r1, lower_16(EXPECTED_BREAK)
++        movt r1, upper_16(EXPECTED_BREAK)
++        cmp r1, r4
++
++        movne r5, #1
++        mov r0, #1  /* r1 still has EXPECTED_BREAK */
++        nop
++        bl write_num_16
++
++        mov r1, #'\n'
++        mov r0, #1
++        nop
++        bl write_char
++
++#if defined(EXPECTED_RODATA)
++        mov r2, #12
++        movw r1, :lower16:(ro_str)
++        movt r1, :upper16:(ro_str)
++        mov r0, #1
++
++        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_write))
++        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_write))
++        bic r3, r3, #0xc000000f
++        blx r3
++
++        /* Truncate the address to page boundary for comparison. */
++        movw r4, #0
++        movt r4, :upper16:(ro_str)
++        nop
++        nop
++
++        mov r0, #1
++        mov r1, r4
++        nop
++        bl write_num_16
++
++        mov r1, #'\n'
++        mov r0, #1
++        nop
++        bl write_char
++
++        movw r1, lower_16(EXPECTED_RODATA)
++        movt r1, upper_16(EXPECTED_RODATA)
++        nop
++        nop
++
++        cmp r1, r4
++        movne r5, #2
++        mov r0, #1  /* r1 still has EXPECTED_RODATA */
++        bl write_num_16
++
++        mov r1, #'\n'
++        mov r0, #2
++        nop
++        bl write_char
++#endif
++
++        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_exit))
++        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_exit))
++        mov r0, r5
++        nop
++
++        nop
++        nop
++        bic r3, r3, #0xc000000f
++        blx r3
++#if defined(PNACL_AS)
++/* NOTE: unlike x86 the alignment directive on ARM takes
++   the logarithm of the alignment */
++#define POW2_BIGGER_THAN_DOT 14
++        .align32 POW2_BIGGER_THAN_DOT, NACL_INSTR_ARM_HALT_FILL
++        .fill (TEXT_EXTEND - (1 << POW2_BIGGER_THAN_DOT))/4, 4, \
++              NACL_INSTR_ARM_HALT_FILL
++#else
++        .fill (TEXT_EXTEND - (. - start_of_text))/4, 4, \
++              NACL_INSTR_ARM_HALT_FILL
++#endif
++
++end_of_text:
++
++#if defined(EXPECTED_RODATA)
++        .section .rodata
++ro_str: .ascii "Hello world\n"
++        /*      123456789012 */
++#endif
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_tls.c b/native_client/src/trusted/service_runtime/arch/arm/nacl_tls.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..5324ee94dceb7e7c1de85207813f969ed58f7f95
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_tls.c
+@@ -0,0 +1,125 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "native_client/src/include/nacl_platform.h"
++#include "native_client/src/include/nacl_macros.h"
++#include "native_client/src/include/portability.h"
++#include "native_client/src/shared/platform/nacl_check.h"
++#include "native_client/src/shared/platform/nacl_sync_checked.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
++#include "native_client/src/trusted/service_runtime/nacl_app_thread.h"
++#include "native_client/src/trusted/service_runtime/nacl_globals.h"
++#include "native_client/src/trusted/service_runtime/nacl_tls.h"
++#include "native_client/src/trusted/service_runtime/sel_ldr.h"
++#include "native_client/src/trusted/service_runtime/sel_memory.h"
++
++static struct NaClMutex gNaClTlsMu;
++static int gNaClThreadIdxInUse[NACL_THREAD_MAX];  /* bool */
++static size_t const kNumThreads = NACL_ARRAY_SIZE_UNSAFE(gNaClThreadIdxInUse);
++
++/* May be NULL if the current thread does not host a NaClAppThread. */
++static THREAD struct NaClThreadContext *nacl_current_thread;
++
++void NaClTlsSetCurrentThread(struct NaClAppThread *natp) {
++  nacl_current_thread = &natp->user;
++}
++
++struct NaClAppThread *NaClTlsGetCurrentThread(void) {
++  return NaClAppThreadFromThreadContext(nacl_current_thread);
++}
++
++uint32_t NaClGetThreadIdx(struct NaClAppThread *natp) {
++  return natp->user.tls_idx;
++}
++
++
++int NaClTlsInit(void) {
++  size_t i;
++
++  NaClLog(2, "NaClTlsInit\n");
++
++  for (i = 0; i < kNumThreads; i++) {
++    gNaClThreadIdxInUse[i] = 0;
++  }
++  if (!NaClMutexCtor(&gNaClTlsMu)) {
++    NaClLog(LOG_WARNING,
++            "NaClTlsInit: gNaClTlsMu initialization failed\n");
++    return 0;
++  }
++
++  return 1;
++}
++
++
++void NaClTlsFini(void) {
++  NaClLog(2, "NaClTlsFini\n");
++  NaClMutexDtor(&gNaClTlsMu);
++}
++
++static int NaClThreadIdxAllocate(void) {
++  size_t i;
++
++  NaClXMutexLock(&gNaClTlsMu);
++  for (i = 1; i < kNumThreads; i++) {
++    if (!gNaClThreadIdxInUse[i]) {
++      gNaClThreadIdxInUse[i] = 1;
++      break;
++    }
++  }
++  NaClXMutexUnlock(&gNaClTlsMu);
++
++  if (kNumThreads != i) {
++    return i;
++  }
++
++  NaClLog(LOG_ERROR, "NaClThreadIdxAllocate: no more slots for a thread\n");
++  return NACL_TLS_INDEX_INVALID;
++}
++
++
++/*
++ * Allocation does not mean we can set nacl_current_thread, since we
++ * are not that thread.  Setting it must wait until the thread
++ * actually launches.
++ */
++uint32_t NaClTlsAllocate(struct NaClAppThread *natp) {
++  UNREFERENCED_PARAMETER(natp);
++
++  return NaClThreadIdxAllocate();
++}
++
++
++void NaClTlsFree(struct NaClAppThread *natp) {
++  uint32_t idx = NaClGetThreadIdx(natp);
++  NaClLog(2, "NaClTlsFree: old idx %d\n", idx);
++
++  NaClXMutexLock(&gNaClTlsMu);
++  gNaClThreadIdxInUse[idx] = 0;
++  NaClXMutexUnlock(&gNaClTlsMu);
++
++  natp->user.r9 = 0;
++  natp->user.guard_token = 0;
++}
++
++
++void NaClTlsSetTlsValue1(struct NaClAppThread *natp, uint32_t value) {
++  natp->user.tls_value1 = value;
++}
++
++
++void NaClTlsSetTlsValue2(struct NaClAppThread *natp, uint32_t value) {
++  natp->user.tls_value2 = value;
++}
++
++
++uint32_t NaClTlsGetTlsValue1(struct NaClAppThread *natp) {
++  return natp->user.tls_value1;
++}
++
++
++uint32_t NaClTlsGetTlsValue2(struct NaClAppThread *natp) {
++  return natp->user.tls_value2;
++}
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_addrspace_arm.c b/native_client/src/trusted/service_runtime/arch/arm/sel_addrspace_arm.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..83e9c70e736806966b982087aab3bbade3980cdb
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/sel_addrspace_arm.c
+@@ -0,0 +1,73 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "native_client/src/include/nacl_platform.h"
++#include "native_client/src/shared/platform/nacl_check.h"
++#include "native_client/src/trusted/service_runtime/arch/sel_ldr_arch.h"
++#include "native_client/src/trusted/service_runtime/nacl_error_code.h"
++#include "native_client/src/trusted/service_runtime/sel_addrspace.h"
++#include "native_client/src/trusted/service_runtime/sel_ldr.h"
++#include "native_client/src/trusted/service_runtime/sel_memory.h"
++
++
++/* NOTE: This routine is almost identical to the x86_32 version.
++ */
++NaClErrorCode NaClAllocateSpaceAslr(void **mem, size_t addrsp_size,
++                                    enum NaClAslrMode aslr_mode) {
++  int result;
++  void *tmp_mem = (void *) NACL_TRAMPOLINE_START;
++
++  UNREFERENCED_PARAMETER(aslr_mode);
++  CHECK(NULL != mem);
++
++  /*
++   * On ARM, we cheat slightly: we add two pages to the requested
++   * allocation!  This accomodates the guard region we require at the
++   * top end of untrusted memory.
++   */
++  addrsp_size += NACL_ADDRSPACE_UPPER_GUARD_SIZE;
++
++  NaClAddrSpaceBeforeAlloc(addrsp_size);
++
++  /*
++   * On 32 bit Linux, a 1 gigabyte block of address space may be reserved at
++   * the zero-end of the address space during process creation, to address
++   * sandbox layout requirements on ARM and performance issues on Intel ATOM.
++   * Look for this prereserved block and if found, pass its address to the
++   * page allocation function.
++   */
++  if (!NaClFindPrereservedSandboxMemory(mem, addrsp_size)) {
++    /* On ARM, we should always have prereserved sandbox memory. */
++    NaClLog(LOG_ERROR, "NaClAllocateSpace:"
++            " Could not find correct amount of prereserved memory"
++            " (looked for 0x%016"NACL_PRIxS" bytes).\n",
++            addrsp_size);
++    return LOAD_NO_MEMORY_FOR_ADDRESS_SPACE;
++  }
++  /*
++   * When creating a zero-based sandbox, we do not allocate the first 64K of
++   * pages beneath the trampolines, because -- on Linux at least -- we cannot.
++   * Instead, we allocate starting at the trampolines, and then coerce the
++   * "mem" out parameter.
++   */
++  CHECK(*mem == NULL);
++  addrsp_size -= NACL_TRAMPOLINE_START;
++  result = NaClPageAllocAtAddr(&tmp_mem, addrsp_size);
++
++  if (0 != result) {
++    NaClLog(2,
++            "NaClAllocateSpace: NaClPageAllocAtAddr 0x%08"NACL_PRIxPTR
++            " failed\n",
++            (uintptr_t) tmp_mem);
++    return LOAD_NO_MEMORY_FOR_ADDRESS_SPACE;
++  }
++  NaClLog(4, "NaClAllocateSpace: %"NACL_PRIxPTR", %"NACL_PRIxS"\n",
++          (uintptr_t) *mem,
++          addrsp_size);
++
++  return LOAD_OK;
++}
++
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.c b/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..ba7833d9d96e7bebcd6cd435510751f6d563a779
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.c
+@@ -0,0 +1,57 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <string.h>
++
++#include "native_client/src/shared/platform/nacl_check.h"
++#include "native_client/src/trusted/service_runtime/nacl_globals.h"
++#include "native_client/src/trusted/service_runtime/sel_ldr.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h"
++
++
++/* NOTE(robertm): the trampoline organization for ARM is currenly assuming
++ * NACL_TRAMPOLINE_SIZE == 32. This is contrary to the bundle size
++ * which is 16. The reason for this is tramp.S which has a payload
++ * 5 instr + one data item
++ */
++
++void  NaClPatchOneTrampoline(struct NaClApp *nap,
++                             uintptr_t      target_addr) {
++  size_t trampoline_size = ((uintptr_t) &NaCl_trampoline_seg_end
++                            - (uintptr_t) &NaCl_trampoline_seg_code);
++
++  UNREFERENCED_PARAMETER(nap);
++
++  CHECK(trampoline_size == NACL_SYSCALL_BLOCK_SIZE);
++  memcpy((void *) target_addr, &NaCl_trampoline_seg_code,
++         NACL_SYSCALL_BLOCK_SIZE);
++}
++
++
++void NaClFillMemoryRegionWithHalt(void *start, size_t size) {
++  uint32_t *inst = (uint32_t *) start;
++  uint32_t i;
++
++  CHECK(sizeof *inst == NACL_HALT_LEN);
++  CHECK(0 == size % NACL_HALT_LEN);
++  /* check that the region start is 4 bytes aligned */
++  CHECK(0 == (uint32_t)start % NACL_HALT_LEN);
++
++  for (i = 0; i < (size / NACL_HALT_LEN); i++)
++    inst[i] = NACL_HALT_OPCODE;
++}
++
++
++void NaClFillTrampolineRegion(struct NaClApp *nap) {
++  NaClFillMemoryRegionWithHalt((void *)(nap->mem_start + NACL_TRAMPOLINE_START),
++                               NACL_TRAMPOLINE_SIZE);
++}
++
++
++void  NaClLoadSpringboard(struct NaClApp  *nap) {
++  UNREFERENCED_PARAMETER(nap);
++}
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h b/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..c27d30fae7d23182ede40bbf15c353f512770156
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h
+@@ -0,0 +1,20 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef SERVICE_RUNTIME_ARCH_ARM_SEL_LDR_H__
++#define SERVICE_RUNTIME_ARCH_ARM_SEL_LDR_H__ 1
++
++#include "native_client/src/trusted/service_runtime/nacl_config.h"
++
++/* NOTE: we hope to unify this among archtectures */
++#define NACL_MAX_ADDR_BITS      30
++
++#define NACL_ADDRSPACE_LOWER_GUARD_SIZE 0
++#define NACL_ADDRSPACE_UPPER_GUARD_SIZE 0x2000
++
++#define NACL_THREAD_MAX         8192  /* arbitrary, can be larger */
++
++#endif /* SERVICE_RUNTIME_ARCH_ARM_SEL_LDR_H__ */
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_rt.c b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..2eb7247d2c4d4aa9bb95c4271359c71a78da29d0
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.c
+@@ -0,0 +1,96 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * NaCl Secure Runtime
++ */
++#include "native_client/src/include/portability_string.h"
++#include "native_client/src/shared/platform/nacl_global_secure_random.h"
++#include "native_client/src/trusted/service_runtime/nacl_app_thread.h"
++#include "native_client/src/trusted/service_runtime/nacl_signal.h"
++#include "native_client/src/trusted/service_runtime/nacl_tls.h"
++#include "native_client/src/trusted/service_runtime/sel_ldr.h"
++#include "native_client/src/trusted/service_runtime/sel_rt.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h"
++
++
++uint32_t nacl_guard_token;
++
++
++void NaClInitGlobals(void) {
++  NaClLog(2, "NaClInitGlobals\n");
++  nacl_guard_token = NaClGlobalSecureRngUint32();
++}
++
++
++int NaClAppThreadInitArchSpecific(struct NaClAppThread *natp,
++                                  nacl_reg_t           prog_ctr,
++                                  nacl_reg_t           stack_ptr) {
++  struct NaClThreadContext *ntcp = &natp->user;
++
++  /*
++   * We call this function so that it does not appear to be dead code,
++   * although it only contains compile-time assertions.
++   */
++  NaClThreadContextOffsetCheck();
++
++  memset((void *)ntcp, 0, sizeof(*ntcp));
++  ntcp->stack_ptr = stack_ptr;
++  ntcp->prog_ctr = prog_ctr;
++  ntcp->tls_idx = NaClTlsAllocate(natp);
++  if (ntcp->tls_idx == NACL_TLS_INDEX_INVALID)
++    return 0;
++  ntcp->r9 = (uintptr_t) &ntcp->tls_value1;
++  ntcp->syscall_routine = (uintptr_t) NaClSyscallSeg;
++  ntcp->guard_token = nacl_guard_token;
++
++  /*
++   * Save the system's state of the FPSCR so we can restore
++   * the same state when returning to trusted code.
++   */
++  __asm__ __volatile__("fmrx %0, fpscr" : "=r" (ntcp->sys_fpscr));
++
++  NaClLog(4, "user.tls_idx: 0x%08"NACL_PRIxNACL_REG"\n", ntcp->tls_idx);
++  NaClLog(4, "user.stack_ptr: 0x%08"NACL_PRIxNACL_REG"\n", ntcp->stack_ptr);
++  NaClLog(4, "user.prog_ctr: 0x%08"NACL_PRIxNACL_REG"\n", ntcp->prog_ctr);
++
++  return 1;
++}
++
++
++void NaClThreadContextToSignalContext(const struct NaClThreadContext *th_ctx,
++                                      struct NaClSignalContext *sig_ctx) {
++  sig_ctx->r0        = 0;
++  sig_ctx->r1        = 0;
++  sig_ctx->r2        = 0;
++  sig_ctx->r3        = 0;
++  sig_ctx->r4        = th_ctx->r4;
++  sig_ctx->r5        = th_ctx->r5;
++  sig_ctx->r6        = th_ctx->r6;
++  sig_ctx->r7        = th_ctx->r7;
++  sig_ctx->r8        = th_ctx->r8;
++  sig_ctx->r9        = th_ctx->r9;
++  sig_ctx->r10       = th_ctx->r10;
++  sig_ctx->r11       = th_ctx->fp;
++  sig_ctx->r12       = 0;
++  sig_ctx->stack_ptr = th_ctx->stack_ptr;
++  sig_ctx->lr        = 0;
++  sig_ctx->prog_ctr  = th_ctx->new_prog_ctr;
++  sig_ctx->cpsr      = 0;
++}
++
++
++void NaClSignalContextUnsetClobberedRegisters(
++    struct NaClSignalContext *sig_ctx) {
++  sig_ctx->r0        = 0;
++  sig_ctx->r1        = 0;
++  sig_ctx->r2        = 0;
++  sig_ctx->r3        = 0;
++  sig_ctx->r12       = 0;
++  sig_ctx->lr        = 0;
++  sig_ctx->cpsr      = 0;
++}
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_rt.h b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..eafaa3eb4ffd1c5c792281536a314a82e0d13dd6
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.h
+@@ -0,0 +1,135 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * NaCl Secure Runtime
++ */
++
++#ifndef __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_SEL_RT_H__
++#define __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_SEL_RT_H__ 1
++
++/* This file can be #included from assembly to get the #defines. */
++#if !defined(__ASSEMBLER__)
++
++#include <stddef.h>
++
++#include "native_client/src/include/nacl_base.h"
++#include "native_client/src/include/nacl_macros.h"
++#include "native_client/src/include/portability.h"
++
++EXTERN_C_BEGIN
++
++uint32_t NaClGetStackPtr(void);
++
++typedef uint32_t nacl_reg_t;
++
++#define NACL_PRIdNACL_REG NACL_PRId32
++#define NACL_PRIiNACL_REG NACL_PRIi32
++#define NACL_PRIoNACL_REG NACL_PRIo32
++#define NACL_PRIuNACL_REG NACL_PRIu32
++#define NACL_PRIxNACL_REG NACL_PRIx32
++#define NACL_PRIXNACL_REG NACL_PRIX32
++
++struct NaClThreadContext {
++  /*
++   * r4 through to fp correspond to NACL_CALLEE_SAVE_LIST, and the assembly
++   * code expects them to appear at the start of the struct.
++   */
++  nacl_reg_t  r4, r5, r6, r7, r8, r9, r10, fp, stack_ptr, prog_ctr;
++  /*           0   4   8   c  10  14   18  1c         20        24 */
++  /*
++   * sys_ret and new_prog_ctr are not a part of the thread's register
++   * set, but are needed by NaClSwitch.  By including them here, the
++   * two use the same interface.
++   */
++  uint32_t  sysret;
++  /*            28 */
++  uint32_t  new_prog_ctr;
++  /*            2c */
++  uint32_t  trusted_stack_ptr;
++  /*            30 */
++  uint32_t  tls_idx;
++  /*            34 */
++  uint32_t  fpscr;
++  /*            38 */
++  uint32_t  sys_fpscr;
++  /*            3c */
++  uint32_t  tls_value1;
++  /*            40 */
++  uint32_t  tls_value2;
++  /*            44 */
++  uint32_t  syscall_routine;  /* Address of NaClSyscallSeg routine */
++  /*            48 */
++  uint32_t  guard_token;
++  /*            4c */
++};
++
++static INLINE uintptr_t NaClGetThreadCtxSp(struct NaClThreadContext *th_ctx) {
++  return th_ctx->stack_ptr;
++}
++
++NORETURN void NaClStartSwitch(struct NaClThreadContext *);
++
++#endif /* !defined(__ASSEMBLER__) */
++
++/*
++ * List of registers at the start of NaClThreadContext, for use with the
++ * instructions LDM and STM.
++ *
++ * Note that we omit "sp" from this list and save/restore it separately,
++ * because using "sp" with LDM/STM is considered deprecated (see
++ * https://crbug.com/564044).
++ */
++#define NACL_CALLEE_SAVE_LIST {r4, r5, r6, r7, r8, r9, r10, fp}
++
++/*
++ * Given an offset for a field in NaClThreadContext, this returns the
++ * field's offset from r9, given that r9 points to tls_value1.
++ */
++#define NACL_R9_OFFSET(offset) \
++    ((offset) - NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1)
++
++#define NACL_THREAD_CONTEXT_OFFSET_STACK_PTR 0x20
++#define NACL_THREAD_CONTEXT_OFFSET_SYSRET 0x28
++#define NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR 0x30
++#define NACL_THREAD_CONTEXT_OFFSET_TLS_IDX 0x34
++#define NACL_THREAD_CONTEXT_OFFSET_FPSCR 0x38
++#define NACL_THREAD_CONTEXT_OFFSET_SYS_FPSCR 0x3c
++#define NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1 0x40
++#define NACL_THREAD_CONTEXT_OFFSET_SYSCALL_ROUTINE 0x48
++#define NACL_THREAD_CONTEXT_OFFSET_GUARD_TOKEN 0x4c
++
++#if !defined(__ASSEMBLER__)
++
++/*
++ * This function exists as a function only because compile-time
++ * assertions need to be inside a function.  This function does not
++ * need to be called for the assertions to be checked.
++ */
++static INLINE void NaClThreadContextOffsetCheck(void) {
++#define NACL_CHECK_FIELD(offset_name, field) \
++    NACL_COMPILE_TIME_ASSERT(offset_name == \
++                             offsetof(struct NaClThreadContext, field));
++
++  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_STACK_PTR, stack_ptr);
++  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_SYSRET, sysret);
++  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR,
++                   trusted_stack_ptr);
++  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_TLS_IDX, tls_idx);
++  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_FPSCR, fpscr);
++  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_SYS_FPSCR, sys_fpscr);
++  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1, tls_value1);
++  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_SYSCALL_ROUTINE, syscall_routine);
++  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_GUARD_TOKEN, guard_token);
++
++#undef NACL_CHECK_FIELD
++}
++
++EXTERN_C_END
++
++#endif /* !defined(__ASSEMBLER__) */
++
++#endif /* __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_SEL_RT_H___ */
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.S b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..f104d5325ed87dff4648481aba9588b7a7eca462
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.S
+@@ -0,0 +1,87 @@
++/*
++ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
++#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
++#include "native_client/src/trusted/service_runtime/nacl_config.h"
++
++        /*
++         * This is code, but it is not code that is actually part of the
++         * program/library being linked.  Marking it as read-only data
++         * instead ensures that nothing like linker code-rewriting will
++         * be applied to this code.
++         */
++        NACL_RODATA
++
++/*
++ * Assembly code template.
++ * This is linked into the service runtime but is unused as code -- it is used
++ * as data to be patched into a NaCl app's address space.
++ *
++ * Trampoline to transfer control from native client module to
++ * sel_ldr's NaClSyscallSeg residing in the service runtime portion of address
++ * space. Trampolines are patched into nacl module's address space in the
++ * trampoline region. They are patched by NaClLoadTrampoline() code (sel_ldr.c).
++ * Each trampoline code segment corresponds to a system call, so the trampoline
++ * region is full of identical trampoline code segments. Service runtime
++ * distinguish which system call is requested using the address of an executed
++ * trampoline (it is saved on stack in NaClSyscallSeg()).
++ *
++ * ARM passes parameters to a callee in registers r0-r3. If there are more
++ * than 4 parameters, the first four are passed in registers and the rest are
++ * placed on the stack. This code saves all parameters from registers into the
++ * stack; thus, we keep all parameters on the stack as follows:
++ * top - arg0, arg1, arg2, arg3 .... argN
++ *
++ * On top of that we save the return address, so we will know where to return
++ * after the system call.
++ *
++ * At the point this code calls NaClSyscallSeg, the stack layout is as follows:
++ *
++ *   sp+0x04: argument 5 (if present)
++ *   sp:      argument 4 (if present)
++ *   sp-0x04: argument 3
++ *   sp-0x08: argument 2
++ *   sp-0x0c: argument 1
++ *   sp-0x10: argument 0
++ *   sp-0x14: return address to untrusted code
++ *  (sp-0x18: return address to trampoline - saved later by NaClSyscallSeg)
++ *
++ * Usually, signal-safe code will not save data below the stack
++ * pointer, but it is safe to do so here because the trusted signal
++ * handler will never run on the untrusted stack.
++ *
++ * When service runtime serves a system call, it first creates a structure which
++ * utilizes these arguments. The structure is created by Decoder functions in
++ * nacl_syscall_handlers.c. (nacl_syscall_handlers.c is an automatically
++ * generated file and placed in
++ * scons-out//gen/native_client/src/trusted/service_runtime).
++ */
++
++DEFINE_GLOBAL_HIDDEN_LOCATION(NaCl_trampoline_seg_code):
++  /*
++   * Save first 4 syscall arguments below the stack pointer.  Any
++   * further arguments are already on the stack.
++   */
++  stmfd sp, {r0, r1, r2, r3}
++  /* Save the return address. */
++  str lr, [sp, #-0x14]
++
++  ldr r0, [r9, #NACL_R9_OFFSET(NACL_THREAD_CONTEXT_OFFSET_SYSCALL_ROUTINE)]
++  /* NOTE: we use the blx instead of bx because the return addres */
++  /*       is used to determine which trampoline was used */
++
++  blx r0
++
++  /* NORETURN */
++
++  /* Fill second bundle: */
++  .word NACL_INSTR_ARM_HALT_FILL
++  .word NACL_INSTR_ARM_HALT_FILL
++  .word NACL_INSTR_ARM_HALT_FILL
++  .word NACL_INSTR_ARM_HALT_FILL
++
++DEFINE_GLOBAL_HIDDEN_LOCATION(NaCl_trampoline_seg_end):
+diff --git a/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..03e786640b561a682cf814c2e49a03badb8452b8
+--- /dev/null
++++ b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h
+@@ -0,0 +1,18 @@
++/*
++ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_ARCH_ARM_TRAMP_ARM_H_
++#define NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_ARCH_ARM_TRAMP_ARM_H_
++
++extern const char NaCl_trampoline_seg_code;
++extern const char NaCl_trampoline_seg_end;
++extern const char NaCl_trampoline_syscall_seg_addr;
++
++extern void NaClSyscallSeg(void);
++extern void NaClSyscallSegRegsSaved(void);
++extern void NaClSyscallSegEnd(void);
++
++#endif  /* NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_ARCH_ARM_TRAMP_ARM_H_ */

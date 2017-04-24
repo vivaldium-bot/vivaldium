@@ -1,1236 +1,3 @@
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_app.c b/native_client/src/trusted/service_runtime/arch/arm/nacl_app.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..d8342f645ae706eb9001590be4b123bb65a82658
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_app.c
-@@ -0,0 +1,27 @@
-+/*
-+ * Copyright 2008 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * NaCl run time.
-+ */
-+#include <fcntl.h>
-+#include <stdlib.h>
-+
-+#include "native_client/src/shared/platform/nacl_sync_checked.h"
-+
-+#include "native_client/src/trusted/desc/nacl_desc_io.h"
-+
-+#include "native_client/src/trusted/service_runtime/sel_ldr.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
-+
-+/*
-+ * No segments:  (currently) no-op.
-+ */
-+NaClErrorCode NaClAppPrepareToLaunch(struct NaClApp     *nap) {
-+  UNREFERENCED_PARAMETER(nap);
-+
-+  return LOAD_OK;
-+}
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_signal_arm.h b/native_client/src/trusted/service_runtime/arch/arm/nacl_signal_arm.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..6df9015760b1862c5f72ef63ef4a62f4ce831187
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_signal_arm.h
-@@ -0,0 +1,44 @@
-+/*
-+ * Copyright 2010 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * NaCl Signal Context
-+ */
-+
-+#ifndef __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_NACL_SIGNAL_ARM_H__
-+#define __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_NACL_SIGNAL_ARM_H__ 1
-+
-+#include "native_client/src/include/portability.h"
-+
-+/*
-+ * Architecture specific context object.  Register order matches that
-+ * found in src/trusted/debug_stub/abi.cc, which allows us to use an
-+ * abi context (GDB ordered context), and a signal context interchangably.
-+ * In addition, we use common names for the stack and program counter to
-+ * allow functions which use them to avoid conditional compilation.
-+ */
-+struct NaClSignalContext {
-+  uint32_t r0;
-+  uint32_t r1;
-+  uint32_t r2;
-+  uint32_t r3;
-+  uint32_t r4;
-+  uint32_t r5;
-+  uint32_t r6;
-+  uint32_t r7;
-+  uint32_t r8;
-+  uint32_t r9;
-+  uint32_t r10;
-+  uint32_t r11;
-+  uint32_t r12;
-+  uint32_t stack_ptr;
-+  uint32_t lr;
-+  uint32_t prog_ctr;
-+  uint32_t cpsr;
-+};
-+
-+
-+#endif /* __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_NACL_SIGNAL_ARM_H__ */
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_switch.S b/native_client/src/trusted/service_runtime/arch/arm/nacl_switch.S
-new file mode 100644
-index 0000000000000000000000000000000000000000..22a9b908907ecbd48202cec880a969a46c6540e9
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_switch.S
-@@ -0,0 +1,97 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include "native_client/src/trusted/service_runtime/nacl_config.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
-+
-+.text
-+.fpu neon
-+
-+/*
-+ * This trusted code is linked into the service_runtime and
-+ * executed when switching from the service runtime to a NaCl
-+ * module. This happens when a main NaCl thread is created and starting to
-+ * execute the NaCl code, or when NaCl module is returning from a system
-+ * call. This piece of code lives in a service runtime part of address space.
-+ * The one and only argument is in register r0.
-+ *
-+ * r0 -- address of thread context (struct NaClThreadContext)
-+ */
-+
-+/*
-+ * Here we are starting a new untrusted thread.  The callee-saved VFP/NEON
-+ * registers have ambient values from trusted code, which must not leak
-+ * into untrusted code.  So clear them.
-+ */
-+DEFINE_GLOBAL_HIDDEN_FUNCTION(NaClStartSwitch):
-+  veor q4, q4, q4
-+  veor q5, q5, q5
-+  veor q6, q6, q6
-+  veor q7, q7, q7
-+
-+/*
-+ * Execution falls through to here.  This is also the entry point for
-+ * returning from a syscall, which does not need to repeat the work of
-+ * clearing the callee-saved registers because the C frames for the call
-+ * to NaClSyscallCSegHook and its callees will save and restore their
-+ * incoming (i.e. the untrusted) values of those registers.
-+ */
-+DEFINE_GLOBAL_HIDDEN_FUNCTION(NaClSwitch):
-+
-+/*
-+ * Load the untrusted code's value of the fpscr into a scratch register.
-+ */
-+  ldr ip, [r0, #NACL_THREAD_CONTEXT_OFFSET_FPSCR]
-+
-+/*
-+ * We clear registers r2, r3, lr, flag and status fields in
-+ * CPSR (status register) to avoid information leaks.  The remaining
-+ * registers are overwritten by the code that follows after.
-+ */
-+
-+  mov r2, #0
-+  mov r3, #0
-+  mov lr, #0
-+  msr cpsr_fs, #0
-+
-+/*
-+ * Clear out the VFP/NEON state that otherwise might leak information.
-+ * Registers d8-d15 (aka q4-q7) are callee-saves, so the untrusted state
-+ * of those will have been saved and restored by whatever trusted code
-+ * paths might have touched them.  The other VFP/NEON registers are
-+ * call-clobbered, so trusted code might have left interesting bits
-+ * there and we must hide that information.
-+ */
-+  veor q0, q0, q0
-+  veor q1, q1, q1
-+  veor q2, q2, q2
-+  veor q3, q3, q3
-+  veor q8, q8, q8
-+  veor q9, q9, q9
-+  veor q10, q10, q10
-+  veor q11, q11, q11
-+  veor q12, q12, q12
-+  veor q13, q13, q13
-+  veor q14, q14, q14
-+  veor q15, q15, q15
-+
-+/*
-+ * Restore the untrusted code's fpscr state.
-+ */
-+  fmxr fpscr, ip
-+
-+/*
-+ * Restore register state from struct NaClThreadContext.
-+ *
-+ * TODO(mcgrathr): Perhaps drop callee-saved registers (r4-r8,r10-r11)
-+ * from this restore and instead just clear them in NaClStartSwitch.
-+ */
-+  ldmia r0, NACL_CALLEE_SAVE_LIST
-+  ldr sp, [r0, #NACL_THREAD_CONTEXT_OFFSET_STACK_PTR]
-+  /* Loads the "sysret" field into r0 and the "new_prog_ctr" field into r1. */
-+  ldrd r0, r1, [r0, #NACL_THREAD_CONTEXT_OFFSET_SYSRET]
-+  /* Transfer control to untrusted code */
-+  bx r1
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_switch_to_app_arm.c b/native_client/src/trusted/service_runtime/arch/arm/nacl_switch_to_app_arm.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..9abed933e59e50e4659caf97cd9030cee951825a
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_switch_to_app_arm.c
-@@ -0,0 +1,45 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * NaCl Service Runtime, C-level context switch code.
-+ */
-+
-+#include "native_client/src/shared/platform/nacl_check.h"
-+#include "native_client/src/trusted/service_runtime/sel_ldr.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
-+#include "native_client/src/trusted/service_runtime/nacl_app_thread.h"
-+#include "native_client/src/trusted/service_runtime/nacl_globals.h"
-+#include "native_client/src/trusted/service_runtime/nacl_switch_to_app.h"
-+
-+void NaClInitSwitchToApp(struct NaClApp *nap) {
-+  /*
-+   * We don't need anything here.  We might need it in future if e.g.
-+   * we start letting untrusted code use NEON extensions.
-+   */
-+  UNREFERENCED_PARAMETER(nap);
-+}
-+
-+NORETURN void NaClStartThreadInApp(struct NaClAppThread *natp,
-+                                   uint32_t             new_prog_ctr) {
-+  struct NaClThreadContext  *context;
-+
-+  natp->user.trusted_stack_ptr = NaClGetStackPtr() & ~0xf;
-+
-+  context = &natp->user;
-+  context->new_prog_ctr = new_prog_ctr;
-+
-+  /*
-+   * At startup this is not the return value, but the first argument.
-+   * In the initial thread, it gets the pointer to the information
-+   * block on the stack.  Additional threads do not expect anything in
-+   * particular in the first argument register, so we don't bother to
-+   * conditionalize this.
-+   */
-+  context->sysret = context->stack_ptr;
-+
-+  NaClStartSwitch(context);
-+}
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_syscall.S b/native_client/src/trusted/service_runtime/arch/arm/nacl_syscall.S
-new file mode 100644
-index 0000000000000000000000000000000000000000..6d54a17daef42ab68990b042340872ef65f637f8
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_syscall.S
-@@ -0,0 +1,74 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
-+#include "native_client/src/trusted/service_runtime/nacl_config.h"
-+
-+.text
-+
-+
-+/*
-+ * This trusted code is linked into the service runtime. It is executed when a
-+ * nacl module performs a system call via a service runtime interface. The nacl
-+ * module jumps to the trampoline corresponding to the syscall and then here.
-+ * This code switches the execution contexts (registers and stack) from
-+ * untrusted to trusted.
-+ */
-+
-+DEFINE_GLOBAL_HIDDEN_FUNCTION(NaClSyscallSeg):
-+  /* Set r0 to the start of the NaClThreadContext struct. */
-+  sub r0, r9, #NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1
-+
-+  /*
-+   * Check that r9 points into a valid NaClThreadContext by checking
-+   * that the guard_token field matches nacl_guard_token.
-+   */
-+  ldr r2, [r0, #NACL_THREAD_CONTEXT_OFFSET_GUARD_TOKEN]
-+  ldr r3, .L.offset.nacl_guard_token
-+.LPIC1:
-+  ldr r3, [pc, r3]
-+  cmp r2, r3
-+  bne NaClSyscallThreadCaptureFault
-+
-+  /* Save address of trampoline for determining which syscall was called. */
-+  str lr, [sp, #-0x18]
-+
-+  /* store thread state to the nacl_user entry */
-+  str sp, [r0, #NACL_THREAD_CONTEXT_OFFSET_STACK_PTR]
-+  stmia r0, NACL_CALLEE_SAVE_LIST
-+  /* if r0 is NULL, we would have faulted here */
-+DEFINE_GLOBAL_HIDDEN_LOCATION(NaClSyscallSegRegsSaved):
-+
-+  /*
-+   * Store the untrusted fpscr state and load the trusted fpscr into r2.
-+   */
-+  fmrx ip, fpscr
-+  str ip, [r0, #NACL_THREAD_CONTEXT_OFFSET_FPSCR]
-+  ldr r2, [r0, #NACL_THREAD_CONTEXT_OFFSET_SYS_FPSCR]
-+
-+  /* Restore the trusted stack */
-+  ldr  sp, [r0, #NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR]
-+
-+  /* Restore the trusted fpscr. */
-+  fmxr fpscr, r2
-+
-+  bl  NaClSyscallCSegHook
-+
-+  /*
-+   * NaClSyscallCSegHook returned with the NaClThreadContext pointer
-+   * back in r0, which is conveniently already where it's needed to
-+   * be the argument to NaClSwitch.
-+   */
-+  b NaClSwitch
-+
-+DEFINE_GLOBAL_HIDDEN_LOCATION(NaClSyscallSegEnd):
-+
-+DEFINE_GLOBAL_HIDDEN_LOCATION(NaClSyscallThreadCaptureFault):
-+  .word NACL_HALT_WORD
-+
-+.L.offset.nacl_guard_token:
-+  .word nacl_guard_token - (.LPIC1 + 8)
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_text_pad_test.S b/native_client/src/trusted/service_runtime/arch/arm/nacl_text_pad_test.S
-new file mode 100644
-index 0000000000000000000000000000000000000000..ad1bcbf06d7f308c689f2ed6cb78c71ef27d6417
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_text_pad_test.S
-@@ -0,0 +1,251 @@
-+/*
-+ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+#include "native_client/src/include/arm_sandbox.h"
-+#include "native_client/src/trusted/service_runtime/include/bits/nacl_syscalls.h"
-+#include "native_client/src/trusted/service_runtime/nacl_config.h"
-+
-+/* the macros below are used with movw/movt and absolute values */
-+/* llvm-mc does not like the use of :lower16:/:upper16: with absolute values */
-+/* c.f.: http://llvm.org/bugs/show_bug.cgi?id=8721 */
-+#define lower_16(x) ((x) & 0xffff)
-+#define upper_16(x) (((x) >> 16) & 0xffff)
-+
-+
-+        /*
-+         * Code to test various address layout boundary conditions.
-+         * This is a translation from the x86-{32,64} code, and is
-+         * not intended to be super efficent, just good enough to
-+         * print out the values that are designed, while maintaining
-+         * strict control over the address space layout.
-+         */
-+
-+        .text
-+start_of_text:
-+        /*
-+         * write_num_10 omitted.  __aeabi_udivmod is too long/complex
-+         * to replicate, we cannot link against glibc to get _udivsi3.o
-+         * and pick up transitive dependencies.  Plus, we don't actually
-+         * use decimal output (yet).
-+         *
-+         * One alternative would be to link using:
-+         *
-+         * ${LD} --native-client -e _start -Ttext 0x20000 -o ${TARGET} \
-+         *  ${SOURCES} ${GLIBC} ${TEXT_EXTEND}
-+         *
-+         * i.e., to load the text pad as a separate .o *after* external
-+         * references are resolved from glibc, with link-time
-+         * expansion/computation of the (TEXT_EXTEND - (. - start_of_text))/4
-+         * fill expression (is that possible?).
-+         */
-+
-+        /*
-+         * write_num_16.  Write an unsigned value in hex.
-+         * r0 is descriptor number, r1 is unsigned value to write.
-+         */
-+        .p2align 4
-+write_num_16:
-+        push {r4, lr}
-+        mov r3, sp
-+        /* r12 is caller-saved: use it as a temporary register */
-+        sub r12, sp, #0x10
-+        bic sp, r12, #0xc0000000
-+
-+        mov r2, #0
-+do_digit_16:
-+        sub r3, r3, #1
-+        add r2, r2, #1
-+        and r4, r1, #0xf
-+
-+        add r4, r4, #'0'
-+        cmp r4, #'9'
-+        ble do_digit_not_upper
-+        add r4, r4, #('a'-'0'-10)
-+
-+do_digit_not_upper:
-+        bic r3, r3, #0xc0000000
-+        strb r4, [r3]
-+        lsrs r1, r1, #4
-+        bne do_digit_16
-+
-+        mov r1, r3
-+        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_write))
-+        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_write))
-+        nop
-+
-+        nop
-+        nop
-+        bic r3, r3, #0xc000000f
-+        blx r3
-+
-+        /* r12 is caller-saved: use it as a temporary register */
-+        add r12, sp, #0x10
-+        bic sp, r12, #0xc0000000
-+        pop {r4, lr}
-+        nop
-+
-+        bic lr, lr, #0xc000000f
-+        bx lr
-+
-+        .p2align 4
-+        /*
-+         * r0 is descriptor number, r1 is character to write
-+         */
-+write_char:
-+        push {lr}
-+        /* r12 is caller-saved: use it as a temporary register */
-+        sub r12, sp, #0x10
-+        bic sp, r12, #0xc0000000
-+        strb r1, [sp]
-+
-+        mov r1, sp
-+        mov r2, #1
-+        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_write))
-+        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_write))
-+
-+        nop
-+        nop
-+        bic r3, r3, #0xc000000f
-+        blx r3
-+
-+        /* r12 is caller-saved: use it as a temporary register */
-+        add r12, sp, #0x10
-+        bic sp, r12, #0xc0000000
-+        pop {lr}
-+        nop
-+
-+        bic lr, lr, #0xc000000f
-+        bx lr
-+
-+        .p2align 4
-+        .globl _start
-+_start:
-+        /* basic I/O test */
-+        mov r0, #1
-+        movw r1, #0xbeef
-+        movt r1, #0xdead
-+        bl write_num_16
-+
-+        mov r0, #1
-+        mov r1, #'\n'
-+        nop
-+        bl write_char
-+
-+        movw r1, :lower16:(end_of_text)
-+        movt r1, :upper16:(end_of_text)
-+        mov r0, #1
-+        bl write_num_16
-+
-+        mov r0, #1
-+        mov r1, #'\n'
-+        nop
-+        bl write_char
-+
-+        mov r0, #0
-+        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_brk))
-+        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_brk))
-+        nop
-+
-+        nop
-+        nop
-+        bic r3, r3, #0xc000000f
-+        blx r3
-+
-+        mov r4, r0  /* save a copy of break addr */
-+        mov r1, r0
-+        mov r0, #1
-+        bl write_num_16
-+
-+        mov r0, #1
-+        mov r1, #'\n'
-+        nop
-+        bl write_char
-+
-+        mov r5, #0  /* r5 holds eventual exit status */
-+        movw r1, lower_16(EXPECTED_BREAK)
-+        movt r1, upper_16(EXPECTED_BREAK)
-+        cmp r1, r4
-+
-+        movne r5, #1
-+        mov r0, #1  /* r1 still has EXPECTED_BREAK */
-+        nop
-+        bl write_num_16
-+
-+        mov r1, #'\n'
-+        mov r0, #1
-+        nop
-+        bl write_char
-+
-+#if defined(EXPECTED_RODATA)
-+        mov r2, #12
-+        movw r1, :lower16:(ro_str)
-+        movt r1, :upper16:(ro_str)
-+        mov r0, #1
-+
-+        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_write))
-+        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_write))
-+        bic r3, r3, #0xc000000f
-+        blx r3
-+
-+        /* Truncate the address to page boundary for comparison. */
-+        movw r4, #0
-+        movt r4, :upper16:(ro_str)
-+        nop
-+        nop
-+
-+        mov r0, #1
-+        mov r1, r4
-+        nop
-+        bl write_num_16
-+
-+        mov r1, #'\n'
-+        mov r0, #1
-+        nop
-+        bl write_char
-+
-+        movw r1, lower_16(EXPECTED_RODATA)
-+        movt r1, upper_16(EXPECTED_RODATA)
-+        nop
-+        nop
-+
-+        cmp r1, r4
-+        movne r5, #2
-+        mov r0, #1  /* r1 still has EXPECTED_RODATA */
-+        bl write_num_16
-+
-+        mov r1, #'\n'
-+        mov r0, #2
-+        nop
-+        bl write_char
-+#endif
-+
-+        movw r3, lower_16(NACL_SYSCALL_ADDR(NACL_sys_exit))
-+        movt r3, upper_16(NACL_SYSCALL_ADDR(NACL_sys_exit))
-+        mov r0, r5
-+        nop
-+
-+        nop
-+        nop
-+        bic r3, r3, #0xc000000f
-+        blx r3
-+#if defined(PNACL_AS)
-+/* NOTE: unlike x86 the alignment directive on ARM takes
-+   the logarithm of the alignment */
-+#define POW2_BIGGER_THAN_DOT 14
-+        .align32 POW2_BIGGER_THAN_DOT, NACL_INSTR_ARM_HALT_FILL
-+        .fill (TEXT_EXTEND - (1 << POW2_BIGGER_THAN_DOT))/4, 4, \
-+              NACL_INSTR_ARM_HALT_FILL
-+#else
-+        .fill (TEXT_EXTEND - (. - start_of_text))/4, 4, \
-+              NACL_INSTR_ARM_HALT_FILL
-+#endif
-+
-+end_of_text:
-+
-+#if defined(EXPECTED_RODATA)
-+        .section .rodata
-+ro_str: .ascii "Hello world\n"
-+        /*      123456789012 */
-+#endif
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/nacl_tls.c b/native_client/src/trusted/service_runtime/arch/arm/nacl_tls.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..5324ee94dceb7e7c1de85207813f969ed58f7f95
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/nacl_tls.c
-@@ -0,0 +1,125 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include "native_client/src/include/nacl_platform.h"
-+#include "native_client/src/include/nacl_macros.h"
-+#include "native_client/src/include/portability.h"
-+#include "native_client/src/shared/platform/nacl_check.h"
-+#include "native_client/src/shared/platform/nacl_sync_checked.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
-+#include "native_client/src/trusted/service_runtime/nacl_app_thread.h"
-+#include "native_client/src/trusted/service_runtime/nacl_globals.h"
-+#include "native_client/src/trusted/service_runtime/nacl_tls.h"
-+#include "native_client/src/trusted/service_runtime/sel_ldr.h"
-+#include "native_client/src/trusted/service_runtime/sel_memory.h"
-+
-+static struct NaClMutex gNaClTlsMu;
-+static int gNaClThreadIdxInUse[NACL_THREAD_MAX];  /* bool */
-+static size_t const kNumThreads = NACL_ARRAY_SIZE_UNSAFE(gNaClThreadIdxInUse);
-+
-+/* May be NULL if the current thread does not host a NaClAppThread. */
-+static THREAD struct NaClThreadContext *nacl_current_thread;
-+
-+void NaClTlsSetCurrentThread(struct NaClAppThread *natp) {
-+  nacl_current_thread = &natp->user;
-+}
-+
-+struct NaClAppThread *NaClTlsGetCurrentThread(void) {
-+  return NaClAppThreadFromThreadContext(nacl_current_thread);
-+}
-+
-+uint32_t NaClGetThreadIdx(struct NaClAppThread *natp) {
-+  return natp->user.tls_idx;
-+}
-+
-+
-+int NaClTlsInit(void) {
-+  size_t i;
-+
-+  NaClLog(2, "NaClTlsInit\n");
-+
-+  for (i = 0; i < kNumThreads; i++) {
-+    gNaClThreadIdxInUse[i] = 0;
-+  }
-+  if (!NaClMutexCtor(&gNaClTlsMu)) {
-+    NaClLog(LOG_WARNING,
-+            "NaClTlsInit: gNaClTlsMu initialization failed\n");
-+    return 0;
-+  }
-+
-+  return 1;
-+}
-+
-+
-+void NaClTlsFini(void) {
-+  NaClLog(2, "NaClTlsFini\n");
-+  NaClMutexDtor(&gNaClTlsMu);
-+}
-+
-+static int NaClThreadIdxAllocate(void) {
-+  size_t i;
-+
-+  NaClXMutexLock(&gNaClTlsMu);
-+  for (i = 1; i < kNumThreads; i++) {
-+    if (!gNaClThreadIdxInUse[i]) {
-+      gNaClThreadIdxInUse[i] = 1;
-+      break;
-+    }
-+  }
-+  NaClXMutexUnlock(&gNaClTlsMu);
-+
-+  if (kNumThreads != i) {
-+    return i;
-+  }
-+
-+  NaClLog(LOG_ERROR, "NaClThreadIdxAllocate: no more slots for a thread\n");
-+  return NACL_TLS_INDEX_INVALID;
-+}
-+
-+
-+/*
-+ * Allocation does not mean we can set nacl_current_thread, since we
-+ * are not that thread.  Setting it must wait until the thread
-+ * actually launches.
-+ */
-+uint32_t NaClTlsAllocate(struct NaClAppThread *natp) {
-+  UNREFERENCED_PARAMETER(natp);
-+
-+  return NaClThreadIdxAllocate();
-+}
-+
-+
-+void NaClTlsFree(struct NaClAppThread *natp) {
-+  uint32_t idx = NaClGetThreadIdx(natp);
-+  NaClLog(2, "NaClTlsFree: old idx %d\n", idx);
-+
-+  NaClXMutexLock(&gNaClTlsMu);
-+  gNaClThreadIdxInUse[idx] = 0;
-+  NaClXMutexUnlock(&gNaClTlsMu);
-+
-+  natp->user.r9 = 0;
-+  natp->user.guard_token = 0;
-+}
-+
-+
-+void NaClTlsSetTlsValue1(struct NaClAppThread *natp, uint32_t value) {
-+  natp->user.tls_value1 = value;
-+}
-+
-+
-+void NaClTlsSetTlsValue2(struct NaClAppThread *natp, uint32_t value) {
-+  natp->user.tls_value2 = value;
-+}
-+
-+
-+uint32_t NaClTlsGetTlsValue1(struct NaClAppThread *natp) {
-+  return natp->user.tls_value1;
-+}
-+
-+
-+uint32_t NaClTlsGetTlsValue2(struct NaClAppThread *natp) {
-+  return natp->user.tls_value2;
-+}
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_addrspace_arm.c b/native_client/src/trusted/service_runtime/arch/arm/sel_addrspace_arm.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..83e9c70e736806966b982087aab3bbade3980cdb
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/sel_addrspace_arm.c
-@@ -0,0 +1,73 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include "native_client/src/include/nacl_platform.h"
-+#include "native_client/src/shared/platform/nacl_check.h"
-+#include "native_client/src/trusted/service_runtime/arch/sel_ldr_arch.h"
-+#include "native_client/src/trusted/service_runtime/nacl_error_code.h"
-+#include "native_client/src/trusted/service_runtime/sel_addrspace.h"
-+#include "native_client/src/trusted/service_runtime/sel_ldr.h"
-+#include "native_client/src/trusted/service_runtime/sel_memory.h"
-+
-+
-+/* NOTE: This routine is almost identical to the x86_32 version.
-+ */
-+NaClErrorCode NaClAllocateSpaceAslr(void **mem, size_t addrsp_size,
-+                                    enum NaClAslrMode aslr_mode) {
-+  int result;
-+  void *tmp_mem = (void *) NACL_TRAMPOLINE_START;
-+
-+  UNREFERENCED_PARAMETER(aslr_mode);
-+  CHECK(NULL != mem);
-+
-+  /*
-+   * On ARM, we cheat slightly: we add two pages to the requested
-+   * allocation!  This accomodates the guard region we require at the
-+   * top end of untrusted memory.
-+   */
-+  addrsp_size += NACL_ADDRSPACE_UPPER_GUARD_SIZE;
-+
-+  NaClAddrSpaceBeforeAlloc(addrsp_size);
-+
-+  /*
-+   * On 32 bit Linux, a 1 gigabyte block of address space may be reserved at
-+   * the zero-end of the address space during process creation, to address
-+   * sandbox layout requirements on ARM and performance issues on Intel ATOM.
-+   * Look for this prereserved block and if found, pass its address to the
-+   * page allocation function.
-+   */
-+  if (!NaClFindPrereservedSandboxMemory(mem, addrsp_size)) {
-+    /* On ARM, we should always have prereserved sandbox memory. */
-+    NaClLog(LOG_ERROR, "NaClAllocateSpace:"
-+            " Could not find correct amount of prereserved memory"
-+            " (looked for 0x%016"NACL_PRIxS" bytes).\n",
-+            addrsp_size);
-+    return LOAD_NO_MEMORY_FOR_ADDRESS_SPACE;
-+  }
-+  /*
-+   * When creating a zero-based sandbox, we do not allocate the first 64K of
-+   * pages beneath the trampolines, because -- on Linux at least -- we cannot.
-+   * Instead, we allocate starting at the trampolines, and then coerce the
-+   * "mem" out parameter.
-+   */
-+  CHECK(*mem == NULL);
-+  addrsp_size -= NACL_TRAMPOLINE_START;
-+  result = NaClPageAllocAtAddr(&tmp_mem, addrsp_size);
-+
-+  if (0 != result) {
-+    NaClLog(2,
-+            "NaClAllocateSpace: NaClPageAllocAtAddr 0x%08"NACL_PRIxPTR
-+            " failed\n",
-+            (uintptr_t) tmp_mem);
-+    return LOAD_NO_MEMORY_FOR_ADDRESS_SPACE;
-+  }
-+  NaClLog(4, "NaClAllocateSpace: %"NACL_PRIxPTR", %"NACL_PRIxS"\n",
-+          (uintptr_t) *mem,
-+          addrsp_size);
-+
-+  return LOAD_OK;
-+}
-+
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.c b/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..ba7833d9d96e7bebcd6cd435510751f6d563a779
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.c
-@@ -0,0 +1,57 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include <string.h>
-+
-+#include "native_client/src/shared/platform/nacl_check.h"
-+#include "native_client/src/trusted/service_runtime/nacl_globals.h"
-+#include "native_client/src/trusted/service_runtime/sel_ldr.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h"
-+
-+
-+/* NOTE(robertm): the trampoline organization for ARM is currenly assuming
-+ * NACL_TRAMPOLINE_SIZE == 32. This is contrary to the bundle size
-+ * which is 16. The reason for this is tramp.S which has a payload
-+ * 5 instr + one data item
-+ */
-+
-+void  NaClPatchOneTrampoline(struct NaClApp *nap,
-+                             uintptr_t      target_addr) {
-+  size_t trampoline_size = ((uintptr_t) &NaCl_trampoline_seg_end
-+                            - (uintptr_t) &NaCl_trampoline_seg_code);
-+
-+  UNREFERENCED_PARAMETER(nap);
-+
-+  CHECK(trampoline_size == NACL_SYSCALL_BLOCK_SIZE);
-+  memcpy((void *) target_addr, &NaCl_trampoline_seg_code,
-+         NACL_SYSCALL_BLOCK_SIZE);
-+}
-+
-+
-+void NaClFillMemoryRegionWithHalt(void *start, size_t size) {
-+  uint32_t *inst = (uint32_t *) start;
-+  uint32_t i;
-+
-+  CHECK(sizeof *inst == NACL_HALT_LEN);
-+  CHECK(0 == size % NACL_HALT_LEN);
-+  /* check that the region start is 4 bytes aligned */
-+  CHECK(0 == (uint32_t)start % NACL_HALT_LEN);
-+
-+  for (i = 0; i < (size / NACL_HALT_LEN); i++)
-+    inst[i] = NACL_HALT_OPCODE;
-+}
-+
-+
-+void NaClFillTrampolineRegion(struct NaClApp *nap) {
-+  NaClFillMemoryRegionWithHalt((void *)(nap->mem_start + NACL_TRAMPOLINE_START),
-+                               NACL_TRAMPOLINE_SIZE);
-+}
-+
-+
-+void  NaClLoadSpringboard(struct NaClApp  *nap) {
-+  UNREFERENCED_PARAMETER(nap);
-+}
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h b/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..c27d30fae7d23182ede40bbf15c353f512770156
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h
-@@ -0,0 +1,20 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#ifndef SERVICE_RUNTIME_ARCH_ARM_SEL_LDR_H__
-+#define SERVICE_RUNTIME_ARCH_ARM_SEL_LDR_H__ 1
-+
-+#include "native_client/src/trusted/service_runtime/nacl_config.h"
-+
-+/* NOTE: we hope to unify this among archtectures */
-+#define NACL_MAX_ADDR_BITS      30
-+
-+#define NACL_ADDRSPACE_LOWER_GUARD_SIZE 0
-+#define NACL_ADDRSPACE_UPPER_GUARD_SIZE 0x2000
-+
-+#define NACL_THREAD_MAX         8192  /* arbitrary, can be larger */
-+
-+#endif /* SERVICE_RUNTIME_ARCH_ARM_SEL_LDR_H__ */
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_rt.c b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..2eb7247d2c4d4aa9bb95c4271359c71a78da29d0
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.c
-@@ -0,0 +1,96 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * NaCl Secure Runtime
-+ */
-+#include "native_client/src/include/portability_string.h"
-+#include "native_client/src/shared/platform/nacl_global_secure_random.h"
-+#include "native_client/src/trusted/service_runtime/nacl_app_thread.h"
-+#include "native_client/src/trusted/service_runtime/nacl_signal.h"
-+#include "native_client/src/trusted/service_runtime/nacl_tls.h"
-+#include "native_client/src/trusted/service_runtime/sel_ldr.h"
-+#include "native_client/src/trusted/service_runtime/sel_rt.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h"
-+
-+
-+uint32_t nacl_guard_token;
-+
-+
-+void NaClInitGlobals(void) {
-+  NaClLog(2, "NaClInitGlobals\n");
-+  nacl_guard_token = NaClGlobalSecureRngUint32();
-+}
-+
-+
-+int NaClAppThreadInitArchSpecific(struct NaClAppThread *natp,
-+                                  nacl_reg_t           prog_ctr,
-+                                  nacl_reg_t           stack_ptr) {
-+  struct NaClThreadContext *ntcp = &natp->user;
-+
-+  /*
-+   * We call this function so that it does not appear to be dead code,
-+   * although it only contains compile-time assertions.
-+   */
-+  NaClThreadContextOffsetCheck();
-+
-+  memset((void *)ntcp, 0, sizeof(*ntcp));
-+  ntcp->stack_ptr = stack_ptr;
-+  ntcp->prog_ctr = prog_ctr;
-+  ntcp->tls_idx = NaClTlsAllocate(natp);
-+  if (ntcp->tls_idx == NACL_TLS_INDEX_INVALID)
-+    return 0;
-+  ntcp->r9 = (uintptr_t) &ntcp->tls_value1;
-+  ntcp->syscall_routine = (uintptr_t) NaClSyscallSeg;
-+  ntcp->guard_token = nacl_guard_token;
-+
-+  /*
-+   * Save the system's state of the FPSCR so we can restore
-+   * the same state when returning to trusted code.
-+   */
-+  __asm__ __volatile__("fmrx %0, fpscr" : "=r" (ntcp->sys_fpscr));
-+
-+  NaClLog(4, "user.tls_idx: 0x%08"NACL_PRIxNACL_REG"\n", ntcp->tls_idx);
-+  NaClLog(4, "user.stack_ptr: 0x%08"NACL_PRIxNACL_REG"\n", ntcp->stack_ptr);
-+  NaClLog(4, "user.prog_ctr: 0x%08"NACL_PRIxNACL_REG"\n", ntcp->prog_ctr);
-+
-+  return 1;
-+}
-+
-+
-+void NaClThreadContextToSignalContext(const struct NaClThreadContext *th_ctx,
-+                                      struct NaClSignalContext *sig_ctx) {
-+  sig_ctx->r0        = 0;
-+  sig_ctx->r1        = 0;
-+  sig_ctx->r2        = 0;
-+  sig_ctx->r3        = 0;
-+  sig_ctx->r4        = th_ctx->r4;
-+  sig_ctx->r5        = th_ctx->r5;
-+  sig_ctx->r6        = th_ctx->r6;
-+  sig_ctx->r7        = th_ctx->r7;
-+  sig_ctx->r8        = th_ctx->r8;
-+  sig_ctx->r9        = th_ctx->r9;
-+  sig_ctx->r10       = th_ctx->r10;
-+  sig_ctx->r11       = th_ctx->fp;
-+  sig_ctx->r12       = 0;
-+  sig_ctx->stack_ptr = th_ctx->stack_ptr;
-+  sig_ctx->lr        = 0;
-+  sig_ctx->prog_ctr  = th_ctx->new_prog_ctr;
-+  sig_ctx->cpsr      = 0;
-+}
-+
-+
-+void NaClSignalContextUnsetClobberedRegisters(
-+    struct NaClSignalContext *sig_ctx) {
-+  sig_ctx->r0        = 0;
-+  sig_ctx->r1        = 0;
-+  sig_ctx->r2        = 0;
-+  sig_ctx->r3        = 0;
-+  sig_ctx->r12       = 0;
-+  sig_ctx->lr        = 0;
-+  sig_ctx->cpsr      = 0;
-+}
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_rt.h b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..eafaa3eb4ffd1c5c792281536a314a82e0d13dd6
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.h
-@@ -0,0 +1,135 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * NaCl Secure Runtime
-+ */
-+
-+#ifndef __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_SEL_RT_H__
-+#define __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_SEL_RT_H__ 1
-+
-+/* This file can be #included from assembly to get the #defines. */
-+#if !defined(__ASSEMBLER__)
-+
-+#include <stddef.h>
-+
-+#include "native_client/src/include/nacl_base.h"
-+#include "native_client/src/include/nacl_macros.h"
-+#include "native_client/src/include/portability.h"
-+
-+EXTERN_C_BEGIN
-+
-+uint32_t NaClGetStackPtr(void);
-+
-+typedef uint32_t nacl_reg_t;
-+
-+#define NACL_PRIdNACL_REG NACL_PRId32
-+#define NACL_PRIiNACL_REG NACL_PRIi32
-+#define NACL_PRIoNACL_REG NACL_PRIo32
-+#define NACL_PRIuNACL_REG NACL_PRIu32
-+#define NACL_PRIxNACL_REG NACL_PRIx32
-+#define NACL_PRIXNACL_REG NACL_PRIX32
-+
-+struct NaClThreadContext {
-+  /*
-+   * r4 through to fp correspond to NACL_CALLEE_SAVE_LIST, and the assembly
-+   * code expects them to appear at the start of the struct.
-+   */
-+  nacl_reg_t  r4, r5, r6, r7, r8, r9, r10, fp, stack_ptr, prog_ctr;
-+  /*           0   4   8   c  10  14   18  1c         20        24 */
-+  /*
-+   * sys_ret and new_prog_ctr are not a part of the thread's register
-+   * set, but are needed by NaClSwitch.  By including them here, the
-+   * two use the same interface.
-+   */
-+  uint32_t  sysret;
-+  /*            28 */
-+  uint32_t  new_prog_ctr;
-+  /*            2c */
-+  uint32_t  trusted_stack_ptr;
-+  /*            30 */
-+  uint32_t  tls_idx;
-+  /*            34 */
-+  uint32_t  fpscr;
-+  /*            38 */
-+  uint32_t  sys_fpscr;
-+  /*            3c */
-+  uint32_t  tls_value1;
-+  /*            40 */
-+  uint32_t  tls_value2;
-+  /*            44 */
-+  uint32_t  syscall_routine;  /* Address of NaClSyscallSeg routine */
-+  /*            48 */
-+  uint32_t  guard_token;
-+  /*            4c */
-+};
-+
-+static INLINE uintptr_t NaClGetThreadCtxSp(struct NaClThreadContext *th_ctx) {
-+  return th_ctx->stack_ptr;
-+}
-+
-+NORETURN void NaClStartSwitch(struct NaClThreadContext *);
-+
-+#endif /* !defined(__ASSEMBLER__) */
-+
-+/*
-+ * List of registers at the start of NaClThreadContext, for use with the
-+ * instructions LDM and STM.
-+ *
-+ * Note that we omit "sp" from this list and save/restore it separately,
-+ * because using "sp" with LDM/STM is considered deprecated (see
-+ * https://crbug.com/564044).
-+ */
-+#define NACL_CALLEE_SAVE_LIST {r4, r5, r6, r7, r8, r9, r10, fp}
-+
-+/*
-+ * Given an offset for a field in NaClThreadContext, this returns the
-+ * field's offset from r9, given that r9 points to tls_value1.
-+ */
-+#define NACL_R9_OFFSET(offset) \
-+    ((offset) - NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1)
-+
-+#define NACL_THREAD_CONTEXT_OFFSET_STACK_PTR 0x20
-+#define NACL_THREAD_CONTEXT_OFFSET_SYSRET 0x28
-+#define NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR 0x30
-+#define NACL_THREAD_CONTEXT_OFFSET_TLS_IDX 0x34
-+#define NACL_THREAD_CONTEXT_OFFSET_FPSCR 0x38
-+#define NACL_THREAD_CONTEXT_OFFSET_SYS_FPSCR 0x3c
-+#define NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1 0x40
-+#define NACL_THREAD_CONTEXT_OFFSET_SYSCALL_ROUTINE 0x48
-+#define NACL_THREAD_CONTEXT_OFFSET_GUARD_TOKEN 0x4c
-+
-+#if !defined(__ASSEMBLER__)
-+
-+/*
-+ * This function exists as a function only because compile-time
-+ * assertions need to be inside a function.  This function does not
-+ * need to be called for the assertions to be checked.
-+ */
-+static INLINE void NaClThreadContextOffsetCheck(void) {
-+#define NACL_CHECK_FIELD(offset_name, field) \
-+    NACL_COMPILE_TIME_ASSERT(offset_name == \
-+                             offsetof(struct NaClThreadContext, field));
-+
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_STACK_PTR, stack_ptr);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_SYSRET, sysret);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR,
-+                   trusted_stack_ptr);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_TLS_IDX, tls_idx);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_FPSCR, fpscr);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_SYS_FPSCR, sys_fpscr);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1, tls_value1);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_SYSCALL_ROUTINE, syscall_routine);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_GUARD_TOKEN, guard_token);
-+
-+#undef NACL_CHECK_FIELD
-+}
-+
-+EXTERN_C_END
-+
-+#endif /* !defined(__ASSEMBLER__) */
-+
-+#endif /* __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_SEL_RT_H___ */
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.S b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.S
-new file mode 100644
-index 0000000000000000000000000000000000000000..f104d5325ed87dff4648481aba9588b7a7eca462
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.S
-@@ -0,0 +1,87 @@
-+/*
-+ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
-+#include "native_client/src/trusted/service_runtime/nacl_config.h"
-+
-+        /*
-+         * This is code, but it is not code that is actually part of the
-+         * program/library being linked.  Marking it as read-only data
-+         * instead ensures that nothing like linker code-rewriting will
-+         * be applied to this code.
-+         */
-+        NACL_RODATA
-+
-+/*
-+ * Assembly code template.
-+ * This is linked into the service runtime but is unused as code -- it is used
-+ * as data to be patched into a NaCl app's address space.
-+ *
-+ * Trampoline to transfer control from native client module to
-+ * sel_ldr's NaClSyscallSeg residing in the service runtime portion of address
-+ * space. Trampolines are patched into nacl module's address space in the
-+ * trampoline region. They are patched by NaClLoadTrampoline() code (sel_ldr.c).
-+ * Each trampoline code segment corresponds to a system call, so the trampoline
-+ * region is full of identical trampoline code segments. Service runtime
-+ * distinguish which system call is requested using the address of an executed
-+ * trampoline (it is saved on stack in NaClSyscallSeg()).
-+ *
-+ * ARM passes parameters to a callee in registers r0-r3. If there are more
-+ * than 4 parameters, the first four are passed in registers and the rest are
-+ * placed on the stack. This code saves all parameters from registers into the
-+ * stack; thus, we keep all parameters on the stack as follows:
-+ * top - arg0, arg1, arg2, arg3 .... argN
-+ *
-+ * On top of that we save the return address, so we will know where to return
-+ * after the system call.
-+ *
-+ * At the point this code calls NaClSyscallSeg, the stack layout is as follows:
-+ *
-+ *   sp+0x04: argument 5 (if present)
-+ *   sp:      argument 4 (if present)
-+ *   sp-0x04: argument 3
-+ *   sp-0x08: argument 2
-+ *   sp-0x0c: argument 1
-+ *   sp-0x10: argument 0
-+ *   sp-0x14: return address to untrusted code
-+ *  (sp-0x18: return address to trampoline - saved later by NaClSyscallSeg)
-+ *
-+ * Usually, signal-safe code will not save data below the stack
-+ * pointer, but it is safe to do so here because the trusted signal
-+ * handler will never run on the untrusted stack.
-+ *
-+ * When service runtime serves a system call, it first creates a structure which
-+ * utilizes these arguments. The structure is created by Decoder functions in
-+ * nacl_syscall_handlers.c. (nacl_syscall_handlers.c is an automatically
-+ * generated file and placed in
-+ * scons-out//gen/native_client/src/trusted/service_runtime).
-+ */
-+
-+DEFINE_GLOBAL_HIDDEN_LOCATION(NaCl_trampoline_seg_code):
-+  /*
-+   * Save first 4 syscall arguments below the stack pointer.  Any
-+   * further arguments are already on the stack.
-+   */
-+  stmfd sp, {r0, r1, r2, r3}
-+  /* Save the return address. */
-+  str lr, [sp, #-0x14]
-+
-+  ldr r0, [r9, #NACL_R9_OFFSET(NACL_THREAD_CONTEXT_OFFSET_SYSCALL_ROUTINE)]
-+  /* NOTE: we use the blx instead of bx because the return addres */
-+  /*       is used to determine which trampoline was used */
-+
-+  blx r0
-+
-+  /* NORETURN */
-+
-+  /* Fill second bundle: */
-+  .word NACL_INSTR_ARM_HALT_FILL
-+  .word NACL_INSTR_ARM_HALT_FILL
-+  .word NACL_INSTR_ARM_HALT_FILL
-+  .word NACL_INSTR_ARM_HALT_FILL
-+
-+DEFINE_GLOBAL_HIDDEN_LOCATION(NaCl_trampoline_seg_end):
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..03e786640b561a682cf814c2e49a03badb8452b8
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h
-@@ -0,0 +1,18 @@
-+/*
-+ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#ifndef NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_ARCH_ARM_TRAMP_ARM_H_
-+#define NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_ARCH_ARM_TRAMP_ARM_H_
-+
-+extern const char NaCl_trampoline_seg_code;
-+extern const char NaCl_trampoline_seg_end;
-+extern const char NaCl_trampoline_syscall_seg_addr;
-+
-+extern void NaClSyscallSeg(void);
-+extern void NaClSyscallSegRegsSaved(void);
-+extern void NaClSyscallSegEnd(void);
-+
-+#endif  /* NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_ARCH_ARM_TRAMP_ARM_H_ */
 diff --git a/native_client/src/trusted/service_runtime/arch/mips/nacl_app.c b/native_client/src/trusted/service_runtime/arch/mips/nacl_app.c
 new file mode 100644
 index 0000000000000000000000000000000000000000..6d8d2ff3144aff2b04c3ea7d464b82b256234c1c
@@ -279447,3 +278214,1768 @@ index 0000000000000000000000000000000000000000..767058e00c95f9570155e19f2b15e4b2
 +
 +if __name__ == '__main__':
 +  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/avx1_xmm_ymm_memory_3op_pd_proof.py b/native_client/src/trusted/validator_ragel/avx1_xmm_ymm_memory_3op_pd_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..2042d88fe1e8ac283bbc5c5196f94303ed44624b
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/avx1_xmm_ymm_memory_3op_pd_proof.py
+@@ -0,0 +1,35 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for adding 3 operand xmm/ymm/memory packed double precision ops."""
++
++import proof_tools
++from proof_tools_templates import XmmYmmOrMemory3operand
++
++
++# Packed FP-double-precision AVX1 Instructions of the form:
++# src1 is an xmm or ymm register.
++# src2 is an xmm or ymm register or memory operand.
++# dest is an xmm or ymm register.
++MNEMONICS = [
++    'vaddpd', 'vaddsubpd', 'vandnpd', 'vandpd', 'vdivpd', 'vhaddpd',
++    'vhsubpd', 'vmaxpd', 'vminpd', 'vmulpd', 'vorpd', 'vsubpd', 'vunpckhpd',
++    'vunpcklpd', 'vxorpd'
++]
++
++
++def Validate(trie_diffs, bitness):
++  """Validates that all allowed patterns of MNEMONICS are added."""
++  expected_adds = set()
++  for mnemonic in MNEMONICS:
++    expected_adds.update(XmmYmmOrMemory3operand(mnemonic_name=mnemonic,
++                                                bitness=bitness))
++
++  proof_tools.AssertDiffSetEquals(
++      trie_diffs,
++      expected_adds=expected_adds,
++      expected_removes=set())
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/avx1_xmm_ymm_memory_3op_ps_proof.py b/native_client/src/trusted/validator_ragel/avx1_xmm_ymm_memory_3op_ps_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..5f28fa55ca405e7df7be8ec0c13fa24430a91bea
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/avx1_xmm_ymm_memory_3op_ps_proof.py
+@@ -0,0 +1,35 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for adding 3 operand xmm/ymm/memory packed single precision ops."""
++
++import proof_tools
++from proof_tools_templates import XmmYmmOrMemory3operand
++
++
++# Packed FP-single-precision AVX1 Instructions of the form:
++# src1 is an xmm or ymm register.
++# src2 is an xmm or ymm register or memory operand.
++# dest is an xmm or ymm register.
++MNEMONICS = [
++    'vaddps', 'vaddsubps', 'vandnps', 'vandps', 'vdivps', 'vhaddps',
++    'vhsubps', 'vmaxps', 'vminps', 'vmulps', 'vorps', 'vsubps', 'vunpckhps',
++    'vunpcklps', 'vxorps'
++]
++
++
++def Validate(trie_diffs, bitness):
++  """Validates that all allowed patterns of MNEMONICS are added."""
++  expected_adds = set()
++  for mnemonic in MNEMONICS:
++    expected_adds.update(XmmYmmOrMemory3operand(mnemonic_name=mnemonic,
++                                                bitness=bitness))
++
++  proof_tools.AssertDiffSetEquals(
++      trie_diffs,
++      expected_adds=expected_adds,
++      expected_removes=set())
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/avx1_xmm_ymm_memory_moves.py b/native_client/src/trusted/validator_ragel/avx1_xmm_ymm_memory_moves.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..82981bdba40dc679d9299b1d8a30eca082d69f1a
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/avx1_xmm_ymm_memory_moves.py
+@@ -0,0 +1,58 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for adding avx1 move instructions for memory/xmm/ymm registers."""
++
++import proof_tools
++from proof_tools import MnemonicOp
++from proof_tools import OpsProd
++from proof_tools_templates import AllXmmYmmMemoryMoves
++from proof_tools_templates import AllXmmYmmMemorytoXmmYmmMoves
++from proof_tools_templates import XmmToMemoryOrXmmAndMemoryToXmmMoves
++
++
++def Avx1XmmYmmMemoryMoves(bitness):
++  """Returns avx1 xmm/ymm/memory move instructions (excluding non-temporal)."""
++  mem = proof_tools.AllMemoryOperands(bitness=bitness)
++  xmm = proof_tools.AllXMMOperands(bitness)
++  ymm = proof_tools.AllYMMOperands(bitness)
++
++  vmovapd = AllXmmYmmMemoryMoves('vmovapd', bitness)
++  vmovaps = AllXmmYmmMemoryMoves('vmovaps', bitness)
++  vmovddup = AllXmmYmmMemorytoXmmYmmMoves('vmovddup', bitness)
++  vmovdqa = AllXmmYmmMemoryMoves('vmovdqa', bitness)
++  vmovdqu = AllXmmYmmMemoryMoves('vmovdqu', bitness)
++  vmovhlps = (OpsProd(MnemonicOp('vmovhlps'), xmm, xmm, xmm))
++  vmovhpd = XmmToMemoryOrXmmAndMemoryToXmmMoves('vmovhpd', bitness)
++  vmovhps = XmmToMemoryOrXmmAndMemoryToXmmMoves('vmovhps', bitness)
++  vmovlhps = (OpsProd(MnemonicOp('vmovlhps'), xmm, xmm, xmm))
++  vmovlpd = XmmToMemoryOrXmmAndMemoryToXmmMoves('vmovlpd', bitness)
++  vmovlps = XmmToMemoryOrXmmAndMemoryToXmmMoves('vmovlps', bitness)
++  vmovsd = (OpsProd(MnemonicOp('vmovsd'), xmm, mem) |
++            OpsProd(MnemonicOp('vmovsd'), mem, xmm) |
++            OpsProd(MnemonicOp('vmovsd'), xmm, xmm, xmm))
++  vmovshdup = AllXmmYmmMemorytoXmmYmmMoves('vmovshdup', bitness)
++  vmovsldup = AllXmmYmmMemorytoXmmYmmMoves('vmovsldup', bitness)
++  vmovss = (OpsProd(MnemonicOp('vmovss'), xmm, xmm, xmm) |
++            OpsProd(MnemonicOp('vmovss'), mem, xmm) |
++            OpsProd(MnemonicOp('vmovss'), xmm, mem))
++  vmovupd = AllXmmYmmMemoryMoves('vmovupd', bitness)
++  vmovups = AllXmmYmmMemoryMoves('vmovups', bitness)
++
++  moves = (vmovapd | vmovaps | vmovddup | vmovdqa | vmovdqu | vmovhlps |
++           vmovhpd | vmovhps | vmovlhps | vmovlpd | vmovlps | vmovsd |
++           vmovshdup | vmovsldup | vmovss | vmovupd | vmovups)
++  return moves
++
++
++def Validate(trie_diffs, bitness):
++  """Validates that all allowed patterns of the moves are added."""
++  proof_tools.AssertDiffSetEquals(
++      trie_diffs,
++      expected_adds=Avx1XmmYmmMemoryMoves(bitness),
++      expected_removes=set())
++
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/avx2_0f_6x_0f_7x_proof.py b/native_client/src/trusted/validator_ragel/avx2_0f_6x_0f_7x_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..9567d8d5d998ab66fec44d11ae44b7ce8a4e2cf2
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/avx2_0f_6x_0f_7x_proof.py
+@@ -0,0 +1,87 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for avx2 upgrade (allow ymm) for 0f 6x and 0f 7x groups"""
++
++import proof_tools
++from proof_tools import MnemonicOp
++from proof_tools import OpsProd
++
++def Instructions(bitness):
++  """Returns avx2 promotions of 0f 6x and 0f 7x groups."""
++  mem = proof_tools.AllMemoryOperands(bitness=bitness)
++  ymm = proof_tools.AllYMMOperands(bitness)
++  xmm = proof_tools.AllXMMOperands(bitness)
++  imm = proof_tools.ImmOp()
++  reg32_write = proof_tools.GprOperands(bitness, operand_size=32,
++                                        is_write_for_64_bit=True)
++
++  vpunpcklbw = OpsProd(MnemonicOp('vpunpcklbw'), mem|ymm, ymm, ymm)
++  vpunpcklwd = OpsProd(MnemonicOp('vpunpcklwd'), mem|ymm, ymm, ymm)
++  vpunpckldq = OpsProd(MnemonicOp('vpunpckldq'), mem|ymm, ymm, ymm)
++  vpacksswb = OpsProd(MnemonicOp('vpacksswb'), mem|ymm, ymm, ymm)
++  vpunpcklqdq = OpsProd(MnemonicOp('vpunpcklqdq'), mem|ymm, ymm, ymm)
++  vpunpckhqdq = OpsProd(MnemonicOp('vpunpckhqdq'), mem|ymm, ymm, ymm)
++  vpcmpgtb = OpsProd(MnemonicOp('vpcmpgtb'), mem|ymm, ymm, ymm)
++  vpcmpgtw = OpsProd(MnemonicOp('vpcmpgtw'), mem|ymm, ymm, ymm)
++  vpcmpgtd = OpsProd(MnemonicOp('vpcmpgtd'), mem|ymm, ymm, ymm)
++  vpackuswb = OpsProd(MnemonicOp('vpackuswb'), mem|ymm, ymm, ymm)
++  vpunpckhbw = OpsProd(MnemonicOp('vpunpckhbw'), mem|ymm, ymm, ymm)
++  vpunpckhwd = OpsProd(MnemonicOp('vpunpckhwd'), mem|ymm, ymm, ymm)
++  vpunpckhdq = OpsProd(MnemonicOp('vpunpckhdq'), mem|ymm, ymm, ymm)
++  vpackssdw = OpsProd(MnemonicOp('vpackssdw'), mem|ymm, ymm, ymm)
++  vpshufd = OpsProd(MnemonicOp('vpshufd'), imm, mem|ymm, ymm)
++  vpshufhw = OpsProd(MnemonicOp('vpshufhw'), imm, mem|ymm, ymm)
++  vpshuflw = OpsProd(MnemonicOp('vpshuflw'), imm, mem|ymm, ymm)
++  vpcmpeqb = OpsProd(MnemonicOp('vpcmpeqb'), mem|ymm, ymm, ymm)
++  vpcmpeqw = OpsProd(MnemonicOp('vpcmpeqw'), mem|ymm, ymm, ymm)
++  vpcmpeqd = OpsProd(MnemonicOp('vpcmpeqd'), mem|ymm, ymm, ymm)
++  vpsrlw = OpsProd(MnemonicOp('vpsrlw'), imm|mem|xmm, ymm, ymm)
++  vpsrld = OpsProd(MnemonicOp('vpsrld'), imm|mem|xmm, ymm, ymm)
++  vpsrlq = OpsProd(MnemonicOp('vpsrlq'), imm|mem|xmm, ymm, ymm)
++  vpaddq = OpsProd(MnemonicOp('vpaddq'), mem|ymm, ymm, ymm)
++  vpmullw = OpsProd(MnemonicOp('vpmullw'), mem|ymm, ymm, ymm)
++  vpmovmskb = OpsProd(MnemonicOp('vpmovmskb'), ymm, reg32_write)
++  vpsubusb = OpsProd(MnemonicOp('vpsubusb'), mem|ymm, ymm, ymm)
++  vpsubusw = OpsProd(MnemonicOp('vpsubusw'), mem|ymm, ymm, ymm)
++  vpminub = OpsProd(MnemonicOp('vpminub'), mem|ymm, ymm, ymm)
++  vpand = OpsProd(MnemonicOp('vpand'), mem|ymm, ymm, ymm)
++  vpaddusb = OpsProd(MnemonicOp('vpaddusb'), mem|ymm, ymm, ymm)
++  vpaddusw = OpsProd(MnemonicOp('vpaddusw'), mem|ymm, ymm, ymm)
++  vpmaxub = OpsProd(MnemonicOp('vpmaxub'), mem|ymm, ymm, ymm)
++  vpandn = OpsProd(MnemonicOp('vpandn'), mem|ymm, ymm, ymm)
++
++  return (
++      vpunpcklbw | vpunpcklwd | vpunpckldq |
++      vpacksswb |
++      vpcmpgtb | vpcmpgtw | vpcmpgtd |
++      vpackuswb |
++      vpunpckhbw | vpunpckhwd | vpunpckhdq |
++      vpackssdw |
++      vpunpcklqdq | vpunpckhqdq |
++      vpshufd | vpshufhw | vpshuflw |
++      vpcmpeqb | vpcmpeqw | vpcmpeqd |
++      vpsrlw | vpsrld | vpsrlq |
++      vpaddq |
++      vpmullw |
++      vpmovmskb |
++      vpsubusb | vpsubusw |
++      vpminub |
++      vpand |
++      vpaddusb | vpaddusw |
++      vpmaxub |
++      vpandn
++  )
++
++
++def Validate(trie_diffs, bitness):
++  """Validates that all ymm variants 0f 6x and 0f 7x groups are added."""
++  proof_tools.AssertDiffSetEquals(
++      trie_diffs,
++      expected_adds=Instructions(bitness),
++      expected_removes=set())
++
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/avx2_additions_proof.py b/native_client/src/trusted/validator_ragel/avx2_additions_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..39a5e80f8ee0c4bf97c606538138f9d9687b8c78
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/avx2_additions_proof.py
+@@ -0,0 +1,75 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for avx2 instructions that are newly added (except vgather)"""
++
++import proof_tools
++from proof_tools import MnemonicOp
++from proof_tools import OpsProd
++
++def Instructions(bitness):
++  """Returns new avx2 instructions."""
++  mem = proof_tools.AllMemoryOperands(bitness=bitness)
++  ymm = proof_tools.AllYMMOperands(bitness)
++  xmm = proof_tools.AllXMMOperands(bitness)
++  imm = proof_tools.ImmOp()
++
++  vbroadcasti128 = OpsProd(MnemonicOp('vbroadcasti128'), mem, ymm)
++  vbroadcastsd = OpsProd(MnemonicOp('vbroadcastsd'), xmm, ymm)
++  vbroadcastss = OpsProd(MnemonicOp('vbroadcastss'), xmm, xmm|ymm)
++  vextracti128 = OpsProd(MnemonicOp('vextracti128'), imm, ymm, mem|xmm)
++  vinserti128 = OpsProd(MnemonicOp('vinserti128'), imm, mem|xmm, ymm, ymm)
++  vpblendd = (OpsProd(MnemonicOp('vpblendd'), imm, mem|xmm, xmm, xmm) |
++              OpsProd(MnemonicOp('vpblendd'), imm, mem|ymm, ymm, ymm))
++  vpbroadcastb = OpsProd(MnemonicOp('vpbroadcastb'), mem|xmm, xmm|ymm)
++  vpbroadcastd = OpsProd(MnemonicOp('vpbroadcastd'), mem|xmm, xmm|ymm)
++  vpbroadcastw = OpsProd(MnemonicOp('vpbroadcastw'), mem|xmm, xmm|ymm)
++  vpbroadcastq = OpsProd(MnemonicOp('vpbroadcastq'), mem|xmm, xmm|ymm)
++  vperm2i128 = OpsProd(MnemonicOp('vperm2i128'), imm, mem|ymm, ymm, ymm)
++  vpermd = OpsProd(MnemonicOp('vpermd'), mem|ymm, ymm, ymm)
++  vpermpd = OpsProd(MnemonicOp('vpermpd'), imm, mem|ymm, ymm)
++  vpermps = OpsProd(MnemonicOp('vpermps'), mem|ymm, ymm, ymm)
++  vpermq = OpsProd(MnemonicOp('vpermq'), imm, mem|ymm, ymm)
++  vpmaskmovd = (OpsProd(MnemonicOp('vpmaskmovd'), mem, xmm, xmm) |
++                OpsProd(MnemonicOp('vpmaskmovd'), mem, ymm, ymm) |
++                OpsProd(MnemonicOp('vpmaskmovd'), xmm, xmm, mem) |
++                OpsProd(MnemonicOp('vpmaskmovd'), ymm, ymm, mem))
++  vpmaskmovq = (OpsProd(MnemonicOp('vpmaskmovq'), mem, xmm, xmm) |
++                OpsProd(MnemonicOp('vpmaskmovq'), mem, ymm, ymm) |
++                OpsProd(MnemonicOp('vpmaskmovq'), xmm, xmm, mem) |
++                OpsProd(MnemonicOp('vpmaskmovq'), ymm, ymm, mem))
++  vpsllvd = (OpsProd(MnemonicOp('vpsllvd'), mem|xmm, xmm, xmm) |
++             OpsProd(MnemonicOp('vpsllvd'), mem|ymm, ymm, ymm))
++  vpsllvq = (OpsProd(MnemonicOp('vpsllvq'), mem|xmm, xmm, xmm) |
++             OpsProd(MnemonicOp('vpsllvq'), mem|ymm, ymm, ymm))
++  vpsravd = (OpsProd(MnemonicOp('vpsravd'), mem|xmm, xmm, xmm) |
++             OpsProd(MnemonicOp('vpsravd'), mem|ymm, ymm, ymm))
++  vpsrlvd = (OpsProd(MnemonicOp('vpsrlvd'), mem|xmm, xmm, xmm) |
++             OpsProd(MnemonicOp('vpsrlvd'), mem|ymm, ymm, ymm))
++  vpsrlvq = (OpsProd(MnemonicOp('vpsrlvq'), mem|xmm, xmm, xmm) |
++             OpsProd(MnemonicOp('vpsrlvq'), mem|ymm, ymm, ymm))
++
++  return (
++    vbroadcasti128 | vbroadcastsd | vbroadcastss |
++    vextracti128 | vinserti128 |
++    vpblendd |
++    vpbroadcastb | vpbroadcastd | vpbroadcastq | vpbroadcastw |
++    vperm2i128 | vpermd | vpermpd | vpermps | vpermq |
++    vpmaskmovd | vpmaskmovq |
++    vpsllvd | vpsllvq |
++    vpsravd |
++    vpsrlvd | vpsrlvq
++  )
++
++
++def Validate(trie_diffs, bitness):
++  """Validates that all new avx2 instructions (except vgather) are added."""
++  proof_tools.AssertDiffSetEquals(
++      trie_diffs,
++      expected_adds=Instructions(bitness),
++      expected_removes=set())
++
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/bitmap.h b/native_client/src/trusted/validator_ragel/bitmap.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..dec2a0d2cb282b194f48330826f40ae94733f307
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/bitmap.h
+@@ -0,0 +1,69 @@
++/*
++ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * This file contains bitmap array manipulation functions.
++ */
++
++#ifndef NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_RAGEL_BITMAP_H_
++#define NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_RAGEL_BITMAP_H_
++
++#include "native_client/src/include/build_config.h"
++#include "native_client/src/include/nacl_macros.h"
++#include "native_client/src/include/portability.h"
++
++#if NACL_WINDOWS
++# define FORCEINLINE __forceinline
++#else
++# define FORCEINLINE __inline __attribute__ ((always_inline))
++#endif
++
++typedef NACL_CONCAT(NACL_CONCAT(uint, NACL_HOST_WORDSIZE), _t) bitmap_word;
++
++static INLINE bitmap_word *BitmapAllocate(size_t indexes) {
++  size_t word_count = ((indexes + NACL_HOST_WORDSIZE - 1) / NACL_HOST_WORDSIZE);
++  NACL_COMPILE_TIME_ASSERT((NACL_HOST_WORDSIZE / 8) == sizeof(bitmap_word));
++  return calloc(word_count, sizeof(bitmap_word));
++}
++
++static FORCEINLINE int BitmapIsBitSet(bitmap_word *bitmap, size_t index) {
++  return (bitmap[index / NACL_HOST_WORDSIZE] &
++                       (((bitmap_word)1) << (index % NACL_HOST_WORDSIZE))) != 0;
++}
++
++static FORCEINLINE void BitmapSetBit(bitmap_word *bitmap, size_t index) {
++  bitmap[index / NACL_HOST_WORDSIZE] |=
++                               ((bitmap_word)1) << (index % NACL_HOST_WORDSIZE);
++}
++
++static FORCEINLINE void BitmapClearBit(bitmap_word *bitmap, size_t index) {
++  bitmap[index / NACL_HOST_WORDSIZE] &=
++                            ~(((bitmap_word)1) << (index % NACL_HOST_WORDSIZE));
++}
++
++/* All the bits must be in a single 32-bit bundle.  */
++static FORCEINLINE int BitmapIsAnyBitSet(bitmap_word *bitmap,
++                                         size_t index, size_t bits) {
++  return (bitmap[index / NACL_HOST_WORDSIZE] &
++       (((((bitmap_word)1) << bits) - 1) << (index % NACL_HOST_WORDSIZE))) != 0;
++}
++
++/* All the bits must be in a single 32-bit bundle. */
++static FORCEINLINE void BitmapSetBits(bitmap_word *bitmap,
++                                      size_t index,
++                                      size_t bits) {
++  bitmap[index / NACL_HOST_WORDSIZE] |=
++               ((((bitmap_word)1) << bits) - 1) << (index % NACL_HOST_WORDSIZE);
++}
++
++/* All the bits must be in a single 32-bit bundle. */
++static FORCEINLINE void BitmapClearBits(bitmap_word *bitmap,
++                                        size_t index, size_t bits) {
++  bitmap[index / NACL_HOST_WORDSIZE] &=
++            ~(((((bitmap_word)1) << bits) - 1) << (index % NACL_HOST_WORDSIZE));
++}
++
++#endif  /* NATIVE_CLIENT_SRC_TRUSTED_VALIDATOR_RAGEL_VALIDATOR_INTERNAL_H_ */
+diff --git a/native_client/src/trusted/validator_ragel/bsr_bsf_proof.py b/native_client/src/trusted/validator_ragel/bsr_bsf_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d8e64e9a8b4328864932be4b01a5d5b4b45165ed
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/bsr_bsf_proof.py
+@@ -0,0 +1,33 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for verifying that 16bit bsr/bsf is added to the 32 bit DFA."""
++
++import proof_tools
++
++
++def Validate(trie_diffs, bitness):
++  """Validate the trie_diffs adds 16 bit bsr/bsf is added in 32bit mode."""
++
++  # No instructions should be removed for 32/64 bit DFAs.
++  # No instructions should be added for 64 bit DFA because it already
++  # contains 16 bit bsr/bsf instructions.
++  # in 32-bit mode, 16 bit bsr/bsf should be added.
++  # This is of the forms:
++  #   {bsr,bsf} mem16/reg16, reg16
++  if bitness == 32:
++    mnemonics = proof_tools.MnemonicOp('bsr') | proof_tools.MnemonicOp('bsf')
++    reg16 = proof_tools.GprOperands(bitness=bitness, operand_size=16)
++    mem = proof_tools.AllMemoryOperands(bitness=bitness)
++    expected_adds = proof_tools.OpsProd(mnemonics, reg16 | mem, reg16)
++  else:
++    expected_adds = set()
++
++  proof_tools.AssertDiffSetEquals(trie_diffs,
++                                  expected_adds=expected_adds,
++                                  expected_removes=set())
++
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/build.scons b/native_client/src/trusted/validator_ragel/build.scons
+new file mode 100644
+index 0000000000000000000000000000000000000000..dee21dcb797c8b2fc49537f56a09b380cf94eb2d
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/build.scons
+@@ -0,0 +1,577 @@
++# -*- python -*-
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import json
++import hashlib
++import os
++import platform
++import sys
++
++Import('env')
++
++# We only want to export validator functions when we build with scons, because
++# they are used for tests.
++# On the other hand, exporting unnecessary symbols causes chromium build
++# problems, see https://code.google.com/p/nativeclient/issues/detail?id=3367 ,
++# so we leave VALIDATOR_EXPORT undefined in gyp build.
++env = env.Clone()
++env.Append(CCFLAGS=['-DVALIDATOR_EXPORT=DLLEXPORT'])
++
++# Dir to place c files generated by 'dfagen' target (it's under source control).
++gen_dir = '$MAIN_DIR/src/trusted/validator_ragel/gen'
++# Currently we only provide ragel pre-built for Linux.
++ragel_binary = '$MAIN_DIR/../third_party/ragel/ragel.linux'
++
++INSTRUCTION_DEFINITIONS = map(env.File, [
++    'instruction_definitions/general_purpose_instructions.def',
++    'instruction_definitions/system_instructions.def',
++    'instruction_definitions/x87_instructions.def',
++    'instruction_definitions/mmx_instructions.def',
++    'instruction_definitions/xmm_instructions.def',
++    'instruction_definitions/nops.def',
++    'instruction_definitions/tls.def',
++])
++
++# These objects are included in both dfa_validate_x86_xx and rdfa_validator
++# libraries, so we have to introduce intermediate scons nodes.
++validator32 = env.ComponentObject('gen/validator_x86_32.c')
++validator64 = env.ComponentObject('gen/validator_x86_64.c')
++
++features = [
++    env.ComponentObject('validator_features_all.c'),
++    env.ComponentObject('validator_features_validator.c')
++]
++
++# Glue library called from service runtime. The source file depends on the
++# target architecture.  In library_deps.py this library is marked as
++# dependant of dfa_validate_x86_xx.
++if env.Bit('build_x86'):
++  caller_lib = 'dfa_validate_caller_x86_%s' % env.get('TARGET_SUBARCH')
++  env.ComponentLibrary(
++      caller_lib,
++      ['dfa_validate_%s.c' % env.get('TARGET_SUBARCH'),
++       {'32': validator32, '64': validator64}[env.get('TARGET_SUBARCH')],
++       'dfa_validate_common.c',
++       features])
++
++# Low-level platform-independent interface supporting both 32 and 64 bit,
++# used in ncval and in validator_benchmark.
++env.ComponentLibrary('rdfa_validator',
++                     [validator32, validator64] + features)
++
++validator_benchmark = env.ComponentProgram(
++    'rdfa_validator_benchmark',
++    ['validator_benchmark.cc'],
++    EXTRA_LIBS=['rdfa_validator', 'platform', 'elf_load']
++)
++
++run_benchmark = env.AutoDepsCommand(
++    'run_validator_ragel_benchmark.out',
++    [validator_benchmark, env.GetIrtNexe(), '10000']
++)
++
++env.AlwaysBuild(env.Alias('dfavalidatorbenchmark', run_benchmark))
++
++# We don't run this test under qemu because it attempts to execute host python
++# binary.
++gen_dfa_test = env.CommandTest(
++    'gen_dfa_test.out',
++    ['${PYTHON}', env.File('gen_dfa_test.py')] + INSTRUCTION_DEFINITIONS,
++    direct_emulation=False)
++
++env.AddNodeToTestSuite(
++    gen_dfa_test,
++    ['small_tests', 'validator_tests'],
++    'run_gen_dfa_test')
++
++trie_test = env.CommandTest(
++    'trie_test.out',
++    ['${PYTHON}', env.File('trie_test.py'), '--verbose'],
++    direct_emulation=False)
++
++env.AddNodeToTestSuite(
++    trie_test,
++    ['small_tests', 'validator_tests'],
++    'run_trie_test')
++
++proof_tools_test = env.CommandTest(
++    'proof_tools_test.out',
++    ['${PYTHON}', env.File('proof_tools_test.py'), '--verbose'],
++    direct_emulation=False)
++
++env.AddNodeToTestSuite(
++    proof_tools_test,
++    ['small_tests', 'validator_tests'],
++    'run_proof_tools_test')
++
++dll_env = env.Clone(COMPONENT_STATIC=False)
++
++if env.Bit('windows'):
++  # On windows we don't need to recompile specifically for dynamic linking.
++  validator32_dll = validator32
++  validator64_dll = validator64
++  features_dll = features
++else:
++  dll_env.Append(CCFLAGS=['-fPIC'])
++  validator32_dll = dll_env.ComponentObject('gen/validator_x86_32.c')
++  validator64_dll = dll_env.ComponentObject('gen/validator_x86_64.c')
++
++  features_dll = [
++      dll_env.ComponentObject('validator_features_all.c'),
++      dll_env.ComponentObject('validator_features_validator.c')
++  ]
++
++dll_utils = dll_env.ComponentObject('dll_utils.c')
++
++validator_dll = dll_env.ComponentLibrary(
++    'rdfa_validator_dll',
++    [validator32_dll, validator64_dll, dll_utils] + features_dll)
++
++# Here for simplicity we make assumption that python used to run scons
++# is the same as the one invoked by scons to run tests.
++python_bitness = {2**31 - 1: 32, 2**63 - 1: 64}[sys.maxsize]
++bitness = int(env.get('TARGET_SUBARCH'))
++assert bitness in [32, 64]
++# Note that it is possible that we build on one machine and run tests on another
++# one, so we build DLL even if python bitness does not match target bitness.
++# Asan does not instrument DLLs (only executables), so we will be unable to
++# run tests under asan.
++python_can_load_dll = python_bitness == bitness and not env.Bit('asan')
++
++# On ARM we still have some test bots that are running an armel system
++# image (with armhf runtime supported added) which means that the python
++# executable is armel and cannot load binaries built by the arm cross
++# compiler that we use.
++# TODO(sbc): remove this once the testbots get upgraded to armhf:
++# https://code.google.com/p/nativeclient/issues/detail?id=3716
++if platform.machine() == 'armv7l':
++  with open(sys.executable) as infile:
++    if '/lib/ld-linux-armhf' not in infile.read(1024):
++      python_can_load_dll = False
++
++if python_can_load_dll:
++  validator_py_test = env.AutoDepsCommand(
++        'validator_py_out',
++        ['${PYTHON}',
++         env.File('validator.py'),
++         validator_dll])
++
++  env.AddNodeToTestSuite(
++      validator_py_test,
++      ['small_tests', 'validator_tests'],
++      'run_validator_py_test')
++
++# Source generation:
++#
++#   dfagen : Regenerate any autogenerated source files.
++
++ragel_targets = set([
++    'dfagen',
++    'dfacheckdecoder',
++    'dfacheckvalidator',
++    'dfagentries',
++    'dfachecktries'])
++ragel_involved = ragel_targets.intersection(COMMAND_LINE_TARGETS)
++
++gas = env.MakeUntrustedNativeEnv()['AS']
++objdump = env.MakeUntrustedNativeEnv()['OBJDUMP']
++
++if ragel_involved:
++  if not env.Bit('host_linux'):
++    raise Exception('Right now DFA generation is only supported on Linux')
++
++  # Source generation step 1: Build generator of ragel files.
++  #
++  # We have generator which reads .def files and produced automaton definition.
++  #
++  # Ragel is included in most Linux distributions, but it's not standard tool
++  # on MacOS/Windows thus we only support gneration of automata under Linux.
++  # This also means that we don't need to make sure gen_dfa.cc is portable to
++  # non-POSIX platforms (in particular it's not Windows compatible).
++
++  env_gen_dfa = env.Clone()
++  env_gen_dfa.Append(CCFLAGS=['-DNACL_TRUSTED_BUT_NOT_TCB'])
++
++  # Generate byte_machines.rl from byte_machines.py
++  (byte_machines,) = env.AutoDepsCommand(
++      'byte_machines.rl',
++      ['${PYTHON}',
++       env.File('byte_machines.py'),
++       '>${TARGET}'])
++
++  # Source generation step 2: Generate decoder automata.
++  #
++  # Now we are back to conditionally defining the large automata generated
++  # by gen_dfa.
++
++  def MakeAutomaton(bits, automaton):
++    (rl_instruction_file,) = env.AutoDepsCommand(
++        '%s_x86_%s_instruction.rl' % (automaton, bits),
++        ['${PYTHON}',
++         env.File('gen_dfa.py'),
++         '--bitness', bits,
++         '--mode', automaton,
++         '>${TARGET}',
++         ] + INSTRUCTION_DEFINITIONS)
++
++    include_dir = rl_instruction_file.dir.get_abspath()
++    assert include_dir == byte_machines.dir.get_abspath()
++
++    # Don't use env.File because filename is written "as is" in XML file.
++    # We want relative path there, not an absolute one!
++    rl_file = 'src/trusted/validator_ragel/%s_x86_%s.rl' % (automaton, bits)
++
++    (xml_file,) = env.AutoDepsCommand(
++        '%s/%s_x86_%s.xml' % (gen_dir, automaton, bits),
++        [ragel_binary,
++         '-x',
++         '-LL',
++         '-I..',
++         '-I%s' % include_dir,
++         rl_file,
++         '-o', '${TARGET}'],
++        extra_deps=[byte_machines, rl_instruction_file])
++
++    c_file = env.AutoDepsCommand(
++        '%s/%s_x86_%s.c' % (gen_dir, automaton, bits),
++        ['${PYTHON}',
++         env.File('codegen.py'),
++         rl_file,
++         xml_file,
++         '${TARGET}'])
++    # We need to at least update timestamp if dfagen is started.
++    # It is needed for presubmit script.
++    env.AlwaysBuild(c_file)
++
++    return c_file, xml_file
++
++  (decoder32, decoder32_xml) = MakeAutomaton(
++      '32', 'decoder')
++  (validator32, validator32_xml) = MakeAutomaton(
++      '32', 'validator')
++  (decoder64, decoder64_xml) = MakeAutomaton(
++      '64', 'decoder')
++  (validator64, validator64_xml) = MakeAutomaton(
++      '64', 'validator')
++
++  automata = [decoder32, validator32, decoder64, validator64]
++
++  # Prepair 'dfacheckdecoder' test.
++  #
++  # In this test, all acceptable instructions are enumerated
++  # by DFA traversal, and for each one objdump output and
++  # DFA-based decoder output are compared.
++  # It takes few hours to run the test, so it's not included
++  # into any suits and is supposed to be run manually when
++  # changes are made to DFA definitions.
++  # Also, since DFA generation is currently linux-only,
++  # this test is somewhat platform-dependent as well.
++
++  decoder32_obj = dll_env.ComponentObject(decoder32)
++  decoder64_obj = dll_env.ComponentObject(decoder64)
++  decoder_test_obj = dll_env.ComponentObject('unreviewed/decoder_test.cc')
++
++  # Command-line decoder.
++  decoder_test = env.ComponentProgram(
++      'decoder_test',
++      [decoder_test_obj, decoder32_obj, decoder64_obj])
++
++  decoder_dll = dll_env.ComponentLibrary(
++      'rdfa_decoder_dll',
++      [decoder_test_obj, decoder32_obj, decoder64_obj])
++
++  check_decoders = []
++
++  for bits, xml in [('32', decoder32_xml), ('64', decoder64_xml)]:
++    check_decoder = env.AutoDepsCommand(
++        'check_decoder_test_results_%s' % bits,
++        ['${PYTHON}',
++         env.File('check_decoder.py'),
++         xml,
++         '--gas', gas,
++         '--objdump', objdump,
++         '--decoder', decoder_test,
++         '--bits', bits])
++
++    check_decoders.append(check_decoder)
++
++  # Never run decoder tests in parallel because they can take all CPU.
++  SideEffect('check_decoder', check_decoders)
++
++  env.AlwaysBuild(env.Alias('dfagen', automata))
++  env.AlwaysBuild(env.Alias('dfacheckdecoder', check_decoders))
++
++  gen_tries = []
++  check_tries = []
++
++  for bits, xml in [('32', validator32_xml), ('64', validator64_xml)]:
++    latest_trie_file = env.AutoDepsCommand(
++        '%s/gen_trie_%s.out' % (gen_dir, bits),
++        ['${PYTHON}',
++         env.File('gen_trie_from_dfa.py'),
++         xml,
++         '--bitness', bits,
++         '--validator_dll', validator_dll,
++         '--decoder_dll', decoder_dll,
++         '--trie_path', '${TARGET}'])
++    gen_tries.append(latest_trie_file)
++
++    check_latest_trie_file = env.AutoDepsCommand(
++        'check_latest_trie_%s.out' % bits,
++        ['${PYTHON}',
++         env.File('check_trie.py'),
++         '--bitness', bits,
++         latest_trie_file])
++    check_tries.append(check_latest_trie_file)
++
++  SideEffect('gen_tries', gen_tries)
++  env.Alias('dfagentries', gen_tries)
++
++  snapshots_dir = '${MAIN_DIR}/../validator_snapshots'
++  trie_proofs = [
++    # (proof_file_name, (bitnesses), old_trie_path, new_trie_path)
++    ('vzero_proof.py', ('32', '64'), '20141001', '20141020.vzero'),
++    ('movbe_proof.py', ('32', '64'), '20141020.vzero', '20141021.movbe'),
++    ('bsr_bsf_proof.py', ('32', '64'), '20141021.movbe', '20141027.bsr_bsf'),
++    ('shld_shrd_proof.py', ('32', '64'), '20141027.bsr_bsf',
++     '20141028.shld_shrd'),
++    ('xadd16_proof.py', ('32', '64'), '20141028.shld_shrd', '20141029.xadd16'),
++    ('cmpxchg16_proof.py', ('32', '64'), '20141029.xadd16',
++     '20141030.cmpxchg16'),
++    ('avx1_xmm_ymm_memory_3op_pd_proof.py', ('32', '64'), '20141030.cmpxchg16',
++     '20141031.avx1_3op_fp_pd'),
++    ('avx1_xmm_ymm_memory_3op_ps_proof.py', ('32', '64'),
++     '20141031.avx1_3op_fp_pd', '20141104.avx1_3op_fp_ps'),
++    ('avx1_xmm_memory_3op_pi_proof.py', ('32', '64'),
++     '20141104.avx1_3op_fp_ps', '20141105.avx1_3op_pi'),
++    ('avx1_xmm_memory_3op_pb_proof.py', ('32', '64'),
++     '20141105.avx1_3op_pi', '20141106.avx1_3op_pb'),
++    ('avx1_xmm_memory_3op_fp_scalars_proof.py', ('32', '64'),
++      '20141106.avx1_3op_pb', '20141110.avx1_3op_fp_scalars'),
++    ('vbroadcast_proof.py', ('32', '64'),
++     '20141110.avx1_3op_fp_scalars', '20141115.avx1_vbroadcast'),
++    ('avx1_3op_simd_or_memory_others_proof.py', ('32', '64'),
++     '20141115.avx1_vbroadcast', '20141118.avx1_remaining_3operand'),
++    ('avx1_xmm_ymm_memory_moves.py', ('32', '64'),
++     '20141118.avx1_remaining_3operand', '20141119.avx1_moves'),
++    ('remaining_nonspecial_avx1_proof.py', ('32', '64'),
++     '20141119.avx1_moves', '20141204.all_nonspecial_avx1'),
++    ('final_avx1_instrs_proof.py', ('32', '64'),
++     '20141204.all_nonspecial_avx1', '20141210.remaining_avx1'),
++    ('fma_proof.py', ('32', '64'), '20141210.remaining_avx1', '20141215.fma'),
++    ('vpminsd_avx2_proof.py', ('32', '64'),
++     '20141215.fma', '20150106.vpminsd.avx2'),
++    ('avx2_0f_6x_0f_7x_proof.py', ('32', '64'),
++     '20150106.vpminsd.avx2', '20150107.avx2.groups_0f_6x_0f_7x'),
++    ('remaining_avx2_promotions_proof.py', ('32', '64'),
++     '20150107.avx2.groups_0f_6x_0f_7x', '20150113.remaining_avx2_promotions'),
++    ('avx2_additions_proof.py', ('32', '64'),
++     '20150113.remaining_avx2_promotions', '20150128.avx2_additions'),
++    ('crc32_16_to_32_proof.py', ('32', '64'),
++     '20150210.vmovq_bugfix', '20150223.crc32w'),
++    ('jecxz_proof.py', ('32', '64'),
++     '20150223.crc32w', '20150226.jecxz'),
++    ('vmovd_proof.py', ('32', '64'),
++     '20150226.jecxz', '20150430.vmovd_bugfix'),
++    ('nacl_unsupported_proof.py', ('32', '64'),
++     '20150430.vmovd_bugfix', '20150723.nacl_unsupported'),
++  ]
++  # Run the 5 latest proofs by default.
++  for proof_file, bitnesses, old, new in trie_proofs[-5:]:
++    for bitness in bitnesses:
++      trie_subdirs = {'32': 'ragel_trie_x86_32', '64': 'ragel_trie_x86_64'}
++      check_proof = env.AutoDepsCommand(
++        '%s_%s_results' % (proof_file, bitness),
++        ['${PYTHON}',
++         env.File(proof_file),
++         '--validator_dll', validator_dll,
++         '--decoder_dll', decoder_dll,
++         '--bitness', bitness,
++         '--gas', gas,
++         '--objdump', objdump,
++         '--old', snapshots_dir + '/' + trie_subdirs[bitness] + '/' + old,
++         '--new', snapshots_dir + '/' + trie_subdirs[bitness] + '/' + new])
++      check_tries.append(check_proof)
++
++  # Don't run gen_trie tests in parallel because they can take all CPU.
++  SideEffect('check_tries', check_tries)
++  env.Alias('dfachecktries', check_tries)
++
++  if python_can_load_dll:
++
++    dfacheckvalidator_tests = []
++
++    for bitness, xml in [('32', validator32_xml), ('64', validator64_xml)]:
++      superinstruction = env.AutoDepsCommand(
++          'superinstructions_x86_%s.txt' % bitness,
++          ['${PYTHON}',
++           env.File('verify_validators_dfa.py'),
++           xml,
++           '-o', '${TARGET}'])
++
++      superinstruction_verified = env.AutoDepsCommand(
++        'superinstructions_verified_x86_%s.out' % bitness,
++        ['${PYTHON}',
++         env.File('verify_superinstructions.py'),
++         '--bitness', bitness,
++         '--gas', gas,
++         '--objdump', objdump,
++         '--validator_dll', validator_dll,
++         superinstruction])
++
++      env.AlwaysBuild(superinstruction_verified)
++      dfacheckvalidator_tests.append(superinstruction_verified)
++
++      regular_instructions_test = env.AutoDepsCommand(
++        'regular_instructions_test_x86_%s.out' % bitness,
++        ['${PYTHON}',
++         env.File('verify_regular_instructions.py'),
++         xml,
++         '--bitness', bitness,
++         '--validator_dll', validator_dll,
++         '--decoder_dll', decoder_dll])
++
++      # Never run exhaustive tests in parallel because they can take all CPU.
++      env.AlwaysBuild(regular_instructions_test)
++      SideEffect('check_validator', regular_instructions_test)
++      dfacheckvalidator_tests.append(regular_instructions_test)
++
++    # There are three categories of protected files: validator files, generated
++    # files (those of validator files that lie withing 'gen' directory) and
++    # generating files (programs and input data used to produce generated
++    # files).
++    #
++    # When validator files are changed, exhaustive validator tests have to be
++    # rerun.  When generating files are changed, dfagen must be run to ensure
++    # that generated files are up to date. Presubmit script uses
++    # protected_files.json to perform these checks.
++
++    # Files which directly affect the validator behavior.
++    protected_files = [
++      'gen/validator_x86_32.c',
++      'gen/validator_x86_32.xml',
++      'gen/validator_x86_64.c',
++      'gen/validator_x86_64.xml',
++      'validator_internal.h',
++      'decoder.h',
++      'decoding.h',
++      'validator.h']
++
++    # Files which are used to generate gen/{decoder,validator}_x86_{32,64}.c
++    # files.
++    generating_files = [
++      INSTRUCTION_DEFINITIONS,
++      'validator_x86_32.rl',
++      'validator_x86_64.rl',
++      'parse_instruction.rl',
++      'byte_machines.py',
++      'gen_dfa.py',
++      'codegen.py']
++
++    def CanonicalizeFilename(filename):
++      return 'native_client/' + env.File(filename).get_path().replace('\\', '/')
++
++    def CalculateHashSums(target, source, env):
++      target_filename = target[0].get_abspath()
++      protected_files = {
++        'validator':{},
++        'generated':[],
++        'generating':[]
++      }
++      for filename in source:
++        canonical_filename = CanonicalizeFilename(filename)
++        with open(filename.get_abspath(), 'r') as file_stream:
++          sha512 = hashlib.sha512(file_stream.read()).hexdigest()
++          protected_files['validator'][canonical_filename] = sha512
++        if canonical_filename.rsplit('/', 2)[1] == 'gen':
++          protected_files['generated'].append(canonical_filename)
++      for filename in Flatten(generating_files):
++        canonical_filename = CanonicalizeFilename(filename)
++        protected_files['generating'].append(canonical_filename)
++      with open(target_filename, 'w') as target_file:
++        json.dump(protected_files, target_file, sort_keys=True, indent=2)
++
++    calculate_hash_sums = env.Command(
++        target='%s/protected_files.json' % gen_dir,
++        source=protected_files,
++        action=CalculateHashSums)
++    env.Depends(calculate_hash_sums, dfacheckvalidator_tests)
++
++    env.Alias('dfacheckvalidator', calculate_hash_sums)
++
++# Targeted tests: RDFA validator test, dis section checker and spec_val test.
++
++for bits in ['32', '64']:
++  tests_mask = (
++      '${MAIN_DIR}/src/trusted/validator_ragel/testdata/%s/*.test' % bits)
++
++  if env.Bit('regenerate_golden'):
++    update_option = ['--update']
++  else:
++    update_option = []
++
++  if env.Bit('build_x86'):
++    # In principle we can run these tests on ARM too, but first, there is no
++    # reason to, and second, there are problems with those bots that build
++    # on one machine and run tests on another (build machine does not recognize
++    # than new ncval is needed, so it's not copied to the test machine).
++    rdfaval = '$STAGING_DIR/ncval_new$PROGSUFFIX'
++    rdfa_targeted_test = env.AutoDepsCommand(
++        'run_rdfa_targeted_tests_%s.out' % bits,
++        ['${PYTHON}',
++         env.File('run_rdfa_validator_tests.py'),
++         '--rdfaval', env.File(rdfaval),
++         '--bits', bits,
++         tests_mask] + update_option)
++
++    env.AddNodeToTestSuite(
++        rdfa_targeted_test,
++        ['small_tests', 'validator_tests'],
++        node_name='run_rdfa_targeted_tests_%s' % bits)
++
++    if env.Bit('regenerate_golden'):
++      # Don't want these tests run in parallel because they write
++      # to .test files.
++      SideEffect(tests_mask, rdfa_targeted_test)
++
++    dis_section_test = env.AutoDepsCommand(
++        'run_dis_section_test_%s.out' % bits,
++        ['${PYTHON}',
++         env.File('check_dis_section.py'),
++         '--objdump', objdump,
++         '--bits', bits,
++         tests_mask] + update_option)
++
++    env.AddNodeToTestSuite(
++        dis_section_test,
++        ['small_tests', 'validator_tests'],
++        node_name='run_dis_section_test_%s' % bits)
++
++    if env.Bit('regenerate_golden'):
++      # Don't want these tests run in parallel because they write
++      # to .test files.
++      SideEffect(tests_mask, dis_section_test)
++
++  spec_test = env.AutoDepsCommand(
++      'run_spec_val_test_%s.out' % bits,
++      ['${PYTHON}',
++       env.File('spec_val_test.py'),
++       '--bits', bits,
++       tests_mask] + update_option)
++
++  env.AddNodeToTestSuite(
++      spec_test,
++      ['small_tests', 'validator_tests'],
++      node_name='run_spec_val_test_%s' % bits)
++
++  if env.Bit('regenerate_golden'):
++    # Don't want these tests run in parallel because they write
++    # to .test files.
++    SideEffect(tests_mask, spec_test)
++
++    # Spec test uses @dis section in test files, which in turn is updated
++    # by dis_section_test.
++    if env.Bit('build_x86'):
++      env.Depends(spec_test, dis_section_test)
+diff --git a/native_client/src/trusted/validator_ragel/byte_machines.py b/native_client/src/trusted/validator_ragel/byte_machines.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..05bc04f2e1f652c4d1b9153640d3db6e96fd15ec
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/byte_machines.py
+@@ -0,0 +1,216 @@
++#!/usr/bin/python
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# Creates byte_machines.rl file.  Each machine accepts exactly one byte.
++#
++# In the name of a machine "0" means "unset bit", "1" means "set bit", "x" or
++# "X" mean "any bit", other letters are ignored.  Prefix "b_" is used as
++# convention to distinguish these autogenerated machines from the hand-written
++# ones, underscores do not matter and are used to separate bitfields in a byte
++# for readability.
++#
++# For example:
++#   b_00_xxx_100 = 0x04 | 0x0c | 0x14 | 0x1c | 0x24 | 0x2c | 0x34 | 0x3c;
++
++# Only generating the byte machines that are needed by the validator or
++# the decoder.
++byte_machines = [
++  # ModR/M parsing
++  'b_00_xxx_100',
++  'b_00_xxx_101',
++  'b_01_xxx_100',
++  'b_10_xxx_100',
++  'b_00_xxx_xxx',
++  'b_11_010_xxx',
++  'b_01_xxx_xxx',
++  'b_10_xxx_xxx',
++  'b_11_010_111',
++  'b_11_100_111',
++  'b_11_100_xxx',
++  'b_11_111_111',
++  'b_11_111_xxx',
++  'b_11_xxx_111',
++  'b_11_xxx_xxx',
++  'b_xx_xxx_000',
++  'b_xx_xxx_001',
++  'b_xx_xxx_010',
++  'b_xx_xxx_011',
++  'b_xx_xxx_100',
++  'b_xx_xxx_101',
++  'b_xx_xxx_110',
++  'b_xx_xxx_111',
++
++  # Opcodes
++  'b_xx_000_xxx',
++  'b_xx_001_xxx',
++  'b_xx_010_xxx',
++  'b_xx_011_xxx',
++  'b_xx_100_xxx',
++  'b_xx_101_xxx',
++  'b_xx_110_xxx',
++  'b_xx_111_xxx',
++
++  # REX parsing.
++  'b_0100_x000',
++  'b_0100_0x00',
++  'b_0100_00x0',
++  'b_0100_000x',
++  'b_0100_xx00',
++  'b_0100_x0x0',
++  'b_0100_x00x',
++  'b_0100_0xx0',
++  'b_0100_0x0x',
++  'b_0100_00xx',
++  'b_0100_xxx0',
++  'b_0100_xx0x',
++  'b_0100_x0xx',
++  'b_0100_0xxx',
++  'b_0100_xxxx',
++
++  # REX parsing - special instructions
++  'b_0100_0xx1',
++  'b_0100_10x1',
++  'b_0100_11x0',
++  'b_0100_11x1',
++  'b_0100_xxx1',
++
++  'b_0100_1000',
++  'b_0100_1x00',
++  'b_0100_10x0',
++  'b_0100_100x',
++  'b_0100_1xx0',
++  'b_0100_1x0x',
++  'b_0100_10xx',
++  'b_0100_1xxx',
++
++  # VEX parsing - RXB bits
++  'b_111_xxxxx',
++  'b_x11_xxxxx',
++  'b_1x1_xxxxx',
++  'b_11x_xxxxx',
++  'b_xx1_xxxxx',
++  'b_x1x_xxxxx',
++  'b_1xx_xxxxx',
++  'b_xxx_xxxxx',
++
++  # VEX parsing - opcode tables
++  'b_xxx_00001',
++  'b_xxx_00010',
++  'b_xxx_00011',
++  'b_xxx_01000',
++  'b_xxx_01001',
++  'b_xxx_01010',
++
++  # VEX parsing - operands (canonical: three bytes)
++  'b_0_1111_0_00',
++  'b_0_1111_0_01',
++  'b_0_1111_0_10',
++  'b_0_1111_0_11',
++  'b_0_1111_1_00',
++  'b_0_1111_1_01',
++  'b_0_1111_1_10',
++  'b_0_1111_1_11',
++  'b_0_1XXX_0_00',
++  'b_0_1XXX_0_01',
++  'b_0_1XXX_0_10',
++  'b_0_1XXX_0_11',
++  'b_0_1XXX_1_00',
++  'b_0_1XXX_1_01',
++  'b_0_1XXX_1_10',
++  'b_0_1XXX_1_11',
++  'b_0_XXXX_0_00',
++  'b_0_XXXX_0_01',
++  'b_0_XXXX_0_10',
++  'b_0_XXXX_0_11',
++  'b_0_XXXX_1_00',
++  'b_0_XXXX_1_01',
++  'b_0_XXXX_1_10',
++  'b_0_XXXX_1_11',
++  'b_1_1111_0_00',
++  'b_1_1111_0_01',
++  'b_1_1111_0_10',
++  'b_1_1111_0_11',
++  'b_1_1111_1_00',
++  'b_1_1111_1_01',
++  'b_1_1111_1_10',
++  'b_1_1111_1_11',
++  'b_1_1XXX_0_00',
++  'b_1_1XXX_0_01',
++  'b_1_1XXX_0_10',
++  'b_1_1XXX_0_11',
++  'b_1_1XXX_1_00',
++  'b_1_1XXX_1_01',
++  'b_1_1XXX_1_10',
++  'b_1_1XXX_1_11',
++  'b_1_XXXX_0_00',
++  'b_1_XXXX_0_01',
++  'b_1_XXXX_0_10',
++  'b_1_XXXX_0_11',
++  'b_1_XXXX_1_00',
++  'b_1_XXXX_1_01',
++
++  # VEX parsing - operands (short: two bytes)
++  'b_X_1111_0_00',
++  'b_X_1111_0_01',
++  'b_X_1111_0_10',
++  'b_X_1111_0_11',
++  'b_X_1111_1_00',
++  'b_X_1111_1_01',
++  'b_X_1111_1_10',
++  'b_X_1111_1_11',
++  'b_X_XXXX_0_00',
++  'b_X_XXXX_0_01',
++  'b_X_XXXX_0_10',
++  'b_X_XXXX_0_11',
++  'b_X_XXXX_1_00',
++  'b_X_XXXX_1_01',
++  'b_X_XXXX_1_10',
++  'b_X_XXXX_1_11',
++
++  # Four-five operands instruction parsing.
++  'b_0xxx_0000',
++  'b_xxxx_0000',
++  'b_0xxx_00xx',
++  'b_xxxx_00xx'
++]
++
++
++def MatchingBytes(byte_machine):
++  assert byte_machine.startswith('b_')
++  mask = byte_machine[2:].replace('_', '').replace('X', 'x')
++  mask = mask[::-1]
++  assert len(mask) == 8
++  assert all(mask_bit in '01x' for mask_bit in mask)
++
++  matching_bytes = []
++  for b in range(256):
++    if all(mask_bit == 'x' or int(mask_bit) == ((b >> i) & 1)
++           for i, mask_bit in enumerate(mask)):
++      matching_bytes.append('0x%02x' % b)
++
++  assert len(matching_bytes) > 0
++  return ' | '.join(matching_bytes)
++
++
++assert (MatchingBytes('b_00_xxx_100') ==
++        '0x04 | 0x0c | 0x14 | 0x1c | 0x24 | 0x2c | 0x34 | 0x3c')
++
++
++def main():
++  print '/* THIS FILE IS AUTOGENERATED (by byte_machines.py). DO NOT EDIT. */'
++  print
++  print '%%{'
++  print '  machine byte_machine;'
++  print '  alphtype unsigned char;'
++  print
++
++  for byte_machine in byte_machines:
++    print '  %s = %s;' % (byte_machine, MatchingBytes(byte_machine))
++
++  print '}%%'
++
++
++if __name__ == '__main__':
++  main()
+diff --git a/native_client/src/trusted/validator_ragel/check_decoder.py b/native_client/src/trusted/validator_ragel/check_decoder.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..4342b3d3f698d9a5238863935daf28ac0d258657
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/check_decoder.py
+@@ -0,0 +1,208 @@
++#!/usr/bin/python
++# Copyright (c) 2012 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Generate all acceptable sequences from acyclic DFA, run objdump and
++decoder on them and compare results.
++"""
++
++import itertools
++import multiprocessing
++import optparse
++import os
++import re
++import subprocess
++import tempfile
++
++import dfa_parser
++import dfa_traversal
++import objdump_parser
++
++
++FWAIT = 0x9b
++NOP = 0x90
++
++
++def IsRexPrefix(byte):
++  return 0x40 <= byte < 0x50
++
++
++def LineRoughlyEqual(s1, s2):
++  """Check whether disasms lines are equal ignoring whitespaces and comments."""
++  # strip comments.
++  # These are mainly used by objdump to print out the absolute address
++  # for rip relative jumps.
++  # e.g.
++  # 0x400408: ff 35 e2 0b 20 00     pushq  0x200be2(%rip)        # 0x600ff0
++  s1, _, _ = s1.partition('#')
++  s2, _, _ = s2.partition('#')
++  # compare ignoring whitespace.
++  result = s1.split() == s2.split()
++  return result
++
++
++class WorkerState(object):
++  __slots__ = [
++      'total_instructions',
++      '_num_instructions',
++      '_asm_file',
++      '_file_prefix',
++  ]
++
++  def __init__(self, prefix):
++    self._file_prefix = 'check_decoder_%s_' % '_'.join(map(hex, prefix))
++    self.total_instructions = 0
++
++    self._StartNewFile()
++
++  def _StartNewFile(self):
++    self._asm_file = tempfile.NamedTemporaryFile(
++        mode='wt',
++        prefix=self._file_prefix,
++        suffix='.s',
++        delete=False)
++    self._asm_file.write('.text\n')
++    self._num_instructions = 0
++
++  def ReceiveInstruction(self, bytes):
++    # We do not disassemble x87 instructions prefixed with fwait as objdump
++    # does. To avoid such situations in enumeration test, we insert nop after
++    # fwait.
++    if (bytes == [FWAIT] or
++        len(bytes) == 2 and IsRexPrefix(bytes[0]) and bytes[1] == FWAIT):
++      bytes = bytes + [NOP]
++    self._asm_file.write('  .byte %s\n' % ','.join(map(hex, bytes)))
++    self.total_instructions += 1
++    self._num_instructions += 1
++    if self._num_instructions == 2000000:
++      self.Finish()
++      self._StartNewFile()
++
++  def _CheckFile(self):
++    try:
++      object_file = tempfile.NamedTemporaryFile(
++          prefix=self._file_prefix,
++          suffix='.o',
++          delete=False)
++      object_file.close()
++      subprocess.check_call([
++          options.gas,
++          '--%s' % options.bits,
++          '--strip-local-absolute',
++          self._asm_file.name,
++          '-o', object_file.name])
++
++      objdump_proc = subprocess.Popen(
++          [options.objdump, '-d', '--insn-width=15', object_file.name],
++          stdout=subprocess.PIPE)
++
++      decoder_proc = subprocess.Popen(
++          [options.decoder, object_file.name],
++          stdout=subprocess.PIPE)
++
++      for line1, line2 in itertools.izip_longest(
++          objdump_parser.SkipHeader(objdump_proc.stdout),
++          decoder_proc.stdout,
++          fillvalue=None):
++
++        if not LineRoughlyEqual(line1, line2):
++          print 'objdump: %r' % line1
++          print 'decoder: %r' % line2
++          raise AssertionError('%r != %r' % (line1, line2))
++
++      return_code = objdump_proc.wait()
++      assert return_code == 0
++
++      return_code = decoder_proc.wait()
++      assert return_code == 0
++
++    finally:
++      os.remove(self._asm_file.name)
++      os.remove(object_file.name)
++
++  def Finish(self):
++    self._asm_file.close()
++    self._CheckFile()
++
++
++def Worker((prefix, state_index)):
++  worker_state = WorkerState(prefix)
++
++  try:
++    dfa_traversal.TraverseTree(
++        dfa.states[state_index],
++        final_callback=worker_state.ReceiveInstruction,
++        prefix=prefix)
++  finally:
++    worker_state.Finish()
++
++  return prefix, worker_state.total_instructions
++
++
++def ParseOptions():
++  parser = optparse.OptionParser(
++      usage='%prog [options] xmlfile',
++      description=__doc__)
++  parser.add_option('--bits',
++                    type=int,
++                    help='The subarchitecture: 32 or 64')
++  parser.add_option('--gas',
++                    help='Path to GNU AS executable')
++  parser.add_option('--objdump',
++                    help='Path to objdump executable')
++  parser.add_option('--decoder',
++                    help='Path to decoder executable')
++  options, args = parser.parse_args()
++  if options.bits not in [32, 64]:
++    parser.error('specify --bits 32 or --bits 64')
++  if not (options.gas and options.objdump and options.decoder):
++    parser.error('specify path to gas, objdump and decoder')
++
++  if len(args) != 1:
++    parser.error('specify one xml file')
++
++  (xml_file,) = args
++
++  return options, xml_file
++
++
++options, xml_file = ParseOptions()
++# We are doing it here to share state graph between workers spawned by
++# multiprocess. Passing it every time is slow.
++dfa = dfa_parser.ParseXml(xml_file)
++
++
++def main():
++  # Decoder is supposed to have one accepting state.
++  accepting_states = [state for state in dfa.states if state.is_accepting]
++  assert accepting_states == [dfa.initial_state]
++
++  assert not dfa.initial_state.any_byte
++
++  num_suffixes = dfa_traversal.GetNumSuffixes(dfa.initial_state)
++  # We can't just write 'num_suffixes[dfa.initial_state]' because
++  # initial state is accepting.
++  total_instructions = sum(
++      num_suffixes[t.to_state]
++      for t in dfa.initial_state.forward_transitions.values())
++  print total_instructions, 'instructions total'
++
++  tasks = dfa_traversal.CreateTraversalTasks(dfa.states, dfa.initial_state)
++  print len(tasks), 'tasks'
++
++  pool = multiprocessing.Pool()
++
++  results = pool.imap(Worker, tasks)
++
++  total = 0
++  for prefix, count in results:
++    print ', '.join(map(hex, prefix))
++    total += count
++
++  print total, 'instructions were processed'
++
++
++if __name__ == '__main__':
++  main()
+diff --git a/native_client/src/trusted/validator_ragel/check_dis_section.py b/native_client/src/trusted/validator_ragel/check_dis_section.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f5183fc829b6c1bdb1d34405133e57b5b3c2f373
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/check_dis_section.py
+@@ -0,0 +1,64 @@
++#!/usr/bin/python
++# Copyright (c) 2013 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import os
++import subprocess
++import sys
++import tempfile
++
++import objdump_parser
++import test_format
++
++
++class RdfaTestRunner(test_format.TestRunner):
++
++  SECTION_NAME = 'dis'
++
++  def CommandLineOptions(self, parser):
++    parser.add_option('--objdump',
++                      help='Path to objdump')
++
++  def GetSectionContent(self, options, sections):
++    arch = {32: '-Mi386', 64: '-Mx86-64'}[options.bits]
++    data = ''.join(test_format.ParseHex(sections['hex']))
++
++    # TODO(shcherbina): get rid of custom prefix once
++    # https://code.google.com/p/nativeclient/issues/detail?id=3631
++    # is actually fixed.
++    tmp = tempfile.NamedTemporaryFile(
++        prefix='tmprdfa_', mode='wb', delete=False)
++    try:
++      tmp.write(data)
++      tmp.close()
++
++      objdump_proc = subprocess.Popen(
++          [options.objdump,
++           '-mi386', arch, '--target=binary',
++           '--disassemble-all', '--disassemble-zeroes',
++           '--insn-width=15',
++           tmp.name],
++          stdout=subprocess.PIPE,
++          # On Windows, builds of binutils based on Cygwin end lines with
++          # \n while builds of binutils based on MinGW end lines with \r\n.
++          # The 'universal_newlines' feature makes this work with either one.
++          universal_newlines=True)
++
++      result = ''.join(objdump_parser.SkipHeader(objdump_proc.stdout))
++      return_code = objdump_proc.wait()
++      assert return_code == 0, 'error running objdump'
++
++    finally:
++      tmp.close()
++      os.remove(tmp.name)
++
++    return result
++
++
++def main(argv):
++  RdfaTestRunner().Run(argv)
++
++
++if __name__ == '__main__':
++  main(sys.argv[1:])
+diff --git a/native_client/src/trusted/validator_ragel/check_trie.py b/native_client/src/trusted/validator_ragel/check_trie.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e475f7ba394f14430bb66e4f300352773f02ae6e
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/check_trie.py
+@@ -0,0 +1,45 @@
++#!/usr/bin/python
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Verifies that a trie is equal to the latest snapshotted one."""
++
++import argparse
++import os
++import sys
++
++# Add location of latest_trie module to sys.path:
++RAGEL_DIR = os.path.dirname(os.path.abspath(__file__))
++NACL_DIR = os.path.dirname(os.path.dirname(os.path.dirname(RAGEL_DIR)))
++SNAPSHOTS_DIR = os.path.join(os.path.dirname(NACL_DIR), 'validator_snapshots')
++if os.path.isdir(SNAPSHOTS_DIR):
++  sys.path.append(SNAPSHOTS_DIR)
++else:
++  print "couldn't find: ", SNAPSHOTS_DIR
++  sys.exit(1)
++
++import latest_trie
++import trie
++
++
++def ParseArgs():
++  parser = argparse.ArgumentParser(description='Compare to latest trie.')
++  parser.add_argument('trie', metavar='t', nargs=1,
++                      help='path of the trie to check.')
++  parser.add_argument('--bitness', type=int, required=True,
++                      choices=[32, 64])
++  return parser.parse_args()
++
++
++def main():
++  args = ParseArgs()
++  golden = latest_trie.LatestRagelTriePath(SNAPSHOTS_DIR, args.bitness)
++  diff_list = [diff for diff in trie.DiffTrieFiles(args.trie[0], golden)]
++  if diff_list:
++    print 'tries differ: ', diff_list
++    sys.exit(1)
++
++
++if __name__ == '__main__':
++  main()
+diff --git a/native_client/src/trusted/validator_ragel/cmpxchg16_proof.py b/native_client/src/trusted/validator_ragel/cmpxchg16_proof.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..509086c4210a44852e50540980b6034cd857234a
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/cmpxchg16_proof.py
+@@ -0,0 +1,28 @@
++# Copyright (c) 2014 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Proof for verifying that 16bit cmpxchg is added to the 32 bit DFA."""
++
++import proof_tools
++from proof_tools_templates import LockedRegWithRegOrMem16bit
++
++
++def Validate(trie_diffs, bitness):
++  """Validate the trie_diffs adds 16 bit cmpxchg to 32bit mode."""
++  # No instructions should be removed for 32/64 bit DFAs.
++  # No instructions should be added for 64 bit DFA because it already
++  # contains 16 bit cmpxchg instruction.
++  if bitness == 32:
++    expected_adds = LockedRegWithRegOrMem16bit(mnemonic_name='cmpxchg',
++                                               bitness=bitness)
++  else:
++    expected_adds = set()
++
++  proof_tools.AssertDiffSetEquals(trie_diffs,
++                                  expected_adds=expected_adds,
++                                  expected_removes=set())
++
++
++if __name__ == '__main__':
++  proof_tools.RunProof(proof_tools.ParseStandardOpts(), Validate)
+diff --git a/native_client/src/trusted/validator_ragel/codegen.py b/native_client/src/trusted/validator_ragel/codegen.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f325e54f5223bb1ecee343d20edd92196dbaf8cc
+--- /dev/null
++++ b/native_client/src/trusted/validator_ragel/codegen.py
+@@ -0,0 +1,151 @@
++#!/usr/bin/python
++# Copyright (c) 2013 The Native Client Authors. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++import os
++
++import dfa_parser
++
++
++class Generator(object):
++
++  def __init__(self, dfa, c_file):
++    self.dfa = dfa
++    self.c_file = c_file
++
++    self.code_table1 = {}
++    self.code_table2 = {}
++
++  def TransitionCode(self, transition):
++    result = [a.body for a in transition.actions]
++    result.append(
++        'current_state = %s; current_position++; goto _again;\n' %
++        transition.to_state.index)
++    return tuple(result)
++
++  def WriteData(self):
++    self.c_file.write(
++        'static const int _dfa_accepting[] = {%s};\n' %
++        ', '.join('1' if state.is_accepting else '0'
++                  for state in self.dfa.states))
++
++    table = []
++    for i, state in enumerate(self.dfa.states):
++      elems = []
++      for byte in range(256):
++        t = state.forward_transitions.get(byte)
++        if t is not None:
++          code = self.TransitionCode(t)
++        else:
++          code = (self.dfa.error_action.body,)
++
++        # Instead of a single switch with all possible sequences of actions,
++        # we use two switches: one for the first 'half' of action sequence,
++        # and one for the second 'half'.
++        # It significantly reduces generated source size and compilation time
++        # (because different action sequences can share 'halves')
++        # at a cost of runtime performance.
++        code1 = code[:1]
++        code2 = code[1:]
++        if code1 not in self.code_table1:
++          self.code_table1[code1] = len(self.code_table1)
++        if code2 not in self.code_table2:
++          self.code_table2[code2] = len(self.code_table2)
++
++        assert self.code_table1[code1] < 2**16
++        assert self.code_table2[code2] < 2**16
++        elems.append('{%s, %s}' % (self.code_table1[code1],
++                                   self.code_table2[code2]))
++      table.append('  {%s}' % ', '.join(map(str, elems)))
++
++    self.c_file.write(
++        'static const uint16_t _dfa_transitions[][256][2] = {\n%s\n};\n' %
++        ',\n'.join(table))
++
++  def WriteInit(self):
++    self.c_file.write(
++        'current_state = %d;\n' % self.dfa.initial_state.index)
++
++  def WriteCodeTable(self, code_table, selector):
++    self.c_file.write(
++        'switch (%s) {\n' % selector)
++    for code, index in sorted(code_table.items(), key=lambda (_, index): index):
++      self.c_file.write(
++          '  case %d:\n' % index)
++      self.c_file.write(' '.join(code))
++      self.c_file.write('  break;\n')
++    self.c_file.write(
++        '}\n')
++
++  def WriteExec(self):
++    self.c_file.write('_again:\n')
++    self.c_file.write(
++        'if (current_position == end_position) {\n'
++        '  if (_dfa_accepting[current_state]) goto _done;\n'
++        '  %s'
++        '}\n' % self.dfa.error_action.body)
++
++    self.WriteCodeTable(
++        self.code_table1,
++        '_dfa_transitions[current_state][*current_position][0]')
++    self.WriteCodeTable(
++        self.code_table2,
++        '_dfa_transitions[current_state][*current_position][1]')
++
++    self.c_file.write(
++        '_done: ;\n')
++
++
++def main():
++  if len(sys.argv[1:]) != 3:
++    print 'Usage:'
++    print '   %s <rl file> <xml file> <output c file>' % os.path.basename(
++        __file__)
++    sys.exit(1)
++  rl_filename, xml_filename, c_filename = sys.argv[1:]
++
++  dfa = dfa_parser.ParseXml(xml_filename)
++
++  with open(rl_filename) as rl_file:
++    lines = list(rl_file)
++
++  with open(c_filename, 'wt') as c_file:
++    c_file.write(
++      '/*\n'
++      ' * THIS FILE IS AUTO-GENERATED. DO NOT EDIT.\n'
++      ' * Generated by %s from %s and %s.\n'
++      ' */\n\n' % (
++          os.path.basename(__file__),
++          os.path.basename(rl_filename),
++          os.path.basename(xml_filename)))
++
++    generator = Generator(dfa, c_file)
++
++    in_ragel_block = False
++    for line in lines:
++      if line.strip() == '%%{':
++        assert not in_ragel_block
++        in_ragel_block = True
++      elif line.strip() == '}%%':
++        assert in_ragel_block
++        in_ragel_block = False
++      elif line.strip() == '%% write data;':
++        assert not in_ragel_block
++        generator.WriteData()
++      elif line.strip() == '%% write init;':
++        assert not in_ragel_block
++        generator.WriteInit()
++      elif line.strip() == '%% write exec;':
++        assert not in_ragel_block
++        generator.WriteExec()
++      else:
++        if not in_ragel_block:
++          c_file.write(line)
++
++    assert not in_ragel_block
++
++
++if __name__ == '__main__':
++  main()
