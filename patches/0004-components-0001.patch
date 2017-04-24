@@ -1,5 +1,5 @@
 diff --git a/components/autofill/content/renderer/autofill_agent.cc b/components/autofill/content/renderer/autofill_agent.cc
-index 49cf6727451407a8878539bf5de972cc69b3e5a1..ca973247536c9947ad1dcf265b3d0fdf1076887f 100644
+index 0aa8a423a75cda25ad5142b746cbceefa4a820ff..aea1c85521e4dceae3a2f83781a4cf35825a9b0d 100644
 --- a/components/autofill/content/renderer/autofill_agent.cc
 +++ b/components/autofill/content/renderer/autofill_agent.cc
 @@ -279,7 +279,6 @@ void AutofillAgent::FireHostSubmitEvents(const FormData& form_data,
@@ -11,10 +11,10 @@ index 49cf6727451407a8878539bf5de972cc69b3e5a1..ca973247536c9947ad1dcf265b3d0fdf
    weak_ptr_factory_.InvalidateWeakPtrs();
  }
 diff --git a/components/autofill/core/browser/personal_data_manager.cc b/components/autofill/core/browser/personal_data_manager.cc
-index 73ba1d3517992601907c047fba18dcceae0aa623..0d717611b45d79aeaa691f8fdd58ec5aa47e4f10 100644
+index 88096ec268add4bf40bbdcdcd09c9135b5dddcf2..0421ced20ae29110cdad71da12e1628b827654db 100644
 --- a/components/autofill/core/browser/personal_data_manager.cc
 +++ b/components/autofill/core/browser/personal_data_manager.cc
-@@ -1077,9 +1077,16 @@ const std::string& PersonalDataManager::GetDefaultCountryCodeForNewAddress()
+@@ -1072,9 +1072,16 @@ const std::string& PersonalDataManager::GetDefaultCountryCodeForNewAddress()
    if (default_country_code_.empty())
      default_country_code_ = MostCommonCountryCodeFromProfiles();
  
@@ -31,8 +31,20 @@ index 73ba1d3517992601907c047fba18dcceae0aa623..0d717611b45d79aeaa691f8fdd58ec5a
  
    // Failing that, guess based on locale.
    if (default_country_code_.empty())
+diff --git a/components/bookmarks/browser/BUILD.gn b/components/bookmarks/browser/BUILD.gn
+index b606dc4b13da4b8ca1b1389bb355a6badf18f3f5..f9ac9abcea02b8bac90bfdb46113d1925acb61e7 100644
+--- a/components/bookmarks/browser/BUILD.gn
++++ b/components/bookmarks/browser/BUILD.gn
+@@ -39,6 +39,7 @@ static_library("browser") {
+     "titled_url_index.h",
+     "titled_url_match.cc",
+     "titled_url_match.h",
++    "titled_url_node.cc",
+     "titled_url_node.h",
+     "titled_url_node_sorter.h",
+     "typed_count_sorter.cc",
 diff --git a/components/bookmarks/browser/bookmark_codec.cc b/components/bookmarks/browser/bookmark_codec.cc
-index 1d6ff890bb6259ce8930a0697650f23f17fdd21c..c613fd5b5bde9bef8c46ec2dbe4053cbe1223818 100644
+index eadb6660cb066feca11059d0f7538739730f3a34..6ff49775802844c49c6747bbb3fec240ecdd776f 100644
 --- a/components/bookmarks/browser/bookmark_codec.cc
 +++ b/components/bookmarks/browser/bookmark_codec.cc
 @@ -14,11 +14,14 @@
@@ -216,7 +228,7 @@ index 7760826e4f61d7769fe907a2b9f639f5e953e211..51f0555d96fd29557ffa786ea38bcfb8
    // Helper to recursively reassign IDs.
    void ReassignIDsHelper(BookmarkNode* node);
 diff --git a/components/bookmarks/browser/bookmark_codec_unittest.cc b/components/bookmarks/browser/bookmark_codec_unittest.cc
-index edac5fe314f8d50f233862f531481496facb6130..506521d3f4e4628f0e497c5701195eb8ad37ef79 100644
+index a9d8523658af4b1be46f21c10d379bb6aecca74d..03e576ac6f2a04dcb58938b86e61219131953708 100644
 --- a/components/bookmarks/browser/bookmark_codec_unittest.cc
 +++ b/components/bookmarks/browser/bookmark_codec_unittest.cc
 @@ -171,6 +171,7 @@ class BookmarkCodecTest : public testing::Test {
@@ -227,104 +239,11 @@ index edac5fe314f8d50f233862f531481496facb6130..506521d3f4e4628f0e497c5701195eb8
                                  &max_id,
                                  value);
      model->set_next_node_id(max_id);
-diff --git a/components/bookmarks/browser/bookmark_index.cc b/components/bookmarks/browser/bookmark_index.cc
-index 9c34e5a2ca5f821b76f0c2724f7ffb542b4d247d..70501cc0534da94f94668cbd86dc3a64dd321e36 100644
---- a/components/bookmarks/browser/bookmark_index.cc
-+++ b/components/bookmarks/browser/bookmark_index.cc
-@@ -85,6 +85,12 @@ void BookmarkIndex::Add(const BookmarkNode* node) {
-     return;
-   std::vector<base::string16> terms =
-       ExtractQueryWords(Normalize(node->GetTitle()));
-+  for (size_t i = 0; i < terms.size(); ++i)
-+    RegisterNode(terms[i], node);
-+  terms = ExtractQueryWords(node->GetNickName());
-+  for (size_t i = 0; i < terms.size(); ++i)
-+    RegisterNode(terms[i], node);
-+  terms = ExtractQueryWords(node->GetDescription());
-   for (size_t i = 0; i < terms.size(); ++i)
-     RegisterNode(terms[i], node);
-   terms =
-@@ -178,18 +184,31 @@ void BookmarkIndex::AddMatchToResults(
-   const base::string16 lower_title =
-       base::i18n::ToLower(Normalize(node->GetTitle()));
-   parser->ExtractQueryWords(lower_title, &title_words);
-+  query_parser::QueryWordVector nick_words, desc_words;
-+  const base::string16 lower_nick =
-+      base::i18n::ToLower(Normalize(node->GetNickName()));
-+  parser->ExtractQueryWords(lower_nick, &nick_words);
-+  const base::string16 lower_desc =
-+      base::i18n::ToLower(Normalize(node->GetDescription()));
-+  parser->ExtractQueryWords(lower_desc, &desc_words);
-   base::OffsetAdjuster::Adjustments adjustments;
-   parser->ExtractQueryWords(
-       CleanUpUrlForMatching(node->url(), &adjustments),
-       &url_words);
--  query_parser::Snippet::MatchPositions title_matches, url_matches;
-+  query_parser::Snippet::MatchPositions title_matches, url_matches,
-+                                        nick_matches, desc_matches;
-   for (const auto& node : query_nodes) {
-     const bool has_title_matches =
-         node->HasMatchIn(title_words, &title_matches);
-+    const bool has_nick_matches = node->HasMatchIn(nick_words, &nick_matches);
-+    const bool has_desc_matches = node->HasMatchIn(desc_words, &desc_matches);
-     const bool has_url_matches = node->HasMatchIn(url_words, &url_matches);
--    if (!has_title_matches && !has_url_matches)
-+    if (!has_title_matches && !has_url_matches &&
-+        !has_nick_matches && !has_desc_matches)
-       return;
-     query_parser::QueryParser::SortAndCoalesceMatchPositions(&title_matches);
-+    query_parser::QueryParser::SortAndCoalesceMatchPositions(&nick_matches);
-+    query_parser::QueryParser::SortAndCoalesceMatchPositions(&desc_matches);
-     query_parser::QueryParser::SortAndCoalesceMatchPositions(&url_matches);
-   }
-   BookmarkMatch match;
-diff --git a/components/bookmarks/browser/bookmark_match.cc b/components/bookmarks/browser/bookmark_match.cc
-index f813cbbbb7f5c23bdd6325e836327218c8b755df..e4c82fb267780b3f288accd4c2584772fb07ef2c 100644
---- a/components/bookmarks/browser/bookmark_match.cc
-+++ b/components/bookmarks/browser/bookmark_match.cc
-@@ -9,7 +9,10 @@
- 
- namespace bookmarks {
- 
--BookmarkMatch::BookmarkMatch() : node(NULL) {}
-+BookmarkMatch::BookmarkMatch(match_type kind) 
-+  : match_kind(kind), 
-+    node(NULL) {
-+}
- 
- BookmarkMatch::BookmarkMatch(const BookmarkMatch& other) = default;
- 
-diff --git a/components/bookmarks/browser/bookmark_match.h b/components/bookmarks/browser/bookmark_match.h
-index ce658939ca847345adc5ea6eb363870c24778087..bf6b11216bd8f8df7b4faae70e5b6b6ab1db0211 100644
---- a/components/bookmarks/browser/bookmark_match.h
-+++ b/components/bookmarks/browser/bookmark_match.h
-@@ -21,7 +21,10 @@ struct BookmarkMatch {
-   typedef std::pair<size_t, size_t> MatchPosition;
-   typedef std::vector<MatchPosition> MatchPositions;
- 
--  BookmarkMatch();
-+  // Type of match: of title, or of nickname
-+  enum match_type {kTitle, kNick, kDescription};
-+
-+  BookmarkMatch(match_type kind = kTitle);
-   BookmarkMatch(const BookmarkMatch& other);
-   ~BookmarkMatch();
- 
-@@ -36,6 +39,9 @@ struct BookmarkMatch {
-       const MatchPositions& match_positions,
-       const std::vector<size_t>& offsets);
- 
-+  // Type of match
-+  match_type match_kind;
-+
-   // The matching node of a query.
-   const BookmarkNode* node;
- 
 diff --git a/components/bookmarks/browser/bookmark_model.cc b/components/bookmarks/browser/bookmark_model.cc
-index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4594fd037 100644
+index 8639f752f30c914d6afae0b5dddc79300d61ea2a..ec31ed4d57fd14428436c04af2675c8fae792ceb 100644
 --- a/components/bookmarks/browser/bookmark_model.cc
 +++ b/components/bookmarks/browser/bookmark_model.cc
-@@ -30,6 +30,11 @@
+@@ -31,6 +31,11 @@
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/gfx/favicon_size.h"
  
@@ -336,7 +255,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
  using base::Time;
  
  namespace bookmarks {
-@@ -116,6 +121,7 @@ BookmarkModel::BookmarkModel(std::unique_ptr<BookmarkClient> client)
+@@ -117,6 +122,7 @@ BookmarkModel::BookmarkModel(std::unique_ptr<BookmarkClient> client)
        bookmark_bar_node_(NULL),
        other_node_(NULL),
        mobile_node_(NULL),
@@ -344,7 +263,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
        next_node_id_(1),
        observers_(
            base::ObserverList<BookmarkModelObserver>::NOTIFY_EXISTING_ONLY),
-@@ -409,6 +415,9 @@ void BookmarkModel::SetNodeMetaInfo(const BookmarkNode* node,
+@@ -410,6 +416,9 @@ void BookmarkModel::SetNodeMetaInfo(const BookmarkNode* node,
  
    for (BookmarkModelObserver& observer : observers_)
      observer.BookmarkMetaInfoChanged(this, node);
@@ -354,7 +273,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
  }
  
  void BookmarkModel::SetNodeMetaInfoMap(
-@@ -571,16 +580,32 @@ void BookmarkModel::BlockTillLoaded() {
+@@ -572,16 +581,32 @@ void BookmarkModel::BlockTillLoaded() {
    loaded_signal_.Wait();
  }
  
@@ -393,7 +312,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
    if (!loaded_ || is_root_node(parent) || !IsValidIndex(parent, index, true)) {
      // Can't add to the root.
      NOTREACHED();
-@@ -591,25 +616,65 @@ const BookmarkNode* BookmarkModel::AddFolderWithMetaInfo(
+@@ -592,25 +617,65 @@ const BookmarkNode* BookmarkModel::AddFolderWithMetaInfo(
        base::MakeUnique<BookmarkNode>(generate_next_node_id(), GURL());
    new_node->set_date_folder_modified(Time::Now());
    // Folders shouldn't have line breaks in their titles.
@@ -467,7 +386,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
  }
  
  const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
-@@ -618,7 +683,12 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
+@@ -619,7 +684,12 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
      const base::string16& title,
      const GURL& url,
      const Time& creation_time,
@@ -481,7 +400,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
    if (!loaded_ || !url.is_valid() || is_root_node(parent) ||
        !IsValidIndex(parent, index, true)) {
      NOTREACHED();
-@@ -637,6 +707,16 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
+@@ -638,6 +708,16 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
    if (meta_info)
      new_node->SetMetaInfoMap(*meta_info);
  
@@ -498,7 +417,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
    return AddNode(AsMutable(parent), index, std::move(new_node));
  }
  
-@@ -753,6 +833,8 @@ const BookmarkPermanentNode* BookmarkModel::PermanentNode(
+@@ -754,6 +834,8 @@ const BookmarkPermanentNode* BookmarkModel::PermanentNode(
        return other_node_;
      case BookmarkNode::MOBILE:
        return mobile_node_;
@@ -507,7 +426,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
      default:
        NOTREACHED();
        return NULL;
-@@ -838,11 +920,14 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
+@@ -839,11 +921,14 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
        details->owned_other_folder_node();
    std::unique_ptr<BookmarkPermanentNode> owned_mobile_folder_node =
        details->owned_mobile_folder_node();
@@ -522,7 +441,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
  
    // Get any extra nodes and take ownership of them at the |root_|.
    std::vector<std::unique_ptr<BookmarkPermanentNode>> extra_nodes =
-@@ -860,6 +945,8 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
+@@ -861,6 +946,8 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
    root_children.push_back(std::move(owned_bb_node));
    root_children.push_back(std::move(owned_other_folder_node));
    root_children.push_back(std::move(owned_mobile_folder_node));
@@ -531,7 +450,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
    std::move(extra_nodes.begin(), extra_nodes.end(),
              std::back_inserter(root_children));
  
-@@ -1013,6 +1100,7 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
+@@ -1014,6 +1101,7 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
      BookmarkNode::Type type) {
    DCHECK(type == BookmarkNode::BOOKMARK_BAR ||
           type == BookmarkNode::OTHER_NODE ||
@@ -539,7 +458,7 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
           type == BookmarkNode::MOBILE);
    BookmarkPermanentNode* node =
        new BookmarkPermanentNode(generate_next_node_id());
-@@ -1030,6 +1118,9 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
+@@ -1031,6 +1119,9 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
      case BookmarkNode::MOBILE:
        title_id = IDS_BOOKMARK_BAR_MOBILE_FOLDER_NAME;
        break;
@@ -549,22 +468,24 @@ index a399809ceac2d8bb05e5ac522502e0394f6f827d..12ff5b8ec4dced302b56551d2dbbced4
      default:
        NOTREACHED();
        title_id = IDS_BOOKMARK_BAR_FOLDER_NAME;
-@@ -1111,8 +1202,12 @@ std::unique_ptr<BookmarkLoadDetails> BookmarkModel::CreateLoadDetails() {
+@@ -1112,10 +1203,14 @@ std::unique_ptr<BookmarkLoadDetails> BookmarkModel::CreateLoadDetails() {
        CreatePermanentNode(BookmarkNode::OTHER_NODE);
    BookmarkPermanentNode* mobile_node =
        CreatePermanentNode(BookmarkNode::MOBILE);
 +  BookmarkPermanentNode* trash_node =
-+       (vivaldi::IsVivaldiRunning() ?
++       (vivaldi::IsVivaldiRunning() || vivaldi::ForcedVivaldiRunning() ?
 +          CreatePermanentNode(BookmarkNode::TRASH):
 +          NULL);
+   std::unique_ptr<TitledUrlNodeSorter> node_sorter =
+       base::MakeUnique<TypedCountSorter>(client_.get());
    return std::unique_ptr<BookmarkLoadDetails>(new BookmarkLoadDetails(
 -      bb_node, other_node, mobile_node, client_->GetLoadExtraNodesCallback(),
 +      bb_node, other_node, mobile_node, trash_node, client_->GetLoadExtraNodesCallback(),
-       new BookmarkIndex(client_.get()), next_node_id_));
+       new TitledUrlIndex(std::move(node_sorter)), next_node_id_));
  }
  
 diff --git a/components/bookmarks/browser/bookmark_model.h b/components/bookmarks/browser/bookmark_model.h
-index 309e806a202269ea0c502ae99df2f2812182e3cd..0a18a71aba5638e27a7fbc444391b229c776a7cd 100644
+index 2a52eb1e2dbc54921704eb2527cf9baaeb5a61c2..dfda290ef3384254175fe1aadd12a224837107fa 100644
 --- a/components/bookmarks/browser/bookmark_model.h
 +++ b/components/bookmarks/browser/bookmark_model.h
 @@ -104,6 +104,9 @@ class BookmarkModel : public BookmarkUndoProvider,
@@ -641,11 +562,11 @@ index 309e806a202269ea0c502ae99df2f2812182e3cd..0a18a71aba5638e27a7fbc444391b229
        const base::Time& creation_time,
 -      const BookmarkNode::MetaInfoMap* meta_info);
 +      const BookmarkNode::MetaInfoMap* meta_info,
-+      const base::string16& nickname = NULL,
-+      const base::string16& description = NULL,
-+      const base::string16 &thumbnail = NULL,
++      const base::string16& nickname = {},
++      const base::string16& description = {},
++      const base::string16 &thumbnail = {},
 +      const bool speeddial = false,
-+      const base::Time *visited_time = NULL);
++      const base::Time *visited_time = nullptr);
  
    // Sorts the children of |parent|, notifying observers by way of the
    // BookmarkNodeChildrenReordered method.
@@ -693,7 +614,7 @@ index 64a5bb40f69d01e3a141ca473277cdc030926f6b..5a4e6a447dfb722d7d4c08b5f8cb301a
    observer_details_.ExpectEquals(root, NULL, 0, -1);
  
 diff --git a/components/bookmarks/browser/bookmark_node.cc b/components/bookmarks/browser/bookmark_node.cc
-index 9574cf1ea5b148383fec8e4dd786030f2e53f724..4bf6c465bf9b94951c3a92430f1b1ed0b76eb3a4 100644
+index 8bc1c292318d75af9f35347e93249921be151068..c902f0242c5b7cd5d6bed2c7473a04ef77dd2feb 100644
 --- a/components/bookmarks/browser/bookmark_node.cc
 +++ b/components/bookmarks/browser/bookmark_node.cc
 @@ -10,6 +10,8 @@
@@ -777,7 +698,7 @@ index 9574cf1ea5b148383fec8e4dd786030f2e53f724..4bf6c465bf9b94951c3a92430f1b1ed0
 +
 +void BookmarkNode::set_description(const base::string16 &desc)
 +{
-+	SetMetaInfo("Description", base::UTF16ToUTF8(desc));
++  SetMetaInfo("Description", base::UTF16ToUTF8(desc));
 +}
 +
 +base::string16 BookmarkNode::GetDescription() const
@@ -793,19 +714,19 @@ index 9574cf1ea5b148383fec8e4dd786030f2e53f724..4bf6c465bf9b94951c3a92430f1b1ed0
                                 const std::string& value) {
    if (!meta_info_map_)
 diff --git a/components/bookmarks/browser/bookmark_node.h b/components/bookmarks/browser/bookmark_node.h
-index 84cea2b07d1467e8b65915181ad7321af70e4345..e806a3adfe217cb736dfe125c6081126501ea709 100644
+index d125c44e52c92806cea31a7297925411baba0182..c932401d1570e7d5b89bf8ae20129124a15bae31 100644
 --- a/components/bookmarks/browser/bookmark_node.h
 +++ b/components/bookmarks/browser/bookmark_node.h
-@@ -24,7 +24,7 @@ class BookmarkModel;
+@@ -25,7 +25,7 @@ class BookmarkModel;
  // BookmarkNode ---------------------------------------------------------------
  
  // BookmarkNode contains information about a starred entry: title, URL, favicon,
 -// id and type. BookmarkNodes are returned from BookmarkModel.
 +// id, type, nickname and description. BookmarkNodes are returned from BookmarkModel.
- class BookmarkNode : public ui::TreeNode<BookmarkNode> {
+ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
   public:
    enum Type {
-@@ -32,7 +32,8 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
+@@ -33,7 +33,8 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
      FOLDER,
      BOOKMARK_BAR,
      OTHER_NODE,
@@ -815,7 +736,7 @@ index 84cea2b07d1467e8b65915181ad7321af70e4345..e806a3adfe217cb736dfe125c6081126
    };
  
    enum FaviconState {
-@@ -86,6 +87,24 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
+@@ -87,6 +88,23 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
      date_folder_modified_ = date;
    }
  
@@ -823,7 +744,7 @@ index 84cea2b07d1467e8b65915181ad7321af70e4345..e806a3adfe217cb736dfe125c6081126
 +  const base::Time date_visited() const;
 +  void set_date_visited(const base::Time& date);
 +
-+  base::string16 GetNickName() const;
++  base::string16 GetNickName() const override;
 +  void set_nickname(const base::string16 &nick);
 +
 +  base::string16 GetThumbnail() const;
@@ -832,8 +753,7 @@ index 84cea2b07d1467e8b65915181ad7321af70e4345..e806a3adfe217cb736dfe125c6081126
 +  bool GetSpeeddial() const;
 +  void set_speeddial(const bool speeddial);
 +
-+
-+  base::string16 GetDescription() const;
++  base::string16 GetDescription() const override;
 +  void set_description(const base::string16 &desc);
 +
 +
@@ -912,7 +832,7 @@ index cbad37cd9a973edc67bd1bb5db029597ead83cdd..eeaf81483e4188b31556f0c89fe4e52b
      std::vector<Element> children;
  
 diff --git a/components/bookmarks/browser/bookmark_storage.cc b/components/bookmarks/browser/bookmark_storage.cc
-index a71c3e3d0dbaeeeb84f3a438025da67a478e0ed3..b379ae5c59df9380bf2342f704ae0a78d18b667b 100644
+index d32a90c88061a8b082c770da656f63da4bdfc0a2..d07afc5bf72960988b885d1a99e1a7a2782e91f2 100644
 --- a/components/bookmarks/browser/bookmark_storage.cc
 +++ b/components/bookmarks/browser/bookmark_storage.cc
 @@ -71,7 +71,8 @@ void LoadCallback(const base::FilePath& path,
@@ -925,15 +845,6 @@ index a71c3e3d0dbaeeeb84f3a438025da67a478e0ed3..b379ae5c59df9380bf2342f704ae0a78
        details->set_max_id(std::max(max_node_id, details->max_id()));
        details->set_computed_checksum(codec.computed_checksum());
        details->set_stored_checksum(codec.stored_checksum());
-@@ -95,7 +96,7 @@ void LoadCallback(const base::FilePath& path,
-   for (size_t i = 0; i < extra_nodes.size(); ++i) {
-     if (!extra_nodes[i]->empty()) {
-       load_index = true;
--      break;
-+      break;  
-     }
-   }
- 
 @@ -104,6 +105,8 @@ void LoadCallback(const base::FilePath& path,
      AddBookmarksToIndex(details.get(), details->bb_node());
      AddBookmarksToIndex(details.get(), details->other_folder_node());
@@ -949,7 +860,7 @@ index a71c3e3d0dbaeeeb84f3a438025da67a478e0ed3..b379ae5c59df9380bf2342f704ae0a78
      BookmarkPermanentNode* mobile_folder_node,
 +    BookmarkPermanentNode* trash_folder_node,
      const LoadExtraCallback& load_extra_callback,
-     BookmarkIndex* index,
+     TitledUrlIndex* index,
      int64_t max_id)
      : bb_node_(bb_node),
        other_folder_node_(other_folder_node),
@@ -959,7 +870,7 @@ index a71c3e3d0dbaeeeb84f3a438025da67a478e0ed3..b379ae5c59df9380bf2342f704ae0a78
        index_(index),
        model_sync_transaction_version_(
 diff --git a/components/bookmarks/browser/bookmark_storage.h b/components/bookmarks/browser/bookmark_storage.h
-index 2496e42c34f247464067efc5f85826a345ebfdc6..8f491d4273fb81e2eca237ac94b8c1b4ad6fda19 100644
+index 6f86188d3fcc3b92161e009855942575add58712..e06786d6beaea30671fffe2264819f05ba555c67 100644
 --- a/components/bookmarks/browser/bookmark_storage.h
 +++ b/components/bookmarks/browser/bookmark_storage.h
 @@ -50,6 +50,7 @@ class BookmarkLoadDetails {
@@ -968,7 +879,7 @@ index 2496e42c34f247464067efc5f85826a345ebfdc6..8f491d4273fb81e2eca237ac94b8c1b4
                        BookmarkPermanentNode* mobile_folder_node,
 +                      BookmarkPermanentNode* trash_folder_node,
                        const LoadExtraCallback& load_extra_callback,
-                       BookmarkIndex* index,
+                       TitledUrlIndex* index,
                        int64_t max_id);
 @@ -64,6 +65,12 @@ class BookmarkLoadDetails {
    BookmarkPermanentNode* mobile_folder_node() {
@@ -990,7 +901,7 @@ index 2496e42c34f247464067efc5f85826a345ebfdc6..8f491d4273fb81e2eca237ac94b8c1b4
 +  std::unique_ptr<BookmarkPermanentNode> trash_folder_node_;
    LoadExtraCallback load_extra_callback_;
    BookmarkPermanentNodeList extra_nodes_;
-   std::unique_ptr<BookmarkIndex> index_;
+   std::unique_ptr<TitledUrlIndex> index_;
 diff --git a/components/bookmarks/browser/bookmark_utils.cc b/components/bookmarks/browser/bookmark_utils.cc
 index a2e114a561fd9d8d04f4c6df96af173d0f72240d..8146ce11900aec9a225d94b33dc0aa2930d42737 100644
 --- a/components/bookmarks/browser/bookmark_utils.cc
@@ -1052,6 +963,86 @@ index c549e2c6576880cbcedcfd49f84743f3a9ddaca9..c79a93fab9e1cd8ecf3cbe2bae593060
  // Returns true if |n1| was added more recently than |n2|.
  bool MoreRecentlyAdded(const BookmarkNode* n1, const BookmarkNode* n2);
  
+diff --git a/components/bookmarks/browser/startup_task_runner_service.cc b/components/bookmarks/browser/startup_task_runner_service.cc
+index 5b9b74139a6ef4fdb9c40b6ec0011cd7cc5c0445..2db0f86de39c00a50ed622bc18ef560d2196feb4 100644
+--- a/components/bookmarks/browser/startup_task_runner_service.cc
++++ b/components/bookmarks/browser/startup_task_runner_service.cc
+@@ -29,6 +29,11 @@ scoped_refptr<base::DeferredSequencedTaskRunner>
+   return bookmark_task_runner_;
+ }
+ 
++scoped_refptr<base::DeferredSequencedTaskRunner>
++    StartupTaskRunnerService::GetNotesTaskRunner() {
++  return GetBookmarkTaskRunner();
++}
++
+ void StartupTaskRunnerService::StartDeferredTaskRunners() {
+   GetBookmarkTaskRunner()->Start();
+ }
+diff --git a/components/bookmarks/browser/startup_task_runner_service.h b/components/bookmarks/browser/startup_task_runner_service.h
+index b39819af135d2a10201a9dd547fb5727df06d0c4..bb6e3b5cfd0ef4b5244c5bb1dbe26bbfb7049bdb 100644
+--- a/components/bookmarks/browser/startup_task_runner_service.h
++++ b/components/bookmarks/browser/startup_task_runner_service.h
+@@ -34,12 +34,22 @@ class StartupTaskRunnerService : public base::NonThreadSafe,
+   // bookmarks only after the history finished).
+   scoped_refptr<base::DeferredSequencedTaskRunner> GetBookmarkTaskRunner();
+ 
+-  // Starts the task runners that are deferred during start-up.
++  // Returns sequenced task runner where all notes I/O operations are
++  // performed.
++  // This method should only be called from the UI thread.
++  // Note: Using a separate task runner per profile service gives a better
++  // management of the sequence in which the task are started in order to avoid
++  // congestion during start-up (e.g the caller may decide to start loading the
++  // bookmarks only after the history finished).
++  scoped_refptr<base::DeferredSequencedTaskRunner> GetNotesTaskRunner();
++
++ // Starts the task runners that are deferred during start-up.
+   void StartDeferredTaskRunners();
+ 
+  private:
+   scoped_refptr<base::SequencedTaskRunner> io_task_runner_;
+   scoped_refptr<base::DeferredSequencedTaskRunner> bookmark_task_runner_;
++  scoped_refptr<base::DeferredSequencedTaskRunner> notes_task_runner_;
+ 
+   DISALLOW_COPY_AND_ASSIGN(StartupTaskRunnerService);
+ };
+diff --git a/components/bookmarks/browser/titled_url_node.cc b/components/bookmarks/browser/titled_url_node.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..113a069ec1939f333df2a91965bc215faf5f0534
+--- /dev/null
++++ b/components/bookmarks/browser/titled_url_node.cc
+@@ -0,0 +1,15 @@
++// Copyright (c) 2017 Vivaldi Technologies AS. All rights reserved.
++
++#include "components/bookmarks/browser/titled_url_node.h"
++
++namespace bookmarks {
++
++base::string16 TitledUrlNode::GetNickName() const {
++  return base::string16();
++}
++
++base::string16 TitledUrlNode::GetDescription() const {
++  return base::string16();
++}
++
++}  // namespace bookmarks
+diff --git a/components/bookmarks/browser/titled_url_node.h b/components/bookmarks/browser/titled_url_node.h
+index bbd6759b77089c1fa1b89469c2852191e7798384..34bef7741ce55cc609aa7b522d44bc6ebbbdbc55 100644
+--- a/components/bookmarks/browser/titled_url_node.h
++++ b/components/bookmarks/browser/titled_url_node.h
+@@ -20,6 +20,10 @@ class TitledUrlNode {
+   // Returns the URL for the node.
+   virtual const GURL& GetTitledUrlNodeUrl() const = 0;
+ 
++  virtual base::string16 GetNickName() const;
++
++  virtual base::string16 GetDescription() const;
++
+  protected:
+   virtual ~TitledUrlNode() {}
+ };
 diff --git a/components/bookmarks/managed/managed_bookmark_util.cc b/components/bookmarks/managed/managed_bookmark_util.cc
 index d19d941e78d8e1bd25b189913f52fe69e154a5db..908d0754d89d2159d6eb5e76b32a58bad0df86b9 100644
 --- a/components/bookmarks/managed/managed_bookmark_util.cc
@@ -1066,11 +1057,182 @@ index d19d941e78d8e1bd25b189913f52fe69e154a5db..908d0754d89d2159d6eb5e76b32a58ba
      return true;
    }
  
+diff --git a/components/browser_sync/profile_sync_components_factory_impl.cc b/components/browser_sync/profile_sync_components_factory_impl.cc
+index ba1f82b5675231513528fe11b038271acc55c9f1..bd42140f13b9e347bcc92b92218da65122e1b76a 100644
+--- a/components/browser_sync/profile_sync_components_factory_impl.cc
++++ b/components/browser_sync/profile_sync_components_factory_impl.cc
+@@ -47,6 +47,14 @@
+ #include "google_apis/gaia/oauth2_token_service_request.h"
+ #include "net/url_request/url_request_context_getter.h"
+ 
++#include "notes/notes_factory.h"
++#include "sync/glue/notes_change_processor.h"
++#include "sync/glue/notes_data_type_controller.h"
++#include "sync/glue/notes_model_associator.h"
++
++#include "sync/vivaldi_syncmanager.h"
++#include "sync/vivaldi_syncmanager_factory.h"
++
+ using bookmarks::BookmarkModel;
+ using sync_bookmarks::BookmarkChangeProcessor;
+ using sync_bookmarks::BookmarkDataTypeController;
+@@ -61,8 +69,13 @@ using syncer::DeviceInfoDataTypeController;
+ using syncer::ModelTypeController;
+ using syncer::ProxyDataTypeController;
+ 
+-namespace browser_sync {
++using vivaldi::NotesDataTypeController;
++using vivaldi::NotesModelAssociator;
++using vivaldi::NotesChangeProcessor;
++using vivaldi::NotesModelFactory;
++
+ 
++namespace browser_sync {
+ namespace {
+ 
+ syncer::ModelTypeSet GetDisabledTypesFromCommandLine(
+@@ -200,6 +213,13 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
+                                                      sync_client_));
+   }
+ 
++  // Notes sync is enabled by default.  Register unless explicitly
++  // disabled.
++  if (!disabled_types.Has(syncer::NOTES)) {
++    sync_service->RegisterDataTypeController(
++      base::MakeUnique<NotesDataTypeController>(error_callback, sync_client_));
++  }
++
+   const bool history_disabled =
+       sync_client_->GetPrefService()->GetBoolean(history_disabled_pref_);
+   // TypedUrl sync is enabled by default.  Register unless explicitly disabled,
+@@ -434,4 +454,20 @@ void ProfileSyncComponentsFactoryImpl::OverridePrefsForUssTest(bool use_uss) {
+ bool ProfileSyncComponentsFactoryImpl::
+     override_prefs_controller_to_uss_for_test_ = false;
+ 
++syncer::SyncApiComponentFactory::SyncComponents
++    ProfileSyncComponentsFactoryImpl::CreateNotesSyncComponents(
++        syncer::SyncService* sync_service,
++        std::unique_ptr<syncer::DataTypeErrorHandler> error_handler) {
++  Notes_Model* notes_model = NotesModelFactory::GetForProfile(
++        sync_service->GetSyncClient()->GetProfile());
++  syncer::UserShare* user_share = sync_service->GetUserShare();
++  NotesModelAssociator* model_associator =
++      new NotesModelAssociator(notes_model, sync_service->GetSyncClient(),
++                               user_share, error_handler->Copy());
++  NotesChangeProcessor* change_processor =
++      new NotesChangeProcessor(sync_service->GetSyncClient(), model_associator,
++                               std::move(error_handler));
++  return SyncComponents(model_associator, change_processor);
++}
++
+ }  // namespace browser_sync
+diff --git a/components/browser_sync/profile_sync_components_factory_impl.h b/components/browser_sync/profile_sync_components_factory_impl.h
+index 9fc0538c5242b2f0b16ff631de764813a5c673a6..6991386e20ef5d789da24d898ca42160da743753 100644
+--- a/components/browser_sync/profile_sync_components_factory_impl.h
++++ b/components/browser_sync/profile_sync_components_factory_impl.h
+@@ -93,6 +93,10 @@ class ProfileSyncComponentsFactoryImpl
+   // ModelTypeController for testing purposes.
+   static void OverridePrefsForUssTest(bool use_uss);
+ 
++  syncer::SyncApiComponentFactory::SyncComponents CreateNotesSyncComponents(
++      syncer::SyncService* sync_service,
++      std::unique_ptr<syncer::DataTypeErrorHandler> error_handler) override;
++
+  private:
+   // Register data types which are enabled on both desktop and mobile.
+   // |disabled_types| and |enabled_types| correspond only to those types
+diff --git a/components/browser_sync/profile_sync_service.cc b/components/browser_sync/profile_sync_service.cc
+index a28a87f4530a7d2574f052e2c7886d26f976240a..9045256226d5884a3cf4bc41b3d0869262710a80 100644
+--- a/components/browser_sync/profile_sync_service.cc
++++ b/components/browser_sync/profile_sync_service.cc
+@@ -1653,9 +1653,10 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
+         syncer::user_selectable_type::READING_LIST,
+ #endif
+         syncer::user_selectable_type::PROXY_TABS,
++        syncer::user_selectable_type::NOTES,
+       };
+ 
+-  static_assert(39 == syncer::MODEL_TYPE_COUNT,
++  static_assert(39 + 1 == syncer::MODEL_TYPE_COUNT,
+                 "custom config histogram must be updated");
+ 
+   if (!sync_everything) {
+@@ -1951,9 +1952,10 @@ std::unique_ptr<base::Value> ProfileSyncService::GetTypeStatusMap() {
+       switch (error.GetSeverity()) {
+         case syncer::SyncError::SYNC_ERROR_SEVERITY_ERROR:
+           type_status->SetString("status", "error");
+-          type_status->SetString(
+-              "value", "Error: " + error.location().ToString() + ", " +
+-                           error.GetMessagePrefix() + error.message());
++          type_status->SetString("value",
++                                 "Error: " + error.location().ToString() +
++                                     ", " + error.GetMessagePrefix() +
++                                     error.message());
+           break;
+         case syncer::SyncError::SYNC_ERROR_SEVERITY_INFO:
+           type_status->SetString("status", "disabled");
+@@ -2640,4 +2642,8 @@ void ProfileSyncService::OnSetupInProgressHandleDestroyed() {
+   NotifyObservers();
+ }
+ 
++bool ProfileSyncService::DisableNotifications() const {
++  return false;
++}
++
+ }  // namespace browser_sync
+diff --git a/components/browser_sync/profile_sync_service.h b/components/browser_sync/profile_sync_service.h
+index 9d7c709fc13fee858b60ed00a00e109d77501a94..41aa89918b083b92e0f2cf65d3f050a4020859d8 100644
+--- a/components/browser_sync/profile_sync_service.h
++++ b/components/browser_sync/profile_sync_service.h
+@@ -91,6 +91,10 @@ struct UpdateCounters;
+ struct UserShare;
+ }  // namespace syncer
+ 
++namespace vivaldi {
++class VivaldiSyncManager;
++} // namespace vivaldi
++
+ namespace browser_sync {
+ 
+ // ProfileSyncService is the layer between browser subsystems like bookmarks,
+@@ -606,6 +610,8 @@ class ProfileSyncService : public syncer::SyncServiceBase,
+   syncer::WeakHandle<syncer::UnrecoverableErrorHandler>
+   GetUnrecoverableErrorHandler() override;
+ 
++  virtual bool DisableNotifications() const;
++
+  private:
+   enum UnrecoverableErrorReason {
+     ERROR_REASON_UNSET,
+@@ -641,6 +647,7 @@ class ProfileSyncService : public syncer::SyncServiceBase,
+   };
+ 
+   friend class TestProfileSyncService;
++  friend class vivaldi::VivaldiSyncManager;
+ 
+   // Helper to install and configure a data type manager.
+   void ConfigureDataTypeManager();
+@@ -678,12 +685,14 @@ class ProfileSyncService : public syncer::SyncServiceBase,
+   // cached passphrase and clear it out when it is done.
+   void ConsumeCachedPassphraseIfPossible();
+ 
++ protected:
+   // RequestAccessToken initiates RPC to request downscoped access token from
+   // refresh token. This happens when a new OAuth2 login token is loaded and
+   // when sync server returns AUTH_ERROR which indicates it is time to refresh
+   // token.
+-  void RequestAccessToken();
++  virtual void RequestAccessToken();
+ 
++ private:
+   // Sets the last synced time to the current time.
+   void UpdateLastSyncedTime();
+ 
 diff --git a/components/browser_sync/profile_sync_service_bookmark_unittest.cc b/components/browser_sync/profile_sync_service_bookmark_unittest.cc
-index caecac859179d66bf91878c58934a76d75d88c32..5b2ce848dddb9783a34a2655f9d6754e600e799b 100644
+index c593d78fa0f8947b1de2eb1b02104d2f987044a5..e2b253caf87e971ac51bb8fe31c6ac732734ec2c 100644
 --- a/components/browser_sync/profile_sync_service_bookmark_unittest.cc
 +++ b/components/browser_sync/profile_sync_service_bookmark_unittest.cc
-@@ -1767,11 +1767,12 @@ void ProfileSyncServiceBookmarkTestWithData::PopulateFromTestData(
+@@ -1768,11 +1768,12 @@ void ProfileSyncServiceBookmarkTestWithData::PopulateFromTestData(
    for (int i = 0; i < size; ++i) {
      const TestData& item = data[i];
      if (item.url) {
@@ -1085,10 +1247,10 @@ index caecac859179d66bf91878c58934a76d75d88c32..5b2ce848dddb9783a34a2655f9d6754e
        model()->AddFolder(node, i, base::UTF8ToUTF16(item.title));
      }
 diff --git a/components/constrained_window/constrained_window_views.cc b/components/constrained_window/constrained_window_views.cc
-index 3ed86ce06852a9da707d5868000e19a7103a8b7d..6b30f8c0bb280014e43f38794319c7b671b3e68b 100644
+index e493eaa708550c21c7901c251cf679adb48e05c5..bb154116d580425025a407f6e352a89fd735b8c3 100644
 --- a/components/constrained_window/constrained_window_views.cc
 +++ b/components/constrained_window/constrained_window_views.cc
-@@ -188,12 +188,19 @@ views::Widget* ShowWebModalDialogWithOverlayViews(
+@@ -202,12 +202,19 @@ views::Widget* ShowWebModalDialogWithOverlayViews(
  views::Widget* CreateWebModalDialogViews(views::WidgetDelegate* dialog,
                                           content::WebContents* web_contents) {
    DCHECK_EQ(ui::MODAL_TYPE_CHILD, dialog->GetModalType());
@@ -1148,11 +1310,35 @@ index bb3313749f7ab4a2c5b282ad0fa2e52c339035d2..6b807ea0d82a2010ec05e105d5e68c61
    }
  
    if (current_candidate())
+diff --git a/components/gcm_driver/gcm_channel_status_syncer.cc b/components/gcm_driver/gcm_channel_status_syncer.cc
+index cbe1ba2fd4dcb46a1aa6054be38874b1f903231b..6ebc492d93aca7faa11b6e30e02c388a4137ebe4 100644
+--- a/components/gcm_driver/gcm_channel_status_syncer.cc
++++ b/components/gcm_driver/gcm_channel_status_syncer.cc
+@@ -20,6 +20,8 @@
+ #include "components/prefs/pref_registry_simple.h"
+ #include "components/prefs/pref_service.h"
+ 
++#include "app/vivaldi_apptools.h"
++
+ namespace gcm {
+ 
+ namespace {
+@@ -131,6 +133,10 @@ GCMChannelStatusSyncer::~GCMChannelStatusSyncer() {
+ }
+ 
+ void GCMChannelStatusSyncer::EnsureStarted() {
++#if defined(VIVALDI_BUILD)
++  if (vivaldi::IsVivaldiRunning())
++    return;
++#endif
+   // Bail out if the request is already scheduled or started.
+   if (started_)
+     return;
 diff --git a/components/google/core/browser/google_util.cc b/components/google/core/browser/google_util.cc
-index f3e8fd432b8e35afac9835c7e8727b6ff0ac2f27..7018ef515418b387c82180bf20ca4b4962e74e0e 100644
+index a16d55eaafdd0daa4d89de8523ad121be7cc5f84..6e0f29d8ef537344e6e425ab3c5652b4d735bb47 100644
 --- a/components/google/core/browser/google_util.cc
 +++ b/components/google/core/browser/google_util.cc
-@@ -44,6 +44,11 @@ bool IsPathHomePageBase(base::StringPiece path) {
+@@ -45,6 +45,11 @@ bool IsPathHomePageBase(base::StringPiece path) {
    return (path == "/") || (path == "/webhp");
  }
  
@@ -1163,9 +1349,9 @@ index f3e8fd432b8e35afac9835c7e8727b6ff0ac2f27..7018ef515418b387c82180bf20ca4b49
 +
  // True if the given canonical |host| is "[www.]<domain_in_lower_case>.<TLD>"
  // with a valid TLD. If |subdomain_permission| is ALLOW_SUBDOMAIN, we check
- // against host "*.<domain_in_lower_case>.<TLD>" instead.
-@@ -95,8 +100,6 @@ bool IsCanonicalHostGoogleHostname(base::StringPiece canonical_host,
-   return IsValidHostName(canonical_host, "google", subdomain_permission);
+ // against host "*.<domain_in_lower_case>.<TLD>" instead. Will return the TLD
+@@ -109,8 +114,6 @@ bool IsCanonicalHostGoogleHostname(base::StringPiece canonical_host,
+   return base::ContainsKey(google_tlds, tld.as_string());
  }
  
 -}  // namespace
@@ -1174,10 +1360,10 @@ index f3e8fd432b8e35afac9835c7e8727b6ff0ac2f27..7018ef515418b387c82180bf20ca4b49
  
  bool HasGoogleSearchQueryParam(base::StringPiece str) {
 diff --git a/components/google/core/browser/google_util.h b/components/google/core/browser/google_util.h
-index 53e58bc0e85e2f5699d02b557172eae04bfdd261..4722ee07d6f101d83ac38f49b883e9f862607bed 100644
+index 53e58bc0e85e2f5699d02b557172eae04bfdd261..a04bfb251cbdf0c5a59fe2230a278cf31ba0902b 100644
 --- a/components/google/core/browser/google_util.h
 +++ b/components/google/core/browser/google_util.h
-@@ -107,6 +107,18 @@ bool IsYoutubeDomainUrl(const GURL& url,
+@@ -107,6 +107,19 @@ bool IsYoutubeDomainUrl(const GURL& url,
                          SubdomainPermission subdomain_permission,
                          PortPermission port_permission);
  
@@ -1186,7 +1372,8 @@ index 53e58bc0e85e2f5699d02b557172eae04bfdd261..4722ee07d6f101d83ac38f49b883e9f8
 +// "*.<domain_in_lower_case>.<TLD>" instead.
 +bool IsValidHostName(base::StringPiece host,
 +                     base::StringPiece domain_in_lower_case,
-+                     google_util::SubdomainPermission subdomain_permission);
++                     google_util::SubdomainPermission subdomain_permission,
++                     base::StringPiece* tld = nullptr);
 +
 +// True if |url| is a valid URL with HTTP or HTTPS scheme. If |port_permission|
 +// is DISALLOW_NON_STANDARD_PORTS, this also requires |url| to use the standard
@@ -1197,7 +1384,7 @@ index 53e58bc0e85e2f5699d02b557172eae04bfdd261..4722ee07d6f101d83ac38f49b883e9f8
  
  #endif  // COMPONENTS_GOOGLE_CORE_BROWSER_GOOGLE_UTIL_H_
 diff --git a/components/guest_view/browser/guest_view_base.cc b/components/guest_view/browser/guest_view_base.cc
-index 2d52bbf4fc3c42241a21b0fc4d18554e4cd86214..36c314d450b828b89f8845f6f081145b010ebec5 100644
+index 98a25805dc97d27858a0ebb3f605932eb938f0e4..a740c75733fbd5e3ecabf95e2488a7b099455bc2 100644
 --- a/components/guest_view/browser/guest_view_base.cc
 +++ b/components/guest_view/browser/guest_view_base.cc
 @@ -28,6 +28,15 @@
@@ -1280,7 +1467,7 @@ index 2d52bbf4fc3c42241a21b0fc4d18554e4cd86214..36c314d450b828b89f8845f6f081145b
 +  }
  
 +  if (web_contents()) {
-+    if (HandOverToBrowser(web_contents())) {
++    if (HandOverToBrowser(web_contents()) || !web_contents_is_owned_by_this_) {
 +      content::WebContentsObserver::Observe(NULL);
 +    } else {
 +      // NOTE(jarle@vivaldi): Check if the WebContent object is already being
@@ -1350,10 +1537,10 @@ index 2d52bbf4fc3c42241a21b0fc4d18554e4cd86214..36c314d450b828b89f8845f6f081145b
  
    auto* embedder_zoom_controller =
 diff --git a/components/guest_view/browser/guest_view_base.h b/components/guest_view/browser/guest_view_base.h
-index 3e6eac1ede32dc7d27d03dde948b73664a51fedf..9eb177379ecf5a67807df3923c3e0f6a187b32df 100644
+index 6c58eeff981eaefd0e0303b169ccde7423e07e85..62edcb5feb7b4a94c54d383b2c91b3b5dcdde00b 100644
 --- a/components/guest_view/browser/guest_view_base.h
 +++ b/components/guest_view/browser/guest_view_base.h
-@@ -24,6 +24,17 @@ struct RendererContentSettingRules;
+@@ -22,6 +22,17 @@
  
  namespace guest_view {
  
@@ -1371,7 +1558,18 @@ index 3e6eac1ede32dc7d27d03dde948b73664a51fedf..9eb177379ecf5a67807df3923c3e0f6a
  class GuestViewEvent;
  
  // A struct of parameters for SetSize(). The parameters are all declared as
-@@ -336,6 +347,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
+@@ -202,6 +213,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
+   content::RenderWidgetHost* GetOwnerRenderWidgetHost() override;
+   content::SiteInstance* GetOwnerSiteInstance() override;
+ 
++  // NOTE(andre@vivaldi.com): This is used in Vivaldi to make sure the lifecycle
++  // of webcontents is working for webcontents owned by multiple guests.
++  bool web_contents_is_owned_by_this_ = true;
++
+  protected:
+   explicit GuestViewBase(content::WebContents* owner_web_contents);
+ 
+@@ -334,6 +349,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
  
    void SetGuestZoomLevelToMatchEmbedder();
  
@@ -1382,7 +1580,7 @@ index 3e6eac1ede32dc7d27d03dde948b73664a51fedf..9eb177379ecf5a67807df3923c3e0f6a
   private:
    friend class GuestViewMessageFilter;
  
-@@ -379,7 +394,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
+@@ -377,7 +396,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
    bool ShouldFocusPageAfterCrash() final;
    void UpdatePreferredSize(content::WebContents* web_contents,
                             const gfx::Size& pref_size) final;
@@ -1504,7 +1702,7 @@ index 4d5c34193f55b535ac8684f1d4d51b868bb30386..5191d706d0c80bacb6f12e3c46110226
    std::unique_ptr<GuestViewRequest> pending_response =
        std::move(pending_response_);
 diff --git a/components/history/core/browser/history_backend.cc b/components/history/core/browser/history_backend.cc
-index 1565486d534978c740ea47500ad2129eb2daae66..b4deff0b4e1801fec380197170eb5011c94dfd1b 100644
+index 08cacf54212abaa3b3639e655f75878563e0b986..5544afda317c9371e5825d4a068de7007a185710 100644
 --- a/components/history/core/browser/history_backend.cc
 +++ b/components/history/core/browser/history_backend.cc
 @@ -90,9 +90,11 @@ const int kFaviconRefetchDays = 7;
@@ -1555,7 +1753,7 @@ index 1565486d534978c740ea47500ad2129eb2daae66..b4deff0b4e1801fec380197170eb5011
  
  #if defined(OS_ANDROID)
    if (backend_client_) {
-@@ -1221,6 +1242,25 @@ void HistoryBackend::RemoveDownloads(const std::set<uint32_t>& ids) {
+@@ -1226,6 +1247,25 @@ void HistoryBackend::RemoveDownloads(const std::set<uint32_t>& ids) {
    DCHECK_GE(ids.size(), num_downloads_deleted);
  }
  
@@ -1582,7 +1780,7 @@ index 1565486d534978c740ea47500ad2129eb2daae66..b4deff0b4e1801fec380197170eb5011
                                    const QueryOptions& options,
                                    QueryResults* query_results) {
 diff --git a/components/history/core/browser/history_backend.h b/components/history/core/browser/history_backend.h
-index 130d9b7b614085893230f11d58d2106102820da7..9e22892edce33f25dd5e597e4d0b7c7e262ba2ca 100644
+index 6959994ab1ae814988b99a55bda09e7a17a89aaf..d8cebc10272cde18da9915499c65334e4736665c 100644
 --- a/components/history/core/browser/history_backend.h
 +++ b/components/history/core/browser/history_backend.h
 @@ -34,6 +34,8 @@
@@ -1591,10 +1789,10 @@ index 130d9b7b614085893230f11d58d2106102820da7..9e22892edce33f25dd5e597e4d0b7c7e
  
 +#include "db/vivaldi_history_types.h"
 +
- class HistoryURLProvider;
- struct HistoryURLProviderParams;
  class SkBitmap;
-@@ -215,6 +217,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
+ class TestingProfile;
+ 
+@@ -212,6 +214,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
    // generating internal metrics.
    TopHostsList TopHosts(size_t num_hosts) const;
  
@@ -1607,7 +1805,7 @@ index 130d9b7b614085893230f11d58d2106102820da7..9e22892edce33f25dd5e597e4d0b7c7e
    // Gets the counts and last last time of URLs that belong to |origins| in the
    // history database. Origins that are not in the history database will be in
    // the map with a count and time of 0.
-@@ -252,6 +260,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
+@@ -249,6 +257,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
    void QueryHistory(const base::string16& text_query,
                      const QueryOptions& options,
                      QueryResults* query_results);
@@ -1619,7 +1817,7 @@ index 130d9b7b614085893230f11d58d2106102820da7..9e22892edce33f25dd5e597e4d0b7c7e
    // Computes the most recent URL(s) that the given canonical URL has
    // redirected to. There may be more than one redirect in a row, so this
 diff --git a/components/history/core/browser/history_database.h b/components/history/core/browser/history_database.h
-index b1b490cf198cdabe8f36bf68f2df164050642fbb..82fcd026e075c772a2fbb76cb70102baff8515b3 100644
+index 9a26ae981941c1d598e8db459b5c84fb1f5103f1..d151d743735f1bbf3eff4f603a61f7c55abb5286 100644
 --- a/components/history/core/browser/history_database.h
 +++ b/components/history/core/browser/history_database.h
 @@ -20,6 +20,8 @@
@@ -1631,7 +1829,7 @@ index b1b490cf198cdabe8f36bf68f2df164050642fbb..82fcd026e075c772a2fbb76cb70102ba
  #if defined(OS_ANDROID)
  #include "components/history/core/browser/android/android_cache_database.h"
  #include "components/history/core/browser/android/android_urls_database.h"
-@@ -48,7 +50,8 @@ class HistoryDatabase : public DownloadDatabase,
+@@ -47,7 +49,8 @@ class HistoryDatabase : public DownloadDatabase,
  #endif
                          public URLDatabase,
                          public VisitDatabase,
@@ -1668,10 +1866,10 @@ index 3af9c84c277395b2cce4891896fcac18a28b8ea9..4d98bf9230ba84de3f53a90ee3f99111
  
  }  // namespace history
 diff --git a/components/history/core/browser/history_service.cc b/components/history/core/browser/history_service.cc
-index a97677666b691d765a49bbc921453c2bdda7d277..0ee3e4f8d7c684d1dfe8afce29ffe13b1ae0d4d1 100644
+index b154b3237e19b1373d1c0ba522aefc8229a51861..d2db5db8b2f7adf411d07ec0e80d8e81082eb70c 100644
 --- a/components/history/core/browser/history_service.cc
 +++ b/components/history/core/browser/history_service.cc
-@@ -343,6 +343,29 @@ void HistoryService::TopHosts(size_t num_hosts,
+@@ -342,6 +342,29 @@ void HistoryService::TopHosts(size_t num_hosts,
        callback);
  }
  
@@ -1701,7 +1899,7 @@ index a97677666b691d765a49bbc921453c2bdda7d277..0ee3e4f8d7c684d1dfe8afce29ffe13b
  void HistoryService::GetCountsAndLastVisitForOrigins(
      const std::set<GURL>& origins,
      const GetCountsAndLastVisitForOriginsCallback& callback) const {
-@@ -736,6 +759,23 @@ void HistoryService::RemoveDownloads(const std::set<uint32_t>& ids) {
+@@ -735,6 +758,23 @@ void HistoryService::RemoveDownloads(const std::set<uint32_t>& ids) {
                                             history_backend_, ids));
  }
  
@@ -1726,10 +1924,10 @@ index a97677666b691d765a49bbc921453c2bdda7d277..0ee3e4f8d7c684d1dfe8afce29ffe13b
      const base::string16& text_query,
      const QueryOptions& options,
 diff --git a/components/history/core/browser/history_service.h b/components/history/core/browser/history_service.h
-index 430037133854ba0d0e65a1ab87763162f4f13eaa..1151e9383e7bdcf379b3040d185285ac4d1aeaf8 100644
+index 8e34834e22ae03fd8a2705560330ddd434c13f86..db7e1b8861d468f35363a35646bde3b657913ec4 100644
 --- a/components/history/core/browser/history_service.h
 +++ b/components/history/core/browser/history_service.h
-@@ -38,6 +38,8 @@
+@@ -39,6 +39,8 @@
  #include "sql/init_status.h"
  #include "ui/base/page_transition_types.h"
  
@@ -1738,7 +1936,7 @@ index 430037133854ba0d0e65a1ab87763162f4f13eaa..1151e9383e7bdcf379b3040d185285ac
  class GURL;
  class HistoryQuickProviderTest;
  class HistoryURLProvider;
-@@ -159,6 +161,18 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
+@@ -157,6 +159,18 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
    virtual void TopHosts(size_t num_hosts,
                          const TopHostsCallback& callback) const;
  
@@ -1757,7 +1955,7 @@ index 430037133854ba0d0e65a1ab87763162f4f13eaa..1151e9383e7bdcf379b3040d185285ac
    // Gets the counts and most recent visit date of URLs that belong to |origins|
    // in the history database.
    void GetCountsAndLastVisitForOrigins(
-@@ -261,6 +275,13 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
+@@ -259,6 +273,13 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
    // the results out of the passed in parameter and take ownership of them.
    typedef base::Callback<void(QueryResults*)> QueryHistoryCallback;
  
@@ -1772,10 +1970,10 @@ index 430037133854ba0d0e65a1ab87763162f4f13eaa..1151e9383e7bdcf379b3040d185285ac
    // history_types.h).  If empty, all results matching the given options
    // will be returned.
 diff --git a/components/history/core/browser/history_types.h b/components/history/core/browser/history_types.h
-index 64f34c30416fa20c0a6331afc0b638bb5c26274e..8a89f1dfe6cfeb35d44ff225593e8eca2737b349 100644
+index e560ed7c020ef6ba98317ac7d7a3bbe50b42202a..0e6131bd4e88f0ee72bdc5b99bec6f3b55023ff9 100644
 --- a/components/history/core/browser/history_types.h
 +++ b/components/history/core/browser/history_types.h
-@@ -58,6 +58,7 @@ enum VisitSource {
+@@ -57,6 +57,7 @@ enum VisitSource {
    SOURCE_FIREFOX_IMPORTED = 3,
    SOURCE_IE_IMPORTED = 4,
    SOURCE_SAFARI_IMPORTED = 5,
@@ -1783,16 +1981,29 @@ index 64f34c30416fa20c0a6331afc0b638bb5c26274e..8a89f1dfe6cfeb35d44ff225593e8eca
  };
  
  typedef int64_t VisitID;
+diff --git a/components/history/core/browser/top_sites.cc b/components/history/core/browser/top_sites.cc
+index 5acf6dbf218110aa728538285f6c6985847dde51..6f7bc6362930c6ed742d27a763fbc0dddc0738ab 100644
+--- a/components/history/core/browser/top_sites.cc
++++ b/components/history/core/browser/top_sites.cc
+@@ -49,4 +49,8 @@ void TopSites::NotifyTopSitesChanged(
+     observer.TopSitesChanged(this, reason);
+ }
+ 
++bool TopSites::HasPageThumbnail(const GURL& url) {
++  return false;
++}
++
+ }  // namespace history
 diff --git a/components/history/core/browser/top_sites.h b/components/history/core/browser/top_sites.h
-index 8e826058f3e3f1b22e1b8a8ae871da3a506de32b..566def2348432b48fa0e850aea8122825f564673 100644
+index 2b5e080f4b5689c76605c0603d89a88e19232d2d..2ad014463eb5d00dcba500463a3765f0d1041890 100644
 --- a/components/history/core/browser/top_sites.h
 +++ b/components/history/core/browser/top_sites.h
-@@ -170,12 +170,18 @@ class TopSites : public RefcountedKeyedService {
+@@ -150,12 +150,18 @@ class TopSites : public RefcountedKeyedService {
    // Called when user has navigated to |url|.
    virtual void OnNavigationCommitted(const GURL& url) = 0;
  
 +  // Returns true if we have a thumbnail available for the given url.
-+  virtual bool HasPageThumbnail(const GURL& url) = 0;
++  virtual bool HasPageThumbnail(const GURL& url);
 +
    // Add Observer to the list.
    void AddObserver(TopSitesObserver* observer);
@@ -1862,10 +2073,10 @@ index 807f3374b61cfaabc4540c7820d1aca4c11de2d0..534174ea72f69890aa9063daba2de5d7
    friend class base::RefCountedThreadSafe<TopSitesBackend>;
  
 diff --git a/components/history/core/browser/top_sites_database.cc b/components/history/core/browser/top_sites_database.cc
-index 191b36d547dba3a3018720ec2ce7738b8792fe12..94e9dcae019db58e18df69be68cf529a24524dae 100644
+index 7e9fc819a0a5f4c92013add5553ac60c6bd45215..acab0a6a01a851d745023d7b3d5b4961e867e90c 100644
 --- a/components/history/core/browser/top_sites_database.cc
 +++ b/components/history/core/browser/top_sites_database.cc
-@@ -16,11 +16,15 @@
+@@ -17,11 +17,15 @@
  #include "components/history/core/browser/history_types.h"
  #include "components/history/core/browser/top_sites.h"
  #include "components/history/core/common/thumbnail_score.h"
@@ -1881,7 +2092,7 @@ index 191b36d547dba3a3018720ec2ce7738b8792fe12..94e9dcae019db58e18df69be68cf529a
  
  namespace history {
  
-@@ -426,6 +430,10 @@ bool TopSitesDatabase::InitImpl(const base::FilePath& db_name) {
+@@ -427,6 +431,10 @@ bool TopSitesDatabase::InitImpl(const base::FilePath& db_name) {
    if (!transaction.Commit())
      return false;
  
@@ -1892,7 +2103,7 @@ index 191b36d547dba3a3018720ec2ce7738b8792fe12..94e9dcae019db58e18df69be68cf529a
    return true;
  }
  
-@@ -732,4 +740,66 @@ sql::Connection* TopSitesDatabase::CreateDB(const base::FilePath& db_name) {
+@@ -733,4 +741,66 @@ sql::Connection* TopSitesDatabase::CreateDB(const base::FilePath& db_name) {
    return db.release();
  }
  
@@ -1990,7 +2201,7 @@ index 3556db1d20ecf07ca542c6aeb4f9ee9e929d963c..dca4dada2bfa230b914b4e7730d76d83
  
    std::unique_ptr<sql::Connection> db_;
 diff --git a/components/history/core/browser/top_sites_impl.cc b/components/history/core/browser/top_sites_impl.cc
-index 57e72498d659f69250d919a70a96d9e6c81722e8..0d5f7d02d5f977d52fbb18d86007cc977bd49c97 100644
+index b9ae71596b59ed7266fd9c563fbb936c0fce41db..274ac71ed5ed34ce1dd63bba46e2ebf1f9cdd140 100644
 --- a/components/history/core/browser/top_sites_impl.cc
 +++ b/components/history/core/browser/top_sites_impl.cc
 @@ -39,6 +39,10 @@
@@ -2053,7 +2264,7 @@ index 57e72498d659f69250d919a70a96d9e6c81722e8..0d5f7d02d5f977d52fbb18d86007cc97
    backend_->GetMostVisitedThumbnails(
        base::Bind(&TopSitesImpl::OnGotMostVisitedThumbnails,
                   base::Unretained(this)),
-@@ -532,8 +552,14 @@ bool TopSitesImpl::EncodeBitmap(const gfx::Image& bitmap,
+@@ -553,8 +573,14 @@ bool TopSitesImpl::EncodeBitmap(const gfx::Image& bitmap,
      return false;
    *bytes = new base::RefCountedBytes();
    std::vector<unsigned char> data;
@@ -2068,10 +2279,11 @@ index 57e72498d659f69250d919a70a96d9e6c81722e8..0d5f7d02d5f977d52fbb18d86007cc97
  
    // As we're going to cache this data, make sure the vector is only as big as
    // it needs to be, as JPEGCodec::Encode() over-allocates data.capacity().
-@@ -642,6 +668,14 @@ void TopSitesImpl::OnNavigationCommitted(const GURL& url) {
-   }
+@@ -602,6 +628,15 @@ int TopSitesImpl::GetRedirectDistanceForURL(const MostVisitedURL& most_visited,
+   return 0;
  }
  
++
 +bool TopSitesImpl::HasPageThumbnail(const GURL& url) {
 +  scoped_refptr<base::RefCountedMemory> bytes;
 +  // This could be relatively expensive, but the assumption is
@@ -2083,7 +2295,7 @@ index 57e72498d659f69250d919a70a96d9e6c81722e8..0d5f7d02d5f977d52fbb18d86007cc97
  bool TopSitesImpl::AddPrepopulatedPages(MostVisitedURLList* urls,
                                          size_t num_forced_urls) {
    bool added = false;
-@@ -936,4 +970,40 @@ void TopSitesImpl::OnURLsDeleted(HistoryService* history_service,
+@@ -896,4 +931,40 @@ void TopSitesImpl::OnURLsDeleted(HistoryService* history_service,
    StartQueryForMostVisited();
  }
  
@@ -2125,10 +2337,10 @@ index 57e72498d659f69250d919a70a96d9e6c81722e8..0d5f7d02d5f977d52fbb18d86007cc97
 +
  }  // namespace history
 diff --git a/components/history/core/browser/top_sites_impl.h b/components/history/core/browser/top_sites_impl.h
-index 338c2a5e3fab4a5eafe22bc312c56b4789551035..2127c20aa978ecf2d836fabfeeb29cc5378dfdb7 100644
+index c83cb0a883a3ed75a6de3615bb0d6a1905c9bc9e..b0c316f930b56e9ca8104f9df5151e9764fa52a1 100644
 --- a/components/history/core/browser/top_sites_impl.h
 +++ b/components/history/core/browser/top_sites_impl.h
-@@ -99,6 +99,10 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
+@@ -94,6 +94,10 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
    bool loaded() const override;
    bool AddForcedURL(const GURL& url, const base::Time& time) override;
    void OnNavigationCommitted(const GURL& url) override;
@@ -2139,7 +2351,7 @@ index 338c2a5e3fab4a5eafe22bc312c56b4789551035..2127c20aa978ecf2d836fabfeeb29cc5
  
    // RefcountedKeyedService:
    void ShutdownOnUIThread() override;
-@@ -252,6 +256,11 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
+@@ -249,6 +253,11 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
                       const URLRows& deleted_rows,
                       const std::set<GURL>& favicon_urls) override;
  
@@ -2363,6 +2575,34 @@ index 8e7acbb92cf80db124612ceebad275c95e1128a5..a77f5ce5bbc2595de715e7828b9c31d0
    // Performs a brute force search over the database to find any URLs or titles
    // which match the |query| string, using the default text matching algorithm.
    // Returns any matches in |results|.
+diff --git a/components/history/core/browser/web_history_service.cc b/components/history/core/browser/web_history_service.cc
+index e90d3b884e4f452b39c1a37daa4231c09bd5b34c..e33f5f9bf8cc77363b1082da4dfdc52d1aa01b33 100644
+--- a/components/history/core/browser/web_history_service.cc
++++ b/components/history/core/browser/web_history_service.cc
+@@ -34,18 +34,20 @@
+ #include "ui/base/device_form_factor.h"
+ #include "url/gurl.h"
+ 
++#include "sync/vivaldi_sync_urls.h"
++
+ namespace history {
+ 
+ namespace {
+ 
+ const char kHistoryOAuthScope[] =
+-    "https://www.googleapis.com/auth/chromesync";
++    TEST_SYNC_URL("/apis/auth/chromesync");
+ 
+ const char kHistoryQueryHistoryUrl[] =
+-    "https://history.google.com/history/api/lookup?client=chrome";
++    TEST_SYNC_URL("/apis/history/api/lookup?client=chrome");
+ 
+ const char kHistoryDeleteHistoryUrl[] =
+-    "https://history.google.com/history/api/delete?client=chrome";
++    TEST_SYNC_URL("/apis/history/api/delete?client=chrome");
+ 
+ const char kHistoryAudioHistoryUrl[] =
+     "https://history.google.com/history/api/lookup?client=audio";
 diff --git a/components/history/core/common/thumbnail_score.cc b/components/history/core/common/thumbnail_score.cc
 index f8f339e5f1651fc6bba524d0472ec5e214e6362b..0469e4c94d9f067eb779893da0e6f6ae18506167 100644
 --- a/components/history/core/common/thumbnail_score.cc
@@ -2431,6 +2671,94 @@ index 2e7dfffdeb437f8e325a15807c9261688ed7de8d..8e55ab251e0d565a4628b4bb46b833b3
    // How "boring" a thumbnail is. The boring score is the 0,1 ranged
    // percentage of pixels that are the most common luma. Higher boring
    // scores indicate that a higher percentage of a bitmap are all the
+diff --git a/components/history/core/test/fake_web_history_service.cc b/components/history/core/test/fake_web_history_service.cc
+index 140c209728ac72e7bad80e360435450276d5a6a1..8da84003fc8f69e13690b123ece5abff818c2351 100644
+--- a/components/history/core/test/fake_web_history_service.cc
++++ b/components/history/core/test/fake_web_history_service.cc
+@@ -15,6 +15,8 @@
+ #include "net/base/url_util.h"
+ #include "net/url_request/url_request_context_getter.h"
+ 
++#include "sync/vivaldi_sync_urls.h"
++
+ namespace history {
+ 
+ // FakeRequest -----------------------------------------------------------------
+@@ -32,7 +34,7 @@ const char kChromeClient[] = "chrome";
+ 
+ const char kWebAndAppClient[] = "web_app";
+ 
+-const char kSyncServerHost[] = "clients4.google.com";
++const char kSyncServerHost[] = SYNC_HOSTNAME; //"clients4.google.com";
+ 
+ class FakeRequest : public WebHistoryService::Request {
+  public:
+diff --git a/components/invalidation/impl/gcm_network_channel.cc b/components/invalidation/impl/gcm_network_channel.cc
+index 5b2aafeb81a01c78ad6d420f9ff989f56673e8ed..eca2ba16dd909465cb5fd257e35b24897d7f8a2c 100644
+--- a/components/invalidation/impl/gcm_network_channel.cc
++++ b/components/invalidation/impl/gcm_network_channel.cc
+@@ -32,13 +32,15 @@
+ #include "google/cacheinvalidation/types.pb.h"
+ #endif
+ 
++#include "sync/vivaldi_sync_urls.h"
++
+ namespace syncer {
+ 
+ namespace {
+ 
+ const char kCacheInvalidationEndpointUrl[] =
+-    "https://clients4.google.com/invalidation/android/request/";
+-const char kCacheInvalidationPackageName[] = "com.google.chrome.invalidations";
++    SYNC_URL("/invalidation/");
++const char kCacheInvalidationPackageName[] = "com.vivaldi.vivaldi.invalidations";
+ 
+ // Register backoff policy.
+ const net::BackoffEntry::Policy kRegisterBackoffPolicy = {
+diff --git a/components/invalidation/impl/push_client_channel.cc b/components/invalidation/impl/push_client_channel.cc
+index 95c490fe17d1c8d7cc06b288dd1a9d55a994c04f..0124df164ba7b2c7f104fe964c2951c456336ccd 100644
+--- a/components/invalidation/impl/push_client_channel.cc
++++ b/components/invalidation/impl/push_client_channel.cc
+@@ -13,11 +13,13 @@
+ #include "google/cacheinvalidation/types.pb.h"
+ #include "jingle/notifier/listener/push_client.h"
+ 
++#include "sync/vivaldi_sync_urls.h"
++
+ namespace syncer {
+ 
+ namespace {
+ 
+-const char kBotJid[] = "tango@bot.talk.google.com";
++const char kBotJid[] = "tango@" SYNC_SERVERNAME;
+ const char kChannelName[] = "tango_raw";
+ 
+ }  // namespace
+diff --git a/components/invalidation/impl/ticl_profile_settings_provider.cc b/components/invalidation/impl/ticl_profile_settings_provider.cc
+index e9424f280d69b364170a71cf9c0cefa994b6258b..34dba63838d52e3d6fbf2669c311497f41e203d1 100644
+--- a/components/invalidation/impl/ticl_profile_settings_provider.cc
++++ b/components/invalidation/impl/ticl_profile_settings_provider.cc
+@@ -13,6 +13,8 @@
+ #include "components/pref_registry/pref_registry_syncable.h"
+ #include "components/prefs/pref_service.h"
+ 
++#include "app/vivaldi_apptools.h"
++
+ namespace invalidation {
+ 
+ TiclProfileSettingsProvider::TiclProfileSettingsProvider(PrefService* prefs)
+@@ -31,6 +33,11 @@ TiclProfileSettingsProvider::TiclProfileSettingsProvider(PrefService* prefs)
+ TiclProfileSettingsProvider::~TiclProfileSettingsProvider() {}
+ 
+ bool TiclProfileSettingsProvider::UseGCMChannel() const {
++#if defined(VIVALDI_BUILD)
++  if (vivaldi::IsVivaldiRunning())
++    return false;
++#endif
++
+   if (prefs_->GetBoolean(prefs::kInvalidationServiceUseGCMChannel)) {
+     // Use GCM channel if it was enabled via prefs.
+     return true;
 diff --git a/components/metrics/proto/omnibox_event.proto b/components/metrics/proto/omnibox_event.proto
 index 2f8f24da94fce2da26730ac60933d164a9cdab28..c0af4982e814aae8b6e168d4bd63c70ce939e85e 100644
 --- a/components/metrics/proto/omnibox_event.proto
@@ -2444,6 +2772,27 @@ index 2f8f24da94fce2da26730ac60933d164a9cdab28..c0af4982e814aae8b6e168d4bd63c70c
      }
      optional ResultType result_type = 2;
  
+diff --git a/components/metrics/url_constants.cc b/components/metrics/url_constants.cc
+index 4a744d56affaff1a259db760a34ae3909eb1be21..20adcbe28c58f74ef58a5d7fe9c1bcd13f2edeff 100644
+--- a/components/metrics/url_constants.cc
++++ b/components/metrics/url_constants.cc
+@@ -6,13 +6,15 @@
+ 
+ #include "build/build_config.h"
+ 
++#include "sync/vivaldi_sync_urls.h"
++
+ namespace metrics {
+ 
+ #if defined(OS_ANDROID) || defined(OS_IOS)
+ const char kDefaultMetricsServerUrl[] =
+     "https://clientservices.googleapis.com/uma/v2";
+ #else
+-const char kDefaultMetricsServerUrl[] = "https://clients4.google.com/uma/v2";
++const char kDefaultMetricsServerUrl[] = SYNC_URL("/uma/v2");
+ #endif
+ 
+ const char kDefaultMetricsMimeType[] = "application/vnd.chrome.uma";
 diff --git a/components/mime_util/mime_util.cc b/components/mime_util/mime_util.cc
 index 5f4cf3ffbe4b4f70cfc83833a7e54a7e57d28ef1..15ead4a6bf8710ffe5ce10cacde95cb658ba5bdd 100644
 --- a/components/mime_util/mime_util.cc
@@ -2456,157 +2805,11 @@ index 5f4cf3ffbe4b4f70cfc83833a7e54a7e57d28ef1..15ead4a6bf8710ffe5ce10cacde95cb6
      "text/comma-separated-values",
      "text/csv",
      "text/tab-separated-values",
-diff --git a/components/omnibox/browser/autocomplete_controller.cc b/components/omnibox/browser/autocomplete_controller.cc
-index 9cf3b566713b5cc05b462e161f165e83d3f33072..192029979e95ae185ce812273415e4347e0d209d 100644
---- a/components/omnibox/browser/autocomplete_controller.cc
-+++ b/components/omnibox/browser/autocomplete_controller.cc
-@@ -123,6 +123,14 @@ void AutocompleteMatchToAssistedQuery(
-       *subtype = 65;
-       return;
-     }
-+    case AutocompleteMatchType::BOOKMARK_NICK: {
-+      *subtype = 66;
-+      return;
-+    }
-+    case AutocompleteMatchType::BOOKMARK_DESCRIPTION: {
-+      *subtype = 67;
-+      return;
-+    }
-     case AutocompleteMatchType::NAVSUGGEST_PERSONALIZED: {
-       *type = 5;
-       *subtype = 39;
-diff --git a/components/omnibox/browser/autocomplete_match.cc b/components/omnibox/browser/autocomplete_match.cc
-index c8b890d060aa8286c1cff9e6b9c3e75d5f5f7f52..6f7606673d323a59cc1282243d9f5c7f81d34f63 100644
---- a/components/omnibox/browser/autocomplete_match.cc
-+++ b/components/omnibox/browser/autocomplete_match.cc
-@@ -192,6 +192,8 @@ gfx::VectorIconId AutocompleteMatch::TypeToVectorIcon(Type type) {
-       gfx::VectorIconId::OMNIBOX_SEARCH,         // VOICE_SEARCH
-       gfx::VectorIconId::OMNIBOX_HTTP,           // PHYSICAL_WEB
-       gfx::VectorIconId::OMNIBOX_HTTP,           // PHYSICAL_WEB_OVERFLOW
-+      gfx::VectorIconId::OMNIBOX_HTTP,           // BOOKMARK_NICK
-+      gfx::VectorIconId::OMNIBOX_HTTP,           // BOOKMARK_DESCRIPTION
-   };
-   static_assert(arraysize(kIcons) == AutocompleteMatchType::NUM_TYPES,
-                 "icons array must have NUM_TYPES elements");
-diff --git a/components/omnibox/browser/autocomplete_match_type.cc b/components/omnibox/browser/autocomplete_match_type.cc
-index 491e61257a6ce9d431cc616b96a64750ebd68ea9..86ea45de72b516dfbf6ecd949f9c8b60ebbfe70c 100644
---- a/components/omnibox/browser/autocomplete_match_type.cc
-+++ b/components/omnibox/browser/autocomplete_match_type.cc
-@@ -30,7 +30,9 @@ std::string AutocompleteMatchType::ToString(AutocompleteMatchType::Type type) {
-     "url-from-clipboard",
-     "voice-suggest",
-     "physical-web",
--    "physical-web-overflow"
-+    "physical-web-overflow",
-+    "bookmark-nick",
-+    "bookmark-description",
-   };
-   static_assert(arraysize(strings) == AutocompleteMatchType::NUM_TYPES,
-                 "strings array must have NUM_TYPES elements");
-diff --git a/components/omnibox/browser/autocomplete_match_type.h b/components/omnibox/browser/autocomplete_match_type.h
-index 9b1649433ae0640b43d6534807a23fa20dfa3a72..46868dfc674d2c299c0ee0602246492320b7c14d 100644
---- a/components/omnibox/browser/autocomplete_match_type.h
-+++ b/components/omnibox/browser/autocomplete_match_type.h
-@@ -54,6 +54,9 @@ struct AutocompleteMatchType {
-     PHYSICAL_WEB                = 21,  // A Physical Web nearby URL.
-     PHYSICAL_WEB_OVERFLOW       = 22,  // An item representing multiple
-                                        // Physical Web nearby URLs.
-+
-+    BOOKMARK_NICK               = 23,  // A bookmark whose nickname contains the input.
-+    BOOKMARK_DESCRIPTION        = 24,  // A bookmark whose description contains the input.
-     NUM_TYPES,
-   };
- 
-diff --git a/components/omnibox/browser/autocomplete_provider.h b/components/omnibox/browser/autocomplete_provider.h
-index 35cc538c07913df7174392bcb2c34c43008d9726..46843dbbfa870e52d120153f0b03ed796dcb21e4 100644
---- a/components/omnibox/browser/autocomplete_provider.h
-+++ b/components/omnibox/browser/autocomplete_provider.h
-@@ -76,6 +76,7 @@ typedef std::vector<metrics::OmniboxEventProto_ProviderInfo> ProvidersInfo;
- //
- // QUERY input type:
- // --------------------------------------------------------------------|-----
-+// Bookmark Provider (nickname exact match)                            | 1600 
- // Search Primary or Secondary (past query in history within 2 days)   | 1599**
- // Keyword (non-substituting or in keyword UI mode, exact match)       | 1500
- // Keyword (substituting, exact match)                                 | 1450
-diff --git a/components/omnibox/browser/bookmark_provider.cc b/components/omnibox/browser/bookmark_provider.cc
-index 5068690db9765924cd2103e47448aa4ecc89011b..4459b28201bc0ebb90e6858eb418619840f8f254 100644
---- a/components/omnibox/browser/bookmark_provider.cc
-+++ b/components/omnibox/browser/bookmark_provider.cc
-@@ -163,9 +163,24 @@ AutocompleteMatch BookmarkProvider::BookmarkMatchToACMatch(
-   // The AutocompleteMatch we construct is non-deletable because the only
-   // way to support this would be to delete the underlying bookmark, which is
-   // unlikely to be what the user intends.
--  AutocompleteMatch match(this, 0, false,
--                          AutocompleteMatchType::BOOKMARK_TITLE);
--  base::string16 title(bookmark_match.node->GetTitle());
-+  AutocompleteMatchType::Type match_type = AutocompleteMatchType::BOOKMARK_TITLE;
-+  const base::string16 *text_p = &bookmark_match.node->GetTitle();
-+  base::string16 text_n;
-+  if (bookmark_match.match_kind == BookmarkMatch::kNick)
-+  {
-+    match_type = AutocompleteMatchType::BOOKMARK_NICK;
-+    text_n = bookmark_match.node->GetNickName();
-+    text_p = &text_n;
-+  }
-+  else if (bookmark_match.match_kind == BookmarkMatch::kDescription)
-+  {
-+    match_type = AutocompleteMatchType::BOOKMARK_DESCRIPTION;
-+    text_n = bookmark_match.node->GetDescription();
-+    text_p = &text_n;
-+  }
-+  AutocompleteMatch match(this, 0, false, match_type);
-+  base::string16 title = *text_p;
-+  DCHECK(!title.empty());
-   BookmarkMatch::MatchPositions new_title_match_positions =
-       bookmark_match.title_match_positions;
-   CorrectTitleAndMatchPositions(&title, &new_title_match_positions);
-@@ -221,6 +236,8 @@ AutocompleteMatch BookmarkProvider::BookmarkMatchToACMatch(
- 
-   // Summary on how a relevance score is determined for the match:
-   //
-+  // An exact match for a nickname is given a score of 1600.
-+  //
-   // For each match within the bookmark's title or URL (or both), calculate a
-   // 'factor', sum up those factors, then use the sum to figure out a value
-   // between the base score and the maximum score.
-@@ -271,6 +288,16 @@ AutocompleteMatch BookmarkProvider::BookmarkMatchToACMatch(
-   // given by |kURLCountBoost|, below.
-   //
- 
-+  const int kNickNameExactMatch = 1600;
-+  if (match_type == AutocompleteMatchType::BOOKMARK_NICK &&
-+      bookmark_match.title_match_positions.size() == 1 && 
-+      bookmark_match.title_match_positions[0].first == 0 &&
-+      bookmark_match.title_match_positions[0].second == title.size() )
-+  {
-+    match.relevance = kNickNameExactMatch;
-+    return match;
-+  }
-+
-   // Pretend empty titles are identical to the URL.
-   if (title.empty())
-     title = base::ASCIIToUTF16(url.spec());
-diff --git a/components/omnibox/browser/omnibox_metrics_provider.cc b/components/omnibox/browser/omnibox_metrics_provider.cc
-index 202dfce07dea75f1df60c30ab690e9e445b7422c..0e52059bec54baa4199be5ba22c34dd1773f39ea 100644
---- a/components/omnibox/browser/omnibox_metrics_provider.cc
-+++ b/components/omnibox/browser/omnibox_metrics_provider.cc
-@@ -74,6 +74,10 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
-     case AutocompleteMatchType::CONTACT_DEPRECATED:
-     case AutocompleteMatchType::NUM_TYPES:
-       break;
-+    case AutocompleteMatchType::BOOKMARK_NICK:
-+      return OmniboxEventProto::Suggestion::BOOKMARK_NICK;
-+    case AutocompleteMatchType::BOOKMARK_DESCRIPTION:
-+      return OmniboxEventProto::Suggestion::BOOKMARK_DESCRIPTION;
-   }
-   NOTREACHED();
-   return OmniboxEventProto::Suggestion::UNKNOWN_RESULT_TYPE;
 diff --git a/components/omnibox/browser/zero_suggest_provider_unittest.cc b/components/omnibox/browser/zero_suggest_provider_unittest.cc
-index 7600582a9ac6a28991bc9e8bd5e70a1ed25ddfc9..b3e9c1a2eba579585b0e3934f0c468f47652d372 100644
+index e60556abd4c048972fe80e740a26213e1e9c3565..1df8880096f2c23ae8e599a3c9af6dd28a8830b1 100644
 --- a/components/omnibox/browser/zero_suggest_provider_unittest.cc
 +++ b/components/omnibox/browser/zero_suggest_provider_unittest.cc
-@@ -94,6 +94,10 @@ class FakeEmptyTopSites : public history::TopSites {
+@@ -82,6 +82,10 @@ class FakeEmptyTopSites : public history::TopSites {
    // RefcountedKeyedService:
    void ShutdownOnUIThread() override {}
  
@@ -2679,7 +2882,7 @@ index b54fe0d2155cbe1453b0a797fea3c02fda3437c2..62c830d3386d28c9d7f3775f6257952a
 +#error GOOGLE_CHROME_BUILD must be set for Vivaldi builds
 +#endif
 diff --git a/components/os_crypt/keychain_password_mac.h b/components/os_crypt/keychain_password_mac.h
-index f044f04e3e1f6018f4258047458373ee60415075..c80a8320d7118cdf61a2989c80e2cc4e5f9876cf 100644
+index 2de865114c487755a3eb73bede2baa4bd7a9e6b0..c7cbb0f95efcaa31968d1bcffc93d60374c9c560 100644
 --- a/components/os_crypt/keychain_password_mac.h
 +++ b/components/os_crypt/keychain_password_mac.h
 @@ -26,6 +26,8 @@ class KeychainPassword {
@@ -2689,10 +2892,10 @@ index f044f04e3e1f6018f4258047458373ee60415075..c80a8320d7118cdf61a2989c80e2cc4e
 +  std::string GetPassword(const std::string& service_name,
 +                          const std::string& account_name) const;
  
-  private:
-   const crypto::AppleKeychain& keychain_;
+   // The service and account names used in Chrome's Safe Storage keychain item.
+   static const char service_name[];
 diff --git a/components/os_crypt/keychain_password_mac.mm b/components/os_crypt/keychain_password_mac.mm
-index 1f60b9f0572ae9c61cf1d257c1457bb5b42838a4..fefb31ffe0af5b483b6f03238a44c3f7ff6f89b7 100644
+index 2b38db266f9aa1f4141c8649c021042ede4e5589..b4120270cdd834feeda9866e3bcf27c454ee3761 100644
 --- a/components/os_crypt/keychain_password_mac.mm
 +++ b/components/os_crypt/keychain_password_mac.mm
 @@ -11,6 +11,10 @@
@@ -2706,7 +2909,7 @@ index 1f60b9f0572ae9c61cf1d257c1457bb5b42838a4..fefb31ffe0af5b483b6f03238a44c3f7
  using crypto::AppleKeychain;
  
  namespace {
-@@ -82,3 +86,38 @@ std::string KeychainPassword::GetPassword() const {
+@@ -77,3 +81,38 @@ std::string KeychainPassword::GetPassword() const {
      return std::string();
    }
  }
@@ -2876,10 +3079,10 @@ index f999d25654e1300bf7a5f239f7a7dc1f3fac57b7..f074657af8a5ba983e1af12b6b8a754e
 +  import_key_is_cached = false;
 +}
 diff --git a/components/policy/resources/policy_templates.json b/components/policy/resources/policy_templates.json
-index 0014b0a9b11d94b89a5d9a46c8d2a3f16355f593..d6cd531fbdfa5f4b2457c0052caf830055849796 100644
+index 8cb4f4b499f22d858b87e65017949d875d8aa63b..b722cedc5583adcb9acf1cd7ef65cd4cd798a565 100644
 --- a/components/policy/resources/policy_templates.json
 +++ b/components/policy/resources/policy_templates.json
-@@ -4727,10 +4727,11 @@
+@@ -4767,10 +4767,11 @@
        'schema': { 'type': 'boolean' },
        'supported_on': ['chrome.*:19-', 'chrome_os:19-'],
        'features': {
@@ -2893,7 +3096,7 @@ index 0014b0a9b11d94b89a5d9a46c8d2a3f16355f593..d6cd531fbdfa5f4b2457c0052caf8300
        'caption': '''Whether online OCSP/CRL checks are performed''',
        'tags': ['website-sharing'],
 diff --git a/components/policy/tools/generate_policy_source.py b/components/policy/tools/generate_policy_source.py
-index 04445612e51e84db03ddbd97a2e572c1794141c3..af159bad2a0b798b01944e6ac8bedb916db98996 100755
+index 37dc99331598b622519626c3fc451e1547569da0..cf2335c422dbda828ee8787d405d962108413e25 100755
 --- a/components/policy/tools/generate_policy_source.py
 +++ b/components/policy/tools/generate_policy_source.py
 @@ -22,6 +22,7 @@ import types
@@ -2904,7 +3107,7 @@ index 04445612e51e84db03ddbd97a2e572c1794141c3..af159bad2a0b798b01944e6ac8bedb91
  CHROME_POLICY_KEY = 'SOFTWARE\\\\Policies\\\\Google\\\\Chrome'
  CHROMIUM_POLICY_KEY = 'SOFTWARE\\\\Policies\\\\Chromium'
  
-@@ -719,7 +720,10 @@ def _WritePolicyConstantSource(policies, os, f, riskTags):
+@@ -746,7 +747,10 @@ def _WritePolicyConstantSource(policies, os, f, riskTags):
    f.write('}  // namespace\n\n')
  
    if os == 'win':
@@ -2917,7 +3120,7 @@ index 04445612e51e84db03ddbd97a2e572c1794141c3..af159bad2a0b798b01944e6ac8bedb91
              'L"' + CHROME_POLICY_KEY + '";\n'
              '#else\n'
 diff --git a/components/renderer_context_menu/context_menu_content_type.cc b/components/renderer_context_menu/context_menu_content_type.cc
-index 9ecd12322b0a5aeb849f49c61b0214fb85062394..b3da811bc2e5fbe33c25af4f7960e72fac0e2a9e 100644
+index 9ecd12322b0a5aeb849f49c61b0214fb85062394..061f887a9f12680f138b1123593f868c4c551273 100644
 --- a/components/renderer_context_menu/context_menu_content_type.cc
 +++ b/components/renderer_context_menu/context_menu_content_type.cc
 @@ -10,6 +10,8 @@
@@ -2929,21 +3132,11 @@ index 9ecd12322b0a5aeb849f49c61b0214fb85062394..b3da811bc2e5fbe33c25af4f7960e72f
  using blink::WebContextMenuData;
  using content::WebContents;
  
-@@ -108,6 +110,9 @@ bool ContextMenuContentType::SupportsGroupInternal(int group) {
- 
-     case ITEM_GROUP_SEARCHWEBFORIMAGE:
-       // Image menu items imply search web for image item.
-+      if (vivaldi::IsVivaldiRunning()) {
-+        return false;
-+      }
-       return SupportsGroupInternal(ITEM_GROUP_MEDIA_IMAGE);
- 
-     case ITEM_GROUP_MEDIA_VIDEO:
 diff --git a/components/renderer_context_menu/render_view_context_menu_base.cc b/components/renderer_context_menu/render_view_context_menu_base.cc
-index 63d8df500f6438c23031d9b5a00e28f22a499e14..dcedf3b84050abde24366039a21ce4f652be5962 100644
+index 7f979cf793749eacb2a05ce99fef2b17bae4dfb1..490dd7f81476716265c4094bcbf1a2f87446d5df 100644
 --- a/components/renderer_context_menu/render_view_context_menu_base.cc
 +++ b/components/renderer_context_menu/render_view_context_menu_base.cc
-@@ -391,6 +391,11 @@ void RenderViewContextMenuBase::OpenURLWithExtraHeaders(
+@@ -392,6 +392,11 @@ void RenderViewContextMenuBase::OpenURLWithExtraHeaders(
    if (!extra_headers.empty())
      open_url_params.extra_headers = extra_headers;
  
@@ -3014,10 +3207,10 @@ index 7b1dff013eec0e035152e42481f4112a835542bc..8064e3e43225cbbf4c43c539fd3f5db0
 +
  }  // namespace sessions
 diff --git a/components/sessions/content/content_live_tab.h b/components/sessions/content/content_live_tab.h
-index e82ac7440e6cda3dc77984e0ae7d40714b4bfd97..0cc2197a04ad42e3f6773cc505d96f01c5d94a2d 100644
+index f4324411ea15f17674b1e7e7261f5f9ef1c4ef5d..aeef3f0188c888c88624e205fb0f48298cf5075b 100644
 --- a/components/sessions/content/content_live_tab.h
 +++ b/components/sessions/content/content_live_tab.h
-@@ -46,6 +46,8 @@ class SESSIONS_EXPORT ContentLiveTab
+@@ -44,6 +44,8 @@ class SESSIONS_EXPORT ContentLiveTab
    void LoadIfNecessary() override;
    const std::string& GetUserAgentOverride() const override;
  
@@ -3093,7 +3286,7 @@ index 03615b0c31aab0f813665113331e6a6ba5b4c102..fdc69bdb89f1d6b1692b2017bc5e95cd
  
   protected:
 diff --git a/components/sessions/core/persistent_tab_restore_service.cc b/components/sessions/core/persistent_tab_restore_service.cc
-index d9266e74d7cad5b8485877b15e9ef4c1c194c1e7..f730e72d9af991c8c892f82c39ba01576d6f4550 100644
+index d9016ee0369073fcc59ca8e04381f34fff8eb73c..8e4f90790eae56b2a09b0475784e46eb9fe04755 100644
 --- a/components/sessions/core/persistent_tab_restore_service.cc
 +++ b/components/sessions/core/persistent_tab_restore_service.cc
 @@ -26,6 +26,9 @@
@@ -3117,7 +3310,7 @@ index d9266e74d7cad5b8485877b15e9ef4c1c194c1e7..f730e72d9af991c8c892f82c39ba0157
  // Number of entries (not commands) before we clobber the file and write
  // everything.
  const int kEntriesPerReset = 40;
-@@ -230,6 +237,10 @@ class PersistentTabRestoreService::Delegate
+@@ -231,6 +238,10 @@ class PersistentTabRestoreService::Delegate
    void OnGotPreviousSession(std::vector<std::unique_ptr<SessionWindow>> windows,
                              SessionID::id_type ignored_active_window);
  
@@ -3128,7 +3321,7 @@ index d9266e74d7cad5b8485877b15e9ef4c1c194c1e7..f730e72d9af991c8c892f82c39ba0157
    // Converts a SessionWindow into a Window, returning true on success. We use 0
    // as the timestamp here since we do not know when the window/tab was closed.
    static bool ConvertSessionWindowToWindow(SessionWindow* session_window,
-@@ -240,6 +251,11 @@ class PersistentTabRestoreService::Delegate
+@@ -241,6 +252,11 @@ class PersistentTabRestoreService::Delegate
    // observers are notified.
    void LoadStateChanged();
  
@@ -3140,7 +3333,7 @@ index d9266e74d7cad5b8485877b15e9ef4c1c194c1e7..f730e72d9af991c8c892f82c39ba0157
   private:
    // The associated client.
    TabRestoreServiceClient* client_;
-@@ -262,12 +278,18 @@ class PersistentTabRestoreService::Delegate
+@@ -263,12 +279,18 @@ class PersistentTabRestoreService::Delegate
    // LoadStateChanged is invoked, which adds these entries to entries_.
    std::vector<std::unique_ptr<Entry>> staging_entries_;
  
@@ -3159,7 +3352,7 @@ index d9266e74d7cad5b8485877b15e9ef4c1c194c1e7..f730e72d9af991c8c892f82c39ba0157
  PersistentTabRestoreService::Delegate::Delegate(TabRestoreServiceClient* client)
      : client_(client),
        base_session_service_(
-@@ -391,6 +413,15 @@ void PersistentTabRestoreService::Delegate::LoadTabsFromLastSession() {
+@@ -392,6 +414,15 @@ void PersistentTabRestoreService::Delegate::LoadTabsFromLastSession() {
    base_session_service_->ScheduleGetLastSessionCommands(
        base::Bind(&Delegate::OnGotLastSessionCommands, base::Unretained(this)),
        &cancelable_task_tracker_);
@@ -3175,7 +3368,7 @@ index d9266e74d7cad5b8485877b15e9ef4c1c194c1e7..f730e72d9af991c8c892f82c39ba0157
  }
  
  void PersistentTabRestoreService::Delegate::DeleteLastSession() {
-@@ -441,6 +472,8 @@ void PersistentTabRestoreService::Delegate::ScheduleCommandsForWindow(
+@@ -442,6 +473,8 @@ void PersistentTabRestoreService::Delegate::ScheduleCommandsForWindow(
          kCommandSetWindowAppName, window.id, window.app_name));
    }
  
@@ -3184,7 +3377,7 @@ index d9266e74d7cad5b8485877b15e9ef4c1c194c1e7..f730e72d9af991c8c892f82c39ba0157
    for (size_t i = 0; i < window.tabs.size(); ++i) {
      int selected_index = GetSelectedNavigationIndexToPersist(*window.tabs[i]);
      if (selected_index != -1)
-@@ -483,6 +516,8 @@ void PersistentTabRestoreService::Delegate::ScheduleCommandsForTab(
+@@ -484,6 +517,8 @@ void PersistentTabRestoreService::Delegate::ScheduleCommandsForTab(
          kCommandSetExtensionAppID, tab.id, tab.extension_app_id));
    }
  
@@ -3220,7 +3413,7 @@ index d9266e74d7cad5b8485877b15e9ef4c1c194c1e7..f730e72d9af991c8c892f82c39ba0157
    }
    if (window->tabs.empty())
 diff --git a/components/sessions/core/session_service_commands.cc b/components/sessions/core/session_service_commands.cc
-index 9e506ee11237fb507fe759792a8c165f847a87b5..4cc43e88bf7fb090c4bc9392a010f9b653b9c758 100644
+index d066372deaa837d96429fe52a5c52c4d523599aa..16b7aa372d8deb4720db2ad4fc6028c5efb3f4c1 100644
 --- a/components/sessions/core/session_service_commands.cc
 +++ b/components/sessions/core/session_service_commands.cc
 @@ -17,6 +17,8 @@
@@ -3255,7 +3448,7 @@ index 9e506ee11237fb507fe759792a8c165f847a87b5..4cc43e88bf7fb090c4bc9392a010f9b6
  
  namespace {
  
-@@ -316,6 +327,9 @@ void AddTabsToWindows(IdToSessionTab* tabs, IdToSessionWindow* windows) {
+@@ -318,6 +329,9 @@ void AddTabsToWindows(IdToSessionTab* tabs, IdToSessionWindow* windows) {
    tabs->clear();
  }
  
@@ -3265,7 +3458,7 @@ index 9e506ee11237fb507fe759792a8c165f847a87b5..4cc43e88bf7fb090c4bc9392a010f9b6
  // Creates tabs and windows from the commands specified in |data|. The created
  // tabs and windows are added to |tabs| and |windows| respectively, with the
  // id of the active window set in |active_window_id|. It is up to the caller
-@@ -591,6 +605,9 @@ bool CreateTabsAndWindows(const ScopedVector<SessionCommand>& data,
+@@ -594,6 +608,9 @@ bool CreateTabsAndWindows(
          break;
        }
  
@@ -3296,10 +3489,10 @@ index db020bf0b83a5ebcafece72223c4cbc8bce20824..df139b0fbaf5846f9e5af71b4b154759
      *sync_data.add_navigation() = navigation.ToSyncData();
    }
 diff --git a/components/sessions/core/session_types.h b/components/sessions/core/session_types.h
-index 92839c785b09261bb74713c8cd7f4fb9de435bf1..e5030ec19d83b15a38741eb2b94ddafcb54ea33d 100644
+index dbaabe6e24eafdd43c98e0ad154f02d43136788f..f9a7fe2cb1b5e4e529802e196142016a714061a2 100644
 --- a/components/sessions/core/session_types.h
 +++ b/components/sessions/core/session_types.h
-@@ -95,6 +95,9 @@ struct SESSIONS_EXPORT SessionTab {
+@@ -90,6 +90,9 @@ struct SESSIONS_EXPORT SessionTab {
    // NavigationEntries need it overridden.
    std::string user_agent_override;
  
@@ -3309,7 +3502,7 @@ index 92839c785b09261bb74713c8cd7f4fb9de435bf1..e5030ec19d83b15a38741eb2b94ddafc
    // Timestamp for when this tab was last modified.
    base::Time timestamp;
  
-@@ -173,6 +176,8 @@ struct SESSIONS_EXPORT SessionWindow {
+@@ -168,6 +171,8 @@ struct SESSIONS_EXPORT SessionWindow {
  
    std::string app_name;
  
@@ -3412,8 +3605,27 @@ index 841f07594df1dd636831b88046e525ae4c2735eb..b6d5416e220ebb413559e3335b5e518e
      restored_tab->LoadIfNecessary();
    }
    client_->OnTabRestored(
+diff --git a/components/signin/core/browser/profile_identity_provider.cc b/components/signin/core/browser/profile_identity_provider.cc
+index 3be796e2d64e3f19e127d294d506c13da474d97c..7c242efc9ed3c8fd39c84a7ad2ba549a5e2405d5 100644
+--- a/components/signin/core/browser/profile_identity_provider.cc
++++ b/components/signin/core/browser/profile_identity_provider.cc
+@@ -34,10 +34,14 @@ OAuth2TokenService* ProfileIdentityProvider::GetTokenService() {
+ }
+ 
+ bool ProfileIdentityProvider::RequestLogin() {
++#if defined(VIVALDI_BUILD)
++  return false;
++#else
+   if (request_login_callback_.is_null())
+     return false;
+   request_login_callback_.Run();
+   return true;
++#endif
+ }
+ 
+ void ProfileIdentityProvider::GoogleSigninSucceeded(
 diff --git a/components/signin/core/browser/signin_manager.cc b/components/signin/core/browser/signin_manager.cc
-index fc3a0c503a53c9c0c5ce14b476132140f98c477a..bce60ac919ce61be325f8dad0d7639ba5520447b 100644
+index 2e3a704451056f412928495c5257ef9fa31a0f24..0f52926f9d54620ea9a1d12f062b106d00912357 100644
 --- a/components/signin/core/browser/signin_manager.cc
 +++ b/components/signin/core/browser/signin_manager.cc
 @@ -25,6 +25,8 @@
@@ -3443,6 +3655,823 @@ index fc3a0c503a53c9c0c5ce14b476132140f98c477a..bce60ac919ce61be325f8dad0d7639ba
    return signin_allowed_.GetValue();
  }
  
+diff --git a/components/signin/core/browser/signin_manager.h b/components/signin/core/browser/signin_manager.h
+index 92e9ff587eca25c491ee14f326b9db83e7b2f22f..dd5c6a2bbaf044e9d5dbb69e5feb1edbac6a324b 100644
+--- a/components/signin/core/browser/signin_manager.h
++++ b/components/signin/core/browser/signin_manager.h
+@@ -92,8 +92,8 @@ class SigninManager : public SigninManagerBase,
+ 
+   // Sign a user out, removing the preference, erasing all keys
+   // associated with the user, and canceling all auth in progress.
+-  virtual void SignOut(signin_metrics::ProfileSignout signout_source_metric,
+-                       signin_metrics::SignoutDelete signout_delete_metric);
++  void SignOut(signin_metrics::ProfileSignout signout_source_metric,
++               signin_metrics::SignoutDelete signout_delete_metric) override;
+ 
+   // On platforms where SigninManager is responsible for dealing with
+   // invalid username policy updates, we need to check this during
+diff --git a/components/signin/core/browser/signin_manager_base.cc b/components/signin/core/browser/signin_manager_base.cc
+index 68d68b477b4334edc4d004773f9daa798cc5621d..4a1f0fbfe162516665ee151f453fd5e0d2ca5cd1 100644
+--- a/components/signin/core/browser/signin_manager_base.cc
++++ b/components/signin/core/browser/signin_manager_base.cc
+@@ -227,6 +227,10 @@ bool SigninManagerBase::AuthInProgress() const {
+   return false;
+ }
+ 
++void SigninManagerBase::SignOut(
++      signin_metrics::ProfileSignout signout_source_metric,
++      signin_metrics::SignoutDelete signout_delete_metric){}
++
+ void SigninManagerBase::Shutdown() {}
+ 
+ void SigninManagerBase::AddObserver(Observer* observer) {
+diff --git a/components/signin/core/browser/signin_manager_base.h b/components/signin/core/browser/signin_manager_base.h
+index ddf20d8556792ac43c5a55263a14fc50e7b03ffd..ea57435c32f42ba61ca84bcfc376295751be2241 100644
+--- a/components/signin/core/browser/signin_manager_base.h
++++ b/components/signin/core/browser/signin_manager_base.h
+@@ -35,6 +35,7 @@
+ #include "components/prefs/pref_member.h"
+ #include "components/signin/core/browser/account_info.h"
+ #include "components/signin/core/browser/signin_internals_util.h"
++#include "components/signin/core/browser/signin_metrics.h"
+ #include "google_apis/gaia/google_service_auth_error.h"
+ 
+ class AccountTrackerService;
+@@ -116,6 +117,11 @@ class SigninManagerBase : public KeyedService {
+   // Returns true if there's a signin in progress.
+   virtual bool AuthInProgress() const;
+ 
++  // Sign a user out, removing the preference, erasing all keys
++  // associated with the user, and canceling all auth in progress.
++  virtual void SignOut(signin_metrics::ProfileSignout signout_source_metric,
++                       signin_metrics::SignoutDelete signout_delete_metric);
++
+   // KeyedService implementation.
+   void Shutdown() override;
+ 
+diff --git a/components/sync/base/data_type_histogram.h b/components/sync/base/data_type_histogram.h
+index beb8487366a1747cec586e04d0908d4d5fc5d9eb..8f7efe99755701c41286050d8717a090281df83f 100644
+--- a/components/sync/base/data_type_histogram.h
++++ b/components/sync/base/data_type_histogram.h
+@@ -151,10 +151,12 @@ void SyncRecordDatatypeBin(const std::string& name, int sample, int value);
+         break;                                                 \
+       case ::syncer::PROXY_TABS:                               \
+         PER_DATA_TYPE_MACRO("Tabs");                           \
+-        break;                                                 \
+       case ::syncer::READING_LIST:                             \
+         PER_DATA_TYPE_MACRO("ReadingList");                    \
+         break;                                                 \
++      case ::syncer::NOTES:                                    \
++        PER_DATA_TYPE_MACRO("Notes");                          \
++        break;                                                 \
+       default:                                                 \
+         NOTREACHED() << "Unknown datatype "                    \
+                      << ::syncer::ModelTypeToString(datatype); \
+diff --git a/components/sync/base/hash_util.cc b/components/sync/base/hash_util.cc
+index 58924ff3b44f235b77883412fe66efa40812e47f..b20db69bfbbbe2708f511585ed14944b246f3060 100644
+--- a/components/sync/base/hash_util.cc
++++ b/components/sync/base/hash_util.cc
+@@ -32,4 +32,11 @@ std::string GenerateSyncableBookmarkHash(
+       BOOKMARKS, originator_cache_guid + originator_client_item_id);
+ }
+ 
++std::string GenerateSyncableNotesHash(
++    const std::string& originator_cache_guid,
++    const std::string& originator_client_item_id) {
++  return GenerateSyncableHash(
++      NOTES, originator_cache_guid + originator_client_item_id);
++}
++
+ }  // namespace syncer
+diff --git a/components/sync/base/hash_util.h b/components/sync/base/hash_util.h
+index efde407f812398b9ac92e30a169028462ab59927..ff342bbdb08fbe47efac2d496113c148e3a91984 100644
+--- a/components/sync/base/hash_util.h
++++ b/components/sync/base/hash_util.h
+@@ -22,6 +22,13 @@ std::string GenerateSyncableBookmarkHash(
+     const std::string& originator_cache_guid,
+     const std::string& originator_client_item_id);
+ 
++// A helper for generating the notes type's tag.  This is required in more
++// than one place, so we define the algorithm here to make sure the
++// implementation is consistent.
++std::string GenerateSyncableNotesHash(
++    const std::string& originator_cache_guid,
++    const std::string& originator_client_item_id);
++
+ }  // namespace syncer
+ 
+ #endif  // COMPONENTS_SYNC_BASE_HASH_UTIL_H_
+diff --git a/components/sync/base/model_type.h b/components/sync/base/model_type.h
+index 5cca1a0809b6bbccf74c0b150b6e66764017867f..b1dcc9557cf6be88498f6b18cdf26c1f3fb9ca41 100644
+--- a/components/sync/base/model_type.h
++++ b/components/sync/base/model_type.h
+@@ -134,6 +134,9 @@ enum ModelType {
+   // Reading list items.
+   READING_LIST,
+ 
++  // Notes items
++  NOTES,
++
+   // ---- Proxy types ----
+   // Proxy types are excluded from the sync protocol, but are still considered
+   // real user types. By convention, we prefix them with 'PROXY_' to distinguish
+diff --git a/components/sync/base/pref_names.cc b/components/sync/base/pref_names.cc
+index 5008badad6be8ef045d810e2ff36b618fac77ee3..9f6438334d564306761661b38d73b5aa8dc130a8 100644
+--- a/components/sync/base/pref_names.cc
++++ b/components/sync/base/pref_names.cc
+@@ -64,6 +64,7 @@ const char kSyncTabs[] = "sync.tabs";
+ const char kSyncThemes[] = "sync.themes";
+ const char kSyncTypedUrls[] = "sync.typed_urls";
+ const char kSyncWifiCredentials[] = "sync.wifi_credentials";
++const char kSyncNotes[] = "sync.notes";
+ 
+ // Boolean used by enterprise configuration management in order to lock down
+ // sync.
+diff --git a/components/sync/base/pref_names.h b/components/sync/base/pref_names.h
+index 9a54c593214bb7fdeea4ded978ff938cbcca2112..1366b46b03279a96b2a211ff45409dd466902071 100644
+--- a/components/sync/base/pref_names.h
++++ b/components/sync/base/pref_names.h
+@@ -52,6 +52,7 @@ extern const char kSyncTabs[];
+ extern const char kSyncThemes[];
+ extern const char kSyncTypedUrls[];
+ extern const char kSyncWifiCredentials[];
++extern const char kSyncNotes[];
+ 
+ extern const char kSyncManaged[];
+ extern const char kSyncSuppressStart[];
+diff --git a/components/sync/base/sync_prefs.cc b/components/sync/base/sync_prefs.cc
+index 025f4e26e29adaa9f08beb48eefa856e6fa7a007..986bab2461c0feb62d7f83d3cc81d0297a33eac5 100644
+--- a/components/sync/base/sync_prefs.cc
++++ b/components/sync/base/sync_prefs.cc
+@@ -324,6 +324,8 @@ const char* SyncPrefs::GetPrefNameForDataType(ModelType data_type) {
+       return prefs::kSyncPrinters;
+     case READING_LIST:
+       return prefs::kSyncReadingList;
++    case NOTES:
++      return prefs::kSyncNotes;
+     default:
+       break;
+   }
+diff --git a/components/sync/driver/generic_change_processor.cc b/components/sync/driver/generic_change_processor.cc
+index 1dee59fda337dfbdee48bb11ed9df1a63826b28d..1ec7524794c799351c17fffbb905a05ec6bca7fb 100644
+--- a/components/sync/driver/generic_change_processor.cc
++++ b/components/sync/driver/generic_change_processor.cc
+@@ -273,6 +273,7 @@ SyncError GenericChangeProcessor::GetAllSyncDataReturnError(
+ 
+   // TODO(akalin): We'll have to do a tree traversal for bookmarks.
+   DCHECK_NE(type_, BOOKMARKS);
++  DCHECK_NE(type_, NOTES);
+ 
+   std::vector<int64_t> child_ids;
+   root.GetChildIds(&child_ids);
+diff --git a/components/sync/driver/generic_change_processor_unittest.cc b/components/sync/driver/generic_change_processor_unittest.cc
+index c29dd7f1bf42c0a85e54eb28226bdb3de16255be..7c12952ea7f76c331b14929c290a4fa3a757744d 100644
+--- a/components/sync/driver/generic_change_processor_unittest.cc
++++ b/components/sync/driver/generic_change_processor_unittest.cc
+@@ -109,6 +109,12 @@ class MockSyncApiComponentFactory : public SyncApiComponentFactory {
+     return std::move(attachment_service);
+   }
+ 
++  SyncApiComponentFactory::SyncComponents CreateNotesSyncComponents(
++      syncer::SyncService* profile_sync_service,
++      std::unique_ptr<syncer::DataTypeErrorHandler> error_handler)override {
++    return SyncApiComponentFactory::SyncComponents(nullptr, nullptr);
++  }
++
+   MockAttachmentService* GetMockAttachmentService() {
+     return mock_attachment_service_;
+   }
+diff --git a/components/sync/driver/glue/sync_backend_host_impl.cc b/components/sync/driver/glue/sync_backend_host_impl.cc
+index ff1a70e7738c43e668f251314436bdb64cc29579..50fab550fd94d8decf2f67656a1a86b254b34dcf 100644
+--- a/components/sync/driver/glue/sync_backend_host_impl.cc
++++ b/components/sync/driver/glue/sync_backend_host_impl.cc
+@@ -559,6 +559,12 @@ void SyncBackendHostImpl::ClearServerDataDoneOnFrontendLoop(
+   frontend_callback.Run();
+ }
+ 
++void SyncBackendHostImpl::DoOnIncomingInvalidation(
++    const syncer::ObjectIdInvalidationMap& invalidation_map) {
++  DCHECK(core_);
++  core_->DoOnIncomingInvalidation(invalidation_map);
++}
++
+ }  // namespace syncer
+ 
+ #undef SDVLOG
+diff --git a/components/sync/driver/glue/sync_backend_host_impl.h b/components/sync/driver/glue/sync_backend_host_impl.h
+index 4d062887fd467ef085633ca241d5b95e809ced7e..8885fd46da3a513560d9ba4f10497b362c9f9172 100644
+--- a/components/sync/driver/glue/sync_backend_host_impl.h
++++ b/components/sync/driver/glue/sync_backend_host_impl.h
+@@ -156,6 +156,10 @@ class SyncBackendHostImpl : public SyncEngine, public InvalidationHandler {
+ 
+   SyncEngineHost* host() { return host_; }
+ 
++  // Forwards an invalidation to the sync manager.
++  void DoOnIncomingInvalidation(
++      const syncer::ObjectIdInvalidationMap& invalidation_map) override;
++
+  private:
+   friend class SyncBackendHostCore;
+ 
+diff --git a/components/sync/driver/model_association_manager.cc b/components/sync/driver/model_association_manager.cc
+index 382c4f1d33bd98d6ec39ccbfa1075a8da02d173d..988df5ae56e5c9efbf0e82e6a0530fe52187a8b5 100644
+--- a/components/sync/driver/model_association_manager.cc
++++ b/components/sync/driver/model_association_manager.cc
+@@ -44,6 +44,7 @@ static const ModelType kStartOrder[] = {
+     DICTIONARY, FAVICON_IMAGES, FAVICON_TRACKING, PRINTERS,
+     SUPERVISED_USER_SETTINGS, SUPERVISED_USER_SHARED_SETTINGS,
+     SUPERVISED_USER_WHITELISTS, ARTICLES, WIFI_CREDENTIALS,
++    NOTES,
+ };
+ 
+ static_assert(arraysize(kStartOrder) ==
+diff --git a/components/sync/driver/shared_change_processor_unittest.cc b/components/sync/driver/shared_change_processor_unittest.cc
+index b64940493dd685f903af202abd88183f28947ac6..2b3095e37178c402720ba92766d22e09a34727d3 100644
+--- a/components/sync/driver/shared_change_processor_unittest.cc
++++ b/components/sync/driver/shared_change_processor_unittest.cc
+@@ -75,6 +75,11 @@ class TestSyncApiComponentFactory : public SyncApiComponentFactory {
+       AttachmentService::Delegate* delegate) override {
+     return AttachmentService::CreateForTest();
+   }
++  SyncApiComponentFactory::SyncComponents CreateNotesSyncComponents(
++      syncer::SyncService* profile_sync_service,
++    std::unique_ptr<syncer::DataTypeErrorHandler> error_handler)override {
++    return SyncApiComponentFactory::SyncComponents(nullptr, nullptr);
++  }
+ };
+ 
+ class SyncSharedChangeProcessorTest : public testing::Test,
+diff --git a/components/sync/driver/sync_api_component_factory.h b/components/sync/driver/sync_api_component_factory.h
+index 122fc1110b54c8c51a1a680ed7edd2f20b3bccef..69023c3acdc542028a892368728eb0446ae69ded 100644
+--- a/components/sync/driver/sync_api_component_factory.h
++++ b/components/sync/driver/sync_api_component_factory.h
+@@ -120,6 +120,10 @@ class SyncApiComponentFactory {
+       const std::string& store_birthday,
+       ModelType model_type,
+       AttachmentService::Delegate* delegate) = 0;
++
++  virtual SyncComponents CreateNotesSyncComponents(
++      SyncService* profile_sync_service,
++      std::unique_ptr<DataTypeErrorHandler> error_handler) = 0;
+ };
+ 
+ }  // namespace syncer
+diff --git a/components/sync/driver/sync_api_component_factory_mock.cc b/components/sync/driver/sync_api_component_factory_mock.cc
+index 2452244398b33ab9b869605cec06cbc80009cfab..414bd97cdc0838d5fbbbb38b47aaee0edc222d81 100644
+--- a/components/sync/driver/sync_api_component_factory_mock.cc
++++ b/components/sync/driver/sync_api_component_factory_mock.cc
+@@ -63,4 +63,11 @@ void SyncApiComponentFactoryMock::SetLocalDeviceInfoProvider(
+   local_device_ = std::move(local_device);
+ }
+ 
++SyncApiComponentFactory::SyncComponents
++SyncApiComponentFactoryMock::CreateNotesSyncComponents(
++    SyncService* sync_service,
++    std::unique_ptr<DataTypeErrorHandler> error_handler) {
++  return MakeSyncComponents();
++}
++
+ }  // namespace syncer
+diff --git a/components/sync/driver/sync_api_component_factory_mock.h b/components/sync/driver/sync_api_component_factory_mock.h
+index 65643da17c71a9df6ba6515a32da7fbf47672da0..30d2b1ac623afd77605a8db4158932e5727b7bbc 100644
+--- a/components/sync/driver/sync_api_component_factory_mock.h
++++ b/components/sync/driver/sync_api_component_factory_mock.h
+@@ -57,6 +57,10 @@ class SyncApiComponentFactoryMock : public SyncApiComponentFactory {
+       SyncService* sync_service,
+       std::unique_ptr<DataTypeErrorHandler> error_handler) override;
+ 
++  SyncComponents CreateNotesSyncComponents(
++      SyncService* sync_service,
++      std::unique_ptr<DataTypeErrorHandler> error_handler) override;
++
+  private:
+   SyncApiComponentFactory::SyncComponents MakeSyncComponents();
+ 
+diff --git a/components/sync/driver/sync_client.cc b/components/sync/driver/sync_client.cc
+index 9e9bb668643e54db77960485a84f86ec2184aee2..39d4d097f2d8ca41adb9d2d78889ceb447a39ac2 100644
+--- a/components/sync/driver/sync_client.cc
++++ b/components/sync/driver/sync_client.cc
+@@ -9,4 +9,12 @@ namespace syncer {
+ SyncClient::SyncClient() {}
+ SyncClient::~SyncClient() {}
+ 
++Profile *SyncClient::GetProfile() {
++  return nullptr;
++}
++
++vivaldi::Notes_Model* SyncClient::GetNotesModel() {
++  return nullptr;
++}
++
+ }  // namespace syncer
+diff --git a/components/sync/driver/sync_client.h b/components/sync/driver/sync_client.h
+index bf9ab4cec3fb760ff290d1161779e27b51de0cde..da15b6d3738700a9554bdb8036f3fcea4647b274 100644
+--- a/components/sync/driver/sync_client.h
++++ b/components/sync/driver/sync_client.h
+@@ -17,6 +17,7 @@
+ 
+ class BookmarkUndoService;
+ class PrefService;
++class Profile;
+ 
+ namespace autofill {
+ class PersonalDataManager;
+@@ -42,6 +43,10 @@ namespace sync_sessions {
+ class SyncSessionsClient;
+ }  // namespace sync_sessions
+ 
++namespace vivaldi {
++class Notes_Model;
++} // namespace vivaldi
++
+ namespace syncer {
+ 
+ class SyncService;
+@@ -64,6 +69,9 @@ class SyncClient {
+   // Returns the current SyncService instance.
+   virtual SyncService* GetSyncService() = 0;
+ 
++  // Returns the current profil
++  virtual Profile *GetProfile();
++
+   // Returns the current profile's preference service.
+   virtual PrefService* GetPrefService() = 0;
+ 
+@@ -109,6 +117,7 @@ class SyncClient {
+   // Returns the current SyncApiComponentFactory instance.
+   virtual SyncApiComponentFactory* GetSyncApiComponentFactory() = 0;
+ 
++  virtual vivaldi::Notes_Model* GetNotesModel();
+  private:
+   DISALLOW_COPY_AND_ASSIGN(SyncClient);
+ };
+diff --git a/components/sync/driver/sync_util.cc b/components/sync/driver/sync_util.cc
+index 6b812813265aaa3816c3b0099abdbb25853e3371..f070c5d38fd2d2f3a3c5102714a6c9b09da662fc 100644
+--- a/components/sync/driver/sync_util.cc
++++ b/components/sync/driver/sync_util.cc
+@@ -10,6 +10,8 @@
+ #include "components/sync/driver/sync_driver_switches.h"
+ #include "url/gurl.h"
+ 
++#include "sync/vivaldi_sync_urls.h"
++
+ namespace {
+ 
+ // Returns string that represents system in UserAgent.
+@@ -48,9 +50,9 @@ std::string GetSystemString(bool is_tablet) {
+ namespace syncer {
+ namespace internal {
+ 
+-const char* kSyncServerUrl = "https://clients4.google.com/chrome-sync";
++const char* kSyncServerUrl = SYNC_URL("/vivid-sync");
+ 
+-const char* kSyncDevServerUrl = "https://clients4.google.com/chrome-sync/dev";
++const char* kSyncDevServerUrl = TEST_SYNC_URL("/vivid-sync");
+ 
+ std::string FormatUserAgentForSync(const std::string& system,
+                                    version_info::Channel channel) {
+diff --git a/components/sync/driver/user_selectable_sync_type.h b/components/sync/driver/user_selectable_sync_type.h
+index 95600c91c89b50f830cb38dcebd1e04cd92cd71b..59fef3f55007154c34f87ccde82dc2d68616fffd 100644
+--- a/components/sync/driver/user_selectable_sync_type.h
++++ b/components/sync/driver/user_selectable_sync_type.h
+@@ -62,6 +62,7 @@ enum UserSelectableSyncType {
+   // ARC_PACKAGE,
+   // PRINTERS
+ 
++  NOTES = 11,
+   // Number of sync datatypes exposed to the user via checboxes in the UI.
+   SELECTABLE_DATATYPE_COUNT = 12,
+ };
+diff --git a/components/sync/engine/sync_engine.h b/components/sync/engine/sync_engine.h
+index af4e53d0b489030cbc8407018440605349b3022b..1f027b4abbd702fae75e096af841e2fa37b7e95b 100644
+--- a/components/sync/engine/sync_engine.h
++++ b/components/sync/engine/sync_engine.h
+@@ -35,6 +35,7 @@ class HttpPostProviderFactory;
+ class SyncEngineHost;
+ class SyncManagerFactory;
+ class UnrecoverableErrorHandler;
++class ObjectIdInvalidationMap;
+ 
+ // The interface into the sync engine, which is the part of sync that performs
+ // communication between model types and the sync server. In prod the engine
+@@ -196,6 +197,10 @@ class SyncEngine : public ModelTypeConfigurer {
+   // See SyncManager::OnCookieJarChanged.
+   virtual void OnCookieJarChanged(bool account_mismatch, bool empty_jar) = 0;
+ 
++  // Forwards an invalidation to the sync manager.
++  virtual void DoOnIncomingInvalidation(
++    const syncer::ObjectIdInvalidationMap& invalidation_map) {}
++
+  private:
+   DISALLOW_COPY_AND_ASSIGN(SyncEngine);
+ };
+diff --git a/components/sync/engine_impl/commit_util.cc b/components/sync/engine_impl/commit_util.cc
+index c8ddfc96661e8e2c7efeee119f92385810af3900..695bb84ef4223b152a2fb638b8b7509c3258e4e6 100644
+--- a/components/sync/engine_impl/commit_util.cc
++++ b/components/sync/engine_impl/commit_util.cc
+@@ -162,8 +162,9 @@ void BuildCommitItem(const syncable::Entry& meta_entry,
+ 
+   SetAttachmentIds(meta_entry, sync_entry);
+ 
+-  // Handle bookmarks separately.
+-  if (meta_entry.GetSpecifics().has_bookmark()) {
++  // Handle bookmarks and notes separately.
++  if (meta_entry.GetSpecifics().has_bookmark() ||
++      meta_entry.GetSpecifics().has_notes()) {
+     if (meta_entry.GetIsDel()) {
+       sync_entry->set_deleted(true);
+     } else {
+diff --git a/components/sync/engine_impl/cycle/nudge_tracker.cc b/components/sync/engine_impl/cycle/nudge_tracker.cc
+index 1cf2391d92258e4de317f360801839e2190f2bd6..0029d40667ffd60baff4d5d65f734bec6c21de67 100644
+--- a/components/sync/engine_impl/cycle/nudge_tracker.cc
++++ b/components/sync/engine_impl/cycle/nudge_tracker.cc
+@@ -28,6 +28,7 @@ base::TimeDelta GetDefaultDelayForType(ModelType model_type,
+       return base::TimeDelta::FromSeconds(kDefaultShortPollIntervalSeconds);
+     case BOOKMARKS:
+     case PREFERENCES:
++    case NOTES:
+     case SESSIONS:
+     case FAVICON_IMAGES:
+     case FAVICON_TRACKING:
+diff --git a/components/sync/engine_impl/process_updates_util.cc b/components/sync/engine_impl/process_updates_util.cc
+index 0592b52a1111d3171f28d39bd9858b58d81a37f1..71b886d23408137e45f430bdb2520b5206e8c2d1 100644
+--- a/components/sync/engine_impl/process_updates_util.cc
++++ b/components/sync/engine_impl/process_updates_util.cc
+@@ -230,7 +230,9 @@ void ProcessUpdate(const sync_pb::SyncEntity& update,
+ 
+   bool position_matches = false;
+   if (target_entry.ShouldMaintainPosition() && !update.deleted()) {
+-    std::string update_tag = GetUniqueBookmarkTagFromUpdate(update);
++    std::string update_tag = target_entry.GetModelType() == BOOKMARKS ?
++                             GetUniqueBookmarkTagFromUpdate(update) :
++                             GetUniqueNotesTagFromUpdate(update);
+     if (UniquePosition::IsValidSuffix(update_tag)) {
+       position_matches = GetUpdatePosition(update, update_tag)
+                              .Equals(target_entry.GetServerUniquePosition());
+diff --git a/components/sync/engine_impl/syncer_proto_util.cc b/components/sync/engine_impl/syncer_proto_util.cc
+index 476ded98e016891f1ff40795c366b1ab8ffece3a..7c0e19f1777f715e7179f1b4fd1c64f070debf8b 100644
+--- a/components/sync/engine_impl/syncer_proto_util.cc
++++ b/components/sync/engine_impl/syncer_proto_util.cc
+@@ -522,7 +522,8 @@ bool SyncerProtoUtil::ShouldMaintainPosition(
+     const sync_pb::SyncEntity& sync_entity) {
+   // Maintain positions for bookmarks that are not server-defined top-level
+   // folders.
+-  return GetModelType(sync_entity) == BOOKMARKS &&
++  return (GetModelType(sync_entity) == BOOKMARKS ||
++    GetModelType(sync_entity) == NOTES) &&
+          !(sync_entity.folder() &&
+            !sync_entity.server_defined_unique_tag().empty());
+ }
+@@ -532,6 +533,7 @@ bool SyncerProtoUtil::ShouldMaintainHierarchy(
+     const sync_pb::SyncEntity& sync_entity) {
+   // Maintain hierarchy for bookmarks or top-level items.
+   return GetModelType(sync_entity) == BOOKMARKS ||
++         GetModelType(sync_entity) == NOTES ||
+          sync_entity.parent_id_string() == "0";
+ }
+ 
+diff --git a/components/sync/engine_impl/syncer_util.cc b/components/sync/engine_impl/syncer_util.cc
+index 3d80bac15393224b99b70f1931d2d9b8411d9751..bad3aaf1c36dfece591526d5c9dd663e75a57edb 100644
+--- a/components/sync/engine_impl/syncer_util.cc
++++ b/components/sync/engine_impl/syncer_util.cc
+@@ -278,6 +278,18 @@ std::string GetUniqueBookmarkTagFromUpdate(const sync_pb::SyncEntity& update) {
+                                       update.originator_client_item_id());
+ }
+ 
++std::string GetUniqueNotesTagFromUpdate(const sync_pb::SyncEntity& update) {
++  if (!update.has_originator_cache_guid() ||
++      !update.has_originator_client_item_id()) {
++    LOG(ERROR) << "Update is missing requirements for notes position."
++               << " This is a server bug.";
++    return UniquePosition::RandomSuffix();
++  }
++
++  return GenerateSyncableNotesHash(
++      update.originator_cache_guid(), update.originator_client_item_id());
++}
++
+ UniquePosition GetUpdatePosition(const sync_pb::SyncEntity& update,
+                                  const std::string& suffix) {
+   DCHECK(UniquePosition::IsValidSuffix(suffix));
+@@ -348,6 +360,29 @@ void UpdateBookmarkPositioning(
+   }
+ }
+ 
++
++void UpdateNotesPositioning(
++    const sync_pb::SyncEntity& update,
++    syncable::ModelNeutralMutableEntry* local_entry) {
++  // Update our unique notes tag.  In many cases this will be identical to
++  // the tag we already have.  However, clients that have recently upgraded to
++  // versions that support unique positions will have incorrect tags.  See the
++  // v86 migration logic in directory_backing_store.cc for more information.
++  //
++  // Both the old and new values are unique to this element.  Applying this
++  // update will not risk the creation of conflicting unique tags.
++  std::string notes_tag = GetUniqueNotesTagFromUpdate(update);
++  if (UniquePosition::IsValidSuffix(notes_tag)) {
++    local_entry->PutUniqueNotesTag(notes_tag);
++  }
++
++  // Update our position.
++  UniquePosition update_pos =
++      GetUpdatePosition(update, local_entry->GetUniqueNotesTag());
++  if (update_pos.IsValid()) {
++    local_entry->PutServerUniquePosition(update_pos);
++  }
++}
+ }  // namespace
+ 
+ void UpdateServerFieldsFromUpdate(syncable::ModelNeutralMutableEntry* target,
+@@ -413,7 +448,17 @@ void UpdateServerFieldsFromUpdate(syncable::ModelNeutralMutableEntry* target,
+   target->PutServerAttachmentMetadata(
+       CreateAttachmentMetadata(update.attachment_id()));
+   if (SyncerProtoUtil::ShouldMaintainPosition(update)) {
+-    UpdateBookmarkPositioning(update, target);
++    switch(GetModelType(update))
++    {
++      case BOOKMARKS:
++          UpdateBookmarkPositioning(update, target);
++          break;
++      case NOTES:
++          UpdateNotesPositioning(update, target);
++          break;
++      default:
++        break;
++    }
+   }
+ 
+   // We only mark the entry as unapplied if its version is greater than the
+diff --git a/components/sync/engine_impl/syncer_util.h b/components/sync/engine_impl/syncer_util.h
+index 264fae1e18d31b56a4bffca754f3df25250bfd01..b9a643f0e03f21b86a75592c03c147a2792321bf 100644
+--- a/components/sync/engine_impl/syncer_util.h
++++ b/components/sync/engine_impl/syncer_util.h
+@@ -66,6 +66,11 @@ UniquePosition GetUpdatePosition(const sync_pb::SyncEntity& update,
+ // Will return an empty string if someting unexpected happens.
+ std::string GetUniqueBookmarkTagFromUpdate(const sync_pb::SyncEntity& update);
+ 
++// Fetch the cache_guid and item_id-based unique notes tag from an update.
++// Will return an empty string if someting unexpected happens.
++std::string GetUniqueNotesTagFromUpdate(
++    const sync_pb::SyncEntity& update);
++
+ // Pass in name to avoid redundant UTF8 conversion.
+ void UpdateServerFieldsFromUpdate(
+     syncable::ModelNeutralMutableEntry* local_entry,
+diff --git a/components/sync/protocol/bookmark_specifics.proto b/components/sync/protocol/bookmark_specifics.proto
+index 8ce46e7dd190d459e19bd779ee00b12cb51795a4..ab39256ab50903b1dff7caa2d600147d65449abd 100644
+--- a/components/sync/protocol/bookmark_specifics.proto
++++ b/components/sync/protocol/bookmark_specifics.proto
+@@ -29,4 +29,11 @@ message BookmarkSpecifics {
+   optional int64 creation_time_us = 4;
+   optional string icon_url = 5;
+   repeated MetaInfo meta_info = 6;
++
++  // Vivaldi specific
++  enum VivaldiSpecialBookmarkType {
++    NORMAL = 0;
++    TRASH_NODE = 1;
++  }
++  optional VivaldiSpecialBookmarkType special_node_type = 10000;
+ }
+diff --git a/components/sync/protocol/nigori_specifics.proto b/components/sync/protocol/nigori_specifics.proto
+index 9e93e5271ca164189e2a710898c89365c230ded0..63781ed56a8eea6a5d7ccb5fef0187aef04c1c39 100644
+--- a/components/sync/protocol/nigori_specifics.proto
++++ b/components/sync/protocol/nigori_specifics.proto
+@@ -145,4 +145,7 @@ message NigoriSpecifics {
+ 
+   // Boolean corresponding to whether reading list items should be encrypted.
+   optional bool encrypt_reading_list = 43;
++
++
++  optional bool encrypt_notes = 20000;
+ }
+diff --git a/components/sync/protocol/notes_specifics.proto b/components/sync/protocol/notes_specifics.proto
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5febdae9c0d9807ed2399512090dee09a29d29f
+--- /dev/null
++++ b/components/sync/protocol/notes_specifics.proto
+@@ -0,0 +1,40 @@
++// Copyright (c) 2012 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++// Sync protocol datatype extension for bookmarks.
++
++// Update proto_value_conversions{.h,.cc,_unittest.cc} if you change
++// any fields in this file.
++
++syntax = "proto2";
++
++option optimize_for = LITE_RUNTIME;
++
++package sync_pb;
++
++// Corresponds to a single attachment itemt for a notes entry.
++message NotesAttachment {
++  optional string filename = 1;
++  optional string content_type = 2;
++  optional bytes content = 3;
++}
++
++// Properties of bookmark sync objects.
++message NotesSpecifics {
++  enum VivaldiSpecialNotesType {
++    NORMAL = 0;
++    TRASH_NODE = 1;
++  }
++
++  optional string url = 1;
++  optional string subject = 2;
++  optional string content = 3;
++  // Corresponds to Notes_Entry::date_added() and is the internal value from
++  // base::Time.
++  optional int64 creation_time_us = 4;
++  // DEPRECATED: unused field, removed
++  optional NotesAttachment icon_deprecated = 5  [deprecated=true];
++  repeated NotesAttachment attachments = 6;
++  optional VivaldiSpecialNotesType special_node_type = 7;
++}
+diff --git a/components/sync/protocol/proto_enum_conversions.cc b/components/sync/protocol/proto_enum_conversions.cc
+index fc9edb73fbe5a612cf5a5f2c304e1deb32ab2869..78112ead2dbb847e73f8c42bd7ef08c8c5ed99f5 100644
+--- a/components/sync/protocol/proto_enum_conversions.cc
++++ b/components/sync/protocol/proto_enum_conversions.cc
+@@ -357,6 +357,32 @@ const char* ProtoEnumToString(
+   return "";
+ }
+ 
++// Vivaldi specific
++const char* ProtoEnumToString(
++  sync_pb::NotesSpecifics::VivaldiSpecialNotesType special_type) {
++  ASSERT_ENUM_BOUNDS(sync_pb::NotesSpecifics, VivaldiSpecialNotesType,
++    NORMAL, TRASH_NODE);
++  switch (special_type) {
++    ENUM_CASE(sync_pb::NotesSpecifics, NORMAL);
++    ENUM_CASE(sync_pb::NotesSpecifics, TRASH_NODE);
++  }
++  NOTREACHED();
++  return "";
++}
++
++const char* ProtoEnumToString(
++  sync_pb::BookmarkSpecifics::VivaldiSpecialBookmarkType special_type) {
++  ASSERT_ENUM_BOUNDS(sync_pb::BookmarkSpecifics, VivaldiSpecialBookmarkType,
++    NORMAL, TRASH_NODE);
++  switch (special_type) {
++    ENUM_CASE(sync_pb::BookmarkSpecifics, NORMAL);
++    ENUM_CASE(sync_pb::BookmarkSpecifics, TRASH_NODE);
++  }
++  NOTREACHED();
++  return "";
++}
++// End Vivaldi specific
++
+ #undef ASSERT_ENUM_BOUNDS
+ #undef ENUM_CASE
+ 
+diff --git a/components/sync/protocol/proto_enum_conversions.h b/components/sync/protocol/proto_enum_conversions.h
+index 3cdf50dbf2783a5e3c389dfb97c16cf87c8201c2..6dcf63eddf17f16c11d8405387fe4833483fac63 100644
+--- a/components/sync/protocol/proto_enum_conversions.h
++++ b/components/sync/protocol/proto_enum_conversions.h
+@@ -81,6 +81,14 @@ const char* ProtoEnumToString(
+ const char* ProtoEnumToString(sync_pb::TabNavigation::BlockedState state);
+ const char* ProtoEnumToString(sync_pb::TabNavigation::PasswordState state);
+ 
++// Vivaldi specific
++const char* ProtoEnumToString(
++    sync_pb::NotesSpecifics::VivaldiSpecialNotesType special_type);
++
++const char* ProtoEnumToString(
++  sync_pb::BookmarkSpecifics::VivaldiSpecialBookmarkType special_type);
++// End Vivaldi specific
++
+ }  // namespace syncer
+ 
+ #endif  // COMPONENTS_SYNC_PROTOCOL_PROTO_ENUM_CONVERSIONS_H_
+diff --git a/components/sync/protocol/proto_value_conversions.cc b/components/sync/protocol/proto_value_conversions.cc
+index d2ed4fcb7674936f03d30ccf8a9656312a03374e..300a89dbc270b42ff7b0654f7a6565251f2ee869 100644
+--- a/components/sync/protocol/proto_value_conversions.cc
++++ b/components/sync/protocol/proto_value_conversions.cc
+@@ -355,6 +355,9 @@ IMPLEMENT_PROTO_TO_VALUE_INCLUDE_SPECIFICS(ClientToServerMessage)
+ IMPLEMENT_PROTO_TO_VALUE_INCLUDE_SPECIFICS(ClientToServerResponse)
+ IMPLEMENT_PROTO_TO_VALUE_INCLUDE_SPECIFICS(SyncEntity)
+ 
++IMPLEMENT_PROTO_TO_VALUE(NotesAttachment)
++IMPLEMENT_PROTO_TO_VALUE(NotesSpecifics)
++
+ #undef IMPLEMENT_PROTO_TO_VALUE
+ #undef IMPLEMENT_PROTO_TO_VALUE_INCLUDE_SPECIFICS
+ 
+diff --git a/components/sync/protocol/proto_value_conversions.h b/components/sync/protocol/proto_value_conversions.h
+index c2d66b23e6f262a3fcaec152320c046b902d5c3b..cb5dd202e288503a20eed1fd7043b82a5ac186db 100644
+--- a/components/sync/protocol/proto_value_conversions.h
++++ b/components/sync/protocol/proto_value_conversions.h
+@@ -49,6 +49,7 @@ class ManagedUserSpecifics;
+ class ManagedUserWhitelistSpecifics;
+ class NavigationRedirect;
+ class NigoriSpecifics;
++class NotesSpecifics;
+ class PasswordSpecifics;
+ class PasswordSpecificsData;
+ class PreferenceSpecifics;
+@@ -182,6 +183,9 @@ std::unique_ptr<base::DictionaryValue> BookmarkSpecificsToValue(
+ std::unique_ptr<base::DictionaryValue> DeviceInfoSpecificsToValue(
+     const sync_pb::DeviceInfoSpecifics& device_info_specifics);
+ 
++std::unique_ptr<base::DictionaryValue> NotesSpecificsToValue(
++  const sync_pb::NotesSpecifics& notes_specifics);
++
+ std::unique_ptr<base::DictionaryValue> DictionarySpecificsToValue(
+     const sync_pb::DictionarySpecifics& dictionary_specifics);
+ 
+diff --git a/components/sync/protocol/proto_value_conversions_unittest.cc b/components/sync/protocol/proto_value_conversions_unittest.cc
+index 9015e5c344053250e2705ac6aa51952b4fae47db..07caa2e16b99b3b24354cb70424c2139dd47629e 100644
+--- a/components/sync/protocol/proto_value_conversions_unittest.cc
++++ b/components/sync/protocol/proto_value_conversions_unittest.cc
+@@ -59,7 +59,7 @@ TEST_F(ProtoValueConversionsTest, ProtoChangeCheck) {
+   // If this number changes, that means we added or removed a data
+   // type.  Don't forget to add a unit test for {New
+   // type}SpecificsToValue below.
+-  EXPECT_EQ(39, MODEL_TYPE_COUNT);
++  EXPECT_EQ(39+1 /*notes*/, MODEL_TYPE_COUNT);
+ 
+   // We'd also like to check if we changed any field in our messages.
+   // However, that's hard to do: sizeof could work, but it's
+@@ -392,6 +392,8 @@ TEST_F(ProtoValueConversionsTest, EntitySpecificsToValue) {
+   SET_FIELD(theme);
+   SET_FIELD(typed_url);
+   SET_FIELD(wifi_credential);
++  SET_FIELD(notes);
++
+   SET_FIELD(autofill_wallet);
+   SET_FIELD(wallet_metadata);
+ 
+diff --git a/components/sync/protocol/proto_visitors.h b/components/sync/protocol/proto_visitors.h
+index 350b715e234dde3f9569e53cbd01dc421ab69204..447ed1861f14ef434aeca1d81468058a6264c183 100644
+--- a/components/sync/protocol/proto_visitors.h
++++ b/components/sync/protocol/proto_visitors.h
+@@ -35,6 +35,8 @@
+ #include "components/sync/protocol/typed_url_specifics.pb.h"
+ #include "components/sync/protocol/unique_position.pb.h"
+ 
++#include "components/sync/protocol/notes_specifics.pb.h"
++
+ // This file implements VisitProtoFields() functions for sync protos.
+ //
+ // VisitProtoFields(visitor, proto) calls |visitor| for each field in
+@@ -307,6 +309,8 @@ VISIT_PROTO_FIELDS(const sync_pb::BookmarkSpecifics& proto) {
+   VISIT(creation_time_us);
+   VISIT(icon_url);
+   VISIT_REP(meta_info);
++  // Vivaldi specific
++  VISIT_ENUM(special_node_type);
+ }
+ 
+ VISIT_PROTO_FIELDS(const sync_pb::DeviceInfoSpecifics& proto) {
+@@ -637,6 +641,7 @@ VISIT_PROTO_FIELDS(const sync_pb::EntitySpecifics& proto) {
+   VISIT(theme);
+   VISIT(typed_url);
+   VISIT(wifi_credential);
++  VISIT(notes);
+ }
+ 
+ VISIT_PROTO_FIELDS(const sync_pb::SyncEntity::BookmarkData& proto) {
+@@ -882,6 +887,25 @@ VISIT_PROTO_FIELDS(const sync_pb::SourceInfo& proto) {
+   VISIT_REP(type_hint);
+ }
+ 
++// Vivaldi specific
++template <class V>
++void VisitProtoFields(V& visitor, const sync_pb::NotesAttachment& proto) {
++  VISIT(filename);
++  VISIT(content_type);
++  VISIT(content);
++}
++
++template <class V>
++void VisitProtoFields(V& visitor, const sync_pb::NotesSpecifics& proto) {
++  VISIT(url);
++  VISIT(subject);
++  VISIT(content);
++  VISIT(creation_time_us);
++  VISIT(icon_deprecated);
++  VISIT_REP(attachments);
++  VISIT_ENUM(special_node_type);
++}
++
+ }  // namespace syncer
+ 
+ #undef VISIT_
+diff --git a/components/sync/protocol/protocol_sources.gni b/components/sync/protocol/protocol_sources.gni
+index a43123a528a72f7c07027d4a87f2fa318d4fe171..abec8f87fd38dc54b840fa167f0b5fd826bf91ab 100644
+--- a/components/sync/protocol/protocol_sources.gni
++++ b/components/sync/protocol/protocol_sources.gni
+@@ -51,4 +51,5 @@ sync_protocol_sources = [
+   "//components/sync/protocol/typed_url_specifics.proto",
+   "//components/sync/protocol/unique_position.proto",
+   "//components/sync/protocol/wifi_credential_specifics.proto",
++  "//components/sync/protocol/notes_specifics.proto",
+ ]
 diff --git a/components/sync/protocol/session_specifics.proto b/components/sync/protocol/session_specifics.proto
 index cedd4723dac6e83704b1b11a598be24ca7ba80cb..68a2bb89c00c2b7c2351d4208748ca665f99cfd4 100644
 --- a/components/sync/protocol/session_specifics.proto
@@ -3458,15 +4487,905 @@ index cedd4723dac6e83704b1b11a598be24ca7ba80cb..68a2bb89c00c2b7c2351d4208748ca66
  }
  
  message TabNavigation {
+diff --git a/components/sync/protocol/sync.proto b/components/sync/protocol/sync.proto
+index a9301d36bb91edf756f1da6551ed561e4b7b6342..0448ef804eb4d3742989fef0508ea44dc9cc0f53 100644
+--- a/components/sync/protocol/sync.proto
++++ b/components/sync/protocol/sync.proto
+@@ -53,6 +53,7 @@ import "theme_specifics.proto";
+ import "typed_url_specifics.proto";
+ import "unique_position.proto";
+ import "wifi_credential_specifics.proto";
++import "notes_specifics.proto";
+ 
+ // Used for inspecting how long we spent performing operations in different
+ // backends. All times must be in millis.
+@@ -135,6 +136,7 @@ message EntitySpecifics {
+   optional ArticleSpecifics article = 223759;
+   optional AppListSpecifics app_list = 229170;
+   optional WifiCredentialSpecifics wifi_credential = 218175;
++  optional NotesSpecifics notes = 229171;
+   optional AutofillWalletSpecifics autofill_wallet = 306270;
+   optional WalletMetadataSpecifics wallet_metadata = 330441;
+   optional ArcPackageSpecifics arc_package = 340906;
+diff --git a/components/sync/syncable/base_node.cc b/components/sync/syncable/base_node.cc
+index 58096c30a1b3717fc0bbc7ad552e23e638dcc098..2ea9f7607d0320786bf8fa855cdebe8f702bbcbb 100644
+--- a/components/sync/syncable/base_node.cc
++++ b/components/sync/syncable/base_node.cc
+@@ -83,6 +83,19 @@ bool BaseNode::DecryptIfNecessary() {
+       unencrypted_data_.CopyFrom(specifics);
+       unencrypted_data_.mutable_bookmark()->set_title(server_legal_title);
+     }
++    else if (GetModelType() == NOTES &&
++        !specifics.notes().has_subject() &&
++        !GetTitle().empty()) {  // Last check ensures this isn't a new node.
++      // We need to fill in the title.
++      std::string title = GetTitle();
++      std::string server_legal_title;
++      SyncAPINameToServerName(title, &server_legal_title);
++      DVLOG(1) << "Reading from legacy note, manually returning title "
++               << title;
++      unencrypted_data_.CopyFrom(specifics);
++      unencrypted_data_.mutable_notes()->set_subject(
++          server_legal_title);
++    }
+     return true;
+   }
+ 
+@@ -131,6 +144,20 @@ const sync_pb::EntitySpecifics& BaseNode::GetUnencryptedSpecifics(
+         DCHECK_EQ(GetModelTypeFromSpecifics(unencrypted_data_), BOOKMARKS);
+         return unencrypted_data_;
+       }
++    } else if (GetModelType() == NOTES) {
++      const sync_pb::NotesSpecifics& notes_specifics =
++          specifics.notes();
++      if (notes_specifics.has_subject() || notes_specifics.has_content() ||
++          GetTitle().empty() ||  // For the empty node case
++          GetIsPermanentFolder()) {
++        // It's possible we previously had to convert and set
++        // |unencrypted_data_| but then wrote our own data, so we allow
++        // |unencrypted_data_| to be non-empty.
++        return specifics;
++      } else {
++        DCHECK_EQ(GetModelTypeFromSpecifics(unencrypted_data_), NOTES);
++        return unencrypted_data_;
++      }
+     } else {
+       DCHECK_EQ(GetModelTypeFromSpecifics(unencrypted_data_), UNSPECIFIED);
+       return specifics;
+@@ -172,6 +199,10 @@ std::string BaseNode::GetTitle() const {
+       GetEntry()->GetSpecifics().has_encrypted()) {
+     // Special case for legacy bookmarks dealing with encryption.
+     ServerNameToSyncAPIName(GetBookmarkSpecifics().title(), &result);
++  } else if (NOTES == GetModelType() &&
++      GetEntry()->GetSpecifics().has_encrypted()) {
++    // Special case for legacy bookmarks dealing with encryption.
++    ServerNameToSyncAPIName(GetNotesSpecifics().subject(), &result);
+   } else {
+     ServerNameToSyncAPIName(GetEntry()->GetNonUniqueName(), &result);
+   }
+@@ -234,6 +265,11 @@ const sync_pb::BookmarkSpecifics& BaseNode::GetBookmarkSpecifics() const {
+   return GetEntitySpecifics().bookmark();
+ }
+ 
++const sync_pb::NotesSpecifics& BaseNode::GetNotesSpecifics() const {
++  DCHECK_EQ(GetModelType(), NOTES);
++  return GetEntitySpecifics().notes();
++}
++
+ const sync_pb::NigoriSpecifics& BaseNode::GetNigoriSpecifics() const {
+   DCHECK_EQ(GetModelType(), NIGORI);
+   return GetEntitySpecifics().nigori();
+diff --git a/components/sync/syncable/base_node.h b/components/sync/syncable/base_node.h
+index 7e7c8ecd89b214646c2f173db32ed1ad02511e4a..24a645c04b8d7a534299c13cad9343209cfab555 100644
+--- a/components/sync/syncable/base_node.h
++++ b/components/sync/syncable/base_node.h
+@@ -28,6 +28,7 @@ class DictionaryValue;
+ 
+ namespace sync_pb {
+ class BookmarkSpecifics;
++class NotesSpecifics;
+ class EntitySpecifics;
+ class NigoriSpecifics;
+ class PasswordSpecificsData;
+@@ -114,6 +115,10 @@ class BaseNode {
+   // data.  Can only be called if GetModelType() == BOOKMARK.
+   const sync_pb::BookmarkSpecifics& GetBookmarkSpecifics() const;
+ 
++  // Getter specific to the NOTES datatype.  Returns protobuf
++  // data.  Can only be called if GetModelType() == NOTES.
++  const sync_pb::NotesSpecifics& GetNotesSpecifics() const;
++
+   // Getter specific to the NIGORI datatype.  Returns protobuf
+   // data.  Can only be called if GetModelType() == NIGORI.
+   const sync_pb::NigoriSpecifics& GetNigoriSpecifics() const;
+diff --git a/components/sync/syncable/directory.cc b/components/sync/syncable/directory.cc
+index d8f708ed8defdb504e69e9f886c3b6bc8e2fa265..dd58835099097f6b91050879829b222c66c5c63d 100644
+--- a/components/sync/syncable/directory.cc
++++ b/components/sync/syncable/directory.cc
+@@ -826,6 +826,7 @@ bool Directory::ResetVersionsForType(BaseWriteTransaction* trans,
+   if (!ProtocolTypes().Has(type))
+     return false;
+   DCHECK_NE(type, BOOKMARKS) << "Only non-hierarchical types are supported";
++  DCHECK_NE(type, NOTES) << "Only non-hierarchical types are supported";
+ 
+   EntryKernel* type_root = GetEntryByServerTag(ModelTypeToRootTag(type));
+   if (!type_root)
+@@ -1450,7 +1451,9 @@ void Directory::PutPredecessor(EntryKernel* e, EntryKernel* predecessor) {
+     DCHECK(!e->ref(UNIQUE_POSITION).IsValid());
+     return;
+   }
+-  std::string suffix = e->ref(UNIQUE_BOOKMARK_TAG);
++  std::string suffix = (e->GetModelType() == BOOKMARKS ?
++                        e->ref(UNIQUE_BOOKMARK_TAG) :
++                        e->ref(UNIQUE_NOTES_TAG));
+   DCHECK(!suffix.empty());
+ 
+   // Remove our item from the ParentChildIndex and remember to re-add it later.
+diff --git a/components/sync/syncable/directory_backing_store.cc b/components/sync/syncable/directory_backing_store.cc
+index 3b26d0aaa765e8976694e8689e99c8afb431da11..bde65f835fa8c85a5fa6a1e686b2ba170a76db9c 100644
+--- a/components/sync/syncable/directory_backing_store.cc
++++ b/components/sync/syncable/directory_backing_store.cc
+@@ -43,6 +43,9 @@ const int32_t kCurrentDBVersion = 90;
+ // The current database page size in Kilobytes.
+ const int32_t kCurrentPageSizeKB = 32768;
+ 
++// Vivaldi version of additions to DB
++const int32_t kCurrentVivaldiDBVersion = 1;
++
+ // Iterate over the fields of |entry| and bind each to |statement| for
+ // updating.  Returns the number of args bound.
+ void BindFields(const EntryKernel& entry,
+@@ -573,6 +576,13 @@ bool DirectoryBackingStore::InitializeTables() {
+       version_on_disk = 90;
+   }
+ 
++  int vivaldi_version_on_disk = GetVivaldiVersion();
++  if (version_on_disk && vivaldi_version_on_disk == 0){
++    MigrateVivaldiVersion0To1();
++    vivaldi_version_on_disk = 1;
++    needs_metas_column_refresh_ = true;
++  }
++
+   // If one of the migrations requested it, drop columns that aren't current.
+   // It's only safe to do this after migrating all the way to the current
+   // version.
+@@ -871,6 +881,30 @@ int DirectoryBackingStore::GetVersion() {
+   }
+ }
+ 
++bool DirectoryBackingStore::SetVivaldiVersion(int version) {
++  sql::Statement s(db_->GetCachedStatement(
++          SQL_FROM_HERE, "UPDATE share_version SET vivaldi_version = ?"));
++  s.BindInt(0, version);
++
++  return s.Run();
++}
++
++int DirectoryBackingStore::GetVivaldiVersion() {
++  if (!db_->DoesTableExist("share_version"))
++    return 0;
++
++  if (!db_->DoesColumnExist("share_version", "vivaldi_version"))
++    return 0;
++
++  sql::Statement statement(db_->GetUniqueStatement(
++          "SELECT vivaldi_version FROM share_version"));
++  if (statement.Step()) {
++    return statement.ColumnInt(0);
++  } else {
++    return 0;
++  }
++}
++
+ bool DirectoryBackingStore::MigrateVersion67To68() {
+   // This change simply removed three columns:
+   //   string NAME
+@@ -1478,15 +1512,17 @@ bool DirectoryBackingStore::CreateTables() {
+   // Create two little tables share_version and share_info
+   if (!db_->Execute(
+           "CREATE TABLE share_version ("
+-          "id VARCHAR(128) primary key, data INT)")) {
++          "id VARCHAR(128) primary key, data INT,"
++          "vivaldi_version INT)")) {
+     return false;
+   }
+ 
+   {
+     sql::Statement s(db_->GetUniqueStatement(
+-            "INSERT INTO share_version VALUES(?, ?)"));
++            "INSERT INTO share_version VALUES(?, ?, ?)"));
+     s.BindString(0, dir_name_);
+     s.BindInt(1, kCurrentDBVersion);
++    s.BindInt(2, kCurrentVivaldiDBVersion);
+ 
+     if (!s.Run())
+       return false;
+@@ -1771,5 +1807,21 @@ void DirectoryBackingStore::SetCatastrophicErrorHandler(
+   db_->set_error_callback(error_callback);
+ }
+ 
++bool DirectoryBackingStore::MigrateVivaldiVersion0To1() {
++  // Vivaldi Version 1 adds the vivalid_version to the share_version table.
++  if (!db_->Execute("ALTER TABLE share_version ADD COLUMN vivaldi_version int"))
++    return false;
++
++  if (!db_->Execute("ALTER TABLE metas ADD COLUMN "
++                    "unique_notes_tag VARCHAR")) {
++    return false;
++  }
++
++  SetVivaldiVersion(1);
++  needs_metas_column_refresh_ = true;
++  return true;
++
++}
++
+ }  // namespace syncable
+ }  // namespace syncer
+diff --git a/components/sync/syncable/directory_backing_store.h b/components/sync/syncable/directory_backing_store.h
+index c89bc774bfb1f45236dc31ced802515e8a2595d2..6272cfd71594261976759593794759b16f061990 100644
+--- a/components/sync/syncable/directory_backing_store.h
++++ b/components/sync/syncable/directory_backing_store.h
+@@ -163,6 +163,9 @@ class DirectoryBackingStore : public base::NonThreadSafe {
+   bool SetVersion(int version);
+   int GetVersion();
+ 
++  bool SetVivaldiVersion(int version);
++  int GetVivaldiVersion();
++
+   // Individual version migrations.
+   bool MigrateVersion67To68();
+   bool MigrateVersion68To69();
+@@ -188,6 +191,8 @@ class DirectoryBackingStore : public base::NonThreadSafe {
+   bool MigrateVersion88To89();
+   bool MigrateVersion89To90();
+ 
++  bool MigrateVivaldiVersion0To1();
++
+   // Accessor for needs_column_refresh_.  Used in tests.
+   bool needs_column_refresh() const;
+ 
+diff --git a/components/sync/syncable/entry.h b/components/sync/syncable/entry.h
+index 77a80c8c920877ce475c5bfc77854bd89eedcdcd..6318948290dcddcb710d8e7dcc875e180fd79f53 100644
+--- a/components/sync/syncable/entry.h
++++ b/components/sync/syncable/entry.h
+@@ -179,6 +179,11 @@ class Entry {
+     return kernel_->ref(UNIQUE_BOOKMARK_TAG);
+   }
+ 
++  const std::string& GetUniqueNotesTag() const {
++    DCHECK(kernel_);
++    return kernel_->ref(UNIQUE_NOTES_TAG);
++  }
++
+   const sync_pb::EntitySpecifics& GetSpecifics() const {
+     DCHECK(kernel_);
+     return kernel_->ref(SPECIFICS);
+diff --git a/components/sync/syncable/entry_kernel.h b/components/sync/syncable/entry_kernel.h
+index e56fc55788a81c84d4009f6e926d9db3babd3584..42978705c8d95c13ed7e64cd273a8e5c9911f049 100644
+--- a/components/sync/syncable/entry_kernel.h
++++ b/components/sync/syncable/entry_kernel.h
+@@ -131,6 +131,7 @@ enum StringField {
+   UNIQUE_SERVER_TAG,    // Tagged by the server
+   UNIQUE_CLIENT_TAG,    // Tagged by the client
+   UNIQUE_BOOKMARK_TAG,  // Client tags for bookmark items
++  UNIQUE_NOTES_TAG,  // Client tags for notes items
+   STRING_FIELDS_END,
+ };
+ 
+diff --git a/components/sync/syncable/model_neutral_mutable_entry.cc b/components/sync/syncable/model_neutral_mutable_entry.cc
+index b7eafcfba4b6f4894b23c914758e8b2c3366b0a2..d08dc47a9c114bf9ebd6e43ccf08e750c62a4eb6 100644
+--- a/components/sync/syncable/model_neutral_mutable_entry.cc
++++ b/components/sync/syncable/model_neutral_mutable_entry.cc
+@@ -333,6 +333,29 @@ void ModelNeutralMutableEntry::PutUniqueBookmarkTag(const std::string& tag) {
+   MarkDirty();
+ }
+ 
++void ModelNeutralMutableEntry::PutUniqueNotesTag(const std::string& tag) {
++  // This unique tag will eventually be used as the unique suffix when adjusting
++  // this bookmark's position.  Let's make sure it's a valid suffix.
++  if (!UniquePosition::IsValidSuffix(tag)) {
++    NOTREACHED();
++    return;
++  }
++
++  if (!kernel_->ref(UNIQUE_NOTES_TAG).empty() &&
++      tag != kernel_->ref(UNIQUE_NOTES_TAG)) {
++    // There is only one scenario where our tag is expected to change.  That
++    // scenario occurs when our current tag is a non-correct tag assigned during
++    // the UniquePosition migration.
++    std::string migration_generated_tag =
++        GenerateSyncableNotesHash(std::string(),
++                                     kernel_->ref(ID).GetServerId());
++    DCHECK_EQ(migration_generated_tag, kernel_->ref(UNIQUE_NOTES_TAG));
++  }
++
++  kernel_->put(UNIQUE_NOTES_TAG, tag);
++  kernel_->mark_dirty(&dir()->kernel()->dirty_metahandles);
++}
++
+ void ModelNeutralMutableEntry::PutServerSpecifics(
+     const sync_pb::EntitySpecifics& value) {
+   DCHECK(kernel_);
+diff --git a/components/sync/syncable/model_neutral_mutable_entry.h b/components/sync/syncable/model_neutral_mutable_entry.h
+index a844c0b1fa804b0f367fa1ad753d2a2b9b3d39c6..1e4691e17228aef04600797431a4cf2c365b58ac 100644
+--- a/components/sync/syncable/model_neutral_mutable_entry.h
++++ b/components/sync/syncable/model_neutral_mutable_entry.h
+@@ -75,6 +75,7 @@ class ModelNeutralMutableEntry : public Entry {
+   bool PutUniqueServerTag(const std::string& value);
+   bool PutUniqueClientTag(const std::string& value);
+   void PutUniqueBookmarkTag(const std::string& tag);
++  void PutUniqueNotesTag(const std::string& tag);
+   void PutServerSpecifics(const sync_pb::EntitySpecifics& value);
+   void PutBaseServerSpecifics(const sync_pb::EntitySpecifics& value);
+   void PutServerUniquePosition(const UniquePosition& value);
+diff --git a/components/sync/syncable/model_type.cc b/components/sync/syncable/model_type.cc
+index 363c848d728a4276d94e84e054389069a2190f54..d046ad7f19be9341a46b85178aed453e375e1bbf 100644
+--- a/components/sync/syncable/model_type.cc
++++ b/components/sync/syncable/model_type.cc
+@@ -139,6 +139,8 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
+      sync_pb::EntitySpecifics::kPrinterFieldNumber, 37},
+     {READING_LIST, "READING_LIST", "reading_list", "Reading List",
+      sync_pb::EntitySpecifics::kReadingListFieldNumber, 38},
++    {NOTES, "NOTES", "vivaldi_notes",
++      "Notes", sync_pb::EntitySpecifics::kNotesFieldNumber, 300},
+     {PROXY_TABS, "", "", "Tabs", -1, 25},
+     {NIGORI, "NIGORI", "nigori", "Encryption Keys",
+      sync_pb::EntitySpecifics::kNigoriFieldNumber, 17},
+@@ -160,11 +162,12 @@ const char* kUserSelectableDataTypeNames[] = {
+ #if BUILDFLAG(ENABLE_READING_LIST)
+     "readingList",
+ #endif
++    "notes",
+     "tabs",
+ };
+ 
+ static_assert(
+-    39 == MODEL_TYPE_COUNT,
++    39+1 == MODEL_TYPE_COUNT,
+     "update kUserSelectableDataTypeName to match UserSelectableTypes");
+ 
+ void AddDefaultFieldValue(ModelType datatype,
+@@ -282,6 +285,9 @@ void AddDefaultFieldValue(ModelType datatype,
+     case READING_LIST:
+       specifics->mutable_reading_list();
+       break;
++    case NOTES:
++      specifics->mutable_notes();
++      break;
+     default:
+       NOTREACHED() << "No known extension for model type.";
+   }
+@@ -449,6 +455,9 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
+   if (specifics.has_wifi_credential())
+     return WIFI_CREDENTIALS;
+ 
++  if (specifics.has_notes())
++    return NOTES;
++
+   return UNSPECIFIED;
+ }
+ 
+@@ -484,6 +493,7 @@ ModelTypeSet UserSelectableTypes() {
+ #if BUILDFLAG(ENABLE_READING_LIST)
+   set.Put(READING_LIST);
+ #endif
++  set.Put(NOTES);
+   set.Put(PROXY_TABS);
+   return set;
+ }
+@@ -713,6 +723,8 @@ ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
+ std::string ModelTypeToRootTag(ModelType type) {
+   if (IsProxyType(type))
+     return std::string();
++  if (type == NOTES)
++    return std::string(kModelTypeInfoMap[type].root_tag);
+   if (IsRealDataType(type))
+     return "google_chrome_" + std::string(kModelTypeInfoMap[type].root_tag);
+   NOTREACHED() << "No known extension for model type.";
+@@ -762,7 +774,7 @@ bool IsActOnceDataType(ModelType model_type) {
+ }
+ 
+ bool IsTypeWithServerGeneratedRoot(ModelType model_type) {
+-  return model_type == BOOKMARKS || model_type == NIGORI;
++  return model_type == BOOKMARKS || model_type == NIGORI || model_type == NOTES;
+ }
+ 
+ bool IsTypeWithClientGeneratedRoot(ModelType model_type) {
+@@ -772,11 +784,11 @@ bool IsTypeWithClientGeneratedRoot(ModelType model_type) {
+ 
+ bool TypeSupportsHierarchy(ModelType model_type) {
+   // TODO(stanisc): crbug/438313: Should this also include TOP_LEVEL_FOLDER?
+-  return model_type == BOOKMARKS;
++  return model_type == BOOKMARKS || model_type == NOTES;
+ }
+ 
+ bool TypeSupportsOrdering(ModelType model_type) {
+-  return model_type == BOOKMARKS;
++  return model_type == BOOKMARKS || model_type == NOTES;
+ }
+ 
+ }  // namespace syncer
+diff --git a/components/sync/syncable/model_type_unittest.cc b/components/sync/syncable/model_type_unittest.cc
+index 1b2d974b0d1c93aca74a113131182536caa5ba55..a867028e7b0564ce512f05762711b88b0270d08e 100644
+--- a/components/sync/syncable/model_type_unittest.cc
++++ b/components/sync/syncable/model_type_unittest.cc
+@@ -108,6 +108,9 @@ TEST_F(ModelTypeTest, ModelTypeHistogramMapping) {
+     // UMA_HISTOGRAM that use this mapping specify MODEL_TYPE_COUNT as the
+     // maximum possible value.  If you break this assumption, you should update
+     // those histograms.
++    if (it.Get() == NOTES)
++      continue;
++
+     EXPECT_LT(histogram_value, MODEL_TYPE_COUNT);
+   }
+ }
+@@ -149,6 +152,9 @@ TEST_F(ModelTypeTest, ModelTypeToRootTagValues) {
+     std::string root_tag = ModelTypeToRootTag(model_type);
+     if (IsProxyType(model_type)) {
+       EXPECT_EQ(root_tag, std::string());
++    } else if (model_type == NOTES) {
++      EXPECT_FALSE(base::StartsWith(root_tag, "google_chrome_",
++                                   base::CompareCase::INSENSITIVE_ASCII));
+     } else if (IsRealDataType(model_type)) {
+       EXPECT_TRUE(base::StartsWith(root_tag, "google_chrome_",
+                                    base::CompareCase::INSENSITIVE_ASCII));
+diff --git a/components/sync/syncable/mutable_entry.cc b/components/sync/syncable/mutable_entry.cc
+index 97a34db68fa2d37480e032a4f9b60dbba3ceb864..5d7f932ab939f1a15344fc06332ac3ec35f820d8 100644
+--- a/components/sync/syncable/mutable_entry.cc
++++ b/components/sync/syncable/mutable_entry.cc
+@@ -65,6 +65,7 @@ MutableEntry::MutableEntry(WriteTransaction* trans,
+   Init(trans, model_type, Id(), name);
+   // We need to have a valid position ready before we can index the item.
+   DCHECK_NE(BOOKMARKS, model_type);
++  DCHECK_NE(NOTES, model_type);
+   DCHECK(!ShouldMaintainPosition());
+ 
+   bool result = trans->directory()->InsertEntry(trans, kernel_);
+@@ -85,6 +86,12 @@ MutableEntry::MutableEntry(WriteTransaction* trans,
+         trans->directory()->cache_guid(), GetId().GetServerId());
+     kernel_->put(UNIQUE_BOOKMARK_TAG, unique_tag);
+     kernel_->put(UNIQUE_POSITION, UniquePosition::InitialPosition(unique_tag));
++  } else if (model_type == NOTES) {
++    // Base the tag off of our cache-guid and local "c-" style ID.
++    std::string unique_tag = GenerateSyncableNotesHash(
++        trans->directory()->cache_guid(), GetId().GetServerId());
++    kernel_->put(UNIQUE_NOTES_TAG, unique_tag);
++    kernel_->put(UNIQUE_POSITION, UniquePosition::InitialPosition(unique_tag));
+   } else {
+     DCHECK(!ShouldMaintainPosition());
+   }
+diff --git a/components/sync/syncable/nigori_util.cc b/components/sync/syncable/nigori_util.cc
+index 80538a663a0f53bd775cf02978874340c4ebc66b..e989c1f794d5978a95c5016eac1ae41b178f6f1b 100644
+--- a/components/sync/syncable/nigori_util.cc
++++ b/components/sync/syncable/nigori_util.cc
+@@ -225,6 +225,13 @@ bool UpdateEntryWithEncryption(BaseTransaction* const trans,
+       if (!entry->GetIsDir())
+         bookmark_specifics->set_url(kEncryptedString);
+       bookmark_specifics->set_title(kEncryptedString);
++    } else if (type == NOTES) {
++      sync_pb::NotesSpecifics* notes_specifics =
++          generated_specifics.mutable_notes();
++      if (!entry->GetIsDir())
++        notes_specifics->set_url(kEncryptedString);
++      notes_specifics->set_subject(kEncryptedString);
++      notes_specifics->set_content(kEncryptedString);
+     }
+   }
+ 
+@@ -246,7 +253,7 @@ void UpdateNigoriFromEncryptedTypes(ModelTypeSet encrypted_types,
+                                     bool encrypt_everything,
+                                     sync_pb::NigoriSpecifics* nigori) {
+   nigori->set_encrypt_everything(encrypt_everything);
+-  static_assert(39 == MODEL_TYPE_COUNT, "update encrypted types");
++  static_assert(39+1 == MODEL_TYPE_COUNT, "update encrypted types");
+   nigori->set_encrypt_bookmarks(encrypted_types.Has(BOOKMARKS));
+   nigori->set_encrypt_preferences(encrypted_types.Has(PREFERENCES));
+   nigori->set_encrypt_autofill_profile(encrypted_types.Has(AUTOFILL_PROFILE));
+@@ -271,6 +278,7 @@ void UpdateNigoriFromEncryptedTypes(ModelTypeSet encrypted_types,
+   nigori->set_encrypt_arc_package(encrypted_types.Has(ARC_PACKAGE));
+   nigori->set_encrypt_printers(encrypted_types.Has(PRINTERS));
+   nigori->set_encrypt_reading_list(encrypted_types.Has(READING_LIST));
++  nigori->set_encrypt_notes(encrypted_types.Has(NOTES));
+ }
+ 
+ ModelTypeSet GetEncryptedTypesFromNigori(
+@@ -279,7 +287,7 @@ ModelTypeSet GetEncryptedTypesFromNigori(
+     return ModelTypeSet::All();
+ 
+   ModelTypeSet encrypted_types;
+-  static_assert(39 == MODEL_TYPE_COUNT, "update encrypted types");
++  static_assert(39+1 == MODEL_TYPE_COUNT, "update encrypted types");
+   if (nigori.encrypt_bookmarks())
+     encrypted_types.Put(BOOKMARKS);
+   if (nigori.encrypt_preferences())
+@@ -324,6 +332,8 @@ ModelTypeSet GetEncryptedTypesFromNigori(
+     encrypted_types.Put(PRINTERS);
+   if (nigori.encrypt_reading_list())
+     encrypted_types.Put(READING_LIST);
++  if (nigori.encrypt_notes())
++    encrypted_types.Put(NOTES);
+   return encrypted_types;
+ }
+ 
+diff --git a/components/sync/syncable/read_node.cc b/components/sync/syncable/read_node.cc
+index 6f220cb48dae4326d02f38ab58358a2b526cd6f7..6b10ef88122a2008a16783f6c2b9252b34dec209 100644
+--- a/components/sync/syncable/read_node.cc
++++ b/components/sync/syncable/read_node.cc
+@@ -98,6 +98,23 @@ BaseNode::InitByLookupResult ReadNode::InitByTagLookupForBookmarks(
+   return DecryptIfNecessary() ? INIT_OK : INIT_FAILED_DECRYPT_IF_NECESSARY;
+ }
+ 
++BaseNode::InitByLookupResult ReadNode::InitByTagLookupForNotes(
++    const std::string& tag) {
++  DCHECK(!entry_) << "Init called twice";
++  if (tag.empty())
++    return INIT_FAILED_PRECONDITION;
++  syncable::BaseTransaction* trans = transaction_->GetWrappedTrans();
++  entry_ = new syncable::Entry(trans, syncable::GET_BY_SERVER_TAG, tag);
++  if (!entry_->good())
++    return INIT_FAILED_ENTRY_NOT_GOOD;
++  if (entry_->GetIsDel())
++    return INIT_FAILED_ENTRY_IS_DEL;
++  ModelType model_type = GetModelType();
++  DCHECK_EQ(model_type, NOTES)
++      << "InitByTagLookup deprecated for all types except notes.";
++  return DecryptIfNecessary() ? INIT_OK : INIT_FAILED_DECRYPT_IF_NECESSARY;
++}
++
+ BaseNode::InitByLookupResult ReadNode::InitTypeRoot(ModelType type) {
+   DCHECK(!entry_) << "Init called twice";
+   if (!IsRealDataType(type))
+diff --git a/components/sync/syncable/read_node.h b/components/sync/syncable/read_node.h
+index 164e8286bf53dbe088533e31c32ec9487609cd66..3b713d0a062288ae8a142478b32bfa6a1aed2efe 100644
+--- a/components/sync/syncable/read_node.h
++++ b/components/sync/syncable/read_node.h
+@@ -49,6 +49,7 @@ class ReadNode : public BaseNode {
+   // have server-tagged items.  All other server-tagged items are type root
+   // nodes, which should be looked up with InitTypeRoot().
+   InitByLookupResult InitByTagLookupForBookmarks(const std::string& tag);
++  InitByLookupResult InitByTagLookupForNotes(const std::string& tag);
+ 
+   // Returns transaction version of the last transaction where this node has
+   // been modified.
+diff --git a/components/sync/syncable/syncable_columns.h b/components/sync/syncable/syncable_columns.h
+index 23b1871a133210f8fb53b1f0463d31bc647b4e0e..25183c1c75575e5eaf3559a3a6c918515c37a757 100644
+--- a/components/sync/syncable/syncable_columns.h
++++ b/components/sync/syncable/syncable_columns.h
+@@ -53,6 +53,7 @@ static const ColumnSpec g_metas_columns[] = {
+     {"unique_server_tag", "varchar"},
+     {"unique_client_tag", "varchar"},
+     {"unique_bookmark_tag", "varchar"},
++    {"unique_notes_tag", "varchar default NULL"},
+     //////////////////////////////////////
+     // Blobs (serialized protos).
+     {"specifics", "blob"},
+diff --git a/components/sync/syncable/syncable_delete_journal.cc b/components/sync/syncable/syncable_delete_journal.cc
+index a5b426a5fac8117829c7ad66c9c8819338a00c3a..9c79c39f35e445bec9a6f2c3f7f069037bd7ecf8 100644
+--- a/components/sync/syncable/syncable_delete_journal.cc
++++ b/components/sync/syncable/syncable_delete_journal.cc
+@@ -137,6 +137,7 @@ void DeleteJournal::AddJournalBatch(BaseTransaction* trans,
+ bool DeleteJournal::IsDeleteJournalEnabled(ModelType type) {
+   switch (type) {
+     case BOOKMARKS:
++    case NOTES:
+       return true;
+     default:
+       return false;
+diff --git a/components/sync/syncable/syncable_enum_conversions.cc b/components/sync/syncable/syncable_enum_conversions.cc
+index db64a81c322c08dc661462f9ca8bc63e42ec9417..20f480f636017690dde53ce927d3611eadfcd070 100644
+--- a/components/sync/syncable/syncable_enum_conversions.cc
++++ b/components/sync/syncable/syncable_enum_conversions.cc
+@@ -113,7 +113,7 @@ const char* GetBitFieldString(BitField bit_field) {
+ }
+ 
+ const char* GetStringFieldString(StringField string_field) {
+-  ASSERT_ENUM_BOUNDS(NON_UNIQUE_NAME, UNIQUE_BOOKMARK_TAG, STRING_FIELDS_BEGIN,
++  ASSERT_ENUM_BOUNDS(NON_UNIQUE_NAME, UNIQUE_NOTES_TAG, STRING_FIELDS_BEGIN,
+                      STRING_FIELDS_END - 1);
+   switch (string_field) {
+     ENUM_CASE(NON_UNIQUE_NAME);
+@@ -121,6 +121,7 @@ const char* GetStringFieldString(StringField string_field) {
+     ENUM_CASE(UNIQUE_SERVER_TAG);
+     ENUM_CASE(UNIQUE_CLIENT_TAG);
+     ENUM_CASE(UNIQUE_BOOKMARK_TAG);
++    ENUM_CASE(UNIQUE_NOTES_TAG);
+     case STRING_FIELDS_END:
+       break;
+   }
+diff --git a/components/sync/syncable/write_node.cc b/components/sync/syncable/write_node.cc
+index 639d48aea0462be739ac1e31f41027588cc15c62..6c3c16e9453b1764d4bdeee72e8317c480424b61 100644
+--- a/components/sync/syncable/write_node.cc
++++ b/components/sync/syncable/write_node.cc
+@@ -63,6 +63,10 @@ void WriteNode::SetTitle(const std::string& title) {
+   if (BOOKMARKS == type && entry_->GetSpecifics().has_encrypted()) {
+     // Encrypted bookmarks only have their title in the unencrypted specifics.
+     current_legal_title = GetBookmarkSpecifics().title();
++  } else if (NOTES == type &&
++      entry_->GetSpecifics().has_encrypted()) {
++    // Encrypted notes only have their title in the unencrypted specifics.
++    current_legal_title = GetNotesSpecifics().subject();
+   } else {
+     // Non-bookmarks and legacy bookmarks (those with no title in their
+     // specifics) store their title in NON_UNIQUE_NAME. Non-legacy bookmarks
+@@ -112,6 +116,12 @@ void WriteNode::SetBookmarkSpecifics(
+   SetEntitySpecifics(entity_specifics);
+ }
+ 
++void WriteNode::SetNotesSpecifics(const sync_pb::NotesSpecifics& new_value) {
++  sync_pb::EntitySpecifics entity_specifics;
++  entity_specifics.mutable_notes()->CopyFrom(new_value);
++  SetEntitySpecifics(entity_specifics);
++}
++
+ void WriteNode::SetNigoriSpecifics(const sync_pb::NigoriSpecifics& new_value) {
+   sync_pb::EntitySpecifics entity_specifics;
+   entity_specifics.mutable_nigori()->CopyFrom(new_value);
+@@ -264,8 +274,9 @@ BaseNode::InitByLookupResult WriteNode::InitTypeRoot(ModelType type) {
+ 
+ // Create a new node with default properties, and bind this WriteNode to it.
+ // Return true on success.
+-bool WriteNode::InitBookmarkByCreation(const BaseNode& parent,
+-                                       const BaseNode* predecessor) {
++bool WriteNode::InitNodeByCreation(const BaseNode& parent,
++                                   const BaseNode* predecessor,
++                                   ModelType model_type) {
+   DCHECK(!entry_) << "Init called twice";
+   // |predecessor| must be a child of |parent| or null.
+   if (predecessor && predecessor->GetParentId() != parent.GetId()) {
+@@ -282,7 +293,7 @@ bool WriteNode::InitBookmarkByCreation(const BaseNode& parent,
+ 
+   entry_ =
+       new syncable::MutableEntry(transaction_->GetWrappedWriteTrans(),
+-                                 syncable::CREATE, BOOKMARKS, parent_id, dummy);
++                               syncable::CREATE, model_type, parent_id, dummy);
+ 
+   if (!entry_->good())
+     return false;
+diff --git a/components/sync/syncable/write_node.h b/components/sync/syncable/write_node.h
+index 9a38887edf0c925d688a40842b37e3902133e064..f5393933e56cf7c8144c4dd168a1130c89fe995d 100644
+--- a/components/sync/syncable/write_node.h
++++ b/components/sync/syncable/write_node.h
+@@ -19,6 +19,7 @@
+ 
+ namespace sync_pb {
+ class BookmarkSpecifics;
++class NotesSpecifics;
+ class EntitySpecifics;
+ class NigoriSpecifics;
+ class PasswordSpecificsData;
+@@ -67,8 +68,16 @@ class WriteNode : public BaseNode {
+   // a null |predecessor| to indicate that this is to be the first child.
+   // |predecessor| must be a child of |new_parent| or null. Returns false on
+   // failure.
++  bool InitNodeByCreation(const BaseNode& parent,
++                              const BaseNode* predecessor, ModelType model_type);
+   bool InitBookmarkByCreation(const BaseNode& parent,
+-                              const BaseNode* predecessor);
++                              const BaseNode* predecessor){
++    return InitNodeByCreation(parent, predecessor, BOOKMARKS);
++  };
++  bool InitNotesByCreation(const BaseNode& parent,
++                              const BaseNode* predecessor){
++    return InitNodeByCreation(parent, predecessor, NOTES);
++  };
+ 
+   // Create nodes using this function if they're unique items that
+   // you want to fetch using client_tag. Note that the behavior of these
+@@ -117,6 +126,10 @@ class WriteNode : public BaseNode {
+   // Should only be called if GetModelType() == BOOKMARK.
+   void SetBookmarkSpecifics(const sync_pb::BookmarkSpecifics& specifics);
+ 
++  // Set the notes specifics.
++  // Should only be called if GetModelType() == NOTES.
++  void SetNotesSpecifics(const sync_pb::NotesSpecifics& specifics);
++
+   // Generic set specifics method. Will extract the model type from |specifics|.
+   void SetEntitySpecifics(const sync_pb::EntitySpecifics& specifics);
+ 
+diff --git a/components/sync/test/fake_server/entity_builder_factory.cc b/components/sync/test/fake_server/entity_builder_factory.cc
+index ace0e38d7b05dc02a4a941aecfb84263f027ed9c..92cb10e05fb656514c91bda679c9377f0b587de5 100644
+--- a/components/sync/test/fake_server/entity_builder_factory.cc
++++ b/components/sync/test/fake_server/entity_builder_factory.cc
+@@ -6,6 +6,8 @@
+ 
+ #include "base/guid.h"
+ #include "base/strings/string_number_conversions.h"
++#include "url/gurl.h"
++#include "sync/test/fake_server/notes_entity_builder.h"
+ 
+ using std::string;
+ 
+@@ -27,4 +29,12 @@ BookmarkEntityBuilder EntityBuilderFactory::NewBookmarkEntityBuilder(
+   return builder;
+ }
+ 
++NotesEntityBuilder EntityBuilderFactory::NewNotesEntityBuilder(
++    const string& title, const GURL& url, const string& content) {
++  --latest_client_item_id_;
++  NotesEntityBuilder builder(title, url, content, cache_guid_,
++                             base::Int64ToString(latest_client_item_id_));
++  return builder;
++}
++
+ }  // namespace fake_server
+diff --git a/components/sync/test/fake_server/entity_builder_factory.h b/components/sync/test/fake_server/entity_builder_factory.h
+index 0fe0c17d724b90ffb6657c0cf4540349ce35a1d8..527e78221e62a78c610a7780664b72b0f0daa481 100644
+--- a/components/sync/test/fake_server/entity_builder_factory.h
++++ b/components/sync/test/fake_server/entity_builder_factory.h
+@@ -11,6 +11,7 @@
+ 
+ #include "components/sync/test/fake_server/bookmark_entity_builder.h"
+ #include "url/gurl.h"
++#include "sync/test/fake_server/notes_entity_builder.h"
+ 
+ namespace fake_server {
+ 
+@@ -29,6 +30,9 @@ class EntityBuilderFactory {
+   virtual ~EntityBuilderFactory();
+ 
+   BookmarkEntityBuilder NewBookmarkEntityBuilder(const std::string& title);
++  NotesEntityBuilder NewNotesEntityBuilder(const std::string& title,
++                                           const GURL& url,
++                                           const std::string& content);
+ 
+  private:
+   // An identifier used when creating entities. This value is used similarly to
+diff --git a/components/sync/test/fake_server/fake_server.cc b/components/sync/test/fake_server/fake_server.cc
+index a7f1cc193d855f39ba37de5395a05911bbe21094..73f349afeb2966878f987926096121f5d11f9f35 100644
+--- a/components/sync/test/fake_server/fake_server.cc
++++ b/components/sync/test/fake_server/fake_server.cc
+@@ -24,6 +24,8 @@
+ #include "net/base/net_errors.h"
+ #include "net/http/http_status_code.h"
+ 
++#include "sync/test/fake_server/notes_entity.h"
++
+ using std::string;
+ using std::vector;
+ using syncer::GetModelType;
+@@ -172,11 +174,26 @@ bool FakeServer::CreatePermanentBookmarkFolder(const std::string& server_tag,
+   return true;
+ }
+ 
++
++bool FakeServer::CreatePermanentNotesFolder(const std::string& server_tag,
++  const std::string& name) {
++  DCHECK(thread_checker_.CalledOnValidThread());
++  std::unique_ptr<FakeServerEntity> entity =
++    PermanentEntity::Create(syncer::NOTES, server_tag, name,
++      ModelTypeToRootTag(syncer::NOTES));
++  if (!entity)
++    return false;
++
++  SaveEntity(std::move(entity));
++  return true;
++}
++
+ bool FakeServer::CreateDefaultPermanentItems() {
+   // Permanent folders are always required for Bookmarks (hierarchical
+   // structure) and Nigori (data stored in permanent root folder).
+   ModelTypeSet permanent_folder_types =
+       ModelTypeSet(syncer::BOOKMARKS, syncer::NIGORI);
++  permanent_folder_types.Put(syncer::NOTES);
+ 
+   for (ModelTypeSet::Iterator it = permanent_folder_types.First(); it.Good();
+        it.Inc()) {
+@@ -196,6 +213,15 @@ bool FakeServer::CreateDefaultPermanentItems() {
+       if (!CreatePermanentBookmarkFolder(kOtherBookmarksFolderServerTag,
+                                          kOtherBookmarksFolderName))
+         return false;
++      if (!CreatePermanentBookmarkFolder("trash_bookmarks", "Trash"))
++        return false;
++    } else if (model_type == syncer::NOTES) {
++      if (!CreatePermanentNotesFolder("main_notes", "Notes"))
++        return false;
++      if (!CreatePermanentNotesFolder("other_notes", "Other Notes"))
++        return false;
++      if (!CreatePermanentNotesFolder("trash_notes", "Trash"))
++        return false;
+     }
+   }
+ 
+@@ -383,6 +409,16 @@ string FakeServer::CommitEntity(
+                                                         *iter->second);
+   } else if (client_entity.has_client_defined_unique_tag()) {
+     entity = UniqueClientEntity::Create(client_entity);
++  } else  if (GetModelType(client_entity) == syncer::NOTES) {
++    EntityMap::const_iterator iter = entities_.find(client_entity.id_string());
++    if (iter != entities_.end()) {
++      entity = NotesEntity::CreateUpdatedVersion(
++        client_entity,
++        *iter->second,
++        parent_id);
++    } else {
++      entity = NotesEntity::CreateNew(client_entity, parent_id, client_guid);
++    }
+   } else {
+     // TODO(pvalenzuela): Validate entity's parent ID.
+     EntityMap::const_iterator iter = entities_.find(client_entity.id_string());
+diff --git a/components/sync/test/fake_server/fake_server.h b/components/sync/test/fake_server/fake_server.h
+index b37a00c1449d229e9dc65d58e1edcab3d7d09671..6e18dc11f55a74fddbe9f35b87ff89593e10d1ed 100644
+--- a/components/sync/test/fake_server/fake_server.h
++++ b/components/sync/test/fake_server/fake_server.h
+@@ -165,6 +165,10 @@ class FakeServer {
+   bool CreatePermanentBookmarkFolder(const std::string& server_tag,
+                                      const std::string& name);
+ 
++  // Creates and saves a permanent folder for Notes (e.g., main_notes).
++  bool CreatePermanentNotesFolder(const std::string& server_tag,
++                                     const std::string& name);
++
+   // Inserts the default permanent items in |entities_|.
+   bool CreateDefaultPermanentItems();
+ 
+diff --git a/components/sync/tools/sync_client.cc b/components/sync/tools/sync_client.cc
+index 69954bca77b5c59e113ce9f4b7da26a9cf52c4b1..8b7aa4eb796b3145a0fd77e31a2528a7366393ce 100644
+--- a/components/sync/tools/sync_client.cc
++++ b/components/sync/tools/sync_client.cc
+@@ -377,6 +377,7 @@ int SyncClientMain(int argc, char* argv[]) {
+   model_types.Put(DICTIONARY);
+   model_types.Put(FAVICON_IMAGES);
+   model_types.Put(FAVICON_TRACKING);
++  model_types.Put(NOTES);
+ 
+   ModelSafeRoutingInfo routing_info;
+   for (ModelTypeSet::Iterator it = model_types.First(); it.Good(); it.Inc()) {
+diff --git a/components/sync/tools/testserver/chromiumsync.py b/components/sync/tools/testserver/chromiumsync.py
+index e6f19913fb2df7e8da1677aedba4c2be19d0a1d4..21e99db5f54d8dfec2607ef53f3630d8996c9de3 100644
+--- a/components/sync/tools/testserver/chromiumsync.py
++++ b/components/sync/tools/testserver/chromiumsync.py
+@@ -99,7 +99,8 @@ ALL_TYPES = (
+     EXTENSION_SETTINGS,
+     FAVICON_IMAGES,
+     FAVICON_TRACKING,
+-    WIFI_CREDENTIAL) = range(37)
++    WIFI_CREDENTIAL,
++    NOTES) = range(37+1)
+ 
+ # An enumeration on the frequency at which the server should send errors
+ # to the client. This would be specified by the url that triggers the error.
+@@ -154,6 +155,7 @@ SYNC_TYPE_TO_DESCRIPTOR = {
+     THEME: SYNC_TYPE_FIELDS['theme'],
+     TYPED_URL: SYNC_TYPE_FIELDS['typed_url'],
+     WIFI_CREDENTIAL: SYNC_TYPE_FIELDS["wifi_credential"],
++    NOTES: SYNC_TYPE_FIELDS['notes'],
+     }
+ 
+ # The parent ID used to indicate a top-level node.
+@@ -519,6 +521,8 @@ class SyncDataModel(object):
+       PermanentItem('synced_bookmarks', name='Synced Bookmarks',
+                     parent_tag='google_chrome_bookmarks', sync_type=BOOKMARK,
+                     create_by_default=False),
++      PermanentItem('trash_bookmarks', name='Trash Bookmarks',
++                    parent_tag='google_chrome_bookmarks', sync_type=BOOKMARK),
+       PermanentItem('google_chrome_autofill', name='Autofill',
+                     parent_tag=ROOT_ID, sync_type=AUTOFILL),
+       PermanentItem('google_chrome_autofill_profiles', name='Autofill Profiles',
+@@ -596,6 +600,14 @@ class SyncDataModel(object):
+                     parent_tag=ROOT_ID, sync_type=DICTIONARY),
+       PermanentItem('google_chrome_articles', name='Articles',
+                     parent_tag=ROOT_ID, sync_type=ARTICLE),
++      PermanentItem('vivaldi_notes', name='Notes',
++                    parent_tag=ROOT_ID, sync_type=NOTES),
++      PermanentItem('main_notes', name='Notes',
++                    parent_tag="vivaldi_notes", sync_type=NOTES),
++      PermanentItem('other_notes', name='Notes',
++                    parent_tag="vivaldi_notes", sync_type=NOTES),
++      PermanentItem('trash_notes', name='Notes',
++                    parent_tag="vivaldi_notes", sync_type=NOTES),
+       ]
+ 
+   def __init__(self):
 diff --git a/components/sync_bookmarks/bookmark_change_processor.cc b/components/sync_bookmarks/bookmark_change_processor.cc
-index 96d50b12215ba35fa52175d51c3ad4c06b168a5c..72650c4910547b9f863c3fe72cdefda7f8e2882d 100644
+index 96d50b12215ba35fa52175d51c3ad4c06b168a5c..45844abcf30af7564b7f5b19df6a5f807390315d 100644
 --- a/components/sync_bookmarks/bookmark_change_processor.cc
 +++ b/components/sync_bookmarks/bookmark_change_processor.cc
-@@ -831,9 +831,12 @@ const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
+@@ -831,12 +831,29 @@ const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
      const int64_t create_time_internal = specifics.creation_time_us();
      base::Time create_time = (create_time_internal == 0) ?
          base::Time::Now() : base::Time::FromInternalValue(create_time_internal);
-+	base::string16 dummy;
++    base::string16 dummy;
      node = model->AddURLWithCreationTimeAndMetaInfo(
          parent, index, title, url, create_time,
 -        GetBookmarkMetaInfo(sync_node).get());
@@ -3476,11 +5395,96 @@ index 96d50b12215ba35fa52175d51c3ad4c06b168a5c..72650c4910547b9f863c3fe72cdefda7
      if (node)
        SetBookmarkFavicon(sync_node, node, model, sync_client);
    }
++  {
++    const sync_pb::BookmarkSpecifics& specifics =
++      sync_node->GetBookmarkSpecifics();
++    BookmarkNode* mutable_node = const_cast<BookmarkNode*>(node);
++    if (specifics.has_special_node_type()) {
++      switch (specifics.special_node_type()) {
++      case sync_pb::BookmarkSpecifics::TRASH_NODE:
++        mutable_node->set_type(BookmarkNode::TRASH);
++        break;
++      default:
++        break;
++      }
++    }
++  }
+ 
+   return node;
+ }
+diff --git a/components/sync_bookmarks/bookmark_model_associator.cc b/components/sync_bookmarks/bookmark_model_associator.cc
+index 8db093d1e03416f36dd40831f0cad769ab69a077..836ccc00dec062d4f411f07606be2766f2e59169 100644
+--- a/components/sync_bookmarks/bookmark_model_associator.cc
++++ b/components/sync_bookmarks/bookmark_model_associator.cc
+@@ -61,6 +61,7 @@ namespace sync_bookmarks {
+ const char kBookmarkBarTag[] = "bookmark_bar";
+ const char kMobileBookmarksTag[] = "synced_bookmarks";
+ const char kOtherBookmarksTag[] = "other_bookmarks";
++const char kTrashBookmarksTag[] = "trash_bookmarks";
+ 
+ // Maximum number of bytes to allow in a title (must match sync's internal
+ // limits; see write_node.cc).
+@@ -415,10 +416,17 @@ bool BookmarkModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
+     has_mobile_folder = false;
+   }
+ 
++  syncer::ReadNode trash_bookmarks_node(&trans);
++  if (trash_bookmarks_node.InitByTagLookupForBookmarks(kTrashBookmarksTag) !=
++      syncer::BaseNode::INIT_OK) {
++    return false;
++  }
++
+   // Sync model has user created nodes if any of the permanent nodes has
+   // children.
+   *has_nodes = bookmark_bar_node.HasChildren() ||
+       other_bookmarks_node.HasChildren() ||
++      trash_bookmarks_node.HasChildren() ||
+       (has_mobile_folder && mobile_bookmarks_node.HasChildren());
+   return true;
+ }
+@@ -494,6 +502,14 @@ syncer::SyncError BookmarkModelAssociator::AssociatePermanentFolders(
+         FROM_HERE, "Mobile bookmarks node not found", model_type());
+   }
+ 
++  const BookmarkNode *trash_node = bookmark_model_->trash_node();
++  if (trash_node &&
++      !AssociateTaggedPermanentNode(trans, trash_node,
++                                    kTrashBookmarksTag)) {
++    return unrecoverable_error_handler_->CreateAndUploadError(
++        FROM_HERE, "Trash bookmarks node not found", model_type());
++  }
++
+   // Note: the root node may have additional extra nodes. Currently none of
+   // them are meant to sync.
+   int64_t bookmark_bar_sync_id =
+@@ -511,12 +527,22 @@ syncer::SyncError BookmarkModelAssociator::AssociatePermanentFolders(
+   if (mobile_bookmarks_sync_id != syncer::kInvalidId)
+     context->AddBookmarkRoot(bookmark_model_->mobile_node());
+ 
++  int64_t trash_bookmarks_sync_id = syncer::kInvalidId;
++  if(trash_node) {
++    trash_bookmarks_sync_id =
++        GetSyncIdFromChromeId(trash_node->id());
++    DCHECK_NE(trash_bookmarks_sync_id, syncer::kInvalidId);
++    context->AddBookmarkRoot(trash_node);
++  }
++
+   // WARNING: The order in which we push these should match their order in the
+   // bookmark model (see BookmarkModel::DoneLoading(..)).
+   context->PushNode(bookmark_bar_sync_id);
+   context->PushNode(other_bookmarks_sync_id);
+   if (mobile_bookmarks_sync_id != syncer::kInvalidId)
+     context->PushNode(mobile_bookmarks_sync_id);
++  if (trash_bookmarks_sync_id != syncer::kInvalidId)
++    context->PushNode(trash_bookmarks_sync_id);
+ 
+   return syncer::SyncError();
+ }
 diff --git a/components/sync_sessions/sessions_sync_manager.cc b/components/sync_sessions/sessions_sync_manager.cc
-index acb6882b7bcae3f68e4bfc4110af0daf1694b060..fcaa3a903a929f2f5e3f10b6a55b09717ecd3622 100644
+index 04e01b70a32a5d0de015a3d9c00bc21bd9a2f004..5850d7c291b615fb49304a865cc39c32c8caab3d 100644
 --- a/components/sync_sessions/sessions_sync_manager.cc
 +++ b/components/sync_sessions/sessions_sync_manager.cc
-@@ -1041,6 +1041,7 @@ void SessionsSyncManager::SetSessionTabFromDelegate(
+@@ -1039,6 +1039,7 @@ void SessionsSyncManager::SetSessionTabFromDelegate(
    session_tab->extension_app_id = tab_delegate.GetExtensionAppId();
    session_tab->user_agent_override.clear();
    session_tab->timestamp = mtime;
@@ -3502,10 +5506,10 @@ index e36a0d9717e34ee62fd534bc4e59e19be12f0224..18dd535fcc1187bcb31fe411367aec73
 +
  }  // namespace sync_sessions
 diff --git a/components/sync_sessions/synced_tab_delegate.h b/components/sync_sessions/synced_tab_delegate.h
-index c78c7e42627e29a2f215c08fa6cb7755fca37008..879e2cd6aa8034678198d80a988751063cfef435 100644
+index aa81540baebe718a8bcd5e96f69b25665d0b8dc9..ad62ad4262baa4151ff0865fa7d0a981cd4b312c 100644
 --- a/components/sync_sessions/synced_tab_delegate.h
 +++ b/components/sync_sessions/synced_tab_delegate.h
-@@ -45,6 +45,7 @@ class SyncedTabDelegate {
+@@ -43,6 +43,7 @@ class SyncedTabDelegate {
    virtual void GetSerializedNavigationAtIndex(
        int i,
        sessions::SerializedNavigationEntry* serialized_entry) const = 0;
@@ -3571,6 +5575,30 @@ index 4335b3955de9b903f858dd5cd11e411f7d21ff4f..9e58cfe89b0c60ddd78cb58d99d98ded
           (scheme1 == url::kAboutScheme && scheme2 == kChromeUIScheme) ||
           (scheme1 == kChromeUIScheme && scheme2 == url::kAboutScheme);
  }
+diff --git a/components/variations/variations_url_constants.cc b/components/variations/variations_url_constants.cc
+index f530ff5cc9363aa68f6f0d123a95930847e238c9..19e4762f32464765e53cbdf9f40d90f5cee4669b 100644
+--- a/components/variations/variations_url_constants.cc
++++ b/components/variations/variations_url_constants.cc
+@@ -6,15 +6,16 @@
+ 
+ #include "build/build_config.h"
+ 
++#include "sync/vivaldi_sync_urls.h"
++
+ namespace variations {
+ 
+ // Default server of Variations seed info.
+ #if defined(OS_ANDROID)
+ const char kDefaultServerUrl[] =
+-    "https://clientservices.googleapis.com/chrome-variations/seed";
++    SYNC_URL("/chrome-variations/seed");
+ #else
+ const char kDefaultServerUrl[] =
+-    "https://clients4.google.com/chrome-variations/seed";
++    SYNC_URL("/chrome-variations/seed");
+ #endif
+-
+ }  // namespace variations
 diff --git a/components/version_info/version_info.cc b/components/version_info/version_info.cc
 index 70657785f2e3cf99f9bad601b8fe2c8dbf371df7..eea92899903148b8b2689c93abec72972fc018a4 100644
 --- a/components/version_info/version_info.cc
