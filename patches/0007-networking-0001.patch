@@ -1,5 +1,23 @@
+diff --git a/net/cert/cert_verify_proc_unittest.cc b/net/cert/cert_verify_proc_unittest.cc
+index 93437474b3373e42aa14165d6cfa9dd86d0036e0..0d880ce372313ae1a70ec9c60b57d81eb2bf6a06 100644
+--- a/net/cert/cert_verify_proc_unittest.cc
++++ b/net/cert/cert_verify_proc_unittest.cc
+@@ -700,6 +700,13 @@ class CertVerifyProcInspectSignatureAlgorithmsTest : public ::testing::Test {
+     LOG(INFO) << "Skipping test on iOS because certs with mismatched "
+                  "algorithms cannot be imported";
+     return false;
++#elif defined(OS_MACOSX)
++    if (base::mac::IsAtLeastOS10_12()) {
++      LOG(INFO) << "Skipping test on macOS >= 10.12 because certs with "
++                   "mismatched algorithms cannot be imported";
++      return false;
++    }
++    return true;
+ #else
+     return true;
+ #endif
 diff --git a/net/ssl/ssl_config.cc b/net/ssl/ssl_config.cc
-index 3275ac47fe9360d275ba2ef07e5508ff2b418ce5..68f8ea8d802d252933cc3483b70a307f24d963ab 100644
+index 726ce48f1e9b53eb14f1bf0c9762a2a3b356a9b2..3357da6323501e3ec36d09156053f67e52d6d8af 100644
 --- a/net/ssl/ssl_config.cc
 +++ b/net/ssl/ssl_config.cc
 @@ -6,6 +6,8 @@
@@ -19,7 +37,7 @@ index 3275ac47fe9360d275ba2ef07e5508ff2b418ce5..68f8ea8d802d252933cc3483b70a307f
 +    : rev_checking_enabled(vivaldi::IsVivaldiRunning()), // false when testing
        rev_checking_required_local_anchors(false),
        sha1_local_anchors_enabled(true),
-       version_min(kDefaultSSLVersionMin),
+       common_name_fallback_local_anchors_enabled(true),
 diff --git a/net/test/embedded_test_server/embedded_test_server.cc b/net/test/embedded_test_server/embedded_test_server.cc
 index 0f89bd9c9e4ad8aec00628a3a8ea2bdc849abddc..d528a6f070a09d8dcc4ad59abde6cda75640e79d 100644
 --- a/net/test/embedded_test_server/embedded_test_server.cc
@@ -34,11 +52,38 @@ index 0f89bd9c9e4ad8aec00628a3a8ea2bdc849abddc..d528a6f070a09d8dcc4ad59abde6cda7
  }
  
  void EmbeddedTestServer::ServeFilesFromSourceDirectory(
+diff --git a/services/ui/gpu/gpu_service.cc b/services/ui/gpu/gpu_service.cc
+index f5e5b1f179bcdf34da4450fb22d8905a4a2a21e7..42115f3187a19f17cf2757cfab930057a8a7a883 100644
+--- a/services/ui/gpu/gpu_service.cc
++++ b/services/ui/gpu/gpu_service.cc
+@@ -35,6 +35,10 @@
+ #include "ui/gl/init/gl_factory.h"
+ #include "url/gurl.h"
+ 
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#include "platform_media/gpu/pipeline/propmedia_gpu_channel_manager.h"
++#endif
++
+ namespace ui {
+ 
+ GpuService::GpuService(const gpu::GPUInfo& gpu_info,
+@@ -90,7 +94,11 @@ void GpuService::InitializeWithHost(mojom::GpuHostPtr gpu_host,
+   // Defer creation of the render thread. This is to prevent it from handling
+   // IPC messages before the sandbox has been enabled and all other necessary
+   // initialization has succeeded.
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++  gpu_channel_manager_.reset(new gpu::ProprietaryMediaGpuChannelManager(
++#else
+   gpu_channel_manager_.reset(new gpu::GpuChannelManager(
++#endif
+       gpu_preferences_, this, watchdog_thread_.get(),
+       base::ThreadTaskRunnerHandle::Get().get(), io_runner_.get(),
+       shutdown_event ? shutdown_event : &shutdown_event_, sync_point_manager_,
 diff --git a/services/ui/public/cpp/gpu/gpu.cc b/services/ui/public/cpp/gpu/gpu.cc
-index 06238988ac9cfa9d4b02527955740b3cf5a3a21e..28e765f649fc444aeb5d44ed173799445c8b792f 100644
+index 45ba2595fcd7a5c9a20961d317c748552c20f130..4a7a2ed8379e7eef4d7bd1d2a76ff6404939fff0 100644
 --- a/services/ui/public/cpp/gpu/gpu.cc
 +++ b/services/ui/public/cpp/gpu/gpu.cc
-@@ -104,11 +104,11 @@ void Gpu::EstablishGpuChannel(
+@@ -102,11 +102,11 @@ void Gpu::EstablishGpuChannel(
      connector_->BindInterface(ui::mojom::kServiceName, &gpu_);
    else
      interface_provider_->GetInterface(&gpu_);
@@ -52,7 +97,7 @@ index 06238988ac9cfa9d4b02527955740b3cf5a3a21e..28e765f649fc444aeb5d44ed17379944
    DCHECK(IsMainThread());
    if (GetGpuChannel())
      return gpu_channel_;
-@@ -122,7 +122,7 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync() {
+@@ -120,7 +120,7 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync() {
      interface_provider_->GetInterface(&gpu_);
  
    mojo::SyncCallRestrictions::ScopedAllowSyncCall allow_sync_call;
