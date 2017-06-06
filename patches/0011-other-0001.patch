@@ -14,7 +14,7 @@ index 74328c47613e95ba8ef5f25629247789329db88c..4f4f98ffbc3a5d8cb04d0599f0dc5bf8
 +*.sh text eol=lf
 diff --git a/.gitmodules b/.gitmodules
 new file mode 100644
-index 0000000000000000000000000000000000000000..4027d0f8123e0a800d0e1f993ad910b1c4cf034e
+index 0000000000000000000000000000000000000000..2b41d0923869710aff4c0ca368b551e0caf82ce5
 --- /dev/null
 +++ b/.gitmodules
 @@ -0,0 +1,273 @@
@@ -101,9 +101,6 @@ index 0000000000000000000000000000000000000000..4027d0f8123e0a800d0e1f993ad910b1
 +	url = ../../external/fontconfig.git
 +[submodule "third_party/freetype-android/src"]
 +	path = third_party/freetype-android/src
-+	url = ../src/third_party/freetype2.git
-+[submodule "third_party/freetype2/src"]
-+	path = third_party/freetype2/src
 +	url = ../src/third_party/freetype2.git
 +[submodule "third_party/gestures/gestures"]
 +	path = third_party/gestures/gestures
@@ -213,6 +210,9 @@ index 0000000000000000000000000000000000000000..4027d0f8123e0a800d0e1f993ad910b1
 +[submodule "third_party/re2/src"]
 +	path = third_party/re2/src
 +	url = ../../external/github.com/google/re2.git
++[submodule "third_party/scan-build/src"]
++	path = third_party/scan-build/src
++	url = ../llvm-project/cfe/tools/scan-build.git
 +[submodule "third_party/scons-2.0.1"]
 +	path = third_party/scons-2.0.1
 +	url = ../../native_client/src/third_party/scons-2.0.1.git
@@ -348,10 +348,10 @@ index c89a3692bf4ef15e29492daa8dfb93af37162753..9b94b1409cb1b2089eb4334706fd1573
        extensions::ExtensionPrefs::Get(browser_context);
    if (WasUnloadedForReload(extension->id(), reason) &&
 diff --git a/apps/launcher.cc b/apps/launcher.cc
-index 5a7dbce91733c024ffe43d249980a3c6d68f88c8..02a1a82d196128cb62f8547a67f11eb925756d12 100644
+index 4782fb604d65ed84a9504b4843cb1baf76de2c1d..db8ec0d09fb8d85b68ebe9592b63147cabcf80be 100644
 --- a/apps/launcher.cc
 +++ b/apps/launcher.cc
-@@ -41,6 +41,9 @@
+@@ -40,6 +40,9 @@
  #include "net/base/filename_util.h"
  #include "url/gurl.h"
  
@@ -361,7 +361,7 @@ index 5a7dbce91733c024ffe43d249980a3c6d68f88c8..02a1a82d196128cb62f8547a67f11eb9
  #if defined(OS_CHROMEOS)
  #include "components/user_manager/user_manager.h"
  #endif
-@@ -392,6 +395,27 @@ void LaunchPlatformAppWithCommandLineAndLaunchId(
+@@ -391,6 +394,27 @@ void LaunchPlatformAppWithCommandLineAndLaunchId(
      }
    }
  
@@ -437,37 +437,8 @@ index 62e1972e5f2e2ba8b2fbe807c9ac42b4a6ca0558..8c5b8eb86423c821dc9faa8cf7709f4d
        break;
      }
      case base::DIR_APP_SHORTCUTS: {
-diff --git a/base/command_line.cc b/base/command_line.cc
-index 99ea2b000324b87ea4ab11bae1f7c5374586331c..7a4ede62cf80070f44676d67aaa135e85dba0b44 100644
---- a/base/command_line.cc
-+++ b/base/command_line.cc
-@@ -322,6 +322,11 @@ CommandLine::StringType CommandLine::GetSwitchValueNative(
-                                                   : *(result->second);
- }
- 
-+void CommandLine::AppendSwitchNoDup(const std::string& switch_string) {
-+  if (!HasSwitch(switch_string))
-+    AppendSwitchNative(switch_string, StringType());
-+}
-+
- void CommandLine::AppendSwitch(const std::string& switch_string) {
-   AppendSwitchNative(switch_string, StringType());
- }
-diff --git a/base/command_line.h b/base/command_line.h
-index 3d29f8fee7fbb8de9e8c1fb691515ddb8bdccbdd..ac608b4884618803506877d63766e876cf3a3fab 100644
---- a/base/command_line.h
-+++ b/base/command_line.h
-@@ -182,6 +182,8 @@ class BASE_EXPORT CommandLine {
-                           const StringType& value);
-   void AppendSwitchASCII(const std::string& switch_string,
-                          const std::string& value);
-+  // Add a switch if it is not already present in the list
-+  void AppendSwitchNoDup(const std::string& switch_string);
- 
-   // Copy a set of switches (and any values) from another command line.
-   // Commonly used when launching a subprocess.
 diff --git a/base/files/file_util_posix.cc b/base/files/file_util_posix.cc
-index 34a1c4d1e6e2481a953ad2fac5d30ddb124ca3cd..d0c62793249e033731cf4b3888bd03c1cf280a87 100644
+index b6a5f3ff92ce5abd09b3ba784ab14105a04838b0..efa5e1c2b31ff3cefaa660035465b9f3f75e6aa8 100644
 --- a/base/files/file_util_posix.cc
 +++ b/base/files/file_util_posix.cc
 @@ -136,7 +136,9 @@ std::string TempFileName() {
@@ -482,10 +453,10 @@ index 34a1c4d1e6e2481a953ad2fac5d30ddb124ca3cd..d0c62793249e033731cf4b3888bd03c1
  #else
    return std::string(".org.chromium.Chromium.XXXXXX");
 diff --git a/base/mac/foundation_util.mm b/base/mac/foundation_util.mm
-index 4f6fa60afd00fdb563888cf7c5c58c2c5b5b8dcd..76620eb9be4f9f070b71b446238bb7fca169be7b 100644
+index eb8284ee58fef43df064d3365dd1b0e8a65c9f49..73573df4029b9f51baf96ddfdcff5db050a4a212 100644
 --- a/base/mac/foundation_util.mm
 +++ b/base/mac/foundation_util.mm
-@@ -243,7 +243,9 @@ const char* BaseBundleID() {
+@@ -247,7 +247,9 @@ const char* BaseBundleID() {
      return base_bundle_id;
    }
  
@@ -512,19 +483,19 @@ index 3a18faa83dd70e82c8381d33cc247afa270339a9..6f26ea763c147f252d1965af2ea71f33
  #else
    std::string name_base = std::string("org.chromium.Chromium");
 diff --git a/base/path_service.cc b/base/path_service.cc
-index 3f954d79e4bd8f4a84f80a505eb2fdde93577254..171912d612dbc40d2a6ed20238615dba1ef44c43 100644
+index 1b9d3949300bb9c3286f8f365c8588a4540936fa..dc34b8aa73582fe5489320b6b56fde9a1b8520ff 100644
 --- a/base/path_service.cc
 +++ b/base/path_service.cc
-@@ -18,6 +18,8 @@
+@@ -17,6 +17,8 @@
  #include "base/synchronization/lock.h"
  #include "build/build_config.h"
  
-+#include "base/threading/thread_local.h"
++#include "base/threading/thread_restrictions.h"
 +
  namespace base {
  
  bool PathProvider(int key, FilePath* result);
-@@ -206,8 +208,13 @@ bool PathService::Get(int key, FilePath* result) {
+@@ -204,8 +206,13 @@ bool PathService::Get(int key, FilePath* result) {
      return false;
  
    if (path.ReferencesParent()) {
@@ -533,13 +504,13 @@ index 3f954d79e4bd8f4a84f80a505eb2fdde93577254..171912d612dbc40d2a6ed20238615dba
 +    bool last_ioallow = base::ThreadRestrictions::SetIOAllowed(true);
      // Make sure path service never returns a path with ".." in it.
      path = MakeAbsoluteFilePath(path);
-+	// Turn it back on, if it was on.
-+	base::ThreadRestrictions::SetIOAllowed(last_ioallow);
++    // Turn it back on, if it was on.
++    base::ThreadRestrictions::SetIOAllowed(last_ioallow);
      if (path.empty())
        return false;
    }
 diff --git a/base/process/process_win.cc b/base/process/process_win.cc
-index afc6a786ba439dd96b7fd1a621902b7e26a10e28..9537842df5462b03ff154540e366793354dff5f9 100644
+index 623212654ee5cdabfee2355f81a8dc87f5f57d94..b0a93ba10306b5a015d1446f1f52478f4cd9b87d 100644
 --- a/base/process/process_win.cc
 +++ b/base/process/process_win.cc
 @@ -67,7 +67,8 @@ Process Process::OpenWithAccess(ProcessId pid, DWORD desired_access) {
@@ -552,49 +523,26 @@ index afc6a786ba439dd96b7fd1a621902b7e26a10e28..9537842df5462b03ff154540e3667933
    ProcessHandle out_handle;
    if (!::DuplicateHandle(GetCurrentProcess(), handle,
                           GetCurrentProcess(), &out_handle,
-diff --git a/base/test/launcher/test_launcher.cc b/base/test/launcher/test_launcher.cc
-index 2f22d32d50a4dba63b902aa4006e94a22db08071..75d74667c150156e66852b04d57d9de57d4d0818 100644
---- a/base/test/launcher/test_launcher.cc
-+++ b/base/test/launcher/test_launcher.cc
-@@ -801,6 +801,7 @@ bool TestLauncher::Init() {
-   if (command_line->HasSwitch(switches::kTestLauncherForceRunBrokenTests))
-     force_run_broken_tests_ = true;
- 
-+  fprintf(stdout, "Initial parallel jobs limit: %" PRIuS ".\n", parallel_jobs_);
-   if (command_line->HasSwitch(switches::kTestLauncherJobs)) {
-     size_t jobs = 0U;
-     if (!StringToSizeT(command_line->GetSwitchValueASCII(
-@@ -811,10 +812,12 @@ bool TestLauncher::Init() {
-     }
- 
-     parallel_jobs_ = jobs;
-+    fprintf(stdout, "Commandline update parallel jobs limit: %" PRIuS ".\n", parallel_jobs_);
-   } else if (command_line->HasSwitch(kGTestFilterFlag) && !BotModeEnabled()) {
-     // Do not run jobs in parallel by default if we are running a subset of
-     // the tests and if bot mode is off.
-     parallel_jobs_ = 1U;
-+    fprintf(stdout, "Filter flag update parallel jobs limit: %" PRIuS ".\n", parallel_jobs_);
-   }
- 
-   fprintf(stdout, "Using %" PRIuS " parallel jobs.\n", parallel_jobs_);
 diff --git a/base/test/launcher/unit_test_launcher.cc b/base/test/launcher/unit_test_launcher.cc
-index c9f0eb0afb139f02094dcb62408f747379fdda67..15008e80bdab65bf29f8e70b682fa92c3d71c0be 100644
+index c9f0eb0afb139f02094dcb62408f747379fdda67..d42f0bf1cf399be8006c76592cec38f44fa8ac1b 100644
 --- a/base/test/launcher/unit_test_launcher.cc
 +++ b/base/test/launcher/unit_test_launcher.cc
-@@ -35,6 +35,8 @@
+@@ -35,6 +35,9 @@
  #include "base/files/file_descriptor_watcher_posix.h"
  #endif
  
++#include "app/vivaldi_apptools.h"
 +#include "base/vivaldi_switches.h"
 +
  namespace base {
  
  namespace {
-@@ -182,6 +184,8 @@ int LaunchUnitTestsInternal(const RunTestSuiteCallback& run_test_suite,
+@@ -182,6 +185,9 @@ int LaunchUnitTestsInternal(const RunTestSuiteCallback& run_test_suite,
                              int default_batch_limit,
                              bool use_job_objects,
                              const Closure& gtest_init) {
-+  CommandLine::ForCurrentProcess()->AppendSwitchNoDup(switches::kDisableVivaldi);
++  vivaldi::CommandLineAppendSwitchNoDup(CommandLine::ForCurrentProcess(),
++                                        switches::kDisableVivaldi);
 +
  #if defined(OS_ANDROID)
    // We can't easily fork on Android, just run the test suite directly.
@@ -4016,10 +3964,10 @@ index 0000000000000000000000000000000000000000..13609cb8dc0ed48b9de436247326a465
 +#endif  // CLIENT_IOS_HANDLER_IOS_BREAKPAD_CONTROLLER_H_
 diff --git a/breakpad/src/client/ios/BreakpadController.mm b/breakpad/src/client/ios/BreakpadController.mm
 new file mode 100644
-index 0000000000000000000000000000000000000000..dd71cff68ac7c959b82205114796fbc9341cef33
+index 0000000000000000000000000000000000000000..22f397a9bc7c6ea0953c65ee34e57e602c2bb7f3
 --- /dev/null
 +++ b/breakpad/src/client/ios/BreakpadController.mm
-@@ -0,0 +1,354 @@
+@@ -0,0 +1,351 @@
 +// Copyright (c) 2012, Google Inc.
 +// All rights reserved.
 +//
@@ -4115,11 +4063,12 @@ index 0000000000000000000000000000000000000000..dd71cff68ac7c959b82205114796fbc9
 +@implementation BreakpadController
 +
 ++ (BreakpadController*)sharedInstance {
-+  @synchronized(self) {
-+    static BreakpadController* sharedInstance_ =
-+        [[BreakpadController alloc] initSingleton];
-+    return sharedInstance_;
-+  }
++  static dispatch_once_t onceToken;
++  static BreakpadController* sharedInstance ;
++  dispatch_once(&onceToken, ^{
++      sharedInstance = [[BreakpadController alloc] initSingleton];
++  });
++  return sharedInstance;
 +}
 +
 +- (id)init {
@@ -4201,10 +4150,9 @@ index 0000000000000000000000000000000000000000..dd71cff68ac7c959b82205114796fbc9
 +        enableUploads_ = YES;
 +        [self sendStoredCrashReports];
 +      } else {
++        // disable the enableUpload_ flag.
++        // sendDelay checks this flag and disables the upload of logs by sendStoredCrashReports
 +        enableUploads_ = NO;
-+        [NSObject cancelPreviousPerformRequestsWithTarget:self
-+            selector:@selector(sendStoredCrashReports)
-+            object:nil];
 +      }
 +  });
 +}
@@ -4339,38 +4287,35 @@ index 0000000000000000000000000000000000000000..dd71cff68ac7c959b82205114796fbc9
 +  [userDefaults synchronize];
 +}
 +
++// This method must be called from the breakpad queue.
 +- (void)sendStoredCrashReports {
-+  dispatch_async(queue_, ^{
-+      if (BreakpadGetCrashReportCount(breakpadRef_) == 0)
-+        return;
++  if (BreakpadGetCrashReportCount(breakpadRef_) == 0)
++    return;
 +
-+      int timeToWait = [self sendDelay];
++  int timeToWait = [self sendDelay];
 +
-+      // Unable to ever send report.
-+      if (timeToWait == -1)
-+        return;
++  // Unable to ever send report.
++  if (timeToWait == -1)
++    return;
 +
-+      // A report can be sent now.
-+      if (timeToWait == 0) {
-+        [self reportWillBeSent];
-+        BreakpadUploadNextReportWithParameters(breakpadRef_,
-+                                               uploadTimeParameters_);
++  // A report can be sent now.
++  if (timeToWait == 0) {
++    [self reportWillBeSent];
++    BreakpadUploadNextReportWithParameters(breakpadRef_,
++                                           uploadTimeParameters_);
 +
-+        // If more reports must be sent, make sure this method is called again.
-+        if (BreakpadGetCrashReportCount(breakpadRef_) > 0)
-+          timeToWait = uploadIntervalInSeconds_;
-+      }
++    // If more reports must be sent, make sure this method is called again.
++    if (BreakpadGetCrashReportCount(breakpadRef_) > 0)
++      timeToWait = uploadIntervalInSeconds_;
++  }
 +
-+      // A report must be sent later.
-+      if (timeToWait > 0) {
-+        // performSelector: doesn't work on queue_
-+        dispatch_async(dispatch_get_main_queue(), ^{
-+            [self performSelector:@selector(sendStoredCrashReports)
-+                       withObject:nil
-+                       afterDelay:timeToWait];
-+        });
-+     }
-+  });
++  // A report must be sent later.
++  if (timeToWait > 0) {
++    dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeToWait * NSEC_PER_SEC));
++    dispatch_after(delay, queue_, ^{
++        [self sendStoredCrashReports];
++    });
++  }
 +}
 +
 +@end
@@ -6307,10 +6252,10 @@ index 0000000000000000000000000000000000000000..b6e77b4b5272c8f6fe6a917698a4f83b
 +#endif  // CLIENT_LINUX_DUMP_WRITER_COMMON_UCONTEXT_READER_H
 diff --git a/breakpad/src/client/linux/handler/exception_handler.cc b/breakpad/src/client/linux/handler/exception_handler.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..8565bbb04d8a7c6b49b68af1416106d825f6f464
+index 0000000000000000000000000000000000000000..d372a10ca1c48e6483517ea9844dc3e02631359e
 --- /dev/null
 +++ b/breakpad/src/client/linux/handler/exception_handler.cc
-@@ -0,0 +1,767 @@
+@@ -0,0 +1,779 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -6899,14 +6844,20 @@ index 0000000000000000000000000000000000000000..8565bbb04d8a7c6b49b68af1416106d8
 +// Runs on the cloned process.
 +bool ExceptionHandler::DoDump(pid_t crashing_process, const void* context,
 +                              size_t context_size) {
++  const bool may_skip_dump =
++      minidump_descriptor_.skip_dump_if_principal_mapping_not_referenced();
++  const uintptr_t principal_mapping_address =
++      minidump_descriptor_.address_within_principal_mapping();
++  const bool sanitize_stacks = minidump_descriptor_.sanitize_stacks();
 +  if (minidump_descriptor_.IsMicrodumpOnConsole()) {
 +    return google_breakpad::WriteMicrodump(
 +        crashing_process,
 +        context,
 +        context_size,
 +        mapping_list_,
-+        minidump_descriptor_.skip_dump_if_principal_mapping_not_referenced(),
-+        minidump_descriptor_.address_within_principal_mapping(),
++        may_skip_dump,
++        principal_mapping_address,
++        sanitize_stacks,
 +        *minidump_descriptor_.microdump_extra_info());
 +  }
 +  if (minidump_descriptor_.IsFD()) {
@@ -6916,7 +6867,10 @@ index 0000000000000000000000000000000000000000..8565bbb04d8a7c6b49b68af1416106d8
 +                                          context,
 +                                          context_size,
 +                                          mapping_list_,
-+                                          app_memory_list_);
++                                          app_memory_list_,
++                                          may_skip_dump,
++                                          principal_mapping_address,
++                                          sanitize_stacks);
 +  }
 +  return google_breakpad::WriteMinidump(minidump_descriptor_.path(),
 +                                        minidump_descriptor_.size_limit(),
@@ -6924,7 +6878,10 @@ index 0000000000000000000000000000000000000000..8565bbb04d8a7c6b49b68af1416106d8
 +                                        context,
 +                                        context_size,
 +                                        mapping_list_,
-+                                        app_memory_list_);
++                                        app_memory_list_,
++                                        may_skip_dump,
++                                        principal_mapping_address,
++                                        sanitize_stacks);
 +}
 +
 +// static
@@ -8607,10 +8564,10 @@ index 0000000000000000000000000000000000000000..bf01f0c7b1d4667542598ea55a242c07
 +#endif  // CLIENT_LINUX_HANDLER_MICRODUMP_EXTRA_INFO_H_
 diff --git a/breakpad/src/client/linux/handler/minidump_descriptor.cc b/breakpad/src/client/linux/handler/minidump_descriptor.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..ce09153ddba9e9f7545d953fe13724111df4a11f
+index 0000000000000000000000000000000000000000..bd94474e9ac9316d84023d0ca615fc93297be3bc
 --- /dev/null
 +++ b/breakpad/src/client/linux/handler/minidump_descriptor.cc
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,97 @@
 +// Copyright (c) 2012 Google Inc.
 +// All rights reserved.
 +//
@@ -8658,6 +8615,11 @@ index 0000000000000000000000000000000000000000..ce09153ddba9e9f7545d953fe1372411
 +      directory_(descriptor.directory_),
 +      c_path_(NULL),
 +      size_limit_(descriptor.size_limit_),
++      address_within_principal_mapping_(
++          descriptor.address_within_principal_mapping_),
++      skip_dump_if_principal_mapping_not_referenced_(
++          descriptor.skip_dump_if_principal_mapping_not_referenced_),
++      sanitize_stacks_(descriptor.sanitize_stacks_),
 +      microdump_extra_info_(descriptor.microdump_extra_info_) {
 +  // The copy constructor is not allowed to be called on a MinidumpDescriptor
 +  // with a valid path_, as getting its c_path_ would require the heap which
@@ -8679,6 +8641,11 @@ index 0000000000000000000000000000000000000000..ce09153ddba9e9f7545d953fe1372411
 +    UpdatePath();
 +  }
 +  size_limit_ = descriptor.size_limit_;
++  address_within_principal_mapping_ =
++      descriptor.address_within_principal_mapping_;
++  skip_dump_if_principal_mapping_not_referenced_ =
++      descriptor.skip_dump_if_principal_mapping_not_referenced_;
++  sanitize_stacks_ = descriptor.sanitize_stacks_;
 +  microdump_extra_info_ = descriptor.microdump_extra_info_;
 +  return *this;
 +}
@@ -8700,10 +8667,10 @@ index 0000000000000000000000000000000000000000..ce09153ddba9e9f7545d953fe1372411
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/client/linux/handler/minidump_descriptor.h b/breakpad/src/client/linux/handler/minidump_descriptor.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..f601427cc07edfcd32f16c09c282113506ccdaaf
+index 0000000000000000000000000000000000000000..911beaef45b71ac4dcdacbe244b2e8f59c265b31
 --- /dev/null
 +++ b/breakpad/src/client/linux/handler/minidump_descriptor.h
-@@ -0,0 +1,184 @@
+@@ -0,0 +1,199 @@
 +// Copyright (c) 2012 Google Inc.
 +// All rights reserved.
 +//
@@ -8770,7 +8737,8 @@ index 0000000000000000000000000000000000000000..f601427cc07edfcd32f16c09c2821135
 +        c_path_(NULL),
 +        size_limit_(-1),
 +        address_within_principal_mapping_(0),
-+        skip_dump_if_principal_mapping_not_referenced_(false) {
++        skip_dump_if_principal_mapping_not_referenced_(false),
++        sanitize_stacks_(false) {
 +    assert(!directory.empty());
 +  }
 +
@@ -8780,7 +8748,8 @@ index 0000000000000000000000000000000000000000..f601427cc07edfcd32f16c09c2821135
 +        c_path_(NULL),
 +        size_limit_(-1),
 +        address_within_principal_mapping_(0),
-+        skip_dump_if_principal_mapping_not_referenced_(false) {
++        skip_dump_if_principal_mapping_not_referenced_(false),
++        sanitize_stacks_(false) {
 +    assert(fd != -1);
 +  }
 +
@@ -8789,7 +8758,8 @@ index 0000000000000000000000000000000000000000..f601427cc07edfcd32f16c09c2821135
 +        fd_(-1),
 +        size_limit_(-1),
 +        address_within_principal_mapping_(0),
-+        skip_dump_if_principal_mapping_not_referenced_(false) {}
++        skip_dump_if_principal_mapping_not_referenced_(false),
++        sanitize_stacks_(false) {}
 +
 +  explicit MinidumpDescriptor(const MinidumpDescriptor& descriptor);
 +  MinidumpDescriptor& operator=(const MinidumpDescriptor& descriptor);
@@ -8832,6 +8802,11 @@ index 0000000000000000000000000000000000000000..f601427cc07edfcd32f16c09c2821135
 +        skip_dump_if_principal_mapping_not_referenced;
 +  }
 +
++  bool sanitize_stacks() const { return sanitize_stacks_; }
++  void set_sanitize_stacks(bool sanitize_stacks) {
++    sanitize_stacks_ = sanitize_stacks;
++  }
++
 +  MicrodumpExtraInfo* microdump_extra_info() {
 +    assert(IsMicrodumpOnConsole());
 +    return &microdump_extra_info_;
@@ -8872,6 +8847,13 @@ index 0000000000000000000000000000000000000000..f601427cc07edfcd32f16c09c2821135
 +  // associated with |address_within_principal_mapping_| will not have their
 +  // stacks logged.
 +  bool skip_dump_if_principal_mapping_not_referenced_;
++
++  // If set, stacks are sanitized to remove PII. This involves
++  // overwriting any pointer-aligned words that are not either
++  // pointers into a process mapping or small integers (+/-4096). This
++  // leaves enough information to unwind stacks, and preserve some
++  // register values, but elides strings and other program data.
++  bool sanitize_stacks_;
 +
 +  // The extra microdump data (e.g. product name/version, build
 +  // fingerprint, gpu fingerprint) that should be appended to the dump
@@ -9041,10 +9023,10 @@ index 0000000000000000000000000000000000000000..f94bbd5fb7b3de14b2ed6cd2067af449
 +#endif  // CLIENT_LINUX_LOG_LOG_H_
 diff --git a/breakpad/src/client/linux/microdump_writer/microdump_writer.cc b/breakpad/src/client/linux/microdump_writer/microdump_writer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..8109a98118bed76bf34a4742ccb8cd74b43b7693
+index 0000000000000000000000000000000000000000..065ca0b79064c741e81c1d23486b1740c0c635e6
 --- /dev/null
 +++ b/breakpad/src/client/linux/microdump_writer/microdump_writer.cc
-@@ -0,0 +1,631 @@
+@@ -0,0 +1,641 @@
 +// Copyright (c) 2014, Google Inc.
 +// All rights reserved.
 +//
@@ -9181,6 +9163,7 @@ index 0000000000000000000000000000000000000000..8109a98118bed76bf34a4742ccb8cd74
 +                  const MappingList& mappings,
 +                  bool skip_dump_if_principal_mapping_not_referenced,
 +                  uintptr_t address_within_principal_mapping,
++                  bool sanitize_stack,
 +                  const MicrodumpExtraInfo& microdump_extra_info,
 +                  LinuxDumper* dumper)
 +      : ucontext_(context ? &context->context : NULL),
@@ -9192,6 +9175,7 @@ index 0000000000000000000000000000000000000000..8109a98118bed76bf34a4742ccb8cd74
 +        skip_dump_if_principal_mapping_not_referenced_(
 +            skip_dump_if_principal_mapping_not_referenced),
 +        address_within_principal_mapping_(address_within_principal_mapping),
++        sanitize_stack_(sanitize_stack),
 +        microdump_extra_info_(microdump_extra_info),
 +        log_line_(NULL),
 +        stack_copy_(NULL),
@@ -9310,8 +9294,8 @@ index 0000000000000000000000000000000000000000..8109a98118bed76bf34a4742ccb8cd74
 +        dumper_->FindMappingNoBias(address_within_principal_mapping_);
 +    if (!principal_mapping) return CAPTURE_UNINTERESTING;
 +
-+    uintptr_t low_addr = principal_mapping->start_addr;
-+    uintptr_t high_addr = principal_mapping->start_addr + principal_mapping->size;
++    uintptr_t low_addr = principal_mapping->system_mapping_info.start_addr;
++    uintptr_t high_addr = principal_mapping->system_mapping_info.end_addr;
 +    uintptr_t pc = UContextReader::GetInstructionPointer(ucontext_);
 +    if (low_addr <= pc && pc <= high_addr) return CAPTURE_OK;
 +
@@ -9415,6 +9399,11 @@ index 0000000000000000000000000000000000000000..8109a98118bed76bf34a4742ccb8cd74
 +  }
 +
 +  void DumpThreadStack() {
++    if (sanitize_stack_) {
++      dumper_->SanitizeStackCopy(stack_copy_, stack_len_, stack_pointer_,
++                                 stack_pointer_ - stack_lower_bound_);
++    }
++
 +    LogAppend("S 0 ");
 +    LogAppend(stack_pointer_);
 +    LogAppend(" ");
@@ -9627,6 +9616,7 @@ index 0000000000000000000000000000000000000000..8109a98118bed76bf34a4742ccb8cd74
 +  const MappingList& mapping_list_;
 +  bool skip_dump_if_principal_mapping_not_referenced_;
 +  uintptr_t address_within_principal_mapping_;
++  bool sanitize_stack_;
 +  const MicrodumpExtraInfo microdump_extra_info_;
 +  char* log_line_;
 +
@@ -9654,6 +9644,7 @@ index 0000000000000000000000000000000000000000..8109a98118bed76bf34a4742ccb8cd74
 +                    const MappingList& mappings,
 +                    bool skip_dump_if_principal_mapping_not_referenced,
 +                    uintptr_t address_within_principal_mapping,
++                    bool sanitize_stack,
 +                    const MicrodumpExtraInfo& microdump_extra_info) {
 +  LinuxPtraceDumper dumper(crashing_process);
 +  const ExceptionHandler::CrashContext* context = NULL;
@@ -9666,9 +9657,10 @@ index 0000000000000000000000000000000000000000..8109a98118bed76bf34a4742ccb8cd74
 +    dumper.set_crash_signal(context->siginfo.si_signo);
 +    dumper.set_crash_thread(context->tid);
 +  }
-+  MicrodumpWriter writer(
-+      context, mappings, skip_dump_if_principal_mapping_not_referenced,
-+      address_within_principal_mapping, microdump_extra_info, &dumper);
++  MicrodumpWriter writer(context, mappings,
++                         skip_dump_if_principal_mapping_not_referenced,
++                         address_within_principal_mapping, sanitize_stack,
++                         microdump_extra_info, &dumper);
 +  if (!writer.Init())
 +    return false;
 +  writer.Dump();
@@ -9678,10 +9670,10 @@ index 0000000000000000000000000000000000000000..8109a98118bed76bf34a4742ccb8cd74
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/client/linux/microdump_writer/microdump_writer.h b/breakpad/src/client/linux/microdump_writer/microdump_writer.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..78af86df8a8e61208bcdf6b28aaf1912b155afe0
+index 0000000000000000000000000000000000000000..a1e53df62693e4132789bf3824b0de802e01e325
 --- /dev/null
 +++ b/breakpad/src/client/linux/microdump_writer/microdump_writer.h
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,68 @@
 +// Copyright (c) 2014, Google Inc.
 +// All rights reserved.
 +//
@@ -9744,6 +9736,7 @@ index 0000000000000000000000000000000000000000..78af86df8a8e61208bcdf6b28aaf1912
 +                    const MappingList& mappings,
 +                    bool skip_dump_if_main_module_not_referenced,
 +                    uintptr_t address_within_main_module,
++                    bool sanitize_stack,
 +                    const MicrodumpExtraInfo& microdump_extra_info);
 +
 +}  // namespace google_breakpad
@@ -9751,10 +9744,10 @@ index 0000000000000000000000000000000000000000..78af86df8a8e61208bcdf6b28aaf1912
 +#endif  // CLIENT_LINUX_MINIDUMP_WRITER_MICRODUMP_WRITER_H_
 diff --git a/breakpad/src/client/linux/microdump_writer/microdump_writer_unittest.cc b/breakpad/src/client/linux/microdump_writer/microdump_writer_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..5d028bd373ba8ef5da5d0ce89050eb9a08d96f21
+index 0000000000000000000000000000000000000000..cbcd1399e62ed27c455c287a5f7976d8b66c95ff
 --- /dev/null
 +++ b/breakpad/src/client/linux/microdump_writer/microdump_writer_unittest.cc
-@@ -0,0 +1,313 @@
+@@ -0,0 +1,393 @@
 +// Copyright (c) 2014 Google Inc.
 +// All rights reserved.
 +//
@@ -9830,11 +9823,14 @@ index 0000000000000000000000000000000000000000..5d028bd373ba8ef5da5d0ce89050eb9a
 +         std::string::npos != buf.find("-----END BREAKPAD MICRODUMP-----");
 +}
 +
++const char kIdentifiableString[] = "_IDENTIFIABLE_";
++
 +void CrashAndGetMicrodump(const MappingList& mappings,
 +                          const MicrodumpExtraInfo& microdump_extra_info,
 +                          std::string* microdump,
 +                          bool skip_dump_if_principal_mapping_not_referenced = false,
-+                          uintptr_t address_within_principal_mapping = 0) {
++                          uintptr_t address_within_principal_mapping = 0,
++                          bool sanitize_stack = false) {
 +  int fds[2];
 +  ASSERT_NE(-1, pipe(fds));
 +
@@ -9842,6 +9838,14 @@ index 0000000000000000000000000000000000000000..5d028bd373ba8ef5da5d0ce89050eb9a
 +  string stderr_file = temp_dir.path() + "/stderr.log";
 +  int err_fd = open(stderr_file.c_str(), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
 +  ASSERT_NE(-1, err_fd);
++
++  char identifiable_string[sizeof(kIdentifiableString)];
++
++  // This string should not appear in the resulting microdump if it
++  // has been sanitized.
++  strcpy(identifiable_string, kIdentifiableString);
++  // Force the strcpy to not be optimized away.
++  IGNORE_RET(write(STDOUT_FILENO, identifiable_string, 0));
 +
 +  const pid_t child = fork();
 +  if (child == 0) {
@@ -9869,7 +9873,8 @@ index 0000000000000000000000000000000000000000..5d028bd373ba8ef5da5d0ce89050eb9a
 +
 +  ASSERT_TRUE(WriteMicrodump(child, &context, sizeof(context), mappings,
 +                             skip_dump_if_principal_mapping_not_referenced,
-+                             address_within_principal_mapping, microdump_extra_info));
++                             address_within_principal_mapping, sanitize_stack,
++                             microdump_extra_info));
 +
 +  // Revert stderr back to the console.
 +  dup2(save_err, STDERR_FILENO);
@@ -9889,6 +9894,27 @@ index 0000000000000000000000000000000000000000..5d028bd373ba8ef5da5d0ce89050eb9a
 +  }
 +  close(err_fd);
 +  close(fds[1]);
++}
++
++void ExtractMicrodumpStackContents(const string& microdump_content,
++                                   string* result) {
++  std::istringstream iss(microdump_content);
++  result->clear();
++  for (string line; std::getline(iss, line);) {
++    if (line.find("S ") == 0) {
++      std::istringstream stack_data(line);
++      std::string key;
++      std::string addr;
++      std::string data;
++      stack_data >> key >> addr >> data;
++      EXPECT_TRUE((data.size() & 1u) == 0u);
++      result->reserve(result->size() + data.size() / 2);
++      for (size_t i = 0; i < data.size(); i += 2) {
++        std::string byte = data.substr(i, 2);
++        result->push_back(static_cast<char>(strtoul(byte.c_str(), NULL, 16)));
++      }
++    }
++  }
 +}
 +
 +void CheckMicrodumpContents(const string& microdump_content,
@@ -9930,6 +9956,13 @@ index 0000000000000000000000000000000000000000..5d028bd373ba8ef5da5d0ce89050eb9a
 +  ASSERT_TRUE(did_find_os_info);
 +  ASSERT_TRUE(did_find_product_info);
 +  ASSERT_TRUE(did_find_gpu_info);
++}
++
++bool MicrodumpStackContains(const string& microdump_content,
++                            const string& expected_content) {
++  string result;
++  ExtractMicrodumpStackContents(microdump_content, &result);
++  return result.find(kIdentifiableString) != string::npos;
 +}
 +
 +void CheckMicrodumpContents(const string& microdump_content,
@@ -9999,6 +10032,46 @@ index 0000000000000000000000000000000000000000..5d028bd373ba8ef5da5d0ce89050eb9a
 +
 +  CrashAndGetMicrodump(no_mappings, kMicrodumpExtraInfo, &buf, true, 0);
 +  ASSERT_FALSE(ContainsMicrodump(buf));
++}
++
++// Ensure that stack content does not contain an identifiable string if the
++// stack is sanitized.
++TEST(MicrodumpWriterTest, StringRemovedBySanitization) {
++  const char kProductInfo[] = "MockProduct:42.0.2311.99";
++  const char kBuildFingerprint[] =
++      "aosp/occam/mako:5.1.1/LMY47W/12345678:userdegbug/dev-keys";
++  const char kGPUFingerprint[] =
++      "Qualcomm;Adreno (TM) 330;OpenGL ES 3.0 V@104.0 AU@  (GIT@Id3510ff6dc)";
++
++  const MicrodumpExtraInfo kMicrodumpExtraInfo(
++      MakeMicrodumpExtraInfo(kBuildFingerprint, kProductInfo, kGPUFingerprint));
++
++  std::string buf;
++  MappingList no_mappings;
++
++  CrashAndGetMicrodump(no_mappings, kMicrodumpExtraInfo, &buf, false, 0u, true);
++  ASSERT_TRUE(ContainsMicrodump(buf));
++  ASSERT_FALSE(MicrodumpStackContains(buf, kIdentifiableString));
++}
++
++// Ensure that stack content does contain an identifiable string if the
++// stack is not sanitized.
++TEST(MicrodumpWriterTest, StringPresentIfNotSanitized) {
++  const char kProductInfo[] = "MockProduct:42.0.2311.99";
++  const char kBuildFingerprint[] =
++      "aosp/occam/mako:5.1.1/LMY47W/12345678:userdegbug/dev-keys";
++  const char kGPUFingerprint[] =
++      "Qualcomm;Adreno (TM) 330;OpenGL ES 3.0 V@104.0 AU@  (GIT@Id3510ff6dc)";
++
++  const MicrodumpExtraInfo kMicrodumpExtraInfo(
++      MakeMicrodumpExtraInfo(kBuildFingerprint, kProductInfo, kGPUFingerprint));
++
++  std::string buf;
++  MappingList no_mappings;
++
++  CrashAndGetMicrodump(no_mappings, kMicrodumpExtraInfo, &buf, false, 0u, false);
++  ASSERT_TRUE(ContainsMicrodump(buf));
++  ASSERT_TRUE(MicrodumpStackContains(buf, kIdentifiableString));
 +}
 +
 +// Ensure that output occurs if the interest region is set, and
@@ -11427,10 +11500,10 @@ index 0000000000000000000000000000000000000000..f5b299f824d871285ad33af3c3bc33dc
 +}
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_dumper.cc b/breakpad/src/client/linux/minidump_writer/linux_dumper.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..4a15f0cc1dfc4f89c0d914fc4642c14e4e4ffc99
+index 0000000000000000000000000000000000000000..3b8c80ab79bbf2f43c2a746b49a9cd342d14661e
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_dumper.cc
-@@ -0,0 +1,799 @@
+@@ -0,0 +1,900 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -11517,9 +11590,14 @@ index 0000000000000000000000000000000000000000..4a15f0cc1dfc4f89c0d914fc4642c14e
 +
 +namespace google_breakpad {
 +
-+#if defined(__CHROMEOS__)
-+
 +namespace {
++
++bool MappingContainsAddress(const MappingInfo& mapping, uintptr_t address) {
++  return mapping.system_mapping_info.start_addr <= address &&
++         address < mapping.system_mapping_info.end_addr;
++}
++
++#if defined(__CHROMEOS__)
 +
 +// Recover memory mappings before writing dump on ChromeOS
 +//
@@ -11681,8 +11759,9 @@ index 0000000000000000000000000000000000000000..4a15f0cc1dfc4f89c0d914fc4642c14e
 +  mappings.resize(f);
 +}
 +
-+}  // namespace
 +#endif  // __CHROMEOS__
++
++}  // namespace
 +
 +// All interesting auvx entry types are below AT_SYSINFO_EHDR
 +#define AT_MAX AT_SYSINFO_EHDR
@@ -12138,6 +12217,101 @@ index 0000000000000000000000000000000000000000..4a15f0cc1dfc4f89c0d914fc4642c14e
 +  return true;
 +}
 +
++void LinuxDumper::SanitizeStackCopy(uint8_t* stack_copy, size_t stack_len,
++                                    uintptr_t stack_pointer,
++                                    uintptr_t sp_offset) {
++  // We optimize the search for containing mappings in three ways:
++  // 1) We expect that pointers into the stack mapping will be common, so
++  //    we cache that address range.
++  // 2) The last referenced mapping is a reasonable predictor for the next
++  //    referenced mapping, so we test that first.
++  // 3) We precompute a bitfield based upon bits 32:32-n of the start and
++  //    stop addresses, and use that to short circuit any values that can
++  //    not be pointers. (n=11)
++  const uintptr_t defaced =
++#if defined(__LP64__)
++      0x0defaced0defaced;
++#else
++      0x0defaced;
++#endif
++  // the bitfield length is 2^test_bits long.
++  const unsigned int test_bits = 11;
++  // byte length of the corresponding array.
++  const unsigned int array_size = 1 << (test_bits - 3);
++  const unsigned int array_mask = array_size - 1;
++  // The amount to right shift pointers by. This captures the top bits
++  // on 32 bit architectures. On 64 bit architectures this would be
++  // uninformative so we take the same range of bits.
++  const unsigned int shift = 32 - 11;
++  const MappingInfo* last_hit_mapping = nullptr;
++  const MappingInfo* hit_mapping = nullptr;
++  const MappingInfo* stack_mapping = FindMappingNoBias(stack_pointer);
++  // The magnitude below which integers are considered to be to be
++  // 'small', and not constitute a PII risk. These are included to
++  // avoid eliding useful register values.
++  const ssize_t small_int_magnitude = 4096;
++
++  char could_hit_mapping[array_size];
++  my_memset(could_hit_mapping, 0, array_size);
++
++  // Initialize the bitfield such that if the (pointer >> shift)'th
++  // bit, modulo the bitfield size, is not set then there does not
++  // exist a mapping in mappings_ that would contain that pointer.
++  for (size_t i = 0; i < mappings_.size(); ++i) {
++    if (!mappings_[i]->exec) continue;
++    // For each mapping, work out the (unmodulo'ed) range of bits to
++    // set.
++    uintptr_t start = mappings_[i]->start_addr;
++    uintptr_t end = start + mappings_[i]->size;
++    start >>= shift;
++    end >>= shift;
++    for (size_t bit = start; bit <= end; ++bit) {
++      // Set each bit in the range, applying the modulus.
++      could_hit_mapping[(bit >> 3) & array_mask] |= 1 << (bit & 7);
++    }
++  }
++
++  // Zero memory that is below the current stack pointer.
++  const uintptr_t offset =
++      (sp_offset + sizeof(uintptr_t) - 1) & ~(sizeof(uintptr_t) - 1);
++  if (offset) {
++    my_memset(stack_copy, 0, offset);
++  }
++
++  // Apply sanitization to each complete pointer-aligned word in the
++  // stack.
++  uint8_t* sp;
++  for (sp = stack_copy + offset;
++       sp <= stack_copy + stack_len - sizeof(uintptr_t);
++       sp += sizeof(uintptr_t)) {
++    uintptr_t addr;
++    my_memcpy(&addr, sp, sizeof(uintptr_t));
++    if (static_cast<intptr_t>(addr) <= small_int_magnitude &&
++        static_cast<intptr_t>(addr) >= -small_int_magnitude) {
++      continue;
++    }
++    if (stack_mapping && MappingContainsAddress(*stack_mapping, addr)) {
++      continue;
++    }
++    if (last_hit_mapping && MappingContainsAddress(*last_hit_mapping, addr)) {
++      continue;
++    }
++    uintptr_t test = addr >> shift;
++    if (could_hit_mapping[(test >> 3) & array_mask] & (1 << (test & 7)) &&
++        (hit_mapping = FindMappingNoBias(addr)) != nullptr &&
++        hit_mapping->exec) {
++      last_hit_mapping = hit_mapping;
++      continue;
++    }
++    my_memcpy(sp, &defaced, sizeof(uintptr_t));
++  }
++  // Zero any partial word at the top of the stack, if alignment is
++  // such that that is required.
++  if (sp < stack_copy + stack_len) {
++    my_memset(sp, 0, stack_copy + stack_len - sp);
++  }
++}
++
 +bool LinuxDumper::StackHasPointerToMapping(const uint8_t* stack_copy,
 +                                           size_t stack_len,
 +                                           uintptr_t sp_offset,
@@ -12232,10 +12406,10 @@ index 0000000000000000000000000000000000000000..4a15f0cc1dfc4f89c0d914fc4642c14e
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_dumper.h b/breakpad/src/client/linux/minidump_writer/linux_dumper.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..0e20209b1856dcaaa5f48d919c2c6e5952e029f9
+index 0000000000000000000000000000000000000000..23c78e08b00971df6e3e72df5c1d08d919344a65
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_dumper.h
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,296 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -12353,6 +12527,19 @@ index 0000000000000000000000000000000000000000..0e20209b1856dcaaa5f48d919c2c6e59
 +  //   stack_len: (output) the length of the memory area
 +  //   stack_top: the current top of the stack
 +  bool GetStackInfo(const void** stack, size_t* stack_len, uintptr_t stack_top);
++
++  // Sanitize a copy of the stack by overwriting words that are not
++  // pointers with a sentinel (0x0defaced).
++  //   stack_copy: a copy of the stack to sanitize. |stack_copy| might
++  //               not be word aligned, but it represents word aligned
++  //               data copied from another location.
++  //   stack_len: the length of the allocation pointed to by |stack_copy|.
++  //   stack_pointer: the address of the stack pointer (used to locate
++  //                  the stack mapping, as an optimization).
++  //   sp_offset: the offset relative to stack_copy that reflects the
++  //              current value of the stack pointer.
++  void SanitizeStackCopy(uint8_t* stack_copy, size_t stack_len,
++                         uintptr_t stack_pointer, uintptr_t sp_offset);
 +
 +  // Test whether |stack_copy| contains a pointer-aligned word that
 +  // could be an address within a given mapping.
@@ -12521,10 +12708,10 @@ index 0000000000000000000000000000000000000000..0e20209b1856dcaaa5f48d919c2c6e59
 +#endif  // CLIENT_LINUX_HANDLER_LINUX_DUMPER_H_
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_dumper_unittest_helper.cc b/breakpad/src/client/linux/minidump_writer/linux_dumper_unittest_helper.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..4ccb7201fab0df33c7998c5b1ea71cd6138ace5f
+index 0000000000000000000000000000000000000000..3ad48e501554a243cfe8448f909861e0ba9620ff
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_dumper_unittest_helper.cc
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,95 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -12584,14 +12771,15 @@ index 0000000000000000000000000000000000000000..4ccb7201fab0df33c7998c5b1ea71cd6
 +
 +void *thread_function(void *data) {
 +  int pipefd = *static_cast<int *>(data);
-+  volatile pid_t thread_id = syscall(__NR_gettid);
++  volatile pid_t* thread_id = new pid_t;
++  *thread_id = syscall(__NR_gettid);
 +  // Signal parent that a thread has started.
 +  uint8_t byte = 1;
 +  if (write(pipefd, &byte, sizeof(byte)) != sizeof(byte)) {
 +    perror("ERROR: parent notification failed");
 +    return NULL;
 +  }
-+  register volatile pid_t *thread_id_ptr asm(TID_PTR_REGISTER) = &thread_id;
++  register volatile pid_t *thread_id_ptr asm(TID_PTR_REGISTER) = thread_id;
 +  while (true)
 +    asm volatile ("" : : "r" (thread_id_ptr));
 +  return NULL;
@@ -13080,10 +13268,10 @@ index 0000000000000000000000000000000000000000..2ce834b0fd08c65e5f72e7cca2f6ea45
 +#endif  // CLIENT_LINUX_HANDLER_LINUX_PTRACE_DUMPER_H_
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper_unittest.cc b/breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..be533e157d8bf080feb49946f75ee948df9ba697
+index 0000000000000000000000000000000000000000..2ef1c4941397937bd7061c8f2498e67c7a3baf6b
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper_unittest.cc
-@@ -0,0 +1,470 @@
+@@ -0,0 +1,574 @@
 +// Copyright (c) 2009, Google Inc.
 +// All rights reserved.
 +//
@@ -13151,6 +13339,63 @@ index 0000000000000000000000000000000000000000..be533e157d8bf080feb49946f75ee948
 +using namespace google_breakpad;
 +
 +namespace {
++
++pid_t SetupChildProcess(int number_of_threads) {
++  char kNumberOfThreadsArgument[2];
++  sprintf(kNumberOfThreadsArgument, "%d", number_of_threads);
++
++  int fds[2];
++  EXPECT_NE(-1, pipe(fds));
++
++  pid_t child_pid = fork();
++  if (child_pid == 0) {
++    // In child process.
++    close(fds[0]);
++
++    string helper_path(GetHelperBinary());
++    if (helper_path.empty()) {
++      fprintf(stderr, "Couldn't find helper binary\n");
++      _exit(1);
++    }
++
++    // Pass the pipe fd and the number of threads as arguments.
++    char pipe_fd_string[8];
++    sprintf(pipe_fd_string, "%d", fds[1]);
++    execl(helper_path.c_str(),
++          "linux_dumper_unittest_helper",
++          pipe_fd_string,
++          kNumberOfThreadsArgument,
++          NULL);
++    // Kill if we get here.
++    printf("Errno from exec: %d", errno);
++    std::string err_str = "Exec of  " + helper_path + " failed";
++    perror(err_str.c_str());
++    _exit(1);
++  }
++  close(fds[1]);
++
++  // Wait for all child threads to indicate that they have started
++  for (int threads = 0; threads < number_of_threads; threads++) {
++    struct pollfd pfd;
++    memset(&pfd, 0, sizeof(pfd));
++    pfd.fd = fds[0];
++    pfd.events = POLLIN | POLLERR;
++
++    const int r = HANDLE_EINTR(poll(&pfd, 1, 1000));
++    EXPECT_EQ(1, r);
++    EXPECT_TRUE(pfd.revents & POLLIN);
++    uint8_t junk;
++    EXPECT_EQ(read(fds[0], &junk, sizeof(junk)),
++              static_cast<ssize_t>(sizeof(junk)));
++  }
++  close(fds[0]);
++
++  // There is a race here because we may stop a child thread before
++  // it is actually running the busy loop. Empirically this sleep
++  // is sufficient to avoid the race.
++  usleep(100000);
++  return child_pid;
++}
 +
 +typedef wasteful_vector<uint8_t> id_vector;
 +typedef testing::Test LinuxPtraceDumperTest;
@@ -13456,58 +13701,9 @@ index 0000000000000000000000000000000000000000..be533e157d8bf080feb49946f75ee948
 +
 +TEST(LinuxPtraceDumperTest, VerifyStackReadWithMultipleThreads) {
 +  static const int kNumberOfThreadsInHelperProgram = 5;
-+  char kNumberOfThreadsArgument[2];
-+  sprintf(kNumberOfThreadsArgument, "%d", kNumberOfThreadsInHelperProgram);
 +
-+  int fds[2];
-+  ASSERT_NE(-1, pipe(fds));
-+
-+  pid_t child_pid = fork();
-+  if (child_pid == 0) {
-+    // In child process.
-+    close(fds[0]);
-+
-+    string helper_path(GetHelperBinary());
-+    if (helper_path.empty()) {
-+      FAIL() << "Couldn't find helper binary";
-+      exit(1);
-+    }
-+
-+    // Pass the pipe fd and the number of threads as arguments.
-+    char pipe_fd_string[8];
-+    sprintf(pipe_fd_string, "%d", fds[1]);
-+    execl(helper_path.c_str(),
-+          "linux_dumper_unittest_helper",
-+          pipe_fd_string,
-+          kNumberOfThreadsArgument,
-+          NULL);
-+    // Kill if we get here.
-+    printf("Errno from exec: %d", errno);
-+    FAIL() << "Exec of " << helper_path << " failed: " << strerror(errno);
-+    exit(0);
-+  }
-+  close(fds[1]);
-+
-+  // Wait for all child threads to indicate that they have started
-+  for (int threads = 0; threads < kNumberOfThreadsInHelperProgram; threads++) {
-+    struct pollfd pfd;
-+    memset(&pfd, 0, sizeof(pfd));
-+    pfd.fd = fds[0];
-+    pfd.events = POLLIN | POLLERR;
-+
-+    const int r = HANDLE_EINTR(poll(&pfd, 1, 1000));
-+    ASSERT_EQ(1, r);
-+    ASSERT_TRUE(pfd.revents & POLLIN);
-+    uint8_t junk;
-+    ASSERT_EQ(read(fds[0], &junk, sizeof(junk)),
-+              static_cast<ssize_t>(sizeof(junk)));
-+  }
-+  close(fds[0]);
-+
-+  // There is a race here because we may stop a child thread before
-+  // it is actually running the busy loop. Empirically this sleep
-+  // is sufficient to avoid the race.
-+  usleep(100000);
++  pid_t child_pid = SetupChildProcess(kNumberOfThreadsInHelperProgram);
++  ASSERT_NE(child_pid, -1);
 +
 +  // Children are ready now.
 +  LinuxPtraceDumper dumper(child_pid);
@@ -13554,12 +13750,108 @@ index 0000000000000000000000000000000000000000..be533e157d8bf080feb49946f75ee948
 +  ASSERT_TRUE(WIFSIGNALED(status));
 +  ASSERT_EQ(SIGKILL, WTERMSIG(status));
 +}
++
++TEST_F(LinuxPtraceDumperTest, SanitizeStackCopy) {
++  static const int kNumberOfThreadsInHelperProgram = 1;
++
++  pid_t child_pid = SetupChildProcess(kNumberOfThreadsInHelperProgram);
++  ASSERT_NE(child_pid, -1);
++
++  LinuxPtraceDumper dumper(child_pid);
++  ASSERT_TRUE(dumper.Init());
++  EXPECT_TRUE(dumper.ThreadsSuspend());
++
++  ThreadInfo thread_info;
++  EXPECT_TRUE(dumper.GetThreadInfoByIndex(0, &thread_info));
++
++  const uintptr_t defaced =
++#if defined(__LP64__)
++      0x0defaced0defaced;
++#else
++      0x0defaced;
++#endif
++
++  uintptr_t simulated_stack[2];
++
++  // Pointers into the stack shouldn't be sanitized.
++  memset(simulated_stack, 0xff, sizeof(simulated_stack));
++  simulated_stack[1] = thread_info.stack_pointer;
++  dumper.SanitizeStackCopy(reinterpret_cast<uint8_t*>(&simulated_stack),
++                           sizeof(simulated_stack), thread_info.stack_pointer,
++                           sizeof(uintptr_t));
++  ASSERT_NE(simulated_stack[1], defaced);
++
++  // Memory prior to the stack pointer should be cleared.
++  ASSERT_EQ(simulated_stack[0], 0u);
++
++  // Small integers should not be sanitized.
++  for (int i = -4096; i <= 4096; ++i) {
++    memset(simulated_stack, 0, sizeof(simulated_stack));
++    simulated_stack[0] = static_cast<uintptr_t>(i);
++    dumper.SanitizeStackCopy(reinterpret_cast<uint8_t*>(&simulated_stack),
++                             sizeof(simulated_stack), thread_info.stack_pointer,
++                             0u);
++    ASSERT_NE(simulated_stack[0], defaced);
++  }
++
++  // The instruction pointer definitely should point into an executable mapping.
++  const MappingInfo* mapping_info = dumper.FindMappingNoBias(
++      reinterpret_cast<uintptr_t>(thread_info.GetInstructionPointer()));
++  ASSERT_NE(mapping_info, nullptr);
++  ASSERT_TRUE(mapping_info->exec);
++
++  // Pointers to code shouldn't be sanitized.
++  memset(simulated_stack, 0, sizeof(simulated_stack));
++  simulated_stack[1] = thread_info.GetInstructionPointer();
++  dumper.SanitizeStackCopy(reinterpret_cast<uint8_t*>(&simulated_stack),
++                           sizeof(simulated_stack), thread_info.stack_pointer,
++                           0u);
++  ASSERT_NE(simulated_stack[0], defaced);
++
++  // String fragments should be sanitized.
++  memcpy(simulated_stack, "abcdefghijklmnop", sizeof(simulated_stack));
++  dumper.SanitizeStackCopy(reinterpret_cast<uint8_t*>(&simulated_stack),
++                           sizeof(simulated_stack), thread_info.stack_pointer,
++                           0u);
++  ASSERT_EQ(simulated_stack[0], defaced);
++  ASSERT_EQ(simulated_stack[1], defaced);
++
++  // Heap pointers should be sanititzed.
++#if defined(__ARM_EABI__)
++  uintptr_t heap_addr = thread_info.regs.uregs[3];
++#elif defined(__aarch64__)
++  uintptr_t heap_addr = thread_info.regs.regs[3];
++#elif defined(__i386)
++  uintptr_t heap_addr = thread_info.regs.ecx;
++#elif defined(__x86_64)
++  uintptr_t heap_addr = thread_info.regs.rcx;
++#elif defined(__mips__)
++  uintptr_t heap_addr = thread_info.mcontext.gregs[1];
++#else
++#error This test has not been ported to this platform.
++#endif
++  memset(simulated_stack, 0, sizeof(simulated_stack));
++  simulated_stack[0] = heap_addr;
++  dumper.SanitizeStackCopy(reinterpret_cast<uint8_t*>(&simulated_stack),
++                           sizeof(simulated_stack), thread_info.stack_pointer,
++                           0u);
++  ASSERT_EQ(simulated_stack[0], defaced);
++
++  EXPECT_TRUE(dumper.ThreadsResume());
++  kill(child_pid, SIGKILL);
++
++  // Reap child.
++  int status;
++  ASSERT_NE(-1, HANDLE_EINTR(waitpid(child_pid, &status, 0)));
++  ASSERT_TRUE(WIFSIGNALED(status));
++  ASSERT_EQ(SIGKILL, WTERMSIG(status));
++}
 diff --git a/breakpad/src/client/linux/minidump_writer/minidump_writer.cc b/breakpad/src/client/linux/minidump_writer/minidump_writer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e7ef51bb5
+index 0000000000000000000000000000000000000000..5c2a339e5879872b2d6f6a20fef34b6a85a994b0
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/minidump_writer.cc
-@@ -0,0 +1,1377 @@
+@@ -0,0 +1,1458 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -13691,6 +13983,9 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +                 const ExceptionHandler::CrashContext* context,
 +                 const MappingList& mappings,
 +                 const AppMemoryList& appmem,
++                 bool skip_stacks_if_mapping_unreferenced,
++                 uintptr_t principal_mapping_address,
++                 bool sanitize_stacks,
 +                 LinuxDumper* dumper)
 +      : fd_(minidump_fd),
 +        path_(minidump_path),
@@ -13702,7 +13997,11 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +        minidump_size_limit_(-1),
 +        memory_blocks_(dumper_->allocator()),
 +        mapping_list_(mappings),
-+        app_memory_list_(appmem) {
++        app_memory_list_(appmem),
++        skip_stacks_if_mapping_unreferenced_(
++            skip_stacks_if_mapping_unreferenced),
++        principal_mapping_address_(principal_mapping_address),
++    sanitize_stacks_(sanitize_stacks) {
 +    // Assert there should be either a valid fd or a valid path, not both.
 +    assert(fd_ != -1 || minidump_path);
 +    assert(fd_ == -1 || !minidump_path);
@@ -13828,12 +14127,16 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +  }
 +
 +  bool FillThreadStack(MDRawThread* thread, uintptr_t stack_pointer,
-+                       int max_stack_len, uint8_t** stack_copy) {
++                       uintptr_t pc, int max_stack_len, uint8_t** stack_copy) {
 +    *stack_copy = NULL;
 +    const void* stack;
 +    size_t stack_len;
++
++    thread->stack.start_of_memory_range = stack_pointer;
++    thread->stack.memory.data_size = 0;
++    thread->stack.memory.rva = minidump_writer_.position();
++
 +    if (dumper_->GetStackInfo(&stack, &stack_len, stack_pointer)) {
-+      UntypedMDRVA memory(&minidump_writer_);
 +      if (max_stack_len >= 0 &&
 +          stack_len > static_cast<unsigned int>(max_stack_len)) {
 +        stack_len = max_stack_len;
@@ -13846,20 +14149,40 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +        }
 +        stack = reinterpret_cast<const void*>(int_stack);
 +      }
-+      if (!memory.Allocate(stack_len))
-+        return false;
 +      *stack_copy = reinterpret_cast<uint8_t*>(Alloc(stack_len));
 +      dumper_->CopyFromProcess(*stack_copy, thread->thread_id, stack,
 +                               stack_len);
++
++      uintptr_t stack_pointer_offset =
++          stack_pointer - reinterpret_cast<uintptr_t>(stack);
++      if (skip_stacks_if_mapping_unreferenced_) {
++        const MappingInfo* principal_mapping =
++            dumper_->FindMappingNoBias(principal_mapping_address_);
++        if (!principal_mapping) {
++          return true;
++        }
++        uintptr_t low_addr = principal_mapping->system_mapping_info.start_addr;
++        uintptr_t high_addr = principal_mapping->system_mapping_info.end_addr;
++        if ((pc < low_addr || pc > high_addr) &&
++            !dumper_->StackHasPointerToMapping(*stack_copy, stack_len,
++                                               stack_pointer_offset,
++                                               *principal_mapping)) {
++          return true;
++        }
++      }
++
++      if (sanitize_stacks_) {
++        dumper_->SanitizeStackCopy(*stack_copy, stack_len, stack_pointer,
++                                   stack_pointer_offset);
++      }
++
++      UntypedMDRVA memory(&minidump_writer_);
++      if (!memory.Allocate(stack_len))
++        return false;
 +      memory.Copy(*stack_copy, stack_len);
-+      thread->stack.start_of_memory_range =
-+          reinterpret_cast<uintptr_t>(stack);
++      thread->stack.start_of_memory_range = reinterpret_cast<uintptr_t>(stack);
 +      thread->stack.memory = memory.location();
 +      memory_blocks_.push_back(thread->stack);
-+    } else {
-+      thread->stack.start_of_memory_range = stack_pointer;
-+      thread->stack.memory.data_size = 0;
-+      thread->stack.memory.rva = minidump_writer_.position();
 +    }
 +    return true;
 +  }
@@ -13906,7 +14229,9 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +          !dumper_->IsPostMortem()) {
 +        uint8_t* stack_copy;
 +        const uintptr_t stack_ptr = UContextReader::GetStackPointer(ucontext_);
-+        if (!FillThreadStack(&thread, stack_ptr, -1, &stack_copy))
++        if (!FillThreadStack(&thread, stack_ptr,
++                             UContextReader::GetInstructionPointer(ucontext_),
++                             -1, &stack_copy))
 +          return false;
 +
 +        // Copy 256 bytes around crashing instruction pointer to minidump.
@@ -13972,8 +14297,9 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +        int max_stack_len = -1;  // default to no maximum for this thread
 +        if (minidump_size_limit_ >= 0 && i >= kLimitBaseThreadCount)
 +          max_stack_len = extra_thread_stack_len;
-+        if (!FillThreadStack(&thread, info.stack_pointer, max_stack_len,
-+            &stack_copy))
++        if (!FillThreadStack(&thread, info.stack_pointer,
++                             info.GetInstructionPointer(), max_stack_len,
++                             &stack_copy))
 +          return false;
 +
 +        TypedMDRVA<RawContextCPU> cpu(&minidump_writer_);
@@ -14827,6 +15153,12 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +  // Additional memory regions to be included in the dump,
 +  // provided by the caller.
 +  const AppMemoryList& app_memory_list_;
++  // If set, skip recording any threads that do not reference the
++  // mapping containing principal_mapping_address_.
++  bool skip_stacks_if_mapping_unreferenced_;
++  uintptr_t principal_mapping_address_;
++  // If true, apply stack sanitization to stored stack data.
++  bool sanitize_stacks_;
 +};
 +
 +
@@ -14836,7 +15168,10 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +                       pid_t crashing_process,
 +                       const void* blob, size_t blob_size,
 +                       const MappingList& mappings,
-+                       const AppMemoryList& appmem) {
++                       const AppMemoryList& appmem,
++                       bool skip_stacks_if_mapping_unreferenced,
++                       uintptr_t principal_mapping_address,
++                       bool sanitize_stacks) {
 +  LinuxPtraceDumper dumper(crashing_process);
 +  const ExceptionHandler::CrashContext* context = NULL;
 +  if (blob) {
@@ -14849,7 +15184,8 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +    dumper.set_crash_thread(context->tid);
 +  }
 +  MinidumpWriter writer(minidump_path, minidump_fd, context, mappings,
-+                        appmem, &dumper);
++                        appmem, skip_stacks_if_mapping_unreferenced,
++                        principal_mapping_address, sanitize_stacks, &dumper);
 +  // Set desired limit for file size of minidump (-1 means no limit).
 +  writer.set_minidump_size_limit(minidump_size_limit);
 +  if (!writer.Init())
@@ -14862,17 +15198,29 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +namespace google_breakpad {
 +
 +bool WriteMinidump(const char* minidump_path, pid_t crashing_process,
-+                   const void* blob, size_t blob_size) {
++                   const void* blob, size_t blob_size,
++                   bool skip_stacks_if_mapping_unreferenced,
++                   uintptr_t principal_mapping_address,
++                   bool sanitize_stacks) {
 +  return WriteMinidumpImpl(minidump_path, -1, -1,
 +                           crashing_process, blob, blob_size,
-+                           MappingList(), AppMemoryList());
++                           MappingList(), AppMemoryList(),
++                           skip_stacks_if_mapping_unreferenced,
++                           principal_mapping_address,
++                           sanitize_stacks);
 +}
 +
 +bool WriteMinidump(int minidump_fd, pid_t crashing_process,
-+                   const void* blob, size_t blob_size) {
++                   const void* blob, size_t blob_size,
++                   bool skip_stacks_if_mapping_unreferenced,
++                   uintptr_t principal_mapping_address,
++                   bool sanitize_stacks) {
 +  return WriteMinidumpImpl(NULL, minidump_fd, -1,
 +                           crashing_process, blob, blob_size,
-+                           MappingList(), AppMemoryList());
++                           MappingList(), AppMemoryList(),
++                           skip_stacks_if_mapping_unreferenced,
++                           principal_mapping_address,
++                           sanitize_stacks);
 +}
 +
 +bool WriteMinidump(const char* minidump_path, pid_t process,
@@ -14882,7 +15230,7 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +  dumper.set_crash_signal(MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED);
 +  dumper.set_crash_thread(process_blamed_thread);
 +  MinidumpWriter writer(minidump_path, -1, NULL, MappingList(),
-+                        AppMemoryList(), &dumper);
++                        AppMemoryList(), false, 0, false, &dumper);
 +  if (!writer.Init())
 +    return false;
 +  return writer.Dump();
@@ -14891,46 +15239,71 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +bool WriteMinidump(const char* minidump_path, pid_t crashing_process,
 +                   const void* blob, size_t blob_size,
 +                   const MappingList& mappings,
-+                   const AppMemoryList& appmem) {
++                   const AppMemoryList& appmem,
++                   bool skip_stacks_if_mapping_unreferenced,
++                   uintptr_t principal_mapping_address,
++                   bool sanitize_stacks) {
 +  return WriteMinidumpImpl(minidump_path, -1, -1, crashing_process,
 +                           blob, blob_size,
-+                           mappings, appmem);
++                           mappings, appmem,
++                           skip_stacks_if_mapping_unreferenced,
++                           principal_mapping_address,
++                           sanitize_stacks);
 +}
 +
 +bool WriteMinidump(int minidump_fd, pid_t crashing_process,
 +                   const void* blob, size_t blob_size,
 +                   const MappingList& mappings,
-+                   const AppMemoryList& appmem) {
++                   const AppMemoryList& appmem,
++                   bool skip_stacks_if_mapping_unreferenced,
++                   uintptr_t principal_mapping_address,
++                   bool sanitize_stacks) {
 +  return WriteMinidumpImpl(NULL, minidump_fd, -1, crashing_process,
 +                           blob, blob_size,
-+                           mappings, appmem);
++                           mappings, appmem,
++                           skip_stacks_if_mapping_unreferenced,
++                           principal_mapping_address,
++                           sanitize_stacks);
 +}
 +
 +bool WriteMinidump(const char* minidump_path, off_t minidump_size_limit,
 +                   pid_t crashing_process,
 +                   const void* blob, size_t blob_size,
 +                   const MappingList& mappings,
-+                   const AppMemoryList& appmem) {
++                   const AppMemoryList& appmem,
++                   bool skip_stacks_if_mapping_unreferenced,
++                   uintptr_t principal_mapping_address,
++                   bool sanitize_stacks) {
 +  return WriteMinidumpImpl(minidump_path, -1, minidump_size_limit,
 +                           crashing_process, blob, blob_size,
-+                           mappings, appmem);
++                           mappings, appmem,
++                           skip_stacks_if_mapping_unreferenced,
++                           principal_mapping_address,
++                           sanitize_stacks);
 +}
 +
 +bool WriteMinidump(int minidump_fd, off_t minidump_size_limit,
 +                   pid_t crashing_process,
 +                   const void* blob, size_t blob_size,
 +                   const MappingList& mappings,
-+                   const AppMemoryList& appmem) {
++                   const AppMemoryList& appmem,
++                   bool skip_stacks_if_mapping_unreferenced,
++                   uintptr_t principal_mapping_address,
++                   bool sanitize_stacks) {
 +  return WriteMinidumpImpl(NULL, minidump_fd, minidump_size_limit,
 +                           crashing_process, blob, blob_size,
-+                           mappings, appmem);
++                           mappings, appmem,
++                           skip_stacks_if_mapping_unreferenced,
++                           principal_mapping_address,
++                           sanitize_stacks);
 +}
 +
 +bool WriteMinidump(const char* filename,
 +                   const MappingList& mappings,
 +                   const AppMemoryList& appmem,
 +                   LinuxDumper* dumper) {
-+  MinidumpWriter writer(filename, -1, NULL, mappings, appmem, dumper);
++  MinidumpWriter writer(filename, -1, NULL, mappings, appmem,
++                        false, 0, false, dumper);
 +  if (!writer.Init())
 +    return false;
 +  return writer.Dump();
@@ -14939,10 +15312,10 @@ index 0000000000000000000000000000000000000000..86009b9f60f5aa4915e1de07de45a42e
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/client/linux/minidump_writer/minidump_writer.h b/breakpad/src/client/linux/minidump_writer/minidump_writer.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..d13fb120b52a2666513266ab0b1207bf811103e2
+index 0000000000000000000000000000000000000000..d1dc331215a3355e1fedbe8dc852cc9db35a498d
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/minidump_writer.h
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,142 @@
 +// Copyright (c) 2009, Google Inc.
 +// All rights reserved.
 +//
@@ -15023,10 +15396,16 @@ index 0000000000000000000000000000000000000000..d13fb120b52a2666513266ab0b1207bf
 +//
 +// Returns true iff successful.
 +bool WriteMinidump(const char* minidump_path, pid_t crashing_process,
-+                   const void* blob, size_t blob_size);
++                   const void* blob, size_t blob_size,
++                   bool skip_stacks_if_mapping_unreferenced = false,
++                   uintptr_t principal_mapping_address = 0,
++                   bool sanitize_stacks = false);
 +// Same as above but takes an open file descriptor instead of a path.
 +bool WriteMinidump(int minidump_fd, pid_t crashing_process,
-+                   const void* blob, size_t blob_size);
++                   const void* blob, size_t blob_size,
++                   bool skip_stacks_if_mapping_unreferenced = false,
++                   uintptr_t principal_mapping_address = 0,
++                   bool sanitize_stacks = false);
 +
 +// Alternate form of WriteMinidump() that works with processes that
 +// are not expected to have crashed.  If |process_blamed_thread| is
@@ -15041,23 +15420,35 @@ index 0000000000000000000000000000000000000000..d13fb120b52a2666513266ab0b1207bf
 +bool WriteMinidump(const char* minidump_path, pid_t crashing_process,
 +                   const void* blob, size_t blob_size,
 +                   const MappingList& mappings,
-+                   const AppMemoryList& appdata);
++                   const AppMemoryList& appdata,
++                   bool skip_stacks_if_mapping_unreferenced = false,
++                   uintptr_t principal_mapping_address = 0,
++                   bool sanitize_stacks = false);
 +bool WriteMinidump(int minidump_fd, pid_t crashing_process,
 +                   const void* blob, size_t blob_size,
 +                   const MappingList& mappings,
-+                   const AppMemoryList& appdata);
++                   const AppMemoryList& appdata,
++                   bool skip_stacks_if_mapping_unreferenced = false,
++                   uintptr_t principal_mapping_address = 0,
++                   bool sanitize_stacks = false);
 +
 +// These overloads also allow passing a file size limit for the minidump.
 +bool WriteMinidump(const char* minidump_path, off_t minidump_size_limit,
 +                   pid_t crashing_process,
 +                   const void* blob, size_t blob_size,
 +                   const MappingList& mappings,
-+                   const AppMemoryList& appdata);
++                   const AppMemoryList& appdata,
++                   bool skip_stacks_if_mapping_unreferenced = false,
++                   uintptr_t principal_mapping_address = 0,
++                   bool sanitize_stacks = false);
 +bool WriteMinidump(int minidump_fd, off_t minidump_size_limit,
 +                   pid_t crashing_process,
 +                   const void* blob, size_t blob_size,
 +                   const MappingList& mappings,
-+                   const AppMemoryList& appdata);
++                   const AppMemoryList& appdata,
++                   bool skip_stacks_if_mapping_unreferenced = false,
++                   uintptr_t principal_mapping_address = 0,
++                   bool sanitize_stacks = false);
 +
 +bool WriteMinidump(const char* filename,
 +                   const MappingList& mappings,
@@ -15069,10 +15460,10 @@ index 0000000000000000000000000000000000000000..d13fb120b52a2666513266ab0b1207bf
 +#endif  // CLIENT_LINUX_MINIDUMP_WRITER_MINIDUMP_WRITER_H_
 diff --git a/breakpad/src/client/linux/minidump_writer/minidump_writer_unittest.cc b/breakpad/src/client/linux/minidump_writer/minidump_writer_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..2e4749e7e95464d545c788715b4ed3e273c580dc
+index 0000000000000000000000000000000000000000..f3b78a22aaecce577a9ed738d92ddb690bfe7af8
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/minidump_writer_unittest.cc
-@@ -0,0 +1,775 @@
+@@ -0,0 +1,865 @@
 +// Copyright (c) 2011 Google Inc.
 +// All rights reserved.
 +//
@@ -15254,7 +15645,7 @@ index 0000000000000000000000000000000000000000..2e4749e7e95464d545c788715b4ed3e2
 +  memcpy(mapping.second, kModuleGUID, sizeof(MDGUID));
 +  mappings.push_back(mapping);
 +  ASSERT_TRUE(WriteMinidump(templ.c_str(), child, &context, sizeof(context),
-+                            mappings, memory_list));
++                            mappings, memory_list, false, 0, false));
 +
 +  // Read the minidump. Load the module list, and ensure that
 +  // the mmap'ed |memory| is listed with the given module name
@@ -15287,6 +15678,96 @@ index 0000000000000000000000000000000000000000..2e4749e7e95464d545c788715b4ed3e2
 +  EXPECT_TRUE(minidump.SeekToStreamType(MD_LINUX_MAPS, &len));
 +  EXPECT_TRUE(minidump.SeekToStreamType(MD_LINUX_DSO_DEBUG, &len));
 +
++  close(fds[1]);
++}
++
++// Test that stacks can be skipped while writing minidumps.
++TEST(MinidumpWriterTest, StacksSkippedIfRequested) {
++  int fds[2];
++  ASSERT_NE(-1, pipe(fds));
++
++  const pid_t child = fork();
++  if (child == 0) {
++    close(fds[1]);
++    char b;
++    IGNORE_RET(HANDLE_EINTR(read(fds[0], &b, sizeof(b))));
++    close(fds[0]);
++    syscall(__NR_exit);
++  }
++  close(fds[0]);
++
++  ExceptionHandler::CrashContext context;
++  memset(&context, 0, sizeof(context));
++  ASSERT_EQ(0, getcontext(&context.context));
++  context.tid = child;
++
++  AutoTempDir temp_dir;
++  string templ = temp_dir.path() + kMDWriterUnitTestFileName;
++
++  // pass an invalid principal mapping address, which will force
++  // WriteMinidump to not dump any thread stacks.
++  ASSERT_TRUE(WriteMinidump(templ.c_str(), child, &context, sizeof(context),
++                            true, static_cast<uintptr_t>(0x0102030405060708ull),
++                            false));
++
++  // Read the minidump. And ensure that no thread memory was dumped.
++  Minidump minidump(templ);
++  ASSERT_TRUE(minidump.Read());
++
++  MinidumpThreadList *threads = minidump.GetThreadList();
++  for (unsigned int i = 0; i < threads->thread_count(); ++i) {
++    MinidumpThread *thread = threads->GetThreadAtIndex(i);
++    ASSERT_TRUE(thread->GetMemory() == nullptr);
++  }
++  close(fds[1]);
++}
++
++// Test that stacks can be sanitized while writing minidumps.
++TEST(MinidumpWriterTest, StacksAreSanitizedIfRequested) {
++  int fds[2];
++  ASSERT_NE(-1, pipe(fds));
++
++  const pid_t child = fork();
++  if (child == 0) {
++    close(fds[1]);
++    char b;
++    IGNORE_RET(HANDLE_EINTR(read(fds[0], &b, sizeof(b))));
++    close(fds[0]);
++    syscall(__NR_exit);
++  }
++  close(fds[0]);
++
++  ExceptionHandler::CrashContext context;
++  memset(&context, 0, sizeof(context));
++  ASSERT_EQ(0, getcontext(&context.context));
++  context.tid = child;
++
++  AutoTempDir temp_dir;
++  string templ = temp_dir.path() + kMDWriterUnitTestFileName;
++  // pass an invalid principal mapping address, which will force
++  // WriteMinidump to not dump any thread stacks.
++  ASSERT_TRUE(WriteMinidump(templ.c_str(), child, &context, sizeof(context),
++                            false, 0, true));
++
++  // Read the minidump. And ensure that thread memory contains a defaced value.
++  Minidump minidump(templ);
++  ASSERT_TRUE(minidump.Read());
++
++  const uintptr_t defaced =
++#if defined(__LP64__)
++      0x0defaced0defaced;
++#else
++      0x0defaced;
++#endif
++  MinidumpThreadList *threads = minidump.GetThreadList();
++  for (unsigned int i = 0; i < threads->thread_count(); ++i) {
++    MinidumpThread *thread = threads->GetThreadAtIndex(i);
++    MinidumpMemoryRegion *mem = thread->GetMemory();
++    ASSERT_TRUE(mem != nullptr);
++    uint32_t sz = mem->GetSize();
++    const uint8_t *data = mem->GetMemory();
++    ASSERT_TRUE(memmem(data, sz, &defaced, sizeof(defaced)) != nullptr);
++  }
 +  close(fds[1]);
 +}
 +
@@ -51122,10 +51603,10 @@ index 0000000000000000000000000000000000000000..0164f4a298335c5ca1993e21a6806b1a
 +}  // namespace
 diff --git a/breakpad/src/client/mac/tests/exception_handler_test.cc b/breakpad/src/client/mac/tests/exception_handler_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..a8cf6968c823d5ba0a0303f6cc5bc57e226c68f8
+index 0000000000000000000000000000000000000000..d5b505a1e17bd980bf4cdeacf32d5dadd8518d60
 --- /dev/null
 +++ b/breakpad/src/client/mac/tests/exception_handler_test.cc
-@@ -0,0 +1,713 @@
+@@ -0,0 +1,714 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -51164,6 +51645,7 @@ index 0000000000000000000000000000000000000000..a8cf6968c823d5ba0a0303f6cc5bc57e
 +
 +#include "breakpad_googletest_includes.h"
 +#include "client/mac/handler/exception_handler.h"
++#include "common/linux/ignore_ret.h"
 +#include "common/mac/MachIPC.h"
 +#include "common/tests/auto_tempdir.h"
 +#include "google_breakpad/processor/minidump.h"
@@ -51221,7 +51703,7 @@ index 0000000000000000000000000000000000000000..a8cf6968c823d5ba0a0303f6cc5bc57e
 +  path.append(".dmp");
 +
 +  int fd = *reinterpret_cast<int*>(context);
-+  (void)write(fd, path.c_str(), path.length() + 1);
++  IGNORE_RET(write(fd, path.c_str(), path.length() + 1));
 +  close(fd);
 +  exit(0);
 +  // not reached
@@ -51421,7 +51903,7 @@ index 0000000000000000000000000000000000000000..a8cf6968c823d5ba0a0303f6cc5bc57e
 +
 +  // Unblock child process
 +  uint8_t data = 1;
-+  (void)write(fds[1], &data, 1);
++  IGNORE_RET(write(fds[1], &data, 1));
 +
 +  // Child process should have exited with a zero status.
 +  int ret;
@@ -51841,10 +52323,10 @@ index 0000000000000000000000000000000000000000..a8cf6968c823d5ba0a0303f6cc5bc57e
 +}
 diff --git a/breakpad/src/client/mac/tests/minidump_generator_test.cc b/breakpad/src/client/mac/tests/minidump_generator_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..d40c7d986a00d448ef3a71fc15a36feb94f4e996
+index 0000000000000000000000000000000000000000..b1fa5d02a18fbbb63ec342101d29766c32e1eeca
 --- /dev/null
 +++ b/breakpad/src/client/mac/tests/minidump_generator_test.cc
-@@ -0,0 +1,319 @@
+@@ -0,0 +1,320 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -51889,6 +52371,7 @@ index 0000000000000000000000000000000000000000..d40c7d986a00d448ef3a71fc15a36feb
 +#include "breakpad_googletest_includes.h"
 +#include "client/mac/handler/minidump_generator.h"
 +#include "client/mac/tests/spawn_child_process.h"
++#include "common/linux/ignore_ret.h"
 +#include "common/mac/MachIPC.h"
 +#include "common/tests/auto_tempdir.h"
 +#include "google_breakpad/processor/minidump.h"
@@ -52037,7 +52520,7 @@ index 0000000000000000000000000000000000000000..d40c7d986a00d448ef3a71fc15a36feb
 +
 +  // Unblock child process
 +  uint8_t data = 1;
-+  (void)write(fds[1], &data, 1);
++  IGNORE_RET(write(fds[1], &data, 1));
 +
 +  // Child process should have exited with a zero status.
 +  int ret;
@@ -59097,10 +59580,10 @@ index 0000000000000000000000000000000000000000..a3c123056fa954ff38518773a3fc5f0b
 +#endif  // CLIENT_WINDOWS_CRASH_GENERATION_MINIDUMP_GENERATOR_H_
 diff --git a/breakpad/src/client/windows/handler/exception_handler.cc b/breakpad/src/client/windows/handler/exception_handler.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..fc22cd9f6ac3eb872cee4bf8a2abd3fdec9fa24a
+index 0000000000000000000000000000000000000000..c42718cb770b0567e068a3751ccaa0bd76f3df2b
 --- /dev/null
 +++ b/breakpad/src/client/windows/handler/exception_handler.cc
-@@ -0,0 +1,1075 @@
+@@ -0,0 +1,1080 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -59149,6 +59632,11 @@ index 0000000000000000000000000000000000000000..fc22cd9f6ac3eb872cee4bf8a2abd3fd
 +  AppMemoryList::const_iterator iter;
 +  AppMemoryList::const_iterator end;
 +} MinidumpCallbackContext;
++
++// This define is new to Windows 10.
++#ifndef DBG_PRINTEXCEPTION_WIDE_C
++#define DBG_PRINTEXCEPTION_WIDE_C ((DWORD)0x4001000A)
++#endif
 +
 +vector<ExceptionHandler*>* ExceptionHandler::handler_stack_ = NULL;
 +LONG ExceptionHandler::handler_stack_index_ = 0;
@@ -62391,10 +62879,10 @@ index 0000000000000000000000000000000000000000..b13603ef44cdd4cb81717e92bc36d7e4
 +}
 diff --git a/breakpad/src/client/windows/unittests/crash_generation_server_test.cc b/breakpad/src/client/windows/unittests/crash_generation_server_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..b7b2b84f2d100bbe957470f3d3f59e95f758a562
+index 0000000000000000000000000000000000000000..09f2dd200dc4b644e75afb65d1e02309a61cd467
 --- /dev/null
 +++ b/breakpad/src/client/windows/unittests/crash_generation_server_test.cc
-@@ -0,0 +1,305 @@
+@@ -0,0 +1,303 @@
 +// Copyright 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -62425,9 +62913,7 @@ index 0000000000000000000000000000000000000000..b7b2b84f2d100bbe957470f3d3f59e95
 +// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 +
 +
-+#include "testing/gtest/include/gtest/gtest.h"
-+#include "testing/include/gmock/gmock.h"
-+
++#include "breakpad_googletest_includes.h"
 +#include "client/windows/crash_generation/crash_generation_server.h"
 +#include "client/windows/common/ipc_protocol.h"
 +
@@ -62702,7 +63188,7 @@ index 0000000000000000000000000000000000000000..b7b2b84f2d100bbe957470f3d3f59e95
 +}  // anonymous namespace
 diff --git a/breakpad/src/client/windows/unittests/dump_analysis.cc b/breakpad/src/client/windows/unittests/dump_analysis.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..6bf8547196f0928023c0009816c388d17ec68621
+index 0000000000000000000000000000000000000000..53d4ddbde9853d190dee631d7ea6c0995d601a91
 --- /dev/null
 +++ b/breakpad/src/client/windows/unittests/dump_analysis.cc
 @@ -0,0 +1,184 @@
@@ -62739,8 +63225,8 @@ index 0000000000000000000000000000000000000000..6bf8547196f0928023c0009816c388d1
 +#include <objbase.h>
 +#include <dbghelp.h>
 +
++#include "breakpad_googletest_includes.h"
 +#include "client/windows/unittests/dump_analysis.h"  // NOLINT
-+#include "testing/gtest/include/gtest/gtest.h"
 +
 +DumpAnalysis::~DumpAnalysis() {
 +  if (dump_file_view_ != NULL) {
@@ -64495,10 +64981,10 @@ index 0000000000000000000000000000000000000000..ef973e539269179be0bc985b6ae2ea85
 +#endif  // CLIENT_WINDOWS_UNITTESTS_EXCEPTION_HANDLER_TEST_H_
 diff --git a/breakpad/src/client/windows/unittests/minidump_test.cc b/breakpad/src/client/windows/unittests/minidump_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..8d2d726c4961e2f62929f71c124f940b40cf513d
+index 0000000000000000000000000000000000000000..d11fccabd04a2f5206a94d4b15e77c8c59af25c6
 --- /dev/null
 +++ b/breakpad/src/client/windows/unittests/minidump_test.cc
-@@ -0,0 +1,333 @@
+@@ -0,0 +1,332 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -64532,10 +65018,9 @@ index 0000000000000000000000000000000000000000..8d2d726c4961e2f62929f71c124f940b
 +#include <objbase.h>
 +#include <dbghelp.h>
 +
++#include "breakpad_googletest_includes.h"
 +#include "client/windows/crash_generation/minidump_generator.h"
 +#include "client/windows/unittests/dump_analysis.h"  // NOLINT
-+
-+#include "gtest/gtest.h"
 +
 +namespace {
 +
@@ -64834,10 +65319,10 @@ index 0000000000000000000000000000000000000000..8d2d726c4961e2f62929f71c124f940b
 +}  // namespace
 diff --git a/breakpad/src/client/windows/unittests/testing.gyp b/breakpad/src/client/windows/unittests/testing.gyp
 new file mode 100644
-index 0000000000000000000000000000000000000000..141d0ed0c825a4f91dfde167e4680ca731e2b3e9
+index 0000000000000000000000000000000000000000..cd8aca227000ec6e9cb2b676ca824f27cbded593
 --- /dev/null
 +++ b/breakpad/src/client/windows/unittests/testing.gyp
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,90 @@
 +# Copyright 2010 Google Inc. All rights reserved.
 +#
 +# Redistribution and use in source and binary forms, with or without
@@ -64878,11 +65363,12 @@ index 0000000000000000000000000000000000000000..141d0ed0c825a4f91dfde167e4680ca7
 +      'type': 'static_library',
 +      'include_dirs': [
 +        '<(DEPTH)/testing/include',
-+        '<(DEPTH)/testing/gtest',
-+        '<(DEPTH)/testing/gtest/include',
++        '<(DEPTH)/testing/googletest/include',
++        '<(DEPTH)/testing/googletest',
++        '<(DEPTH)/testing',
 +      ],
 +      'sources': [
-+        '<(DEPTH)/testing/gtest/src/gtest-all.cc',
++        '<(DEPTH)/testing/googletest/src/gtest-all.cc',
 +      ],
 +      'direct_dependent_settings': {
 +        'include_dirs': [
@@ -64901,18 +65387,24 @@ index 0000000000000000000000000000000000000000..141d0ed0c825a4f91dfde167e4680ca7
 +      'type': 'static_library',
 +      'include_dirs': [
 +        '<(DEPTH)/testing/include',
-+        '<(DEPTH)/testing/',
-+        '<(DEPTH)/testing/gtest',
-+        '<(DEPTH)/testing/gtest/include',
++        '<(DEPTH)/testing/googletest/include',
++        '<(DEPTH)/testing/googletest',
++        '<(DEPTH)/testing/googlemock/include',
++        '<(DEPTH)/testing/googlemock',
++        '<(DEPTH)/testing',
 +      ],
 +      'sources': [
-+        '<(DEPTH)/testing/src/gmock-all.cc',
-+        '<(DEPTH)/testing/src/gmock_main.cc',
++        '<(DEPTH)/testing/googlemock/src/gmock-all.cc',
++        '<(DEPTH)/testing/googletest/src/gtest_main.cc',
 +      ],
 +      'direct_dependent_settings': {
 +        'include_dirs': [
 +          '<(DEPTH)/testing/include',
-+          '<(DEPTH)/testing/gtest/include',
++          '<(DEPTH)/testing/googletest/include',
++          '<(DEPTH)/testing/googletest',
++          '<(DEPTH)/testing/googlemock/include',
++          '<(DEPTH)/testing/googlemock',
++          '<(DEPTH)/testing',
 +        ],
 +        'defines': ['_VARIADIC_MAX=10'],
 +      },
@@ -101157,7 +101649,7 @@ index 0000000000000000000000000000000000000000..30db742db5f1b495110653585e9abdeb
 +#endif  // BREAKPAD_COMMON_MAC_MACHO_READER_H_
 diff --git a/breakpad/src/common/mac/macho_reader_unittest.cc b/breakpad/src/common/mac/macho_reader_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..8ceab14bf2ef7cb44616168113ec625b59b6b034
+index 0000000000000000000000000000000000000000..d8459d8cd4b86a797f251d79e1607542166a235e
 --- /dev/null
 +++ b/breakpad/src/common/mac/macho_reader_unittest.cc
 @@ -0,0 +1,1902 @@
@@ -102277,7 +102769,7 @@ index 0000000000000000000000000000000000000000..8ceab14bf2ef7cb44616168113ec625b
 +                    Return(true)));
 +  EXPECT_TRUE(reader.WalkLoadCommands(&load_command_handler));
 +
-+  EXPECT_EQ(false,                        actual_segment.bits_64);
++  EXPECT_FALSE(actual_segment.bits_64);
 +  EXPECT_EQ("froon",                      actual_segment.name);
 +  EXPECT_EQ(0x1891139cU,                  actual_segment.vmaddr);
 +  EXPECT_EQ(0xcb76584fU,                  actual_segment.vmsize);
@@ -102314,7 +102806,7 @@ index 0000000000000000000000000000000000000000..8ceab14bf2ef7cb44616168113ec625b
 +                    Return(true)));
 +  EXPECT_TRUE(reader.WalkLoadCommands(&load_command_handler));
 +
-+  EXPECT_EQ(false,                        actual_segment.bits_64);
++  EXPECT_FALSE(actual_segment.bits_64);
 +  EXPECT_EQ("sixteenprecisely",           actual_segment.name);
 +  EXPECT_EQ(0x4b877866U,                  actual_segment.vmaddr);
 +  EXPECT_EQ(0xcb76584fU,                  actual_segment.vmsize);
@@ -105580,7 +106072,7 @@ index 0000000000000000000000000000000000000000..162f01e97cabf5941f219755599e6653
 +@end
 diff --git a/breakpad/src/common/md5.cc b/breakpad/src/common/md5.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..a0d9a1bdd89108c38c7da3015a44bca2e0ed6e66
+index 0000000000000000000000000000000000000000..4f1ac8cad41f6dcea27e900a318d2baa56812b9b
 --- /dev/null
 +++ b/breakpad/src/common/md5.cc
 @@ -0,0 +1,251 @@
@@ -105724,8 +106216,8 @@ index 0000000000000000000000000000000000000000..a0d9a1bdd89108c38c7da3015a44bca2
 +  byteReverse(ctx->in, 14);
 +
 +  /* Append length in bits and transform */
-+  ((u32 *) ctx->in)[14] = ctx->bits[0];
-+  ((u32 *) ctx->in)[15] = ctx->bits[1];
++  memcpy(&ctx->in[14], &ctx->bits[0], sizeof(u32));
++  memcpy(&ctx->in[15], &ctx->bits[1], sizeof(u32));
 +
 +  MD5Transform(ctx->buf, (u32 *) ctx->in);
 +  byteReverse((unsigned char *) ctx->buf, 4);
@@ -117039,10 +117531,10 @@ index 0000000000000000000000000000000000000000..f8d48cb1b5479ce816c52552ba7d7be4
 +#endif  // COMMON_WINDOWS_HTTP_UPLOAD_H_
 diff --git a/breakpad/src/common/windows/omap.cc b/breakpad/src/common/windows/omap.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..554a57c2db1459586025b2e472e32eb028f4b768
+index 0000000000000000000000000000000000000000..ba3ce86b8b7be6b4d0f6b5bebfe89de164150618
 --- /dev/null
 +++ b/breakpad/src/common/windows/omap.cc
-@@ -0,0 +1,694 @@
+@@ -0,0 +1,716 @@
 +// Copyright 2013 Google Inc. All rights reserved.
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -117494,6 +117986,27 @@ index 0000000000000000000000000000000000000000..554a57c2db1459586025b2e472e32eb0
 +  }
 +}
 +
++void BuildSubsequentRVAMap(const OmapData &omap_data,
++                           std::map<DWORD, DWORD> *subsequent) {
++  assert(subsequent->empty());
++  const OmapFromTable &orig2tran =
++      reinterpret_cast<const OmapFromTable &>(omap_data.omap_from);
++
++  if (orig2tran.empty())
++    return;
++
++  for (size_t i = 0; i < orig2tran.size() - 1; ++i) {
++    // Expect that orig2tran is sorted.
++    if (orig2tran[i].rva_original >= orig2tran[i + 1].rva_original) {
++      fprintf(stderr, "OMAP 'from' table unexpectedly unsorted\n");
++      subsequent->clear();
++      return;
++    }
++    subsequent->insert(std::make_pair(orig2tran[i].rva_original,
++                                      orig2tran[i + 1].rva_original));
++  }
++}
++
 +// Clips the given mapped range.
 +void ClipMappedRangeOriginal(const AddressRange& clip_range,
 +                             MappedRange* mapped_range) {
@@ -117621,6 +118134,7 @@ index 0000000000000000000000000000000000000000..554a57c2db1459586025b2e472e32eb0
 +
 +  BuildMapping(omap_data, &image_map->mapping);
 +  BuildEndpointIndexMap(image_map);
++  BuildSubsequentRVAMap(omap_data, &image_map->subsequent_rva_block);
 +}
 +
 +void MapAddressRange(const ImageMap& image_map,
@@ -117737,7 +118251,6 @@ index 0000000000000000000000000000000000000000..554a57c2db1459586025b2e472e32eb0
 +}
 +
 +}  // namespace google_breakpad
-\ No newline at end of file
 diff --git a/breakpad/src/common/windows/omap.h b/breakpad/src/common/windows/omap.h
 new file mode 100644
 index 0000000000000000000000000000000000000000..bc293afb51c6447058fd7318ac30babe6a4c52ce
@@ -117818,10 +118331,10 @@ index 0000000000000000000000000000000000000000..bc293afb51c6447058fd7318ac30babe
 +#endif  // COMMON_WINDOWS_OMAP_H_
 diff --git a/breakpad/src/common/windows/omap_internal.h b/breakpad/src/common/windows/omap_internal.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..3f904d7a73967cf8ef2ae96e5e28fb3c51c86131
+index 0000000000000000000000000000000000000000..2a4713d934703b74ed0d70c8ac6ca6e79d9243e9
 --- /dev/null
 +++ b/breakpad/src/common/windows/omap_internal.h
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,140 @@
 +// Copyright 2013 Google Inc. All rights reserved.
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -117859,6 +118372,7 @@ index 0000000000000000000000000000000000000000..3f904d7a73967cf8ef2ae96e5e28fb3c
 +#include <windows.h>
 +#include <dia2.h>
 +
++#include <map>
 +#include <vector>
 +
 +namespace google_breakpad {
@@ -117954,6 +118468,8 @@ index 0000000000000000000000000000000000000000..3f904d7a73967cf8ef2ae96e5e28fb3c
 +  // an interval in |mapping| that contains the endpoint. Useful for doing
 +  // interval intersection queries.
 +  EndpointIndexMap endpoint_index_map;
++
++  std::map<DWORD, DWORD> subsequent_rva_block;
 +};
 +
 +}  // namespace google_breakpad
@@ -117961,10 +118477,10 @@ index 0000000000000000000000000000000000000000..3f904d7a73967cf8ef2ae96e5e28fb3c
 +#endif  // COMMON_WINDOWS_OMAP_INTERNAL_H_
 diff --git a/breakpad/src/common/windows/omap_unittest.cc b/breakpad/src/common/windows/omap_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..960a33f469c3326c7ac55ef6adcf0bd525b17ede
+index 0000000000000000000000000000000000000000..7fe66bd406e425687894dff10cc1706826bfe81d
 --- /dev/null
 +++ b/breakpad/src/common/windows/omap_unittest.cc
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,329 @@
 +// Copyright 2013 Google Inc. All rights reserved.
 +//
 +// Redistribution and use in source and binary forms, with or without
@@ -117997,8 +118513,7 @@ index 0000000000000000000000000000000000000000..960a33f469c3326c7ac55ef6adcf0bd5
 +
 +#include "common/windows/omap.h"
 +
-+#include "gmock/gmock.h"
-+#include "gtest/gtest.h"
++#include "breakpad_googletest_includes.h"
 +
 +namespace google_breakpad {
 +
@@ -118297,10 +118812,10 @@ index 0000000000000000000000000000000000000000..960a33f469c3326c7ac55ef6adcf0bd5
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/common/windows/pdb_source_line_writer.cc b/breakpad/src/common/windows/pdb_source_line_writer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..01f4ce3b7519a8d55d2044e27ec3851af4492131
+index 0000000000000000000000000000000000000000..c2e22e40f6199aae8f94c557d3a19f0f6f683784
 --- /dev/null
 +++ b/breakpad/src/common/windows/pdb_source_line_writer.cc
-@@ -0,0 +1,1369 @@
+@@ -0,0 +1,1412 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -118424,6 +118939,16 @@ index 0000000000000000000000000000000000000000..01f4ce3b7519a8d55d2044e27ec3851a
 + private:
 +  PLOADED_IMAGE img_;
 +};
++
++bool SymbolsMatch(IDiaSymbol* a, IDiaSymbol* b) {
++  DWORD a_section, a_offset, b_section, b_offset;
++  if (FAILED(a->get_addressSection(&a_section)) ||
++      FAILED(a->get_addressOffset(&a_offset)) ||
++      FAILED(b->get_addressSection(&b_section)) ||
++      FAILED(b->get_addressOffset(&b_offset)))
++    return false;
++  return a_section == b_section && a_offset == b_offset;
++}
 +
 +bool CreateDiaDataSourceInstance(CComPtr<IDiaDataSource> &data_source) {
 +  if (SUCCEEDED(data_source.CoCreateInstance(CLSID_DiaSource))) {
@@ -119159,6 +119684,39 @@ index 0000000000000000000000000000000000000000..01f4ce3b7519a8d55d2044e27ec3851a
 +            stack_param_size > 0 ? stack_param_size : 0,
 +            name.m_str);
 +  }
++
++  // Now walk the function in the original untranslated space, asking DIA
++  // what function is at that location, stepping through OMAP blocks. If
++  // we're still in the same function, emit another entry, because the
++  // symbol could have been split into multiple pieces. If we've gotten to
++  // another symbol in the original address space, then we're done for
++  // this symbol. See https://crbug.com/678874.
++  for (;;) {
++    // This steps to the next block in the original image. Simply doing
++    // rva++ would also be correct, but would emit tons of unnecessary
++    // entries.
++    rva = image_map_.subsequent_rva_block[rva];
++    if (rva == 0)
++      break;
++
++    CComPtr<IDiaSymbol> next_sym = NULL;
++    LONG displacement;
++    if (FAILED(session_->findSymbolByRVAEx(rva, SymTagPublicSymbol, &next_sym,
++                                           &displacement))) {
++      break;
++    }
++
++    if (!SymbolsMatch(symbol, next_sym))
++      break;
++
++    AddressRangeVector next_ranges;
++    MapAddressRange(image_map_, AddressRange(rva, 1), &next_ranges);
++    for (size_t i = 0; i < next_ranges.size(); ++i) {
++      fprintf(output_, "PUBLIC %x %x %ws\n", next_ranges[i].rva,
++              stack_param_size > 0 ? stack_param_size : 0, name.m_str);
++    }
++  }
++
 +  return true;
 +}
 +
@@ -125951,10 +126509,10 @@ index 0000000000000000000000000000000000000000..c59142315b9a777f383950e541a62ca0
 +#endif  // GOOGLE_BREAKPAD_PROCSSOR_CALL_STACK_H__
 diff --git a/breakpad/src/google_breakpad/processor/code_module.h b/breakpad/src/google_breakpad/processor/code_module.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..b139907c44c497072e2a739c03e6020ce63a39f9
+index 0000000000000000000000000000000000000000..29b8d9c9ab5aa326ee5a4cdf8a82840c2577833c
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/processor/code_module.h
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,104 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -126051,6 +126609,9 @@ index 0000000000000000000000000000000000000000..b139907c44c497072e2a739c03e6020c
 +  // should always reflect the original values (reported in the minidump).
 +  virtual uint64_t shrink_down_delta() const = 0;
 +  virtual void SetShrinkDownDelta(uint64_t shrink_down_delta) = 0;
++
++  // Whether the module was unloaded from memory.
++  virtual bool is_unloaded() const = 0;
 +};
 +
 +}  // namespace google_breakpad
@@ -126842,10 +127403,10 @@ index 0000000000000000000000000000000000000000..1322a01c76eaa685acc43a80bec0116c
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_MICRODUMP_PROCESSOR_H__
 diff --git a/breakpad/src/google_breakpad/processor/minidump.h b/breakpad/src/google_breakpad/processor/minidump.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb879371bad
+index 0000000000000000000000000000000000000000..a5d32c8b1dbef404327a3282715431b1751b4eab
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/processor/minidump.h
-@@ -0,0 +1,1284 @@
+@@ -0,0 +1,1285 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -127198,7 +127759,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +
 +  static const uint32_t kStreamType = MD_THREAD_LIST_STREAM;
 +
-+  bool Read(uint32_t aExpectedSize);
++  bool Read(uint32_t aExpectedSize) override;
 +
 +  // The largest number of threads that will be read from a minidump.  The
 +  // default is 256.
@@ -127247,6 +127808,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +  virtual string debug_identifier() const;
 +  virtual string version() const;
 +  virtual CodeModule* Copy() const;
++  virtual bool is_unloaded() const { return false; }
 +
 +  // Getter and setter for shrink_down_delta.  This is used when the address
 +  // range for a module is shrunk down due to address range conflicts with
@@ -127439,7 +128001,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +
 +  explicit MinidumpMemoryList(Minidump* minidump);
 +
-+  bool Read(uint32_t expected_size);
++  bool Read(uint32_t expected_size) override;
 +
 +  // The largest number of memory regions that will be read from a minidump.
 +  // The default is 256.
@@ -127494,7 +128056,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +
 +  explicit MinidumpException(Minidump* minidump);
 +
-+  bool Read(uint32_t expected_size);
++  bool Read(uint32_t expected_size) override;
 +
 +  MDRawExceptionStream exception_;
 +  MinidumpContext*     context_;
@@ -127534,7 +128096,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +
 +  explicit MinidumpAssertion(Minidump* minidump);
 +
-+  bool Read(uint32_t expected_size);
++  bool Read(uint32_t expected_size) override;
 +
 +  MDRawAssertionInfo assertion_;
 +  string expression_;
@@ -127591,7 +128153,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +
 +  static const uint32_t kStreamType = MD_SYSTEM_INFO_STREAM;
 +
-+  bool Read(uint32_t expected_size);
++  bool Read(uint32_t expected_size) override;
 +
 +  // A string identifying the CPU vendor, if known.
 +  const string* cpu_vendor_;
@@ -127623,6 +128185,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +  string debug_identifier() const override;
 +  string version() const override;
 +  CodeModule* Copy() const override;
++  bool is_unloaded() const override { return true; }
 +  uint64_t shrink_down_delta() const override;
 +  void SetShrinkDownDelta(uint64_t shrink_down_delta) override;
 +
@@ -127695,8 +128258,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +
 +  static const uint32_t kStreamType = MD_UNLOADED_MODULE_LIST_STREAM;
 +
-+
-+  bool Read(uint32_t expected_size_);
++  bool Read(uint32_t expected_size_) override;
 +
 +  // The largest number of modules that will be read from a minidump.  The
 +  // default is 1024.
@@ -127732,7 +128294,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +
 +  explicit MinidumpMiscInfo(Minidump* minidump_);
 +
-+  bool Read(uint32_t expected_size_);
++  bool Read(uint32_t expected_size_) override;
 +
 +  MDRawMiscInfo misc_info_;
 +
@@ -127773,7 +128335,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +
 +  explicit MinidumpBreakpadInfo(Minidump* minidump_);
 +
-+  bool Read(uint32_t expected_size_);
++  bool Read(uint32_t expected_size_) override;
 +
 +  MDRawBreakpadInfo breakpad_info_;
 +
@@ -127841,7 +128403,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +
 +  explicit MinidumpMemoryInfoList(Minidump* minidump_);
 +
-+  bool Read(uint32_t expected_size);
++  bool Read(uint32_t expected_size) override;
 +
 +  // Access to memory info using addresses as the key.
 +  RangeMap<uint64_t, unsigned int> *range_map_;
@@ -127936,7 +128498,7 @@ index 0000000000000000000000000000000000000000..1bfc7d9e60810eac7319b283f3ea3bb8
 +  // Read and load the contents of the process mapping data.
 +  // The stream should have data in the form of /proc/self/maps.
 +  // This method returns whether the stream was read successfully.
-+  bool Read(uint32_t expected_size);
++  bool Read(uint32_t expected_size) override;
 +
 +  // The list of individual mappings.
 +  MinidumpLinuxMappings *maps_;
@@ -128423,10 +128985,10 @@ index 0000000000000000000000000000000000000000..15c7213e9ba4c33374d845363fc2b98b
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_PROCESS_RESULT_H__
 diff --git a/breakpad/src/google_breakpad/processor/process_state.h b/breakpad/src/google_breakpad/processor/process_state.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..9f12b0c69970b288395ad1bb6058210b97212579
+index 0000000000000000000000000000000000000000..21bef42c50efe43cd9e6ec2c948f3dd64dc7252a
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/processor/process_state.h
-@@ -0,0 +1,198 @@
+@@ -0,0 +1,203 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -128520,7 +129082,7 @@ index 0000000000000000000000000000000000000000..9f12b0c69970b288395ad1bb6058210b
 +
 +class ProcessState {
 + public:
-+  ProcessState() : modules_(NULL) { Clear(); }
++  ProcessState() : modules_(NULL), unloaded_modules_(NULL) { Clear(); }
 +  ~ProcessState();
 +
 +  // Resets the ProcessState to its default values
@@ -128540,6 +129102,7 @@ index 0000000000000000000000000000000000000000..9f12b0c69970b288395ad1bb6058210b
 +  }
 +  const SystemInfo* system_info() const { return &system_info_; }
 +  const CodeModules* modules() const { return modules_; }
++  const CodeModules* unloaded_modules() const { return unloaded_modules_; }
 +  const vector<linked_ptr<const CodeModule> >* shrunk_range_modules() const {
 +    return &shrunk_range_modules_;
 +  }
@@ -128605,6 +129168,10 @@ index 0000000000000000000000000000000000000000..9f12b0c69970b288395ad1bb6058210b
 +  // The modules that were loaded into the process represented by the
 +  // ProcessState.
 +  const CodeModules *modules_;
++
++  // The modules that have been unloaded from the process represented by the
++  // ProcessState.
++  const CodeModules *unloaded_modules_;
 +
 +  // The modules which virtual address ranges were shrunk down due to
 +  // virtual address conflicts.
@@ -129445,10 +130012,10 @@ index 0000000000000000000000000000000000000000..dc5d8ae67391adc123a51b310e13e0cd
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_STACK_FRAME_CPU_H__
 diff --git a/breakpad/src/google_breakpad/processor/stack_frame_symbolizer.h b/breakpad/src/google_breakpad/processor/stack_frame_symbolizer.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..074907cb14625ca5e9f20e21eb14a2eefbf90b6c
+index 0000000000000000000000000000000000000000..0bbaae0a3638a0fd675f72cb31a3ef3ab0359a3e
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/processor/stack_frame_symbolizer.h
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,110 @@
 +// -*- mode: C++ -*-
 +
 +// Copyright (c) 2012 Google Inc.
@@ -129526,9 +130093,11 @@ index 0000000000000000000000000000000000000000..074907cb14625ca5e9f20e21eb14a2ee
 +
 +  // Encapsulate the step of resolving source line info for a stack frame.
 +  // "frame" must not be NULL.
-+  virtual SymbolizerResult FillSourceLineInfo(const CodeModules* modules,
-+                                              const SystemInfo* system_info,
-+                                              StackFrame* stack_frame);
++  virtual SymbolizerResult FillSourceLineInfo(
++      const CodeModules* modules,
++      const CodeModules* unloaded_modules,
++      const SystemInfo* system_info,
++      StackFrame* stack_frame);
 +
 +  virtual WindowsFrameInfo* FindWindowsFrameInfo(const StackFrame* frame);
 +
@@ -129559,10 +130128,10 @@ index 0000000000000000000000000000000000000000..074907cb14625ca5e9f20e21eb14a2ee
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_STACK_FRAME_SYMBOLIZER_H__
 diff --git a/breakpad/src/google_breakpad/processor/stackwalker.h b/breakpad/src/google_breakpad/processor/stackwalker.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..a1bd3e7fe8e708d777251aeb15002d5d856dfe1d
+index 0000000000000000000000000000000000000000..4378f75be6bb00b9bab53e5be5d6bbffee26b6b8
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/processor/stackwalker.h
-@@ -0,0 +1,235 @@
+@@ -0,0 +1,242 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -129654,7 +130223,9 @@ index 0000000000000000000000000000000000000000..a1bd3e7fe8e708d777251aeb15002d5d
 +     DumpContext* context,
 +     MemoryRegion* memory,
 +     const CodeModules* modules,
++     const CodeModules* unloaded_modules,
 +     StackFrameSymbolizer* resolver_helper);
++
 +
 +  static void set_max_frames(uint32_t max_frames) {
 +    max_frames_ = max_frames;
@@ -129753,6 +130324,11 @@ index 0000000000000000000000000000000000000000..a1bd3e7fe8e708d777251aeb15002d5d
 +  // A list of modules, for populating each StackFrame's module information.
 +  // This field is optional and may be NULL.
 +  const CodeModules* modules_;
++
++  // A list of unloaded modules, for populating frames which aren't matched
++  // to any loaded modules.
++  // This field is optional and may be NULL.
++  const CodeModules* unloaded_modules_;
 +
 + protected:
 +  // The StackFrameSymbolizer implementation.
@@ -130409,10 +130985,10 @@ index 0000000000000000000000000000000000000000..9b4095b16c1c6274edcc19c8ac7bffce
 +}
 diff --git a/breakpad/src/processor/basic_code_module.h b/breakpad/src/processor/basic_code_module.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..0f7b3e4316dd04a755f3564e29c87a21cd2d0a71
+index 0000000000000000000000000000000000000000..35d66a6075ebf6b1b1a96c02dd77b1d0ebaec65b
 --- /dev/null
 +++ b/breakpad/src/processor/basic_code_module.h
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,121 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -130477,14 +131053,16 @@ index 0000000000000000000000000000000000000000..0f7b3e4316dd04a755f3564e29c87a21
 +        code_identifier_(that->code_identifier()),
 +        debug_file_(that->debug_file()),
 +        debug_identifier_(that->debug_identifier()),
-+        version_(that->version()) {}
++        version_(that->version()),
++        is_unloaded_(that->is_unloaded()) {}
 +
 +  BasicCodeModule(uint64_t base_address, uint64_t size,
 +                  const string &code_file,
 +                  const string &code_identifier,
 +                  const string &debug_file,
 +                  const string &debug_identifier,
-+                  const string &version)
++                  const string &version,
++                  const bool is_unloaded = false)
 +      : base_address_(base_address),
 +        size_(size),
 +        shrink_down_delta_(0),
@@ -130492,7 +131070,8 @@ index 0000000000000000000000000000000000000000..0f7b3e4316dd04a755f3564e29c87a21
 +        code_identifier_(code_identifier),
 +        debug_file_(debug_file),
 +        debug_identifier_(debug_identifier),
-+        version_(version)
++        version_(version),
++        is_unloaded_(is_unloaded)
 +    {}
 +  virtual ~BasicCodeModule() {}
 +
@@ -130510,6 +131089,7 @@ index 0000000000000000000000000000000000000000..0f7b3e4316dd04a755f3564e29c87a21
 +  virtual string debug_identifier() const { return debug_identifier_; }
 +  virtual string version() const { return version_; }
 +  virtual CodeModule* Copy() const { return new BasicCodeModule(this); }
++  virtual bool is_unloaded() const { return is_unloaded_; }
 +
 + private:
 +  uint64_t base_address_;
@@ -130520,6 +131100,7 @@ index 0000000000000000000000000000000000000000..0f7b3e4316dd04a755f3564e29c87a21
 +  string debug_file_;
 +  string debug_identifier_;
 +  string version_;
++  bool is_unloaded_;
 +
 +  // Disallow copy constructor and assignment operator.
 +  BasicCodeModule(const BasicCodeModule &that);
@@ -131597,10 +132178,10 @@ index 0000000000000000000000000000000000000000..a022bc0dbbf360a8c2c91b4f84b094d4
 +#endif  // PROCESSOR_BASIC_SOURCE_LINE_RESOLVER_TYPES_H__
 diff --git a/breakpad/src/processor/basic_source_line_resolver_unittest.cc b/breakpad/src/processor/basic_source_line_resolver_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..a75044c74b75da5b55a71fd39b13870a20de7185
+index 0000000000000000000000000000000000000000..9fab8ca666416297e91136fc25e8b2d56080ecb8
 --- /dev/null
 +++ b/breakpad/src/processor/basic_source_line_resolver_unittest.cc
-@@ -0,0 +1,682 @@
+@@ -0,0 +1,683 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -131674,6 +132255,7 @@ index 0000000000000000000000000000000000000000..a75044c74b75da5b55a71fd39b13870a
 +  virtual CodeModule* Copy() const {
 +    return new TestCodeModule(code_file_);
 +  }
++  virtual bool is_unloaded() const { return false; }
 +  virtual uint64_t shrink_down_delta() const { return 0; }
 +  virtual void SetShrinkDownDelta(uint64_t shrink_down_delta) {}
 +
@@ -137477,10 +138059,10 @@ index 0000000000000000000000000000000000000000..2c010470f5bd7ecf293d151303a89d79
 +#endif  // PROCESSOR_FAST_SOURCE_LINE_RESOLVER_TYPES_H__
 diff --git a/breakpad/src/processor/fast_source_line_resolver_unittest.cc b/breakpad/src/processor/fast_source_line_resolver_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c7215228e94c89e0b06cb60ce8600bf16aebd6cb
+index 0000000000000000000000000000000000000000..87b13c522e8e3e49e2fc515b36949bb2c492644c
 --- /dev/null
 +++ b/breakpad/src/processor/fast_source_line_resolver_unittest.cc
-@@ -0,0 +1,491 @@
+@@ -0,0 +1,492 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -137565,6 +138147,7 @@ index 0000000000000000000000000000000000000000..c7215228e94c89e0b06cb60ce8600bf1
 +  virtual CodeModule* Copy() const {
 +    return new TestCodeModule(code_file_);
 +  }
++  virtual bool is_unloaded() const { return false; }
 +  virtual uint64_t shrink_down_delta() const { return 0; }
 +  virtual void SetShrinkDownDelta(uint64_t shrink_down_delta) {}
 +
@@ -139711,10 +140294,10 @@ index 0000000000000000000000000000000000000000..4af62f56f0c6c04978f97ddb65947dcd
 +
 diff --git a/breakpad/src/processor/microdump_processor.cc b/breakpad/src/processor/microdump_processor.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..366e3f30aa97acb7d1edf1bef1523a0d9ee44fe0
+index 0000000000000000000000000000000000000000..2d67f8618bde09521ff5ba991cfbf1378b4eb987
 --- /dev/null
 +++ b/breakpad/src/processor/microdump_processor.cc
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,101 @@
 +// Copyright (c) 2014, Google Inc.
 +// All rights reserved.
 +//
@@ -139790,6 +140373,7 @@ index 0000000000000000000000000000000000000000..366e3f30aa97acb7d1edf1bef1523a0d
 +                            microdump.GetContext(),
 +                            microdump.GetMemory(),
 +                            process_state->modules_,
++                            /* unloaded_modules= */ NULL,
 +                            frame_symbolizer_));
 +
 +  scoped_ptr<CallStack> stack(new CallStack());
@@ -140358,10 +140942,10 @@ index 0000000000000000000000000000000000000000..a8b0e0df5ae1fcadf9c3d476fc7a3a3a
 +MICRODUMP_SUPPORTED_ARCHS="arm arm64"
 diff --git a/breakpad/src/processor/minidump.cc b/breakpad/src/processor/minidump.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..7226d34a270c4daab8f4f6dc3b20bc53e0e81c73
+index 0000000000000000000000000000000000000000..c9fa4d8124d55d8bdf5e2d666dd664c3d865ddb4
 --- /dev/null
 +++ b/breakpad/src/processor/minidump.cc
-@@ -0,0 +1,5379 @@
+@@ -0,0 +1,5381 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -142553,8 +143137,9 @@ index 0000000000000000000000000000000000000000..7226d34a270c4daab8f4f6dc3b20bc53
 +    }
 +
 +    if (signature == MD_CVINFOPDB70_SIGNATURE) {
-+      // Now that the structure type is known, recheck the size.
-+      if (MDCVInfoPDB70_minsize > module_.cv_record.data_size) {
++      // Now that the structure type is known, recheck the size,
++      // ensuring at least one byte for the null terminator.
++      if (MDCVInfoPDB70_minsize + 1 > module_.cv_record.data_size) {
 +        BPLOG(ERROR) << "MinidumpModule CodeView7 record size mismatch, " <<
 +                        MDCVInfoPDB70_minsize << " > " <<
 +                        module_.cv_record.data_size;
@@ -142579,8 +143164,9 @@ index 0000000000000000000000000000000000000000..7226d34a270c4daab8f4f6dc3b20bc53
 +        return NULL;
 +      }
 +    } else if (signature == MD_CVINFOPDB20_SIGNATURE) {
-+      // Now that the structure type is known, recheck the size.
-+      if (MDCVInfoPDB20_minsize > module_.cv_record.data_size) {
++      // Now that the structure type is known, recheck the size,
++      // ensuring at least one byte for the null terminator.
++      if (MDCVInfoPDB20_minsize + 1 > module_.cv_record.data_size) {
 +        BPLOG(ERROR) << "MinidumpModule CodeView2 record size mismatch, " <<
 +                        MDCVInfoPDB20_minsize << " > " <<
 +                        module_.cv_record.data_size;
@@ -146004,10 +146590,10 @@ index 0000000000000000000000000000000000000000..fb62ace7351ab6c0e22344ccabf2ed7a
 +exit $?
 diff --git a/breakpad/src/processor/minidump_processor.cc b/breakpad/src/processor/minidump_processor.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..e80ebc382319c2642f6e6c61ed446878d007d170
+index 0000000000000000000000000000000000000000..c522adff03ff47855c4156bf639c17c860e5d82a
 --- /dev/null
 +++ b/breakpad/src/processor/minidump_processor.cc
-@@ -0,0 +1,1586 @@
+@@ -0,0 +1,1593 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -146151,6 +146737,12 @@ index 0000000000000000000000000000000000000000..e80ebc382319c2642f6e6c61ed446878
 +    }
 +  }
 +
++  MinidumpUnloadedModuleList *unloaded_module_list =
++      dump->GetUnloadedModuleList();
++  if (unloaded_module_list) {
++    process_state->unloaded_modules_ = unloaded_module_list->Copy();
++  }
++
 +  MinidumpMemoryList *memory_list = dump->GetMemoryList();
 +  if (memory_list) {
 +    BPLOG(INFO) << "Found " << memory_list->region_count()
@@ -146272,6 +146864,7 @@ index 0000000000000000000000000000000000000000..e80ebc382319c2642f6e6c61ed446878
 +                                       context,
 +                                       thread_memory,
 +                                       process_state->modules_,
++                                       process_state->unloaded_modules_,
 +                                       frame_symbolizer_));
 +
 +    scoped_ptr<CallStack> stack(new CallStack());
@@ -147596,10 +148189,10 @@ index 0000000000000000000000000000000000000000..e80ebc382319c2642f6e6c61ed446878
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/processor/minidump_processor_unittest.cc b/breakpad/src/processor/minidump_processor_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..d43c1fc97a7e59073eaf967ed6db284d45a216a2
+index 0000000000000000000000000000000000000000..83682a51df86faae8bfbda5afd7f20995be10fa9
 --- /dev/null
 +++ b/breakpad/src/processor/minidump_processor_unittest.cc
-@@ -0,0 +1,645 @@
+@@ -0,0 +1,747 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -147673,7 +148266,23 @@ index 0000000000000000000000000000000000000000..d43c1fc97a7e59073eaf967ed6db284d
 +  MOCK_METHOD0(GetException, MinidumpException*());
 +  MOCK_METHOD0(GetAssertion, MinidumpAssertion*());
 +  MOCK_METHOD0(GetModuleList, MinidumpModuleList*());
++  MOCK_METHOD0(GetUnloadedModuleList, MinidumpUnloadedModuleList*());
 +  MOCK_METHOD0(GetMemoryList, MinidumpMemoryList*());
++};
++
++class MockMinidumpUnloadedModule : public MinidumpUnloadedModule {
++ public:
++  MockMinidumpUnloadedModule() : MinidumpUnloadedModule(NULL) {}
++};
++
++class MockMinidumpUnloadedModuleList : public MinidumpUnloadedModuleList {
++ public:
++  MockMinidumpUnloadedModuleList() : MinidumpUnloadedModuleList(NULL) {}
++
++  ~MockMinidumpUnloadedModuleList() {}
++  MOCK_CONST_METHOD0(Copy, CodeModules*());
++  MOCK_CONST_METHOD1(GetModuleForAddress,
++                     const MinidumpUnloadedModule*(uint64_t));
 +};
 +
 +class MockMinidumpThreadList : public MinidumpThreadList {
@@ -147759,6 +148368,8 @@ index 0000000000000000000000000000000000000000..d43c1fc97a7e59073eaf967ed6db284d
 +using google_breakpad::MockMinidumpMemoryRegion;
 +using google_breakpad::MockMinidumpThread;
 +using google_breakpad::MockMinidumpThreadList;
++using google_breakpad::MockMinidumpUnloadedModule;
++using google_breakpad::MockMinidumpUnloadedModuleList;
 +using google_breakpad::ProcessState;
 +using google_breakpad::scoped_ptr;
 +using google_breakpad::SymbolSupplier;
@@ -147921,6 +148532,90 @@ index 0000000000000000000000000000000000000000..d43c1fc97a7e59073eaf967ed6db284d
 +
 +class MinidumpProcessorTest : public ::testing::Test {
 +};
++
++TEST_F(MinidumpProcessorTest, TestUnloadedModules) {
++  MockMinidump dump;
++
++  EXPECT_CALL(dump, path()).WillRepeatedly(Return("mock minidump"));
++  EXPECT_CALL(dump, Read()).WillRepeatedly(Return(true));
++
++  MDRawHeader fake_header;
++  fake_header.time_date_stamp = 0;
++  EXPECT_CALL(dump, header()).WillRepeatedly(Return(&fake_header));
++
++  MDRawSystemInfo raw_system_info;
++  memset(&raw_system_info, 0, sizeof(raw_system_info));
++  raw_system_info.processor_architecture = MD_CPU_ARCHITECTURE_X86;
++  raw_system_info.platform_id = MD_OS_WIN32_NT;
++  TestMinidumpSystemInfo dump_system_info(raw_system_info);
++
++  EXPECT_CALL(dump, GetSystemInfo()).
++      WillRepeatedly(Return(&dump_system_info));
++
++  // No loaded modules
++
++  MockMinidumpUnloadedModuleList unloaded_module_list;
++  EXPECT_CALL(dump, GetUnloadedModuleList()).
++      WillOnce(Return(&unloaded_module_list));
++
++  MockMinidumpMemoryList memory_list;
++  EXPECT_CALL(dump, GetMemoryList()).
++      WillOnce(Return(&memory_list));
++
++  MockMinidumpThreadList thread_list;
++  EXPECT_CALL(dump, GetThreadList()).
++      WillOnce(Return(&thread_list));
++
++  EXPECT_CALL(thread_list, thread_count()).
++    WillRepeatedly(Return(1));
++
++  MockMinidumpThread thread;
++  EXPECT_CALL(thread_list, GetThreadAtIndex(0)).
++    WillOnce(Return(&thread));
++
++  EXPECT_CALL(thread, GetThreadID(_)).
++    WillRepeatedly(DoAll(SetArgumentPointee<0>(1),
++                         Return(true)));
++
++  MDRawContextX86 thread_raw_context;
++  memset(&thread_raw_context, 0,
++         sizeof(thread_raw_context));
++  thread_raw_context.context_flags = MD_CONTEXT_X86_FULL;
++  const uint32_t kExpectedEIP = 0xabcd1234;
++  thread_raw_context.eip = kExpectedEIP;
++  TestMinidumpContext thread_context(thread_raw_context);
++  EXPECT_CALL(thread, GetContext()).
++    WillRepeatedly(Return(&thread_context));
++
++  // The memory contents don't really matter here, since it won't be used.
++  MockMinidumpMemoryRegion thread_memory(0x1234, "xxx");
++  EXPECT_CALL(thread, GetMemory()).
++    WillRepeatedly(Return(&thread_memory));
++  EXPECT_CALL(thread, GetStartOfStackMemoryRange()).
++    Times(0);
++  EXPECT_CALL(memory_list, GetMemoryRegionForAddress(_)).
++    Times(0);
++
++  MockMinidumpUnloadedModuleList* unloaded_module_list_copy =
++      new MockMinidumpUnloadedModuleList();
++  EXPECT_CALL(unloaded_module_list, Copy()).
++      WillOnce(Return(unloaded_module_list_copy));
++
++  MockMinidumpUnloadedModule unloaded_module;
++  EXPECT_CALL(*unloaded_module_list_copy, GetModuleForAddress(kExpectedEIP)).
++      WillOnce(Return(&unloaded_module));
++
++  MinidumpProcessor processor(reinterpret_cast<SymbolSupplier*>(NULL), NULL);
++  ProcessState state;
++  EXPECT_EQ(processor.Process(&dump, &state),
++            google_breakpad::PROCESS_OK);
++
++  // The single frame should be populated with the unloaded module.
++  ASSERT_EQ(1U, state.threads()->size());
++  ASSERT_EQ(1U, state.threads()->at(0)->frames()->size());
++  ASSERT_EQ(kExpectedEIP, state.threads()->at(0)->frames()->at(0)->instruction);
++  ASSERT_EQ(&unloaded_module, state.threads()->at(0)->frames()->at(0)->module);
++}
 +
 +TEST_F(MinidumpProcessorTest, TestCorruptMinidumps) {
 +  MockMinidump dump;
@@ -150969,3 +151664,217 @@ index 0000000000000000000000000000000000000000..effb009162f35d6e4daaf0bca296f53f
 +}  // namespace google_breakpad
 +
 +#endif  // PROCESSOR_MODULE_SERIALIZER_H__
+diff --git a/breakpad/src/processor/pathname_stripper.cc b/breakpad/src/processor/pathname_stripper.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..839287bdba8ec957791859fdc14cf0375dcba9bd
+--- /dev/null
++++ b/breakpad/src/processor/pathname_stripper.cc
+@@ -0,0 +1,56 @@
++// Copyright (c) 2006, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// pathname_stripper.cc: Manipulates pathnames into their component parts.
++//
++// See pathname_stripper.h for documentation.
++//
++// Author: Mark Mentovai
++
++#include "processor/pathname_stripper.h"
++
++namespace google_breakpad {
++
++// static
++string PathnameStripper::File(const string &path) {
++  string::size_type slash = path.rfind('/');
++  string::size_type backslash = path.rfind('\\');
++
++  string::size_type file_start = 0;
++  if (slash != string::npos &&
++      (backslash == string::npos || slash > backslash)) {
++    file_start = slash + 1;
++  } else if (backslash != string::npos) {
++    file_start = backslash + 1;
++  }
++
++  return path.substr(file_start);
++}
++
++}  // namespace google_breakpad
+diff --git a/breakpad/src/processor/pathname_stripper.h b/breakpad/src/processor/pathname_stripper.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..423ca0d05abc09d6bf0f8ef09ca8ce688d8ac20e
+--- /dev/null
++++ b/breakpad/src/processor/pathname_stripper.h
+@@ -0,0 +1,53 @@
++// Copyright (c) 2006, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// pathname_stripper.h: Manipulates pathnames into their component parts.
++//
++// Author: Mark Mentovai
++
++#ifndef PROCESSOR_PATHNAME_STRIPPER_H__
++#define PROCESSOR_PATHNAME_STRIPPER_H__
++
++#include <string>
++
++#include "common/using_std_string.h"
++
++namespace google_breakpad {
++
++class PathnameStripper {
++ public:
++  // Given path, a pathname with components separated by slashes (/) or
++  // backslashes (\), returns the trailing component, without any separator.
++  // If path ends in a separator character, returns an empty string.
++  static string File(const string &path);
++};
++
++}  // namespace google_breakpad
++
++#endif  // PROCESSOR_PATHNAME_STRIPPER_H__
+diff --git a/breakpad/src/processor/pathname_stripper_unittest.cc b/breakpad/src/processor/pathname_stripper_unittest.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..1bff4cb01777524a0a0760d8916131209a114a35
+--- /dev/null
++++ b/breakpad/src/processor/pathname_stripper_unittest.cc
+@@ -0,0 +1,87 @@
++// Copyright (c) 2006, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++#include <stdio.h>
++
++#include "processor/pathname_stripper.h"
++#include "processor/logging.h"
++
++#define ASSERT_TRUE(condition) \
++  if (!(condition)) { \
++    fprintf(stderr, "FAIL: %s @ %s:%d\n", #condition, __FILE__, __LINE__); \
++    return false; \
++  }
++
++#define ASSERT_EQ(e1, e2) ASSERT_TRUE((e1) == (e2))
++
++namespace {
++
++using google_breakpad::PathnameStripper;
++
++static bool RunTests() {
++  ASSERT_EQ(PathnameStripper::File("/dir/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("\\dir\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("/dir\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("\\dir/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir/\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir\\/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir/"), "");
++  ASSERT_EQ(PathnameStripper::File("dir\\"), "");
++  ASSERT_EQ(PathnameStripper::File("dir/dir/"), "");
++  ASSERT_EQ(PathnameStripper::File("dir\\dir\\"), "");
++  ASSERT_EQ(PathnameStripper::File("dir1/dir2/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir1\\dir2\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir1/dir2\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir1\\dir2/file"), "file");
++  ASSERT_EQ(PathnameStripper::File(""), "");
++  ASSERT_EQ(PathnameStripper::File("1"), "1");
++  ASSERT_EQ(PathnameStripper::File("1/2"), "2");
++  ASSERT_EQ(PathnameStripper::File("1\\2"), "2");
++  ASSERT_EQ(PathnameStripper::File("/1/2"), "2");
++  ASSERT_EQ(PathnameStripper::File("\\1\\2"), "2");
++  ASSERT_EQ(PathnameStripper::File("dir//file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir\\\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("/dir//file"), "file");
++  ASSERT_EQ(PathnameStripper::File("\\dir\\\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("c:\\dir\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("c:\\dir\\file.ext"), "file.ext");
++
++  return true;
++}
++
++}  // namespace
++
++int main(int argc, char **argv) {
++  BPLOG_INIT(&argc, &argv);
++
++  return RunTests() ? 0 : 1;
++}
