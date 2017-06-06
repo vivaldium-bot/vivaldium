@@ -1,110 +1,3 @@
-diff --git a/ash/drag_drop/drag_drop_controller.cc b/ash/drag_drop/drag_drop_controller.cc
-index 1d07181e52379215e675330e13934edf9bd8ae30..5680a9ad4ae406747dd2e7f6ff023957702ebe84 100644
---- a/ash/drag_drop/drag_drop_controller.cc
-+++ b/ash/drag_drop/drag_drop_controller.cc
-@@ -155,7 +155,8 @@ int DragDropController::StartDragAndDrop(
-     aura::Window* source_window,
-     const gfx::Point& screen_location,
-     int operation,
--    ui::DragDropTypes::DragEventSource source) {
-+    ui::DragDropTypes::DragEventSource source,
-+    bool& cancelled) {
-   if (IsDragDropInProgress())
-     return 0;
- 
-diff --git a/ash/drag_drop/drag_drop_controller.h b/ash/drag_drop/drag_drop_controller.h
-index 728d9a2a882abbf55d74a13d83102f1b10b3a5f0..0d82212e632a74488887670d489e5394be08a277 100644
---- a/ash/drag_drop/drag_drop_controller.h
-+++ b/ash/drag_drop/drag_drop_controller.h
-@@ -56,7 +56,8 @@ class ASH_EXPORT DragDropController : public aura::client::DragDropClient,
-                        aura::Window* source_window,
-                        const gfx::Point& screen_location,
-                        int operation,
--                       ui::DragDropTypes::DragEventSource source) override;
-+                       ui::DragDropTypes::DragEventSource source,
-+                       bool& cancelled) override;
-   void DragCancel() override;
-   bool IsDragDropInProgress() override;
- 
-diff --git a/ash/drag_drop/drag_drop_controller_unittest.cc b/ash/drag_drop/drag_drop_controller_unittest.cc
-index dba9ef0ca31dc9329fc7cf312251a3a38d36e671..d347f59119352cf28eabed43ec7d4a8be4b8542b 100644
---- a/ash/drag_drop/drag_drop_controller_unittest.cc
-+++ b/ash/drag_drop/drag_drop_controller_unittest.cc
-@@ -152,11 +152,13 @@ class TestDragDropController : public DragDropController {
-                        aura::Window* source_window,
-                        const gfx::Point& location,
-                        int operation,
--                       ui::DragDropTypes::DragEventSource source) override {
-+                       ui::DragDropTypes::DragEventSource source,
-+                       bool& cancelled) override {
-     drag_start_received_ = true;
-     data.GetString(&drag_string_);
-     return DragDropController::StartDragAndDrop(
--        data, root_window, source_window, location, operation, source);
-+        data, root_window, source_window, location, operation, source,
-+        cancelled);
-   }
- 
-   void DragUpdate(aura::Window* target,
-@@ -950,12 +952,14 @@ TEST_F(DragDropControllerTest, DragCancelAcrossDisplays) {
-   ui::OSExchangeData data;
-   data.SetString(base::UTF8ToUTF16("I am being dragged"));
-   {
-+    bool cancelled;
-     std::unique_ptr<views::Widget> widget(CreateNewWidget());
-     aura::Window* window = widget->GetNativeWindow();
-     drag_drop_controller_->StartDragAndDrop(
-         data, window->GetRootWindow(), window, gfx::Point(5, 5),
-         ui::DragDropTypes::DRAG_MOVE,
--        ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
-+        ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE,
-+        cancelled);
- 
-     DragImageWindowObserver observer;
-     ASSERT_TRUE(GetDragImageWindow());
-@@ -981,12 +985,14 @@ TEST_F(DragDropControllerTest, DragCancelAcrossDisplays) {
-   }
- 
-   {
-+    bool cancelled;
-     std::unique_ptr<views::Widget> widget(CreateNewWidget());
-     aura::Window* window = widget->GetNativeWindow();
-     drag_drop_controller_->StartDragAndDrop(
-         data, window->GetRootWindow(), window, gfx::Point(405, 405),
-         ui::DragDropTypes::DRAG_MOVE,
--        ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
-+        ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE,
-+        cancelled);
-     DragImageWindowObserver observer;
-     ASSERT_TRUE(GetDragImageWindow());
-     GetDragImageWindow()->AddObserver(&observer);
-@@ -1029,9 +1035,11 @@ TEST_F(DragDropControllerTest, DragCancelOnDisplayDisconnect) {
-   data.SetString(base::UTF8ToUTF16("I am being dragged"));
-   std::unique_ptr<views::Widget> widget(CreateNewWidget());
-   aura::Window* window = widget->GetNativeWindow();
-+  bool cancelled=false;
-   drag_drop_controller_->StartDragAndDrop(
-       data, window->GetRootWindow(), window, gfx::Point(5, 5),
--      ui::DragDropTypes::DRAG_MOVE, ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
-+      ui::DragDropTypes::DRAG_MOVE, ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE,
-+      cancelled);
- 
-   // Start dragging.
-   ui::MouseEvent e1(ui::ET_MOUSE_DRAGGED, gfx::Point(200, 0),
-diff --git a/ash/wm/overview/window_selector_unittest.cc b/ash/wm/overview/window_selector_unittest.cc
-index c943534e323981af9a6663f943d698d9c94bfe64..26b76ab17c1ba35c3af3a70201be80cd6977c70e 100644
---- a/ash/wm/overview/window_selector_unittest.cc
-+++ b/ash/wm/overview/window_selector_unittest.cc
-@@ -1562,7 +1562,8 @@ TEST_F(WindowSelectorTest, DISABLED_DragDropInProgress) {
-   data.SetString(base::UTF8ToUTF16("I am being dragged"));
-   drag_drop_controller->StartDragAndDrop(
-       data, window->GetRootWindow(), window.get(), gfx::Point(5, 5),
--      ui::DragDropTypes::DRAG_MOVE, ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
-+      ui::DragDropTypes::DRAG_MOVE, ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE,
-+      drag_canceled_by_test);
-   RunAllPendingInMessageLoop();
-   EXPECT_FALSE(drag_canceled_by_test);
-   ASSERT_TRUE(IsSelecting());
 diff --git a/ui/app_list/test/run_all_unittests.cc b/ui/app_list/test/run_all_unittests.cc
 index b7db379c1ca5420141a04a735a3534c55e0a8759..7e1a4455a4353c2ec3cc3ab6b2c98506367e66a3 100644
 --- a/ui/app_list/test/run_all_unittests.cc
@@ -125,53 +18,66 @@ index b7db379c1ca5420141a04a735a3534c55e0a8759..7e1a4455a4353c2ec3cc3ab6b2c98506
      ui::RegisterPathProvider();
  
      base::FilePath ui_test_pak_path;
+diff --git a/ui/aura/client/drag_drop_client.cc b/ui/aura/client/drag_drop_client.cc
+index f7dc619d5907c6f615a79ffc4166d62baf7c31cf..9d7374cc2b54d79be153f31fce95b25fb048e313 100644
+--- a/ui/aura/client/drag_drop_client.cc
++++ b/ui/aura/client/drag_drop_client.cc
+@@ -27,5 +27,29 @@ DragDropClient* GetDragDropClient(Window* root_window) {
+       root_window->GetProperty(kRootWindowDragDropClientKey) : NULL;
+ }
+ 
++int DragDropClient::StartDragAndDrop(
++    const ui::OSExchangeData& data,
++    aura::Window* root_window,
++    aura::Window* source_window,
++    const gfx::Point& screen_location,
++    int operation,
++    ui::DragDropTypes::DragEventSource source) {
++  bool cancelled;
++  return StartDragAndDrop(data, root_window, source_window, screen_location,
++                          operation, source, cancelled);
++}
++
++int DragDropClient::StartDragAndDrop(const ui::OSExchangeData& data,
++                                     aura::Window* root_window,
++                                     aura::Window* source_window,
++                                     const gfx::Point& screen_location,
++                                     int operation,
++                                     ui::DragDropTypes::DragEventSource source,
++                                     bool& cancelled) {
++  cancelled = false;
++  return StartDragAndDrop(data, root_window, source_window, screen_location,
++                          operation, source);
++}
++
+ }  // namespace client
+ }  // namespace aura
 diff --git a/ui/aura/client/drag_drop_client.h b/ui/aura/client/drag_drop_client.h
-index 4015f0f1a93773f4073f13c433c8d1790fa2982b..18207573ee3ef91cdc2e425216539c24bbb3ea79 100644
+index 4015f0f1a93773f4073f13c433c8d1790fa2982b..5ec5bf35df192afb57f22a4963f0ea3b136f377c 100644
 --- a/ui/aura/client/drag_drop_client.h
 +++ b/ui/aura/client/drag_drop_client.h
-@@ -34,7 +34,8 @@ class AURA_EXPORT DragDropClient {
+@@ -34,7 +34,15 @@ class AURA_EXPORT DragDropClient {
                                 aura::Window* source_window,
                                 const gfx::Point& screen_location,
                                 int operation,
 -                               ui::DragDropTypes::DragEventSource source) = 0;
++                               ui::DragDropTypes::DragEventSource source);
++
++  virtual int StartDragAndDrop(const ui::OSExchangeData& data,
++                               aura::Window* root_window,
++                               aura::Window* source_window,
++                               const gfx::Point& screen_location,
++                               int operation,
 +                               ui::DragDropTypes::DragEventSource source,
-+                               bool& cancelled) = 0;
++                               bool& cancelled);
  
    // Called when a drag and drop session is cancelled.
    virtual void DragCancel() = 0;
-diff --git a/ui/aura/mus/drag_drop_controller_mus.cc b/ui/aura/mus/drag_drop_controller_mus.cc
-index a82841c80c09d3adf4b280a76d33b85f18a78242..a487022c924039db8ebbf5045f5b9ddaedf06932 100644
---- a/ui/aura/mus/drag_drop_controller_mus.cc
-+++ b/ui/aura/mus/drag_drop_controller_mus.cc
-@@ -130,7 +130,8 @@ int DragDropControllerMus::StartDragAndDrop(
-     Window* source_window,
-     const gfx::Point& screen_location,
-     int drag_operations,
--    ui::DragDropTypes::DragEventSource source) {
-+    ui::DragDropTypes::DragEventSource source,
-+    bool& cancelled) {
-   DCHECK(!current_drag_state_);
- 
-   // TODO(erg): Pass |cursor_location| and |bitmap| in PerformDragDrop() when
-diff --git a/ui/aura/mus/drag_drop_controller_mus.h b/ui/aura/mus/drag_drop_controller_mus.h
-index 92700dcb9928dcea6a76c7d7b897a1da6d2536a1..c2932c8afd362c2cdf76aa62a0b7a0eba2d38417 100644
---- a/ui/aura/mus/drag_drop_controller_mus.h
-+++ b/ui/aura/mus/drag_drop_controller_mus.h
-@@ -67,7 +67,8 @@ class DragDropControllerMus : public client::DragDropClient {
-                        Window* source_window,
-                        const gfx::Point& screen_location,
-                        int drag_operations,
--                       ui::DragDropTypes::DragEventSource source) override;
-+                       ui::DragDropTypes::DragEventSource source,
-+                       bool& cancelled) override;
-   void DragCancel() override;
-   bool IsDragDropInProgress() override;
- 
 diff --git a/ui/base/BUILD.gn b/ui/base/BUILD.gn
-index 33a2d0b602ce7813d1bd056be43c01beeec7a523..2b73302dad932083aeb379448a86abd4c5df348a 100644
+index 8def626ed9c8d82f971f705711273c824d40d18a..d3361b3f17f4d0bc1619b259e2e4d108938dd3ad 100644
 --- a/ui/base/BUILD.gn
 +++ b/ui/base/BUILD.gn
-@@ -976,7 +976,7 @@ test("ui_base_unittests") {
+@@ -982,7 +982,7 @@ test("ui_base_unittests") {
    }
  }
  
@@ -286,7 +192,7 @@ index 440ab1a04d4d37c31f22bc853bb449a913a02d08..6d6ea07474c803a615a718b84e879f96
    // GLib implements correct environment variable parsing with
    // the precedence order: LANGUAGE, LC_ALL, LC_MESSAGES and LANG.
 diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
-index d2e4c51de325a5826acf60bed572aa04649eabc9..8fff9302d85472acbc08371698f0061fbd7c67ca 100644
+index 03ab51f52ceb656de3b75a232353bff5e4bd2e82..8157e3c76d92791177f80465e05f58bb5880fa08 100644
 --- a/ui/base/resource/resource_bundle.cc
 +++ b/ui/base/resource/resource_bundle.cc
 @@ -10,6 +10,7 @@
@@ -297,7 +203,7 @@ index d2e4c51de325a5826acf60bed572aa04649eabc9..8fff9302d85472acbc08371698f0061f
  #include "base/big_endian.h"
  #include "base/command_line.h"
  #include "base/files/file.h"
-@@ -248,7 +249,11 @@ ResourceBundle& ResourceBundle::GetSharedInstance() {
+@@ -249,7 +250,11 @@ ResourceBundle& ResourceBundle::GetSharedInstance() {
  
  #if !defined(OS_ANDROID)
  bool ResourceBundle::LocaleDataPakExists(const std::string& locale) {
@@ -310,7 +216,7 @@ index d2e4c51de325a5826acf60bed572aa04649eabc9..8fff9302d85472acbc08371698f0061f
  }
  #endif  // !defined(OS_ANDROID)
  
-@@ -322,10 +327,17 @@ std::string ResourceBundle::LoadLocaleResources(
+@@ -333,10 +338,17 @@ std::string ResourceBundle::LoadLocaleResources(
    if (locale_file_path.empty())
      locale_file_path = GetLocaleFilePath(app_locale, true);
  
@@ -329,7 +235,7 @@ index d2e4c51de325a5826acf60bed572aa04649eabc9..8fff9302d85472acbc08371698f0061f
    }
  
    std::unique_ptr<DataPack> data_pack(new DataPack(SCALE_FACTOR_100P));
-@@ -725,12 +737,12 @@ void ResourceBundle::LoadChromeResources() {
+@@ -735,12 +747,12 @@ void ResourceBundle::LoadChromeResources() {
    // scale factor to gfx::ImageSkia::AddRepresentation.
    if (IsScaleFactorSupported(SCALE_FACTOR_100P)) {
      AddDataPackFromPath(GetResourcesPakFilePath(
@@ -344,17 +250,17 @@ index d2e4c51de325a5826acf60bed572aa04649eabc9..8fff9302d85472acbc08371698f0061f
    }
  }
  
-@@ -753,7 +765,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
+@@ -763,7 +775,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
    std::unique_ptr<DataPack> data_pack(new DataPack(scale_factor));
    if (data_pack->LoadFromPath(pack_path)) {
-     AddDataPack(data_pack.release());
+     AddDataPack(std::move(data_pack));
 -  } else if (!optional) {
 +  } else if (false) {
      LOG(ERROR) << "Failed to load " << pack_path.value()
                 << "\nSome features may not be available.";
    }
 diff --git a/ui/base/resource/resource_bundle_mac.mm b/ui/base/resource/resource_bundle_mac.mm
-index 2dbe9ea26d63a34c08c34a6aa5f861b286f98eb4..99f82256c844cbb5c4a0900abc676f15baf5ee0c 100644
+index 3b17113ddd461f0646780b5d73a11fa745a1e346..619e8496035a9b5035ae4ad90c5941a966cce3a8 100644
 --- a/ui/base/resource/resource_bundle_mac.mm
 +++ b/ui/base/resource/resource_bundle_mac.mm
 @@ -48,13 +48,13 @@ base::FilePath GetResourcesPakFilePath(NSString* name, NSString* mac_locale) {
@@ -373,19 +279,6 @@ index 2dbe9ea26d63a34c08c34a6aa5f861b286f98eb4..99f82256c844cbb5c4a0900abc676f15
                          SCALE_FACTOR_200P);
    }
  }
-diff --git a/ui/gfx/vector_icons/BUILD.gn b/ui/gfx/vector_icons/BUILD.gn
-index d0676ddd0106873586376f8fc7562858021ea505..a33a2b9530351c89d0051739a1e3c0fae3809f38 100644
---- a/ui/gfx/vector_icons/BUILD.gn
-+++ b/ui/gfx/vector_icons/BUILD.gn
-@@ -108,7 +108,7 @@ action("aggregate_vector_icons") {
-     "web.icon",
-     "zoom_minus.icon",
-     "zoom_plus.icon",
--    "${branding_path_component}/product.icon",
-+    "//vivaldi/app/resources/vector_icons/product.icon",
-   ]
- 
-   output_cc = "$target_gen_dir/vector_icons.cc"
 diff --git a/ui/shell_dialogs/select_file_dialog_win.cc b/ui/shell_dialogs/select_file_dialog_win.cc
 index 46804d2ac696ba305b23bc68cce4e4f5ecd9697e..e9d0a8470b604838a464f1cdf850b4335aa19bff 100644
 --- a/ui/shell_dialogs/select_file_dialog_win.cc
@@ -434,32 +327,8 @@ index 735a2237bcb536fb0bb272a2fa06b6abff199ae6..f3fdb512ecb7748ab8395f49906ba55e
    // Mac never adjusts.
    bubble_delegate->set_adjust_if_offscreen(false);
  #endif
-diff --git a/ui/views/controls/button/menu_button_unittest.cc b/ui/views/controls/button/menu_button_unittest.cc
-index adb1a6d3d5fcf475fde5ee011bbbfcceba0b72c6..92f8d321b3dfecd16e9194bcc87d33bd8ab15d97 100644
---- a/ui/views/controls/button/menu_button_unittest.cc
-+++ b/ui/views/controls/button/menu_button_unittest.cc
-@@ -245,7 +245,8 @@ class TestDragDropClient : public aura::client::DragDropClient,
-                        aura::Window* source_window,
-                        const gfx::Point& screen_location,
-                        int operation,
--                       ui::DragDropTypes::DragEventSource source) override;
-+                       ui::DragDropTypes::DragEventSource source,
-+                       bool& cancelled) override;
-   void DragCancel() override;
-   bool IsDragDropInProgress() override;
- 
-@@ -275,7 +276,8 @@ int TestDragDropClient::StartDragAndDrop(
-     aura::Window* source_window,
-     const gfx::Point& screen_location,
-     int operation,
--    ui::DragDropTypes::DragEventSource source) {
-+    ui::DragDropTypes::DragEventSource source,
-+    bool& cancelled) {
-   if (IsDragDropInProgress())
-     return ui::DragDropTypes::DRAG_NONE;
-   drag_in_progress_ = true;
 diff --git a/ui/views/controls/menu/menu_controller.cc b/ui/views/controls/menu/menu_controller.cc
-index 37db59dfd9313ef7ac30b9dbc1b132207cbe56ea..161af496b05e133b3e95f2012988f0aa8ece9a25 100644
+index 335945f284ed025510dfe538b0f75ded3e3421d5..c4050d836faaf9f194470e648ea5eba7ae66e535 100644
 --- a/ui/views/controls/menu/menu_controller.cc
 +++ b/ui/views/controls/menu/menu_controller.cc
 @@ -496,6 +496,10 @@ MenuItemView* MenuController::Run(Widget* parent,
@@ -486,30 +355,6 @@ index 697e9a5781f25efd1c917c02607a39967087a4fd..598165b299f103e82c7a9e476e0ea220
    // Only used for testing.
    static void TurnOffMenuSelectionHoldForTest();
  
-diff --git a/ui/views/controls/menu/menu_controller_unittest.cc b/ui/views/controls/menu/menu_controller_unittest.cc
-index 70aded93ba9e3e141f363e8160e635bdf72062be..d1910e11252e37253038f8e3ebeb60770122d4f2 100644
---- a/ui/views/controls/menu/menu_controller_unittest.cc
-+++ b/ui/views/controls/menu/menu_controller_unittest.cc
-@@ -206,7 +206,8 @@ class TestDragDropClient : public aura::client::DragDropClient {
-                        aura::Window* source_window,
-                        const gfx::Point& screen_location,
-                        int operation,
--                       ui::DragDropTypes::DragEventSource source) override;
-+                       ui::DragDropTypes::DragEventSource source,
-+                       bool& cancelled) override;
-   void DragCancel() override;
-   bool IsDragDropInProgress() override;
- 
-@@ -223,7 +224,8 @@ int TestDragDropClient::StartDragAndDrop(
-     aura::Window* source_window,
-     const gfx::Point& screen_location,
-     int operation,
--    ui::DragDropTypes::DragEventSource source) {
-+    ui::DragDropTypes::DragEventSource source,
-+    bool& cancelled) {
-   drag_in_progress_ = true;
-   start_drag_and_drop_callback_.Run();
-   return 0;
 diff --git a/ui/views/controls/menu/menu_runner_impl.cc b/ui/views/controls/menu/menu_runner_impl.cc
 index a247d5129bba444b463610ba9855590974ef70ae..0e68ebe30631a3ee9e44ac1e0db80d5dfb2752bf 100644
 --- a/ui/views/controls/menu/menu_runner_impl.cc
@@ -532,26 +377,6 @@ index a247d5129bba444b463610ba9855590974ef70ae..0e68ebe30631a3ee9e44ac1e0db80d5d
  #if defined(OS_WIN)
    // This is only needed on Windows.
    if (!show_mnemonics)
-diff --git a/ui/views/drag_utils_aura.cc b/ui/views/drag_utils_aura.cc
-index 27577e0eb2c647383947dd6d403d041bffaba87d..b3311fd17db7b9b68013ddee4b9626afd60e7d8a 100644
---- a/ui/views/drag_utils_aura.cc
-+++ b/ui/views/drag_utils_aura.cc
-@@ -16,12 +16,14 @@ void RunShellDrag(gfx::NativeView view,
-                   const gfx::Point& location,
-                   int operation,
-                   ui::DragDropTypes::DragEventSource source) {
-+  bool cancelled;
-   gfx::Point screen_location(location);
-   wm::ConvertPointToScreen(view, &screen_location);
-   aura::Window* root_window = view->GetRootWindow();
-   if (aura::client::GetDragDropClient(root_window)) {
-     aura::client::GetDragDropClient(root_window)->StartDragAndDrop(
--        data, root_window, view, screen_location, operation, source);
-+        data, root_window, view, screen_location, operation, source,
-+        cancelled);
-   }
- }
- 
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
 index dd0c1947c461fe81bd513cb972b2b63a9cacc6ec..cdbca951b57878539be02cdb64241c14513cafd4 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
@@ -587,59 +412,21 @@ index dd0c1947c461fe81bd513cb972b2b63a9cacc6ec..cdbca951b57878539be02cdb64241c14
                              ui::DragDropTypes::DRAG_EVENT_SOURCE_COUNT);
    return ui::DragDropTypes::DRAG_NONE;
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h
-index 732d0454017cc797ae435abb983c4244e834ff55..9dfbf1cd7fe1771deaac479b2e8812f87da01291 100644
+index 732d0454017cc797ae435abb983c4244e834ff55..172a7cde9d77873db2d0f2458364dde69d02f1cf 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h
 +++ b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h
-@@ -87,7 +87,8 @@ class VIEWS_EXPORT DesktopDragDropClientAuraX11
+@@ -87,7 +87,10 @@ class VIEWS_EXPORT DesktopDragDropClientAuraX11
                         aura::Window* source_window,
                         const gfx::Point& screen_location,
                         int operation,
 -                       ui::DragDropTypes::DragEventSource source) override;
 +                       ui::DragDropTypes::DragEventSource source,
 +                       bool& cancelled) override;
++  using aura::client::DragDropClient::StartDragAndDrop;
++
    void DragCancel() override;
    bool IsDragDropInProgress() override;
  
-diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11_unittest.cc b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11_unittest.cc
-index 862495c0166c8a8d2b005503a8f1643015dbb2ef..9681cf0c5829eac0d10f0b16a41bf63758894e8a 100644
---- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11_unittest.cc
-+++ b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11_unittest.cc
-@@ -395,6 +395,7 @@ class DesktopDragDropClientAuraX11Test : public ViewsTestBase {
-     drag_bitmap.eraseARGB(0xFF, 0, 0, 0);
-     gfx::ImageSkia drag_image(gfx::ImageSkia::CreateFrom1xBitmap(drag_bitmap));
-     data.provider().SetDragImage(drag_image, gfx::Vector2d());
-+    bool cancelled;
- 
-     return client_->StartDragAndDrop(
-         data,
-@@ -402,7 +403,8 @@ class DesktopDragDropClientAuraX11Test : public ViewsTestBase {
-         widget_->GetNativeWindow(),
-         gfx::Point(),
-         ui::DragDropTypes::DRAG_COPY,
--        ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
-+        ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE,
-+        cancelled);
-   }
- 
-   // ViewsTestBase:
-@@ -871,6 +873,7 @@ class DesktopDragDropClientAuraX11ChromeSourceTargetTest
-   int StartDragAndDrop() {
-     ui::OSExchangeData data;
-     data.SetString(base::ASCIIToUTF16("Test"));
-+    bool cancelled;
- 
-     return client_->StartDragAndDrop(
-         data,
-@@ -878,7 +881,8 @@ class DesktopDragDropClientAuraX11ChromeSourceTargetTest
-         widget_->GetNativeWindow(),
-         gfx::Point(),
-         ui::DragDropTypes::DRAG_COPY,
--        ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
-+        ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE,
-+        cancelled);
-   }
- 
-   // ViewsTestBase:
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc b/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc
 index 67fd2faa13f594ad7f1d0371a8408813be12b413..9c0ea8870ba19d02cfbab44c216760fe1bd1c303 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc
@@ -733,7 +520,7 @@ index 3432afe40d033984d5c898b9b395a38253eff235..bbc8064b1232ff911b7855db64fbec61
    return GetPrimaryDisplay();
  }
 diff --git a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
-index 3b848bc9ddb9aa899dc8eaf96f30a0a97998e5b1..3f30f3210e91564b2b133f454fff8d2b119bf417 100644
+index 448baf898079c28dab37da1087c36257225f5e8c..81be0d3be7a9f3b8414f77a45758ef9453a4d195 100644
 --- a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
 @@ -64,6 +64,8 @@
@@ -742,10 +529,10 @@ index 3b848bc9ddb9aa899dc8eaf96f30a0a97998e5b1..3f30f3210e91564b2b133f454fff8d2b
  
 +#include "ui/views/widget/widget_delegate.h"
 +
- DECLARE_WINDOW_PROPERTY_TYPE(views::DesktopWindowTreeHostX11*);
+ DECLARE_UI_CLASS_PROPERTY_TYPE(views::DesktopWindowTreeHostX11*);
  
  namespace views {
-@@ -1346,6 +1348,15 @@ void DesktopWindowTreeHostX11::InitX11Window(
+@@ -1356,6 +1358,15 @@ void DesktopWindowTreeHostX11::InitX11Window(
    swa.background_pixmap = None;
    swa.bit_gravity = NorthWestGravity;
  
@@ -761,7 +548,7 @@ index 3b848bc9ddb9aa899dc8eaf96f30a0a97998e5b1..3f30f3210e91564b2b133f454fff8d2b
    ::Atom window_type;
    switch (params.type) {
      case Widget::InitParams::TYPE_MENU:
-@@ -1776,6 +1787,22 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
+@@ -1786,6 +1797,22 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
    if (event->IsAnyButton() || event->IsMouseWheelEvent())
      FlashFrame(false);
  
@@ -785,10 +572,10 @@ index 3b848bc9ddb9aa899dc8eaf96f30a0a97998e5b1..3f30f3210e91564b2b133f454fff8d2b
      SendEventToProcessor(event);
    } else {
 diff --git a/ui/views/widget/native_widget_aura.cc b/ui/views/widget/native_widget_aura.cc
-index c422cc072167d5a13008352f21bf247dbd449e58..13a12f375bba9893e1cf21a8e230bccfb38604d5 100644
+index 9c2c1b0f8a93f313059fefc14ad323b641308f51..fbb37203fb9e6e18c019ad3e9e037c14a9f1858f 100644
 --- a/ui/views/widget/native_widget_aura.cc
 +++ b/ui/views/widget/native_widget_aura.cc
-@@ -1207,6 +1207,8 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
+@@ -1178,6 +1178,8 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
      // matches our previous behaviour; the global stacking client would almost
      // always reattach the window to the same RootWindow.
      aura::Window* root_window = native_view->GetRootWindow();
@@ -798,10 +585,10 @@ index c422cc072167d5a13008352f21bf247dbd449e58..13a12f375bba9893e1cf21a8e230bccf
          native_view, root_window, root_window->GetBoundsInScreen());
    }
 diff --git a/ui/views/widget/widget.cc b/ui/views/widget/widget.cc
-index 118a118b20e9dbe799b56f8c14f99b2b22ee459f..40649edfc82c99c7dcfc7fd3110bac7cf8e9a65f 100644
+index 5ff65fdbd3aeda262b71e96eee4e627472e019f1..8588240bdf51637944def78e817b83bbe4073809 100644
 --- a/ui/views/widget/widget.cc
 +++ b/ui/views/widget/widget.cc
-@@ -135,6 +135,7 @@ Widget::InitParams::InitParams(Type type)
+@@ -136,6 +136,7 @@ Widget::InitParams::InitParams(Type type)
        layer_type(ui::LAYER_TEXTURED),
        context(nullptr),
        force_show_in_taskbar(false),
@@ -810,10 +597,10 @@ index 118a118b20e9dbe799b56f8c14f99b2b22ee459f..40649edfc82c99c7dcfc7fd3110bac7c
  
  Widget::InitParams::InitParams(const InitParams& other) = default;
 diff --git a/ui/views/widget/widget.h b/ui/views/widget/widget.h
-index 2c5ba165dd74f95145584a07675811d383f3064d..b742b2a486f5da583a3510de0d7839db48af42f5 100644
+index a7affa69a5dda14fa1270c324f994de108217488..ebc7a547429fdb151ab249f4bf90d525bdfb9f96 100644
 --- a/ui/views/widget/widget.h
 +++ b/ui/views/widget/widget.h
-@@ -282,6 +282,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+@@ -283,6 +283,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
      // If true, forces the window to be shown in the taskbar, even for window
      // types that do not appear in the taskbar by default (popup and bubble).
      bool force_show_in_taskbar;
@@ -823,7 +610,7 @@ index 2c5ba165dd74f95145584a07675811d383f3064d..b742b2a486f5da583a3510de0d7839db
      // Only used by X11, for root level windows. Specifies the res_name and
      // res_class fields, respectively, of the WM_CLASS window property. Controls
      // window grouping and desktop file matching in Linux window managers.
-@@ -656,6 +659,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+@@ -657,6 +660,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
    void set_frame_type(FrameType frame_type) { frame_type_ = frame_type; }
    FrameType frame_type() const { return frame_type_; }
  
@@ -874,10 +661,10 @@ index b843416dac5fe668527a0032f7df6d5fba63c6fd..5fcb415a02be594afb8d9e76600d5c61
      }
      case Widget::InitParams::TYPE_CONTROL:
 diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
-index 5547471c277d44cfdcf360fb9dc2dbd8ca6d7304..ec60faf31ce9acfcf0ecd6d7ad751eb2b7fa0c1f 100644
+index ac7645344f2e60f7ce4fe9484df2342fe752e60c..a58cb5a804ccadc78dde0a6154bb5fe4aae3c4de 100644
 --- a/ui/views/win/hwnd_message_handler.cc
 +++ b/ui/views/win/hwnd_message_handler.cc
-@@ -1152,8 +1152,12 @@ bool HWNDMessageHandler::GetClientAreaInsets(gfx::Insets* insets) const {
+@@ -1151,8 +1151,12 @@ bool HWNDMessageHandler::GetClientAreaInsets(gfx::Insets* insets) const {
      // Windows automatically adds a standard width border to all sides when a
      // window is maximized.
      int border_thickness = GetSystemMetrics(SM_CXSIZEFRAME);
@@ -891,7 +678,7 @@ index 5547471c277d44cfdcf360fb9dc2dbd8ca6d7304..ec60faf31ce9acfcf0ecd6d7ad751eb2
          border_thickness, border_thickness, border_thickness, border_thickness);
      return true;
 diff --git a/ui/webui/resources/js/util.js b/ui/webui/resources/js/util.js
-index cdc8ed73c645259f519528ac03688abfbd8b57df..55b6cd4a953203382626b0896ab5c40889905b64 100644
+index 28a60d2ce1378e6c9609170c4aad62c3d547c856..6b990c35625f8457bf282b6efcccb28023500436 100644
 --- a/ui/webui/resources/js/util.js
 +++ b/ui/webui/resources/js/util.js
 @@ -210,6 +210,13 @@ function queryRequiredElement(selectors, opt_context) {
@@ -922,17 +709,3 @@ index cdc8ed73c645259f519528ac03688abfbd8b57df..55b6cd4a953203382626b0896ab5c408
      if ((anchor.protocol == 'file:' || anchor.protocol == 'about:') &&
          (e.button == 0 || e.button == 1)) {
        chrome.send('navigateToUrl', [
-diff --git a/ui/wm/public/scoped_drag_drop_disabler.cc b/ui/wm/public/scoped_drag_drop_disabler.cc
-index 223422737574912487d4579297c0a65f52c630de..f9f95e8b297d107c1b42d9e463ab22bc7935cf1a 100644
---- a/ui/wm/public/scoped_drag_drop_disabler.cc
-+++ b/ui/wm/public/scoped_drag_drop_disabler.cc
-@@ -18,7 +18,8 @@ class NopDragDropClient : public DragDropClient {
-                        aura::Window* source_window,
-                        const gfx::Point& screen_location,
-                        int operation,
--                       ui::DragDropTypes::DragEventSource source) override {
-+                       ui::DragDropTypes::DragEventSource source,
-+                       bool& cancelled) override {
-     return 0;
-   }
-   void DragCancel() override {}
