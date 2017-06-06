@@ -4,7 +4,6 @@
 
 #include <windows.h>
 
-
 void ChromiumProfileLock::Init() {
   lock_handle_ = INVALID_HANDLE_VALUE;
 }
@@ -12,9 +11,9 @@ void ChromiumProfileLock::Init() {
 void ChromiumProfileLock::Lock() {
   if (HasAcquired())
     return;
-  lock_handle_ = CreateFile(lock_file_.value().c_str(),
-                            GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
-                            FILE_FLAG_DELETE_ON_CLOSE, NULL);
+  lock_handle_ =
+      CreateFile(lock_file_.value().c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                 NULL, OPEN_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, NULL);
 }
 
 void ChromiumProfileLock::Unlock() {

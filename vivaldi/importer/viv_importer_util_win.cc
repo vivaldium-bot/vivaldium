@@ -1,6 +1,5 @@
 // Copyright (c) 2013 Vivaldi Technologies AS. All rights reserved
 
-
 #include <string>
 
 #include "base/bind.h"
@@ -11,10 +10,9 @@
 
 #include "importer/viv_importer_utils.h"
 
-static const wchar_t *kOperaRegPath = L"Software\\Opera Software";
-static const wchar_t *kOpera = L"Opera";
-static const wchar_t *kOpera64bitFolder = L"Opera x64";
-
+static const wchar_t* kOperaRegPath = L"Software\\Opera Software";
+static const wchar_t* kOpera = L"Opera";
+static const wchar_t* kOpera64bitFolder = L"Opera x64";
 
 base::FilePath GetOperaInstallPathFromRegistry() {
   // Detects the path that Opera is installed in.
@@ -23,10 +21,8 @@ base::FilePath GetOperaInstallPathFromRegistry() {
   DWORD buffer_length = sizeof(buffer);
   base::win::RegKey reg_key(HKEY_CURRENT_USER, registry_path.c_str(), KEY_READ);
   buffer_length = sizeof(buffer);
-  LONG result = reg_key.ReadValue(L"Last Install Path",
-                                  buffer,
-                                  &buffer_length,
-                                  NULL);
+  LONG result =
+      reg_key.ReadValue(L"Last Install Path", buffer, &buffer_length, NULL);
 
   return (result != ERROR_SUCCESS) ? base::FilePath() : base::FilePath(buffer);
 }

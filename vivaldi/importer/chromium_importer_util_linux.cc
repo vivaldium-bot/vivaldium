@@ -1,7 +1,7 @@
 // Copyright (c) 2015 Vivaldi Technologies AS. All rights reserved
 
-#include "importer/chromium_profile_importer.h"
 #include "base/path_service.h"
+#include "importer/chromium_profile_importer.h"
 
 base::FilePath GetProfileDir(importer::ImporterType importerType) {
   base::FilePath home_path;
