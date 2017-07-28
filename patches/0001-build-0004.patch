@@ -1,3 +1,53 @@
+diff --git a/tools/gyp/test/win/gyptest-link-ltcg.py b/tools/gyp/test/win/gyptest-link-ltcg.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..5271e099d7137ff75f8b773c76bdaf7e0332bda6
+--- /dev/null
++++ b/tools/gyp/test/win/gyptest-link-ltcg.py
+@@ -0,0 +1,44 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2013 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Make sure LTCG is working properly.
++"""
++
++import TestGyp
++
++import sys
++
++if sys.platform == 'win32':
++  test = TestGyp.TestGyp(formats=['msvs', 'ninja'])
++
++  CHDIR = 'linker-flags'
++  test.run_gyp('ltcg.gyp', chdir=CHDIR)
++
++  # Here we expect LTCG is able to inline functions beyond compile unit.
++  # Note: This marker is embedded in 'inline_test_main.cc'
++  INLINE_MARKER = '==== inlined ===='
++
++  # link.exe generates following lines when LTCG is enabled.
++  # Note: Future link.exe may or may not generate them. Update as needed.
++  LTCG_LINKER_MESSAGES = ['Generating code', 'Finished generating code']
++
++  # test 'LinkTimeCodeGenerationOptionDefault'
++  test.build('ltcg.gyp', 'test_ltcg_off', chdir=CHDIR)
++  test.run_built_executable('test_ltcg_off', chdir=CHDIR)
++  test.must_not_contain_any_line(test.stdout(), [INLINE_MARKER])
++
++  # test 'LinkTimeCodeGenerationOptionUse'
++  test.build('ltcg.gyp', 'test_ltcg_on', chdir=CHDIR)
++  if test.format == 'ninja':
++    # Make sure ninja win_tool.py filters out noisy lines.
++    test.must_not_contain_any_line(test.stdout(), LTCG_LINKER_MESSAGES)
++  elif test.format == 'msvs':
++    test.must_contain_any_line(test.stdout(), LTCG_LINKER_MESSAGES)
++  test.run_built_executable('test_ltcg_on', chdir=CHDIR)
++  test.must_contain_any_line(test.stdout(), [INLINE_MARKER])
++
++  test.pass_test()
 diff --git a/tools/gyp/test/win/gyptest-link-mapfile.py b/tools/gyp/test/win/gyptest-link-mapfile.py
 new file mode 100644
 index 0000000000000000000000000000000000000000..00c1dea9e90a262a614f6d91ca203e1522dc8f5b
@@ -10974,7 +11024,7 @@ index 0a36a19369075c84251191f9be834f1440d8ea90..9eca9579c6767d5863d86373208a79b3
  
  FEATURE_TYPES = ['APIFeature', 'BehaviorFeature',
 diff --git a/tools/json_schema_compiler/json_schema_api.gni b/tools/json_schema_compiler/json_schema_api.gni
-index 6f4620e861672348f8f6a46eb4e2dfd178beb44f..49e23061c6e6ef69f66391b64903d67975d77d74 100644
+index 46cb996f1bcb96cbfd2c12eda19cb2447c247eab..de5a611b76ffaa911ea00792fc3b77f4cd1088be 100644
 --- a/tools/json_schema_compiler/json_schema_api.gni
 +++ b/tools/json_schema_compiler/json_schema_api.gni
 @@ -84,13 +84,25 @@ template("json_schema_api") {
@@ -11015,7 +11065,7 @@ index 6f4620e861672348f8f6a46eb4e2dfd178beb44f..49e23061c6e6ef69f66391b64903d679
          "--namespace=$root_namespace",
          "--generator=cpp",
          "--include-rules=$schema_include_rules",
-@@ -158,8 +170,8 @@ template("json_schema_api") {
+@@ -159,8 +171,8 @@ template("json_schema_api") {
          "$target_gen_dir/generated_schemas.h",
        ]
        args = [
@@ -11026,7 +11076,7 @@ index 6f4620e861672348f8f6a46eb4e2dfd178beb44f..49e23061c6e6ef69f66391b64903d679
                 "--namespace=$root_namespace",
                 "--bundle-name=" + invoker.bundle_name,
                 "--generator=cpp-bundle-schema",
-@@ -183,7 +195,11 @@ template("json_schema_api") {
+@@ -184,7 +196,11 @@ template("json_schema_api") {
             "\"impl_dir\" must be defined for the $target_name template.")
  
      # Child directory inside the generated file tree.
@@ -11039,7 +11089,7 @@ index 6f4620e861672348f8f6a46eb4e2dfd178beb44f..49e23061c6e6ef69f66391b64903d679
  
      bundle_generator_registration_name =
          target_name + "_bundle_generator_registration"
-@@ -191,12 +207,12 @@ template("json_schema_api") {
+@@ -192,12 +208,12 @@ template("json_schema_api") {
        script = compiler_script
        inputs = compiler_sources + invoker.sources + uncompiled_sources
        outputs = [
@@ -11057,12 +11107,12 @@ index 6f4620e861672348f8f6a46eb4e2dfd178beb44f..49e23061c6e6ef69f66391b64903d679
                 "--bundle-name=" + invoker.bundle_name,
                 "--generator=cpp-bundle-registration",
 diff --git a/tools/licenses.py b/tools/licenses.py
-index b5b68ff9a6d7f5ffd1beddf2276ad3f133f4d2a3..b653fc3d83bd5b1902777c53352bc93fb7bcf865 100755
+index 97600d430cbbc2aa2a725e96345a99a24754b975..6d497ff92049ad66c460c4df46ebb24833b5d87a 100755
 --- a/tools/licenses.py
 +++ b/tools/licenses.py
-@@ -21,12 +21,16 @@ import os
- import subprocess
+@@ -23,12 +23,16 @@ import subprocess
  import sys
+ import tempfile
  
 +
 +sys.path.insert(0, os.path.join(os.path.dirname(__file__),
@@ -11078,7 +11128,7 @@ index b5b68ff9a6d7f5ffd1beddf2276ad3f133f4d2a3..b653fc3d83bd5b1902777c53352bc93f
  # Paths from the root of the tree to directories to skip.
  PRUNE_PATHS = set([
      # Placeholder directory only, not third-party code.
-@@ -49,7 +53,6 @@ PRUNE_PATHS = set([
+@@ -51,7 +55,6 @@ PRUNE_PATHS = set([
      os.path.join('third_party','bison'),
      os.path.join('third_party','blanketjs'),
      os.path.join('third_party','chromite'),
@@ -11086,7 +11136,7 @@ index b5b68ff9a6d7f5ffd1beddf2276ad3f133f4d2a3..b653fc3d83bd5b1902777c53352bc93f
      os.path.join('third_party','gles2_conform'),
      os.path.join('third_party','gnu_binutils'),
      os.path.join('third_party','gold'),
-@@ -60,7 +63,6 @@ PRUNE_PATHS = set([
+@@ -62,7 +65,6 @@ PRUNE_PATHS = set([
      os.path.join('third_party','mingw-w64'),
      os.path.join('third_party','nacl_sdk_binaries'),
      os.path.join('third_party','pefile'),
@@ -11094,7 +11144,7 @@ index b5b68ff9a6d7f5ffd1beddf2276ad3f133f4d2a3..b653fc3d83bd5b1902777c53352bc93f
      os.path.join('third_party','psyco_win32'),
      os.path.join('third_party','pyelftools'),
      os.path.join('third_party','pylib'),
-@@ -114,7 +116,7 @@ ADDITIONAL_PATHS = (
+@@ -116,7 +118,7 @@ ADDITIONAL_PATHS = (
      # Fake directories to include the strongtalk and fdlibm licenses.
      os.path.join('v8', 'strongtalk'),
      os.path.join('v8', 'fdlibm'),
@@ -11103,7 +11153,7 @@ index b5b68ff9a6d7f5ffd1beddf2276ad3f133f4d2a3..b653fc3d83bd5b1902777c53352bc93f
  
  
  # Directories where we check out directly from upstream, and therefore
-@@ -249,6 +251,7 @@ SPECIAL_CASES = {
+@@ -251,6 +253,7 @@ SPECIAL_CASES = {
          "License File": "/third_party/swiftshader/LICENSE.txt",
      },
  }
@@ -11111,7 +11161,7 @@ index b5b68ff9a6d7f5ffd1beddf2276ad3f133f4d2a3..b653fc3d83bd5b1902777c53352bc93f
  
  # Special value for 'License File' field used to indicate that the license file
  # should not be used in about:credits.
-@@ -559,6 +562,9 @@ def GenerateCredits(
+@@ -591,6 +594,9 @@ def GenerateCredits(
          }
          entries.append(entry)
  
@@ -11121,7 +11171,7 @@ index b5b68ff9a6d7f5ffd1beddf2276ad3f133f4d2a3..b653fc3d83bd5b1902777c53352bc93f
      entries.sort(key=lambda entry: (entry['name'], entry['content']))
      entries_contents = '\n'.join([entry['content'] for entry in entries])
      file_template = open(file_template_file).read()
-@@ -580,7 +586,7 @@ def GenerateCredits(
+@@ -620,7 +626,7 @@ def GenerateCredits(
        # This is still no perfect, as it will fail if no build files are changed,
        # but a new README.chromium / LICENSE is added. This shouldn't happen in
        # practice however.
@@ -15130,6 +15180,20 @@ index 0000000000000000000000000000000000000000..c30e8d840e1129dc52ea2f1ccd0be01b
 +<script src="../common/start.js"></script>
 +</body>
 +</html>
+diff --git a/tools/perf/benchmarks/system_health_smoke_test.py b/tools/perf/benchmarks/system_health_smoke_test.py
+index 2930e28282217ec14670cad7eb6cf8c983cce80c..7b6e824a8d32f6a5bd83c91cd87933748336159b 100644
+--- a/tools/perf/benchmarks/system_health_smoke_test.py
++++ b/tools/perf/benchmarks/system_health_smoke_test.py
+@@ -143,6 +143,9 @@ def GenerateBenchmarkOptions(benchmark_class):
+ def load_tests(loader, standard_tests, pattern):
+   del loader, standard_tests, pattern  # unused
+   suite = progress_reporter.TestSuite()
++  # Vivaldi does not test these but waiting for the filters will cause
++  # load failures to trigger
++  return suite
+   benchmark_classes = GetSystemHealthBenchmarksToSmokeTest()
+   assert benchmark_classes, 'This list should never be empty'
+   for benchmark_class in benchmark_classes:
 diff --git a/tools/perf/core/bootstrap.py b/tools/perf/core/bootstrap.py
 index 3a25f5f053c9bc73cde6fb4065f9fa45e3d1b636..6d5266807268fac21599780aac769506f3749364 100644
 --- a/tools/perf/core/bootstrap.py
@@ -15146,10 +15210,10 @@ index 3a25f5f053c9bc73cde6fb4065f9fa45e3d1b636..6d5266807268fac21599780aac769506
    exec open(deps_file).read()  # pylint: disable=exec-used
  
 diff --git a/tools/perf/measurements/clock_domain_test.py b/tools/perf/measurements/clock_domain_test.py
-index 596439fdb94abdf2c9352cb25be88f0b379912b5..5dabb03049a1b34a431a309f477ba4db02bd2471 100644
+index b24b23f4638bad3fe36bc6a9e8eb0a61966d3e07..664bd2290f3d8fa41ffa95edab657c9619847454 100644
 --- a/tools/perf/measurements/clock_domain_test.py
 +++ b/tools/perf/measurements/clock_domain_test.py
-@@ -37,5 +37,5 @@ class ClockDomainTest(tab_test_case.TabTestCase):
+@@ -38,5 +38,5 @@ class ClockDomainTest(tab_test_case.TabTestCase):
      ts_telemetry_start = telemetry_sync[0]['args']['issue_ts']
      ts_chrome = chrome_sync[0]['ts']
      ts_telemetry_end = telemetry_sync[0]['ts']
@@ -102201,28 +102265,3 @@ index 0000000000000000000000000000000000000000..a0ed202ed5a4b5fdd4b228070e261686
 +
 +
 +# @@protoc_insertion_point(module_scope)
-diff --git a/tools/swarming_client/third_party/infra_libs/ts_mon/protos/new/README.md b/tools/swarming_client/third_party/infra_libs/ts_mon/protos/new/README.md
-new file mode 100644
-index 0000000000000000000000000000000000000000..c4ff16338f44b82dd6c7256fb835044c3cf4149b
---- /dev/null
-+++ b/tools/swarming_client/third_party/infra_libs/ts_mon/protos/new/README.md
-@@ -0,0 +1,9 @@
-+Updating the *.proto files: see go/updating-tsmon-protos
-+
-+To generate the `*_pb2.py` files from the `*proto` files:
-+
-+    cd infra_libs/ts_mon/protos/new
-+    protoc --python_out=. *.proto
-+
-+protoc version tested: libprotoc 3.0.0
-+
-diff --git a/tools/swarming_client/third_party/infra_libs/ts_mon/protos/new/__init__.py b/tools/swarming_client/third_party/infra_libs/ts_mon/protos/new/__init__.py
-new file mode 100644
-index 0000000000000000000000000000000000000000..ce33e059a6e9d7701201a073f8284c6a7c1ec121
---- /dev/null
-+++ b/tools/swarming_client/third_party/infra_libs/ts_mon/protos/new/__init__.py
-@@ -0,0 +1,4 @@
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
