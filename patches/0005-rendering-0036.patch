@@ -1,3 +1,1946 @@
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-copy-text.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-copy-text.html
+deleted file mode 100644
+index 6d80b33a87b1741c4d2ab05cc600c84762376223..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-copy-text.html
++++ /dev/null
+@@ -1,29 +0,0 @@
+-<!DOCTYPE html>
+-<script src="../../resources/js-test.js"></script>
+-
+-<textarea id=textarea rows=1>Hello World</textarea>
+-<script>
+-description("This tests that text is copied (rather than moved) when the copy key is down.");
+-
+-if (window.testRunner) {
+-    // Drag a word in the textarea
+-    var textarea = document.getElementById("textarea");
+-    textarea.focus();
+-    textarea.setSelectionRange(0, 5);
+-    x = textarea.offsetLeft + 10;
+-    y = textarea.offsetTop + textarea.offsetHeight / 2;
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();
+-    // and drop it off to the right
+-    eventSender.leapForward(500);
+-    eventSender.mouseMoveTo(textarea.offsetLeft +
+-    textarea.offsetWidth - 10, y);
+-
+-    // Simulate pressing the copy key. This will
+-    // transform the drag into a copy, rather
+-    // than a move.
+-    eventSender.mouseUp(0, ["copyKey"]);
+-
+-    shouldBeEqualToString("textarea.value", "Hello WorldHello");
+-}
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-dead-frame.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-dead-frame.html
+deleted file mode 100644
+index 48c62a6b5fc580b51ccf0c4db0efa7973ed35fff..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-dead-frame.html
++++ /dev/null
+@@ -1,66 +0,0 @@
+-<!doctype html>
+-<title>Check you don't crash when your previous drag target frame is deleted</title>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<p>Check you don't crash when your previous drag target frame is deleted</p>
+-<div><span id="dragme">hello</span></div>
+-<iframe id="target"></iframe>
+-<div id="log"></div>
+-<script>
+-var framex;
+-var framey;
+-var target = document.getElementById("target");
+-target.contentDocument.designMode = 'on';
+-var t = async_test('Drag-And-Drop to dead frame');
+-
+-window.addEventListener('load', t.step_func(() => {
+-    if (!window.eventSender)
+-        throw new Error('This test requires eventSender.');
+-
+-    framex = target.offsetLeft + 10;
+-    framey = target.offsetTop + target.offsetHeight / 2;
+-
+-    // Drag 'hello'
+-    var dragMe = document.getElementById("dragme");
+-    window.getSelection().selectAllChildren(dragMe);
+-    x = dragMe.offsetLeft + 10;
+-    y = dragMe.offsetTop + dragMe.offsetHeight / 2;
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();
+-
+-    eventSender.leapForward(500);
+-    eventSender.mouseMoveTo(framex, framey);
+-    setTimeout(dropIt1, 0);
+-}));
+-
+-function dropIt1() {
+-    // Drop it off to the frame
+-    eventSender.mouseUp();
+-    assert_equals(target.contentDocument.body.textContent, 'hello',
+-                  'target should have dropped content');
+-    setTimeout(deleteFrameAndDrop, 0);
+-}
+-
+-function deleteFrameAndDrop() {
+-
+-    // Delete the frame where we just dragged somet stuff
+-    target.remove();
+-
+-    // Do drag drop again
+-    var dragMe = document.getElementById("dragme");
+-    x = dragMe.offsetLeft + 10;
+-    y = dragMe.offsetTop + dragMe.offsetHeight / 2;
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();
+-    eventSender.leapForward(500);
+-    eventSender.mouseMoveTo(framex, framey);
+-    setTimeout(dropIt2, 0);
+-}
+-
+-function dropIt2() {
+-    // Drop it off to somewhere
+-    eventSender.mouseUp();
+-    // Since we don't crash, we are succeeded!
+-    t.done();
+-}
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-iframe-refresh-crash-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-iframe-refresh-crash-expected.txt
+deleted file mode 100644
+index 3ded1fb5a8c86ef76bde4c4f3ab9c86453f09dcb..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-iframe-refresh-crash-expected.txt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-Bug 37618: Crash when an image drag-drop operation happens inside a continuously refreshing iframe.
+-
+-SUCCESS
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-iframe-refresh-crash.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-iframe-refresh-crash.html
+deleted file mode 100644
+index db06ee5f77b064412231dcf4402e5202636581a5..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-iframe-refresh-crash.html
++++ /dev/null
+@@ -1,58 +0,0 @@
+-<html>
+-<head>
+-<script>
+-if (window.testRunner) {
+-    testRunner.waitUntilDone();
+-    testRunner.dumpAsText();
+-}
+-
+-function log(message) {
+-    var console = document.getElementById("console");
+-    var li = document.createElement("li");
+-    var text = document.createTextNode(message);
+-    
+-    console.appendChild(li);
+-    li.appendChild(text);
+-}
+-
+-function runTest() {
+-
+-    var doc = window.frames[0].document;
+-    e = doc.getElementById("dragme");
+-    xdrag = e.offsetLeft + e.offsetWidth / 2;
+-    ydrag = e.offsetTop + e.offsetHeight / 2;
+-    e = doc.getElementById("target");
+-    xdrop = e.offsetLeft + e.offsetWidth / 2;
+-    ydrop = e.offsetTop + e.offsetHeight / 2;
+-
+-    var timer = setInterval(function() {
+-                                window.frames[0].location = "../resources/drag-drop.html";
+-                            }, 100);
+-
+-    if (!window.testRunner) {
+-        log("This test uses eventSender. To run it manually, drag the selected image to another position in the editable div and drop it. Renderer should not crash.");
+-        return;
+-    }
+-    
+-    var max_tries = 50; 
+-    for (i = 0; i < max_tries; i++) {
+-         eventSender.mouseMoveTo(xdrag, ydrag);
+-         eventSender.mouseDown();    
+-         eventSender.mouseMoveTo(xdrop, ydrop);
+-         eventSender.mouseUp();
+-    }
+-
+-    clearInterval(timer);
+-
+-    document.write("<p>Bug 37618: Crash when an image drag-drop operation happens inside a continuously refreshing iframe.</p>");
+-    document.write("<p>SUCCESS</p>");
+-
+-    testRunner.notifyDone();
+-}
+-</script>
+-</head>
+-<body onload="runTest()">
+-<iframe src="../resources/drag-drop.html"></iframe>
+-<ul id="console"></ul>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-in-svg-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-in-svg-expected.txt
+deleted file mode 100644
+index c05c235889be555b3202dfb80f125aaddca336d4..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-in-svg-expected.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-PASS without crash in Debug mode.
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-in-svg.svg b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-in-svg.svg
+deleted file mode 100644
+index f25b2dde756917682262ad52b632009472020c41..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-in-svg.svg
++++ /dev/null
+@@ -1,41 +0,0 @@
+-<?xml version="1.0"?>
+-<svg xmlns="http://www.w3.org/2000/svg"
+-     xmlns:xlink="http://www.w3.org/1999/xlink"
+-     xmlns:xhtml="http://www.w3.org/1999/xhtml">
+-<foreignObject width="200" height="80">
+-    <xhtml:div>
+-        <xhtml:input id="src" type="text" value="Select and drag this text"></xhtml:input>
+-        <xhtml:input id="dst" type="text" value="to here"></xhtml:input>
+-    </xhtml:div>
+-</foreignObject>
+-<text>PASS without crash in Debug mode.</text>
+-<script>
+-(function runTest()
+-{
+-    if (!window.testRunner)
+-        return;
+-
+-    testRunner.dumpAsText();
+-    testRunner.waitUntilDone();
+-
+-    var sourceInput = document.getElementById("src");
+-    sourceInput.focus();
+-    sourceInput.setSelectionRange(0, 6);
+-    var x = sourceInput.offsetLeft + 10;
+-    var y = sourceInput.offsetTop + sourceInput.offsetHeight / 2;
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();
+-
+-    eventSender.leapForward(500);
+-
+-    var destinationInput = document.getElementById("dst");
+-    eventSender.mouseMoveTo(destinationInput.offsetLeft + 10, destinationInput.offsetTop + destinationInput.offsetHeight / 2);
+-    eventSender.mouseUp();
+-
+-    sourceInput.parentNode.removeChild(sourceInput);
+-    destinationInput.parentNode.removeChild(destinationInput);
+-
+-    testRunner.notifyDone();
+-})();
+-</script>
+-</svg>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-textarea-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-textarea-expected.txt
+deleted file mode 100644
+index 1a825ab1549ea1a4dc29fe8989cf46ef1a63dc43..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-textarea-expected.txt
++++ /dev/null
+@@ -1,5 +0,0 @@
+-This tests text selection drag from a textarea and drop to an input, and vice versa. There was a bug of an assertion failure in a case of the selected text was longer than the destination text.
+-
+-PASS: to input
+-PASS: to textarea
+- 
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-textarea.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-textarea.html
+deleted file mode 100644
+index 58db9f1ba344fd7894647411706dbae20def8a7f..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-input-textarea.html
++++ /dev/null
+@@ -1,59 +0,0 @@
+-<html>
+-<body>
+-<script>
+-function debug(msg) {
+-  var console = document.getElementById('console');
+-  var line = document.createElement('div');
+-  line.textContent = msg;
+-  console.appendChild(line);
+-}
+-
+-function editingTest() {
+-    if (!window.testRunner)
+-        return;
+-
+-    testRunner.dumpAsText();
+-    testRunner.waitUntilDone();
+-
+-    // Drag a word in the textarea
+-    var textarea = document.getElementById("textarea");
+-    textarea.focus();
+-    textarea.setSelectionRange(0, 4);
+-    x = textarea.offsetLeft + 10;
+-    y = textarea.offsetTop + textarea.offsetHeight / 2;
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();
+-    // and drop it off to the input field
+-    var input = document.getElementById("destination");
+-    eventSender.leapForward(500);
+-    eventSender.mouseMoveTo(input.offsetLeft + 10, input.offsetTop + input.offsetHeight / 2);
+-    eventSender.mouseUp();
+-
+-    var result = input.value;
+-    debug(result == 'What' ? 'PASS: to input' : 'FAIL: expected value="What", actual value="' + result + '"');
+-
+-    // Drag from the input to the textarea.
+-    textarea.value = '';
+-    input.focus();
+-    input.setSelectionRange(0, 4);
+-    eventSender.mouseMoveTo(input.offsetLeft + 10, input.offsetTop + input.offsetHeight / 2);
+-    eventSender.mouseDown();
+-    eventSender.leapForward(500);
+-    eventSender.mouseMoveTo(textarea.offsetLeft + 10, textarea.offsetTop + 10);
+-    eventSender.mouseUp();
+-    var result = textarea.value;
+-    debug(result == 'What' ? 'PASS: to textarea' : 'FAIL: expected value="What", actual value="' + result + '"');
+-    
+-    testRunner.notifyDone();
+-}
+-</script>
+-<p>This tests text selection drag from a textarea and drop to an input, and vice versa.
+-  There was a bug of an assertion failure in a case of the selected text was
+-  longer than the destination text.</p>
+-<div id=console></div>
+-<input id=destination>
+-<textarea id=textarea rows=1>What steps will reproduce the problem?
+-</textarea>
+-<script>editingTest();</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-list-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-list-expected.txt
+deleted file mode 100644
+index 8f834bfac59c5288b0d45d1aa38e1b66dcaf080e..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-list-expected.txt
++++ /dev/null
+@@ -1,15 +0,0 @@
+-This tests dropping content onto a list items content when the content is wrapped in a span.  You should see 'DropAboveMe DragMe'. See <rdar://4861080>, but note that the expected behavior is different than what's described there, since the rendering bug <rdar://4907469> has been fixed.
+-| "
+-"
+-| <li>
+-|   id="li"
+-|   style="border: 1px solid black;"
+-|   <span>
+-|     <div>
+-|       id="contents"
+-|       style="border: 1px solid red;"
+-|       "<#selection-anchor>DragMe <#selection-focus>DropAboveMe"
+-| "
+-"
+-| "
+-"
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-list.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-list.html
+deleted file mode 100644
+index aeedf42a7dfdd0a5d10e09eb38b9f625a36737bf..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-list.html
++++ /dev/null
+@@ -1,55 +0,0 @@
+-<!DOCTYPE HTML>
+-<html>
+-<body>
+-<div contenteditable="true" id="editable">
+-<li id="li" style="border: 1px solid black;"><span><div id="contents" style="border: 1px solid red;">DropAboveMe</div></span></li>
+-<div><span id="drag">DragMe</span></div>
+-</div>
+-
+-<ul id="console"></ul>
+-<script src="../../resources/dump-as-markup.js"></script>
+-<script>
+-function log(str) {
+-    var li = document.createElement("li");
+-    li.appendChild(document.createTextNode(str));
+-    var console = document.getElementById("console");
+-    console.appendChild(li);
+-}
+-
+-function runTest() {
+-    if (!window.testRunner)
+-        log("This can only be run automatically using the layout test engine.  To run it manually, drag 'Dragme' and drop it above 'DropAboveMe'.");
+-    
+-    var drag = document.getElementById("drag");
+-    var dragx = drag.offsetParent.offsetLeft + drag.offsetLeft + drag.offsetWidth / 2;
+-    var dragy = drag.offsetParent.offsetTop +  drag.offsetTop + drag.offsetHeight / 2;
+-    
+-    eventSender.mouseMoveTo(dragx, dragy);
+-    eventSender.mouseDown();
+-    eventSender.mouseUp();
+-    eventSender.mouseDown();
+-    eventSender.mouseUp();
+-    // Leap forward so that the next mouseDown doesn't trigger a triple click.
+-    eventSender.leapForward(1200);
+-    
+-    eventSender.mouseDown();
+-    // Leap forward so that the mouse movement causes a drag instead of selection creation.
+-    eventSender.leapForward(500);
+-
+-    var li = document.getElementById("li");
+-    
+-    var dropx = li.offsetLeft + li.offsetWidth / 2;
+-    var dropy = li.offsetTop + 15;
+-
+-    eventSender.mouseMoveTo(dropx, dropy);
+-    eventSender.mouseUp();
+-    
+-    Markup.description("This tests dropping content onto a list items content when the content is wrapped in a span.  You should see 'DropAboveMe DragMe'. "
+-        + "See <rdar://4861080>, but note that the expected behavior is different than what's described there, since the rendering bug <rdar://4907469> has been fixed.");
+-    Markup.dump(editable);
+-}
+-
+-runTest();
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-modifies-page.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-modifies-page.html
+deleted file mode 100644
+index 66bf00f03ed2d0e5c595c1e200102ff5dfe9586a..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-modifies-page.html
++++ /dev/null
+@@ -1,30 +0,0 @@
+-<!doctype html>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<script src="../assert_selection.js"></script>
+-<script>
+-test(() => {
+-    assert_not_equals(window.eventSender, undefined,
+-        'This test requires eventSender');
+-
+-    assert_selection(
+-        '<div contenteditable><span id="dragme">^hello|</span> world</div>',
+-        selection => {
+-            // Drag 'hello'
+-            const dragMe = selection.document.getElementById('dragme');
+-            const editor = dragMe.parentNode;
+-            const editorLeft = editor.offsetLeft + selection.document.offsetLeft;
+-            const editorTop = editor.offsetTop + selection.document.offsetTop;
+-            const x = editorLeft + dragMe.offsetWidth / 2;
+-            const y = editorTop + dragMe.offsetHeight / 2;
+-            eventSender.mouseMoveTo(x, y);
+-            eventSender.mouseDown();
+-            // and drop it off to the right somewhere
+-            eventSender.leapForward(500);
+-            eventSender.mouseMoveTo(editorLeft + editor.offsetWidth, y);
+-            eventSender.mouseUp();
+-        },
+-        '<div contenteditable>world^hello|</div>',
+-        'Drag "hello" after "wold"');
+-});
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-to-data-url.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-to-data-url.html
+deleted file mode 100644
+index 6ccd70f88f15c340da5e7e7eef4ab72a4dcb0107..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-to-data-url.html
++++ /dev/null
+@@ -1,40 +0,0 @@
+-<!doctype html>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<p>Check you can't drag into a data URL</p>
+-<div><span id="dragme">hello</span></div>
+-<iframe id="target" src="data:text/html;charset=utf-8,%3Cbody%20contentEditable%3Dtrue%3E%0D%0A"></iframe>
+-<script>
+-var target = document.getElementById("target");
+-var t = async_test('Drag-And-Drop to Data URL');
+-
+-window.addEventListener('load', t.step_func(() => {
+-    if (!window.eventSender)
+-        throw new Error('This test requires eventSender.');
+-
+-    // Drag 'hello'
+-    dragDropIt();
+-}));
+-
+-function dragDropIt() {
+-    var dragMe = document.getElementById("dragme");
+-    window.getSelection().selectAllChildren(dragMe);
+-    var x = dragMe.offsetLeft + 10;
+-    var y = dragMe.offsetTop + dragMe.offsetHeight / 2;
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();
+-
+-    eventSender.leapForward(500);
+-    var framex = target.offsetLeft + 10;
+-    var framey = target.offsetTop + t.offsetHeight / 2;
+-    eventSender.mouseMoveTo(framex, framey);
+-    setTimeout(dropIt, 0);
+-}
+-
+-function dropIt() {
+-    // Drop it off to the frame
+-    eventSender.mouseUp();
+-    assert_equals(target.contentDocument.body.outerHTML, '<body contenteditable="true">\n</body>');
+-    t.done();
+-}
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-url-text-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-url-text-expected.txt
+deleted file mode 100644
+index db0c12923ada0cd87a91469fe6b6a06f9e0fa6d5..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-url-text-expected.txt
++++ /dev/null
+@@ -1,7 +0,0 @@
+-This tests text selection drag for a URL-like text.
+-
+-To test this by hand, select all of the text in this input: 
+-and drag/drop it into this input:  
+-
+-If you see that the text "http://www.apple.com/" was put in the second box, then the test passed.
+-PASS
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-url-text.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-url-text.html
+deleted file mode 100644
+index f9640438cdb0672cd673ea41a56f7f8bd74a9002..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-url-text.html
++++ /dev/null
+@@ -1,45 +0,0 @@
+-<html>
+-<body>
+-<script>
+-function debug(msg) {
+-  var console = document.getElementById('console');
+-  var line = document.createElement('div');
+-  line.textContent = msg;
+-  console.appendChild(line);
+-}
+-
+-function editingTest() {
+-    if (!window.testRunner)
+-        return;
+-
+-    testRunner.dumpAsText();
+-    testRunner.waitUntilDone();
+-
+-    // Drag a URL text in the source
+-    var source = document.getElementById("source");
+-    source.focus();
+-    source.setSelectionRange(0, source.value.length);
+-    x = source.offsetLeft + 10;
+-    y = source.offsetTop + source.offsetHeight / 2;
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();
+-    // and drop it off to the destination field.
+-    var destination = document.getElementById("destination");
+-    eventSender.leapForward(500);
+-    eventSender.mouseMoveTo(destination.offsetLeft + 10, destination.offsetTop + destination.offsetHeight / 2);
+-    eventSender.mouseUp();
+-
+-    var result = destination.value;
+-    debug(result == 'http://www.apple.com/' ? 'PASS' : 'FAIL: expected value="http://www.apple.com/", actual value="' + result + '"');
+-
+-    testRunner.notifyDone();
+-}
+-</script>
+-<p>This tests text selection drag for a URL-like text.</p>
+-To test this by hand, select all of the text in this input: <input id=source value="http://www.apple.com/"><br>
+-and drag/drop it into this input: <input id=destination>
+-<br><br>If you see that the text "http://www.apple.com/" was put in the second box, then the test passed.
+-<div id=console></div>
+-<script>editingTest();</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-url-with-style.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-url-with-style.html
+deleted file mode 100644
+index 91e5f11d96e9fded61a8bbbcfa53aa640d539e48..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-drop-url-with-style.html
++++ /dev/null
+@@ -1,50 +0,0 @@
+-<!doctype html>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<script src="../assert_selection.js"></script>
+-<script>
+-function computePoint(selection, target) {
+-  const x = selection.document.offsetLeft + target.offsetLeft +
+-      target.offsetWidth / 2;
+-  const y = selection.document.offsetTop + target.offsetTop +
+-      target.offsetHeight / 2;
+-  return {x, y};
+-}
+-
+-test(() => {
+-  if (!window.eventSender) {
+-    assert_unreached('This test requires eventSender.');
+-    return;
+-  }
+-
+-  assert_selection(
+-    [
+-      '<div contenteditable>',
+-        '<a href="http://dev.chromium.org/"',
+-          ' title="some title" style="color:orange">^drag me|</a>',
+-      '</div>',
+-      '<p>to the box blow:</p>',
+-      '<div contenteditable id="drop"><br></div>',
+-    ].join(''),
+-    selection => {
+-      const source = selection.document.querySelector('a');
+-      const sourcePoint = computePoint(selection, source);
+-      eventSender.mouseMoveTo(sourcePoint.x, sourcePoint.y);
+-      eventSender.mouseDown();
+-
+-      const drop = selection.document.getElementById('drop');
+-      const dropPoint = computePoint(selection, drop);
+-      eventSender.leapForward(300);
+-      eventSender.mouseMoveTo(dropPoint.x, dropPoint.y);
+-      eventSender.mouseUp();
+-    },
+-    [
+-      '<div contenteditable></div>',
+-      '<p>to the box blow:</p>',
+-      '<div contenteditable id="drop">',
+-        '<a href="http://dev.chromium.org/"',
+-          ' style="color: orange;" title="some title">^drag me|</a>',
+-      '</div>',
+-    ].join(''));
+-}, 'Drag-and-Drop should keep attributes of A');
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-files-to-editable-element-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-files-to-editable-element-expected.txt
+deleted file mode 100644
+index 928f8d5194df9e998bb43599c4e1e6885f9cdd94..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-files-to-editable-element-expected.txt
++++ /dev/null
+@@ -1,10 +0,0 @@
+-If we drag files onto an editable area, then the filenames should be inserted into the editable area.
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-FAIL result should be <div>LayoutTests/editing/pasteboard/foo</div><div>LayoutTests/editing/pasteboard/bar</div><div>LayoutTests/editing/pasteboard/baz</div>. Was .
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-files-to-editable-element.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-files-to-editable-element.html
+deleted file mode 100644
+index b9b8c03b8800535d41519787f3824a8eab058796..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-files-to-editable-element.html
++++ /dev/null
+@@ -1,44 +0,0 @@
+-<html>
+-<head>
+-<script src="../../resources/js-test.js"></script>
+-</head>
+-<body onload="startTest();">
+-<p id="description"></p>
+-<div id="console"></div>
+-<div id="editable" contentEditable=true style="width:200px; height:200px"></div>
+-<script>
+-description('If we drag files onto an editable area, then the filenames should be inserted into the editable area.');
+-
+-var result;
+-
+-function startTest()
+-{
+-    var editable = document.getElementById("editable");
+-    if (window.eventSender) {
+-        dragFilesOntoEditable(['foo', 'bar', 'baz']);
+-        result = editable.innerHTML.replace(/file.*?LayoutTests/g, "LayoutTests");
+-        // FIXME: This test fails and got rebaselinend to expect the failure, we should fix this. See http://crbug.com/443143
+-        shouldBeEqualToString('result', '<div>LayoutTests/editing/pasteboard/foo</div><div>LayoutTests/editing/pasteboard/bar</div><div>LayoutTests/editing/pasteboard/baz</div>');
+-        editable.innerHTML = '';
+-        window.stop();
+-    }
+-}
+-
+-function moveMouseToCenterOfElement(element)
+-{
+-    var centerX = element.offsetLeft + element.offsetWidth / 2;
+-    var centerY = element.offsetTop + element.offsetHeight / 2;
+-    eventSender.mouseMoveTo(centerX, centerY);
+-}
+-
+-function dragFilesOntoEditable(files)
+-{
+-    eventSender.beginDragWithFiles(files);
+-    moveMouseToCenterOfElement(editable);
+-    eventSender.mouseUp();
+-}
+-
+-var successfullyParsed = true;
+-</script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-image-in-about-blank-frame-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-image-in-about-blank-frame-expected.txt
+deleted file mode 100644
+index 8ad048b9bde2345ed4ae5602b9cf8cf2af5a8cfd..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-image-in-about-blank-frame-expected.txt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-Bug 14428: FCKEditor: Images disappear on drag/drop and copy/paste
+-
+-SUCCESS
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-image-in-about-blank-frame.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-image-in-about-blank-frame.html
+deleted file mode 100644
+index f4100f9c378bf06973d9299d293e7bdc620514ea..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-image-in-about-blank-frame.html
++++ /dev/null
+@@ -1,58 +0,0 @@
+-<html>
+-<head>
+-<script>
+-if (window.testRunner) {
+-    testRunner.waitUntilDone();
+-    testRunner.dumpAsText();
+-}
+-
+-function log(message) {
+-    var console = document.getElementById("console");
+-    var li = document.createElement("li");
+-    var text = document.createTextNode(message);
+-    
+-    console.appendChild(li);
+-    li.appendChild(text);
+-}
+-
+-function step1() {
+-    window.frames[0].document.write("<div contenteditable>drag<img src='../resources/abe.png' id=dragme>me<span id=target>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></div>");
+-    setTimeout("step2()", 100);
+-}
+-
+-function step2() {
+-    if (!window.testRunner) {
+-        log("This test uses eventSender. To run it manually, drag the selected image to another position in the editable div and drop it. It should not disappear.");
+-        return;
+-    }
+-    
+-    var doc = window.frames[0].document;
+-    e = doc.getElementById("dragme");
+-    x = e.offsetLeft + e.offsetWidth / 2;
+-    y = e.offsetTop + e.offsetHeight / 2;
+-    
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();    
+-    e = doc.getElementById("target");
+-    x = e.offsetLeft + e.offsetWidth / 2;
+-    y = e.offsetTop + e.offsetHeight / 2;
+-    
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseUp();
+-
+-    document.write("<p><a href='http://bugs.webkit.org/show_bug.cgi?id=14428'>Bug 14428</a>: FCKEditor: Images disappear on drag/drop and copy/paste</p>");
+-
+-    if (doc.getElementById("dragme").parentNode.tagName == "SPAN" && doc.getElementById("dragme").src.length > 10)
+-        document.write("<p>SUCCESS</p>");
+-    else
+-        document.write("<p>FAILURE</p>");
+-
+-    testRunner.notifyDone();
+-}
+-</script>
+-</head>
+-<body onload="setTimeout('step1()', 100)">
+-<iframe src="about:blank"></iframe>
+-<ul id="console"></ul>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-image-to-contenteditable-in-iframe.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-image-to-contenteditable-in-iframe.html
+deleted file mode 100644
+index a1d14fdb046a39ce20bf6832a0ca3f953b7370d2..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-image-to-contenteditable-in-iframe.html
++++ /dev/null
+@@ -1,51 +0,0 @@
+-<html> 
+-<head>
+-<script>
+-function log(message) {
+-    var console = document.getElementById("console");
+-    var li = document.createElement("li");
+-    var text = document.createTextNode(message);
+-    
+-    console.appendChild(li);
+-    li.appendChild(text);
+-}
+-
+-function runTest() {
+-    if (!window.testRunner) {
+-        log("To run this test manually attempt to drag and drop Abe after the broken image in the editable div");
+-        return;
+-    }
+-
+-    testRunner.waitUntilDone();
+-
+-    //find abe
+-    var dragme = document.getElementById("dragme");
+-    x1 = dragme.offsetLeft + 20;
+-    y1 = dragme.offsetTop + 20;
+-    
+-    // Find the target
+-    var drag_target = document.getElementById("drag_target");
+-    x2 = drag_target.offsetLeft + drag_target.offsetWidth / 2;
+-    y2 = drag_target.offsetTop + drag_target.offsetHeight / 2;
+- 
+-    // Drag abe into the editable 
+-    eventSender.mouseMoveTo(x1, y1);
+-    eventSender.mouseDown();
+-    eventSender.leapForward(500);
+-    eventSender.mouseMoveTo(x2, y2);
+-    eventSender.mouseUp();
+-    
+-    testRunner.notifyDone();
+-}
+-
+-</script>
+-<title>Dragging an image to the end of a content editable div in an iframe</title> 
+-</head> 
+-<body onload="runTest()">
+-    <p>This tests that we can drag an image into the last position of a content editable div in an iframe that already contains an image, without crashing.</p>
+-    
+-    <img id="dragme" src="../resources/abe.png"/>
+-    <iframe id="drag_target" src="resources/drag-image-to-contenteditable-iframe.html"></iframe>
+-    <ul id="console"></ul>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-list-item.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-list-item.html
+deleted file mode 100644
+index 0f6264574ec4cdfddae02e43da8df6cb9ae9707e..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-list-item.html
++++ /dev/null
+@@ -1,81 +0,0 @@
+-<!doctype html>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<script src="../assert_selection.js"></script>
+-<script>
+-function computePoint(selection, targetId) {
+-  const target = selection.document.getElementById(targetId);
+-  const x = selection.document.offsetLeft + target.offsetLeft +
+-      target.offsetWidth / 2 + target.parentNode.offsetLeft;
+-  const y = selection.document.offsetTop + target.offsetTop +
+-      target.offsetHeight / 2 + target.parentNode.offsetTop;
+-  return {x, y};
+-}
+-
+-function dragSelectionToTarget(selection, sourceId, dropId) {
+-  const sourcePoint = computePoint(selection, sourceId);
+-  eventSender.mouseMoveTo(sourcePoint.x, sourcePoint.y);
+-  eventSender.mouseDown();
+-  eventSender.leapForward(200);
+-
+-  const dropPoint = computePoint(selection, dropId);
+-  eventSender.mouseMoveTo(dropPoint.x, dropPoint.y);
+-  eventSender.mouseUp();
+-}
+-
+-test(() => {
+-  if (!window.eventSender) {
+-    assert_unreached('This test requires eventSender.');
+-    return;
+-  }
+-
+-  assert_selection(
+-    [
+-      '<div contenteditable>',
+-        '<ol id="test">',
+-          '<li id="one">one</li>',
+-          '<li id="two">^two|</li>',
+-          '<li id="three">three</li>',
+-          '<li id="four">four</li>',
+-        '</ol>',
+-      '</div>',
+-    ].join(''),
+-    selection => dragSelectionToTarget(selection, 'two', 'four'),
+-    [
+-      '<div contenteditable>',
+-        '<ol id="test">',
+-          '<li id="one">one</li>',
+-          '<li id="three">three</li>',
+-          '<li id="four">four</li>',
+-          '<li id="two">^two|</li>',
+-        '</ol>',
+-      '</div>',
+-    ].join(''),
+-    'Move list item two to four');
+-
+-
+-  assert_selection(
+-    [
+-      '<div contenteditable>',
+-        '<ol id="test">',
+-          '<li id="one">one</li>',
+-          '<li id="two">^two</li>',
+-          '<li id="three">three|</li>',
+-          '<li id="four">four</li>',
+-        '</ol>',
+-      '</div>',
+-    ].join(''),
+-    selection => dragSelectionToTarget(selection, 'two', 'four'),
+-    [
+-      '<div contenteditable>',
+-        '<ol id="test">',
+-          '<li id="one">one</li>',
+-          '<li id="four">four</li>',
+-          '<li id="two">^two</li>',
+-          '<li id="three">three|</li>',
+-        '</ol>',
+-      '</div>',
+-    ].join(''),
+-    'Move list item two and three to four');
+-}, 'Drag-and-Drop list item');
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-prioritizes-draggable-container-over-image-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-prioritizes-draggable-container-over-image-expected.txt
+deleted file mode 100644
+index e1ea212b3563c4b181cc4b4e18367e22783fd550..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-prioritizes-draggable-container-over-image-expected.txt
++++ /dev/null
+@@ -1,5 +0,0 @@
+-This test verifies that starting a drag on an image inside a -webkit-user-drag: element container succeeds. To run this test manually, try dragging the image to the box below. You should see the word "PASS" appear if it succeeds.
+-
+-
+-PASS
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-prioritizes-draggable-container-over-image.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-prioritizes-draggable-container-over-image.html
+deleted file mode 100644
+index 348b50074e55f12705e3c02a3a30e5125a5d9051..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-prioritizes-draggable-container-over-image.html
++++ /dev/null
+@@ -1,71 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-  <head>
+-    <style>
+-      #draggableContainer {
+-        -webkit-user-drag: element;
+-      }
+-      #draggableContainer img { 
+-        -webkit-user-drag: none;
+-      }
+-      #drop {
+-        border: 1px solid black;
+-        height: 200px;
+-        width: 200px;
+-      }
+-    </style>
+-    <script>
+-      function runTest() {
+-        var drag = document.getElementById('drag');
+-        var drop = document.getElementById('drop');
+-
+-        drop.addEventListener('dragenter', onDragEnterOrOver);
+-        drop.addEventListener('dragover', onDragEnterOrOver);
+-        drop.addEventListener('drop', onDrop);
+-
+-        if (!window.testRunner)
+-          return;
+-
+-        testRunner.dumpAsText();
+-        testRunner.waitUntilDone();
+-
+-        var x;
+-        var y;
+-
+-        x = drag.offsetLeft + drag.offsetWidth / 2;
+-        y = drag.offsetTop + drag.offsetHeight / 2;
+-        eventSender.mouseMoveTo(x, y);
+-        eventSender.mouseDown();
+-        eventSender.leapForward(500);
+-        x = drop.offsetLeft + drop.offsetWidth / 2;
+-        y = drop.offsetTop + drop.offsetHeight / 2;
+-        eventSender.mouseMoveTo(x, y);
+-        eventSender.mouseUp();
+-      }
+-
+-      function onDragEnterOrOver(e) {
+-        e.preventDefault();
+-      }
+-
+-      function onDrop() {
+-        var console = document.getElementById('console');
+-        console.appendChild(document.createTextNode('PASS'));
+-        console.appendChild(document.createElement('br'));
+-
+-        if (window.testRunner)
+-          testRunner.notifyDone();
+-      }
+-    </script>
+-  </head>
+-  <body onload="runTest()">
+-    <p>This test verifies that starting a drag on an image inside a
+-    -webkit-user-drag: element container succeeds. To run this test manually,
+-    try dragging the image to the box below. You should see the word "PASS"
+-    appear if it succeeds.</p>
+-    <div id="draggableContainer">
+-      <img id="drag" src="resources/apple.gif">
+-    </div>
+-    <div id="drop"></div>
+-    <div id="console"></div>
+-  </body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-selected-image-to-contenteditable.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drag-selected-image-to-contenteditable.html
+deleted file mode 100644
+index 3f7469194b530326e4179540d6d51491df051ec9..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drag-selected-image-to-contenteditable.html
++++ /dev/null
+@@ -1,61 +0,0 @@
+-<html>
+-<head>
+-<script src=../editing.js language="JavaScript" type="text/JavaScript" ></script>
+-<script>
+-if (window.testRunner)
+-     testRunner.dumpEditingCallbacks();
+-</script>
+-
+-<script>
+-function log(message) {
+-    var console = document.getElementById("console");
+-    var li = document.createElement("li");
+-    var text = document.createTextNode(message);
+-    
+-    console.appendChild(li);
+-    li.appendChild(text);
+-}
+-
+-function runTest() {
+-    if (window.testRunner)
+-        testRunner.waitUntilDone();
+-    // Let the subframe come into being.
+-    window.setTimeout(step2, 100);
+-    e = document.getElementById("dragme");
+-    setSelectionCommand(e, 0, e, 0);
+-}
+-
+-function step2() 
+-{
+-    if (!window.testRunner) {
+-        log("This test uses the eventSender.  To run it manually, drag the selected image into the editable div and drop it.  It should appear inside the editable div.");
+-        return;
+-    }
+-    
+-    log("Abe should appear twice, once inside the div and once outside it.");
+-    
+-    e = document.getElementById("dragme");
+-    x = e.offsetLeft + e.offsetWidth / 2;
+-    y = e.offsetTop + e.offsetHeight / 2;
+-
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();    
+-    e = document.getElementById("target");
+-    x = e.offsetLeft + e.offsetWidth / 2;
+-    y = e.offsetTop + e.offsetHeight / 2;
+-    
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseUp();
+-    
+-    testRunner.notifyDone();
+-}
+-</script>
+-</head>
+-
+-<body style="padding:0; margin:0" onload="runTest();">  
+-
+-<div id="target" style="border: 1px solid black; width: 300px; height: 120px;" contenteditable="true"></div>
+-<img id="dragme" src="../resources/abe.png">
+-
+-<ul id="console"></ul>
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/dragstart-contains-default-content-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/dragstart-contains-default-content-expected.txt
+deleted file mode 100644
+index 9c915e470671d40b6b68581455417fb227860e18..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/dragstart-contains-default-content-expected.txt
++++ /dev/null
+@@ -1,22 +0,0 @@
+-CONSOLE WARNING: Resource requests whose URLs contain raw newline characters are deprecated, and may be blocked in M60, around August 2017. Please remove newlines from places like element attribute values in order to continue loading those resources. See https://www.chromestatus.com/features/5735596811091968 for more details.
+-Simple test that the dragstart event contains the default data in the event.
+-
+-Select some text in this box and drag it.
+-
+-Drag the image. 
+-
+-Drag the link. Link
+-
+-Test ID: selectionTest
+-text/plain: Select some text in this box and drag it.
+-text/url: 
+-text/html: <span style="color: rgb(0, 0, 0); font-family: serif; font-size: medium; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: normal; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; white-space: normal; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; text-decoration-style: initial; text-decoration-color: initial; display: inline !important; float: none;">Select some text in this box and drag it.</span>
+-Test ID: imageTest
+-text/plain: 
+-text/url: 
+-text/html: <img id="imageTest" src="data:image/png;base64, iVBORw0KGgoAAAANSUhEUgAAAJYAAAA8CAIAAAAL5NQ9AAAACXBIWXMAAAsTAAALEwEAmpwY AAAAB3RJTUUH2woaBQc4oLEFpAAAABl0RVh0Q29tbWVudABDcmVhdGVkIHdpdGggR0lNUFeB DhcAAACMSURBVHja7dNBEYAgFEVRPhHMYgAzUIsmVnFvB/fsoQb+ObfBmzMvxneW1D1vzz2w FiEUQiFEKIRCKIQIhVAIhRChEAqhECIUQiEUQoRCKIRCiFAIhVAIEep3xTWTLzzu5oVCKIRC iFAIhVAIEQqhEAohQiEUQiFEKIRCKIQIhVAIhRChEAqhECLUZi3VEwcBMGr1NgAAAABJRU5E rkJggg==" ondragstart="dragStartTest(event)">
+-Test ID: linkTest
+-text/plain: http://www.example.com/
+-text/url: 
+-text/html: <a id="linkTest" href="http://www.example.com/" ondragstart="dragStartTest(event)">Link</a>
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/dragstart-contains-default-content.html b/third_party/WebKit/LayoutTests/editing/pasteboard/dragstart-contains-default-content.html
+deleted file mode 100644
+index bb739a93a34f47b0b10e15bbc29467bb967e7b3e..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/dragstart-contains-default-content.html
++++ /dev/null
+@@ -1,64 +0,0 @@
+-<!DOCTYPE html>
+-<html>
+-  <head>
+-    <style>
+-      body { font-family: serif; }
+-      .testCase { border: 1px solid black; padding: 10px; margin: 10px; width: 100%; }
+-    </style>
+-    <script>
+-      function log(text) {
+-        var log = document.getElementById('log');
+-        log.appendChild(document.createTextNode(text));
+-        log.appendChild(document.createElement('br'));
+-      }
+-
+-      function dragStartTest(e) {
+-        log("Test ID: " + e.currentTarget.id);
+-        log("text/plain: " + e.dataTransfer.getData("text/plain"));
+-        log("text/url: " + e.dataTransfer.getData("text/url"));
+-        log("text/html: " + e.dataTransfer.getData("text/html"));
+-      }
+-
+-      function dragCenterOfRect(clientRect) {
+-        var x = clientRect.left + clientRect.width / 2;
+-        var y = clientRect.top + clientRect.height / 2;
+-
+-        eventSender.mouseMoveTo(x, y);
+-        eventSender.mouseDown();
+-        eventSender.leapForward(200);
+-        eventSender.mouseMoveTo(x + 100, y + 100);
+-        eventSender.mouseUp();
+-      }
+-
+-      function runTest() {
+-        if (!window.testRunner)
+-        return;
+-        testRunner.dumpAsText();
+-
+-        var selection = window.getSelection();
+-        selection.selectAllChildren(document.getElementById('selectionTest'));
+-        dragCenterOfRect(selection.getRangeAt(0).getBoundingClientRect());
+-        dragCenterOfRect(document.getElementById('imageTest').getBoundingClientRect());
+-        dragCenterOfRect(document.getElementById('linkTest').getBoundingClientRect());
+-      }
+-    </script>
+-  </head>
+-  <body onload="runTest()">
+-    <p>Simple test that the dragstart event contains the default data in the event.
+-    <div class="testCase" id="selectionTest" ondragstart="dragStartTest(event)">
+-      <p>Select some text in this box and drag it.
+-    </div>
+-    <div class="testCase">
+-      <p>Drag the image. <img id="imageTest" src="data:image/png;base64,
+-      iVBORw0KGgoAAAANSUhEUgAAAJYAAAA8CAIAAAAL5NQ9AAAACXBIWXMAAAsTAAALEwEAmpwY
+-      AAAAB3RJTUUH2woaBQc4oLEFpAAAABl0RVh0Q29tbWVudABDcmVhdGVkIHdpdGggR0lNUFeB
+-      DhcAAACMSURBVHja7dNBEYAgFEVRPhHMYgAzUIsmVnFvB/fsoQb+ObfBmzMvxneW1D1vzz2w
+-      FiEUQiFEKIRCKIQIhVAIhRChEAqhECIUQiEUQoRCKIRCiFAIhVAIEep3xTWTLzzu5oVCKIRC
+-      iFAIhVAIEQqhEAohQiEUQiFEKIRCKIQIhVAIhRChEAqhECLUZi3VEwcBMGr1NgAAAABJRU5E
+-      rkJggg==" ondragstart="dragStartTest(event)">
+-    </div>
+-    <div class="testCase">
+-      <p>Drag the link. <a id="linkTest" href="http://www.example.com/" ondragstart="dragStartTest(event)">Link</a>
+-    </div>
+-    <div id="log"></div>
+-  </html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-file-svg-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-file-svg-expected.txt
+deleted file mode 100644
+index 092e0fb187506468f07540c49a504c6b217a04ba..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-file-svg-expected.txt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-A crash reproducing test using DRT. The test passes if it doesn't crash.
+-
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-file-svg.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-file-svg.html
+deleted file mode 100644
+index e6fe9f6ae740d67cbf35698b56b712ab69845355..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-file-svg.html
++++ /dev/null
+@@ -1,28 +0,0 @@
+-<html>
+-<head>
+-<script>
+-
+-function moveMouseToCenterOfElement(element)
+-{
+-    var centerX = element.offsetLeft + element.offsetWidth / 2;
+-    var centerY = element.offsetTop + element.offsetHeight / 2;
+-    eventSender.mouseMoveTo(centerX, centerY);
+-}
+-
+-function test()
+-{
+-    if (window.testRunner)
+-        testRunner.dumpAsText();
+-    eventSender.beginDragWithFiles(["fakefile"]);
+-    moveMouseToCenterOfElement(document.getElementById("target"));
+-    eventSender.mouseUp();
+-    window.stop();
+-}
+-
+-</script>
+-</head>
+-<p>A crash reproducing test using DRT. The test passes if it doesn't crash.</p>
+-<body onload="test()">
+-<iframe id="target" src="resources/drop-file-svg.svg"></iframe>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-inputtext-acquires-style-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-inputtext-acquires-style-expected.txt
+deleted file mode 100644
+index 5022ddf6db38b19d66202cf39064ab59819f22bd..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-inputtext-acquires-style-expected.txt
++++ /dev/null
+@@ -1,8 +0,0 @@
+-This test checks that the plain text dropped into a styled text region will acquire the appropriate style.
+-To run this test manually, drag the text in the input element below into the bold text region. The dropped text should be bold. Click the verify button to check.
+-
+- 
+- 
+-Drag the text from the above iDrag this textnput element into this bold text
+-<b contenteditable="true" id="destination">Drag the text from the above iDrag this textnput element into this bold text</b>
+-SUCCESS
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-inputtext-acquires-style.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-inputtext-acquires-style.html
+deleted file mode 100644
+index d7e3469eff43d23179eb2a4e6483dc347fd943ec..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-inputtext-acquires-style.html
++++ /dev/null
+@@ -1,63 +0,0 @@
+-<html>
+-<script>
+-if (window.testRunner)
+-     testRunner.dumpAsText();
+-</script>
+-<div>This test checks that the plain text dropped into a styled text region will acquire the appropriate style.</div>
+-<p>To run this test manually, drag the text in the input element below into the bold text region.  The dropped text should be bold.
+-Click the verify button to check.</p>
+-<input type="button" value="Verify" onClick="verifier()">
+-<br />
+-<input id="grabme" value="Drag this text" >
+-<br />
+-<b contenteditable="true" id="destination">Drag the text from the above input element into this bold text</b>
+-<ul id="console"></ul>
+-
+-<script>
+-function log(message) {
+-    var console = document.getElementById("console");
+-    var li = document.createElement("li");
+-    var pre = document.createElement("pre");
+-    pre.appendChild(document.createTextNode(message));
+-    li.appendChild(pre);
+-    console.appendChild(li);
+-}
+-
+-function runTest() {
+-    var textToDrag = document.getElementById("grabme");
+-    textToDrag.select();
+-
+-    if (!window.testRunner)
+-        return;
+-    
+-    var x = textToDrag.offsetLeft + textToDrag.offsetWidth / 2;
+-    var y = textToDrag.offsetTop + textToDrag.offsetHeight / 2;
+-
+-    eventSender.mouseMoveTo(x, y);
+-
+-    eventSender.mouseDown();
+-    // Wait a moment so that the mouseDown will kick off a drag
+-    eventSender.leapForward(400);
+-    
+-    var destinationObject = document.getElementById("destination");
+-    var x = destinationObject.offsetLeft + destinationObject.offsetWidth / 2;
+-    var y = destinationObject.offsetTop + destinationObject.offsetHeight / 2;
+-
+-
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseUp();
+-
+-    verifier();
+-}
+-
+-function verifier() {
+-    log(document.getElementById("destination").outerHTML);
+-    if (document.getElementById("destination").childNodes.length == 1)
+-        log("SUCCESS");
+-    else
+-        log("FAILURE");
+-}
+-
+-runTest();
+-</script>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-link-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-link-expected.txt
+deleted file mode 100644
+index 2f19c68997823f586ce35974a10f5dca2cd3a0a1..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-link-expected.txt
++++ /dev/null
+@@ -1,16 +0,0 @@
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-This test checks that links dragged into editable regions preserve their title and URL.
+-HelloThis is a link
+-GoodbyeThis </a><a href="http://webkit.org/">is another link
+-Link is http://apple.com/
+-Link is http://apple.com/
+-Success!
+-To run this test manually, drag the first link into the box with 'Hello' in it, drag the second link into the box with 'Goodbye' in it, and then click on the button.
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-link.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-link.html
+deleted file mode 100644
+index f7d68e8381d49d2f2897c020abaa9508d3679b63..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-link.html
++++ /dev/null
+@@ -1,110 +0,0 @@
+-<script>
+-if (window.testRunner)
+-     testRunner.dumpEditingCallbacks();
+-</script>
+-<div>This test checks that links dragged into editable regions preserve their title and URL.</div>
+-
+-<div contenteditable="true" id="destination">Hello</div>
+-<div contenteditable="true" id="destination2">Goodbye</div>
+-
+-<div><a href="http://apple.com" id="grabme">This is a link</a></div>
+-<div><a href="http://apple.com" id="grabme2">This &lt;/a&gt;&lt;a href="http://webkit.org/"&gt;is another link</a></div>
+-
+-<ul id="console"></ul>
+-
+-<div>To run this test manually, drag the first link into the box with 'Hello' in it,
+-drag the second link into the box with 'Goodbye' in it, and then click on the button.<br><input type="button" value="Verify" onClick="verifier()"></div>
+-
+-<script>
+-
+-function log(message) {
+-    var console = document.getElementById("console");
+-    var li = document.createElement("li");
+-    var pre = document.createElement("pre");
+-    pre.appendChild(document.createTextNode(message));
+-    li.appendChild(pre);
+-    console.appendChild(li);
+-}
+-
+-function runTest() {
+-    if (!window.testRunner)
+-        return;
+-    testRunner.dumpAsText();
+-
+-    dragLink('grabme', 'destination');
+-    dragLink('grabme2', 'destination2');
+-
+-    verifier();
+-}
+-
+-function dragLink(srcId, targetId)
+-{
+-    var anchorToDrag = document.getElementById(srcId);
+-    window.getSelection().setBaseAndExtent(anchorToDrag, 0, anchorToDrag, 0);
+-
+-    var x = anchorToDrag.offsetLeft + anchorToDrag.offsetWidth / 2;
+-    var y = anchorToDrag.offsetTop + anchorToDrag.offsetHeight / 2;
+-
+-    eventSender.mouseMoveTo(x, y);
+-
+-    eventSender.mouseDown();
+-    // Wait a moment so that the mouseDown will kick off a drag instead of navigating to the link
+-    eventSender.leapForward(400);
+-
+-    var destinationObject = document.getElementById(targetId);
+-    var x = destinationObject.offsetLeft + destinationObject.offsetWidth / 2;
+-    var y = destinationObject.offsetTop + destinationObject.offsetHeight / 2;
+-
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseUp();
+-
+-    // Clear id on the cloned link created from the drag and drop.
+-    document.querySelector("a[id]").removeAttribute('id');
+-}
+-
+-function verifier() {
+-    var anchorToDrag = document.getElementById("grabme");
+-    var anchorToDrag2 = document.getElementById("grabme2");
+-
+-    var passed = verifyLink('grabme', 0) && verifyLink('grabme2', 1);
+-
+-    var anchors = document.getElementsByTagName("a");
+-    if (anchors.length != 2) {
+-        log("Failure, incorrect number of anchor tags present");
+-        passed = false;
+-    }
+-
+-    if (passed)
+-        log("Success!");
+-}
+-
+-function verifyLink(linkId, linkNumber)
+-{
+-    var anchorToDrag = document.getElementById(linkId);
+-
+-    var originalTarget = anchorToDrag.href;
+-    var originalText = anchorToDrag.innerText;
+-    var anchorParent = anchorToDrag.parentNode;
+-    anchorParent.removeChild(anchorToDrag);
+-
+-    var anchors = document.getElementsByTagName("a");
+-    if (!anchors[linkNumber]) {
+-        log("Link " + linkNumber + " not found");
+-        passed = false;
+-    } else {
+-        log("Link is " + anchors[linkNumber].href);
+-        var passed = true;
+-        if (anchors[linkNumber].href != originalTarget) {
+-            log("Failure! Expected target: " + anchors[linkNumber].href + ", actual target: " + originalTarget);
+-            passed = false;
+-        }
+-        if (anchors[linkNumber].innerText != originalText) {
+-            log("Failure! Expected text: " + anchors[linkNumber].innerText + ", actual text: " + originalText);
+-            passed = false;
+-        }
+-    }
+-    return passed;
+-}
+-
+-runTest();
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-expected.txt
+deleted file mode 100644
+index 23a63d3a0b9794f59e55498a906fad56218a8ade..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-expected.txt
++++ /dev/null
+@@ -1,35 +0,0 @@
+-This tests that Drag drop fires textInput events.
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS actualTextEventData is 'PlainHello'
+-PASS testTargetTextarea.value is 'PlainHello'
+-PASS actualTextEventData is 'PlainHello'
+-PASS testTargetInput.value is 'PlainHello'
+-PASS actualTextEventData is ''
+-PASS 0 <= testTargetEditable.innerHTML.indexOf('PlainHello') is true
+-PASS actualTextEventData is 'RichHello'
+-PASS testTargetTextarea.value is 'RichHello'
+-PASS actualTextEventData is 'RichHello'
+-PASS testTargetInput.value is 'RichHello'
+-PASS actualTextEventData is ''
+-PASS 0 <= testTargetEditable.innerHTML.indexOf('<b>Rich</b>Hello') is true
+-PASS textInputCount is proceedingTestCases.length
+-PASS actualTextEventData is 'PlainHello'
+-PASS testTargetTextarea.value is ''
+-PASS actualTextEventData is 'PlainHello'
+-PASS testTargetInput.value is ''
+-PASS actualTextEventData is ''
+-PASS testTargetEditable.innerHTML is 'placeholder'
+-PASS actualTextEventData is 'RichHello'
+-PASS testTargetTextarea.value is ''
+-PASS actualTextEventData is 'RichHello'
+-PASS testTargetInput.value is ''
+-PASS actualTextEventData is ''
+-PASS testTargetEditable.innerHTML is 'placeholder'
+-PASS textInputCount is cancelingTestCases.length
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect-crash-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect-crash-expected.txt
+deleted file mode 100644
+index bf50962d7dd586ad82b0779efb8e9883993bc3cd..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect-crash-expected.txt
++++ /dev/null
+@@ -1,11 +0,0 @@
+-Ensure safety on side-effect on drop-initiated TextEvent.
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS testTargetEditable.innerHTML is 'initialValue'
+-PASS testTargetIFrameDocument.body.innerHTML is 'initialBody'
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect-crash.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect-crash.html
+deleted file mode 100644
+index ed35a762dc64ed200e923b020c6b646b8258293c..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect-crash.html
++++ /dev/null
+@@ -1,14 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<p id="description"></p>
+-<div id="console"></div>
+-<script>
+-document.body.contentEditable = "true";    
+-</script>
+-<script src="script-tests/drop-text-events-sideeffect.js"></script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect-expected.txt
+deleted file mode 100644
+index bf50962d7dd586ad82b0779efb8e9883993bc3cd..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect-expected.txt
++++ /dev/null
+@@ -1,11 +0,0 @@
+-Ensure safety on side-effect on drop-initiated TextEvent.
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS testTargetEditable.innerHTML is 'initialValue'
+-PASS testTargetIFrameDocument.body.innerHTML is 'initialBody'
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect.html
+deleted file mode 100644
+index a017c158293cff442d182279e82a1dc1d6d124f6..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events-sideeffect.html
++++ /dev/null
+@@ -1,11 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<p id="description"></p>
+-<div id="console"></div>
+-<script src="script-tests/drop-text-events-sideeffect.js"></script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events.html
+deleted file mode 100644
+index 221c69accb3e9d5af3df32011f8719454bec545d..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-events.html
++++ /dev/null
+@@ -1,11 +0,0 @@
+-<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+-<html>
+-<head>
+-<script src="../../resources/js-test.js"></script>
+-</head>
+-<body>
+-<p id="description"></p>
+-<div id="console"></div>
+-<script src="script-tests/drop-text-events.js"></script>
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-without-selection.html b/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-without-selection.html
+deleted file mode 100644
+index b52725de4d8670e8c4cd90af7bf5911d8c625604..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/drop-text-without-selection.html
++++ /dev/null
+@@ -1,48 +0,0 @@
+-<script>
+-if (window.testRunner)
+-     testRunner.dumpEditingCallbacks();
+-</script>
+-<body onload="runTest()">
+-<p>
+-    This is a test for <i><a href="https://bugs.webkit.org/show_bug.cgi?id=8394">http://bugzilla.opendarwin.org/show_bug.cgi?id=8394</a>
+-    Editable region does not accept dropped text if there is no selection</i>.
+-</p>
+-<p>
+-    The text field should accept drag-and-dropped text, such as the link, even if
+-    no text is currently selected.
+-</p>
+-<hr>
+-<input id="field">
+-<a id="link" href="http://www.ibm.com/">drop me into the text field</a>
+-
+-<script>
+-
+-function runTest() {
+-    if (!window.testRunner)
+-        return;
+-
+-    window.testRunner.waitUntilDone();
+-
+-    var link = document.getElementById("link");
+-
+-    var x = link.offsetLeft + link.offsetWidth / 2;
+-    var y = link.offsetTop + link.offsetHeight / 2;
+-
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseDown();
+-    // Wait a moment so that the mouseDown will kick off a drag instead of starting a new selection.
+-    eventSender.leapForward(400);
+-    var field = document.getElementById("field");
+-    
+-    x = field.offsetLeft + field.offsetWidth / 2;
+-    y = field.offsetTop + field.offsetHeight / 2;
+-
+-    eventSender.mouseMoveTo(x, y);
+-    eventSender.mouseUp();
+-
+-    window.testRunner.notifyDone();
+-}
+-
+-</script>
+-
+-</body>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-cntl-y-001-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-cntl-y-001-expected.txt
+deleted file mode 100644
+index 54fa58bdabfb342e00107ba66b65851d76f48298..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-cntl-y-001-expected.txt
++++ /dev/null
+@@ -1,29 +0,0 @@
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-layer at (0,0) size 800x600
+-  LayoutView at (0,0) size 800x600
+-layer at (0,0) size 800x600
+-  LayoutBlockFlow {HTML} at (0,0) size 800x600
+-    LayoutBlockFlow {BODY} at (8,8) size 784x584
+-      LayoutBlockFlow {DIV} at (0,0) size 784x184 [border: (2px solid #0000FF)]
+-        LayoutBlockFlow {DIV} at (14,14) size 756x56
+-          LayoutText {#text} at (0,0) size 67x28
+-            text run at (0,0) width 67: "Tests: "
+-          LayoutBR {BR} at (0,0) size 0x0
+-          LayoutText {#text} at (0,28) size 544x28
+-            text run at (0,28) width 544: "Cntl-y at caret selection when nothing is in the kill ring."
+-        LayoutBlockFlow {DIV} at (14,86) size 756x84
+-          LayoutText {#text} at (0,0) size 189x28
+-            text run at (0,0) width 189: "Expected Results: "
+-          LayoutBR {BR} at (189,22) size 0x0
+-          LayoutText {#text} at (0,28) size 291x28
+-            text run at (0,28) width 291: "Deletes a character, yielding: "
+-          LayoutBR {BR} at (291,50) size 0x0
+-          LayoutText {#text} at (0,56) size 166x28
+-            text run at (0,56) width 166: "one tw three four"
+-      LayoutBlockFlow {DIV} at (0,208) size 784x32
+-        LayoutBlockFlow {DIV} at (0,0) size 784x32 [border: (2px solid #FF0000)]
+-          LayoutText {#text} at (2,2) size 178x28
+-            text run at (2,2) width 178: "one two three four"
+-caret: position 7 of child 0 {#text} of child 1 {DIV} of child 3 {DIV} of body
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-cntl-y-001.html b/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-cntl-y-001.html
+deleted file mode 100644
+index 69efaf2728b7f40bc7cf93eb4b9d383d519f7e1e..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-cntl-y-001.html
++++ /dev/null
+@@ -1,62 +0,0 @@
+-<html> 
+-<head>
+-
+-<style>
+-.editing { 
+-    border: 2px solid red; 
+-    font-size: 24px; 
+-}
+-.explanation { 
+-    border: 2px solid blue; 
+-    padding: 12px; 
+-    font-size: 24px; 
+-    margin-bottom: 24px;
+-}
+-.scenario { margin-bottom: 16px;}
+-.scenario:first-line { font-weight: bold; margin-bottom: 16px;}
+-.expected-results:first-line { font-weight: bold }
+-</style>
+-<script src=../editing.js language="JavaScript" type="text/JavaScript" ></script>
+-
+-<script>
+-
+-function editingTest() {
+-    moveSelectionForwardByWordCommand();
+-    moveSelectionForwardByWordCommand();
+-    if (window.eventSender) {
+-        eventSender.clearKillRing();
+-        eventSender.keyDown("y", ["ctrlKey"]);
+-    }
+-}
+-
+-</script>
+-
+-<title>Editing Test</title> 
+-</head> 
+-<body>
+-
+-<div class="explanation">
+-<div class="scenario">
+-Tests: 
+-<br>
+-Cntl-y at caret selection when nothing is in the kill ring.
+-</div>
+-<div class="expected-results">
+-Expected Results:
+-<br>
+-Deletes a character, yielding:
+-<BR>
+-one tw three four
+-</div>
+-</div>
+-
+-<div contenteditable id="root" style="word-wrap: break-word; -khtml-nbsp-mode: space; -khtml-line-break: after-white-space;">
+-<div id="test" class="editing">one two three four</div>
+-</div>
+-
+-<script>
+-runEditingTest();
+-</script>
+-
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-a-k-y.html b/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-a-k-y.html
+deleted file mode 100644
+index f65ea9a163e4dc97738e9746ba4bdd9aa7178170..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-a-k-y.html
++++ /dev/null
+@@ -1,31 +0,0 @@
+-<!doctype html>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-<script src="../assert_selection.js"></script>
+-<script>
+-test(() => {
+-    assert_true(navigator.platform.indexOf('Mac') === 0,
+-        'This test requires MacOS for kill ring');
+-
+-    assert_not_equals(window.testRunner, undefined,
+-        'This test requires testRunner');
+-
+-    // Note: The orignal test used |eventSender.keyDown()| with Ctrl+A, Ctrl+K
+-    // and Ctrl+Y, but content_shell doesn't support mapping control key to menu
+-    // command. This test uses |testRunner.execCommand()| to verify menu
+-    // commands which mapped from key bindings.
+-    assert_selection(
+-        '<div contenteditable>one five| two three four</div>',
+-        selection => {
+-            // "two three four" in the kill ring
+-            testRunner.execCommand('deleteToEndOfLine'); // Ctrl+K
+-            // cursor before "one"
+-            testRunner.execCommand('moveToBeginningOfLine'); // Ctrl+A
+-            // cursor after "one"
+-            selection.modify('move', 'forward', 'word');
+-            testRunner.execCommand('yank'); // Ctrl+Y
+-        },
+-        '<div contenteditable>one two three four| five</div>',
+-        'Verifies Ctrl+K, Ctrl+A, then Ctrl+Y for MacOS');
+-});
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-with-move-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-with-move-expected.txt
+deleted file mode 100644
+index 1e33220b1c6095f6bf77f7ac6082f7847691a1d8..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-with-move-expected.txt
++++ /dev/null
+@@ -1,14 +0,0 @@
+-Test for bug 73888: Kill ring is not cleared when selection changes.
+-
+-one
+-three
+-five
+-four
+-
+-Expected result:
+-one
+-three
+-five
+-four
+-
+-
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-with-move.html b/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-with-move.html
+deleted file mode 100644
+index e4be74b224934b81c0bfd3eb1ea02cf37b1dee44..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-with-move.html
++++ /dev/null
+@@ -1,36 +0,0 @@
+-<p>Test for <a href="https://bugs.webkit.org/show_bug.cgi?id=73888">bug 73888</a>:
+-Kill ring is not cleared when selection changes.</p>
+-
+-<div contenteditable id=ce>
+-one
+-<div>two</div>
+-<div>three</div>
+-<div>four</div>
+-<div>five</div>
+-<div><br></div>
+-</div>
+-
+-<div>
+-Expected result:
+-<div>one</div>
+-<div>three</div>
+-<div>five</div>
+-<div>four</div>
+-<div><br></div>
+-</div>
+-
+-<script>
+-if (window.testRunner) {
+-    testRunner.dumpAsText();
+-    document.getElementById("ce").focus();
+-    testRunner.execCommand("moveDown");
+-    testRunner.execCommand("deleteToEndOfParagraph");
+-    testRunner.execCommand("deleteToEndOfParagraph");
+-    testRunner.execCommand("moveDown");
+-    testRunner.execCommand("deleteToEndOfParagraph");
+-    testRunner.execCommand("deleteToEndOfParagraph");
+-    testRunner.execCommand("moveDown");
+-    testRunner.execCommand("yank");
+-} else
+-    document.write("This test only runs in automatic mode");
+-</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-y-001-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-y-001-expected.txt
+deleted file mode 100644
+index a476ce66898948818a82d112e4cd1206a867d75e..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-y-001-expected.txt
++++ /dev/null
+@@ -1,63 +0,0 @@
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-four five six
+-seven eight nine replacingDOMRange:range from 8 of #text > DIV > DIV > BODY > HTML > #document to 8 of #text > DIV > DIV > BODY > HTML > #document givenAction:WebViewInsertActionTyped
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
+-EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification
+-layer at (0,0) size 800x600
+-  LayoutView at (0,0) size 800x600
+-layer at (0,0) size 800x600
+-  LayoutBlockFlow {HTML} at (0,0) size 800x600
+-    LayoutBlockFlow {BODY} at (8,8) size 784x584
+-      LayoutBlockFlow {DIV} at (0,0) size 784x212 [border: (2px solid #0000FF)]
+-        LayoutBlockFlow {DIV} at (14,14) size 756x56
+-          LayoutText {#text} at (0,0) size 67x28
+-            text run at (0,0) width 67: "Tests: "
+-          LayoutBR {BR} at (0,0) size 0x0
+-          LayoutText {#text} at (0,28) size 348x28
+-            text run at (0,28) width 348: "Multiple ctrl-k presses then a ctrl-y."
+-        LayoutBlockFlow {DIV} at (14,86) size 756x112
+-          LayoutBlockFlow (anonymous) at (0,0) size 756x28
+-            LayoutText {#text} at (0,0) size 189x28
+-              text run at (0,0) width 189: "Expected Results: "
+-            LayoutBR {BR} at (189,22) size 0x0
+-          LayoutBlockFlow {DIV} at (0,28) size 756x84
+-            LayoutBlockFlow (anonymous) at (0,0) size 756x28
+-              LayoutText {#text} at (0,0) size 132x28
+-                text run at (0,0) width 132: "one two three"
+-            LayoutBlockFlow {DIV} at (0,28) size 756x28
+-              LayoutText {#text} at (0,0) size 118x28
+-                text run at (0,0) width 118: "four five six"
+-            LayoutBlockFlow {DIV} at (0,56) size 756x28
+-              LayoutText {#text} at (0,0) size 158x28
+-                text run at (0,0) width 158: "seven eight nine"
+-      LayoutBlockFlow {DIV} at (0,236) size 784x96
+-        LayoutBlockFlow {DIV} at (0,0) size 784x32 [border: (2px solid #FF0000)]
+-          LayoutText {#text} at (2,2) size 132x28
+-            text run at (2,2) width 132: "one two three"
+-        LayoutBlockFlow {DIV} at (0,32) size 784x32 [border: (2px solid #FF0000)]
+-          LayoutText {#text} at (2,2) size 118x28
+-            text run at (2,2) width 118: "four five six"
+-        LayoutBlockFlow {DIV} at (0,64) size 784x32 [border: (2px solid #FF0000)]
+-          LayoutText {#text} at (2,2) size 158x28
+-            text run at (2,2) width 158: "seven eight nine"
+-caret: position 16 of child 0 {#text} of child 3 {DIV} of child 3 {DIV} of body
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-y-001.html b/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-y-001.html
+deleted file mode 100644
+index 382746e2f34bacd35b43cb82996b1dbe78c4e3f5..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/emacs-ctrl-k-y-001.html
++++ /dev/null
+@@ -1,73 +0,0 @@
+-<html>
+-<head>
+-<style>
+-.editing { 
+-    border: 2px solid red; 
+-    font-size: 24px; 
+-}
+-.explanation { 
+-    border: 2px solid blue; 
+-    padding: 12px; 
+-    font-size: 24px; 
+-    margin-bottom: 24px;
+-}
+-.scenario { margin-bottom: 16px;}
+-.scenario:first-line { font-weight: bold; margin-bottom: 16px;}
+-.expected-results:first-line { font-weight: bold }
+-</style>
+-
+-<script src='../editing.js'></script>
+-
+-<script>
+-function editingTest()
+-{
+-    moveSelectionForwardByWordCommand(); // cursor after "one"
+-    moveSelectionForwardByWordCommand(); // cursor after "two"
+-    if (window.eventSender) {
+-        eventSender.clearKillRing();
+-        eventSender.keyDown("k", ["ctrlKey"]); // two three in the kill ring
+-        eventSender.keyDown("k", ["ctrlKey"]); // newline added to killring
+-        eventSender.keyDown("k", ["ctrlKey"]); // four five six added to kill ring
+-        eventSender.keyDown("k", ["ctrlKey"]); // newline added to killring
+-        eventSender.keyDown("k", ["ctrlKey"]); // seven eight nine added to kill ring
+-        eventSender.keyDown("y", ["ctrlKey"]);
+-    }
+-}
+-</script>
+-<title>Editing Test for ctrl-k and ctrl-y</title>
+-</head>
+-<body>
+-
+-<div class="explanation">
+-<div class="scenario">
+-Tests: 
+-<br>
+-Multiple ctrl-k presses then a ctrl-y.
+-</div>
+-<div class="expected-results">
+-Expected Results:
+-<br>
+-
+-<div>
+-one two three
+-<div>four five six</div>
+-<div>seven eight nine</div>
+-</div>
+-
+-</div>
+-</div>
+-
+-<div contenteditable id="root" style="word-wrap: break-word; -khtml-nbsp-mode: space; -khtml-line-break: after-white-space;">
+-<div id="test" class="editing">
+-one two three
+-<div>four five six</div>
+-<div>seven eight nine</div>
+-</div>
+-</div>
+-
+-<script>
+-runEditingTest();
+-</script>
+-
+-</body>
+-</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/file-drag-to-editable-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/file-drag-to-editable-expected.txt
+deleted file mode 100644
+index 4c21417d1c7fb3895f8fa8cafbeedeec5710bee9..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/pasteboard/file-drag-to-editable-expected.txt
++++ /dev/null
+@@ -1,10 +0,0 @@
+-Tests that dragging a file into an editable area does not insert a filename.
+-
+-On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
+-
+-
+-PASS window.attemptedFileNavigation is true
+-PASS successfullyParsed is true
+-
+-TEST COMPLETE
+-
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/file-drag-to-editable.html b/third_party/WebKit/LayoutTests/editing/pasteboard/file-drag-to-editable.html
 deleted file mode 100644
 index 4a6beeaa4f8329dc4c00d9c5d6ad7546c2d8499e..0000000000000000000000000000000000000000
@@ -984,12 +2927,12 @@ index cae327083e622b46b6b17954bc41e4046b7619c9..00000000000000000000000000000000
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-expected.txt
 deleted file mode 100644
-index 1b654e10195e88f922e7c0bb11cf75209026e6fe..0000000000000000000000000000000000000000
+index 64b01dc0065beb6ba5729e8ac07321d7ef8bb6cb..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/onpaste-text-html-expected.txt
 +++ /dev/null
 @@ -1,6 +0,0 @@
 -CONSOLE MESSAGE: line 21: text/plain: This test verifies that we can get text/html from the clipboard during an onpaste event. 
--CONSOLE MESSAGE: line 23: text/html: <span style="color: rgb(0, 0, 0); font-size: medium; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: normal; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; white-space: normal; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; text-decoration-style: initial; text-decoration-color: initial; display: inline !important; float: none;">This test verifies that we can get text/html from the clipboard during an onpaste event.<span class="Apple-converted-space"> </span></span>
+-CONSOLE MESSAGE: line 23: text/html: <span style="color: rgb(0, 0, 0); font-size: medium; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: normal; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; white-space: normal; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; text-decoration-style: initial; text-decoration-color: initial; display: inline !important; float: none;">This test verifies that we can get text/html from the clipboard during an onpaste event.<span> </span></span>
 -This test verifies that we can get text/html from the clipboard during an onpaste event. This test requires DRT.
 -Paste content in this div.This test verifies that we can get text/html from the clipboard during an onpaste event. 
 -PASS
@@ -1519,10 +3462,10 @@ index 2ae374e344b6a13c958d6fddbdc99d94aad181f7..00000000000000000000000000000000
 -</html>
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-before-tab-span-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-before-tab-span-expected.txt
 deleted file mode 100644
-index 0a18088e761d03512bbec425c39f5c851e52ab9f..0000000000000000000000000000000000000000
+index 7fc60655acc92d55e5961573a2612f6929bba455..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-before-tab-span-expected.txt
 +++ /dev/null
-@@ -1,13 +0,0 @@
+@@ -1,12 +0,0 @@
 -This test ensures pasting content before a tab span isn't pasted into the tab span.
 -
 -Result:
@@ -1530,7 +3473,6 @@ index 0a18088e761d03512bbec425c39f5c851e52ab9f..00000000000000000000000000000000
 -|   id="test"
 -|   "hellohelloa<#selection-caret>"
 -|   <span>
--|     class="Apple-tab-span"
 -|     style="white-space:pre"
 -|     "		"
 -|   "world"
@@ -1538,7 +3480,7 @@ index 0a18088e761d03512bbec425c39f5c851e52ab9f..00000000000000000000000000000000
 -"
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-before-tab-span.html b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-before-tab-span.html
 deleted file mode 100644
-index 1b72f3af7bccdc30fb98ffd2349d5eec779a5700..0000000000000000000000000000000000000000
+index 0e67e56e44625e9d2e36e5588273b102c6206c80..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-before-tab-span.html
 +++ /dev/null
 @@ -1,28 +0,0 @@
@@ -1548,7 +3490,7 @@ index 1b72f3af7bccdc30fb98ffd2349d5eec779a5700..00000000000000000000000000000000
 -<script src="../../resources/dump-as-markup.js"></script>
 -</head>
 -<body>
--<div contenteditable id="root" class="editing"><span id="test">hello<span class="Apple-tab-span" style="white-space:pre">		</span>world</span> 
+-<div contenteditable id="root" class="editing"><span id="test">hello<span style="white-space:pre">		</span>world</span> 
 -</div>
 -<script>
 -
@@ -2135,10 +4077,10 @@ index d55dfd852bfd662358a4393ccbb6884a0da83885..00000000000000000000000000000000
 -</html>
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-delete-insertion-position-skip-paragraph-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-delete-insertion-position-skip-paragraph-expected.txt
 deleted file mode 100644
-index 1f5dc607c0d7afa5d443b8bb119cf484dc9a8799..0000000000000000000000000000000000000000
+index 5c4f6a6a3297319cf9bbc46176a53e32ce23da02..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-delete-insertion-position-skip-paragraph-expected.txt
 +++ /dev/null
-@@ -1,77 +0,0 @@
+@@ -1,68 +0,0 @@
 -This test ensures WebKit does not skip paragraphs when determining the insertion position for paste.
 -You should see "hello world<caret> WebKit" below.
 -
@@ -2146,14 +4088,12 @@ index 1f5dc607c0d7afa5d443b8bb119cf484dc9a8799..00000000000000000000000000000000
 -| "
 -"
 -| <font>
--|   class="Apple-style-span"
 -|   face="'courier new', monospace"
 -|   <div>
 -|     style="font-family: arial;"
 -|     "
 -"
 -|     <span>
--|       class="Apple-style-span"
 -|       style="font-family: 'courier new', monospace;"
 -|       "hello"
 -|   "
@@ -2161,7 +4101,6 @@ index 1f5dc607c0d7afa5d443b8bb119cf484dc9a8799..00000000000000000000000000000000
 -|   <div>
 -|     style="font-family: arial; "
 -|     <span>
--|       class="Apple-style-span"
 -|       style="font-family: 'courier new', monospace;"
 -|       " WebKit"
 -| "
@@ -2171,14 +4110,12 @@ index 1f5dc607c0d7afa5d443b8bb119cf484dc9a8799..00000000000000000000000000000000
 -| "
 -"
 -| <font>
--|   class="Apple-style-span"
 -|   face="'courier new', monospace"
 -|   <div>
 -|     style="font-family: arial;"
 -|     "
 -"
 -|     <span>
--|       class="Apple-style-span"
 -|       style="font-family: 'courier new', monospace;"
 -|       "hello"
 -|   "
@@ -2186,7 +4123,6 @@ index 1f5dc607c0d7afa5d443b8bb119cf484dc9a8799..00000000000000000000000000000000
 -|   <div>
 -|     style="font-family: arial; "
 -|     <span>
--|       class="Apple-style-span"
 -|       style="font-family: 'courier new', monospace;"
 -|       " WebKit"
 -| "
@@ -2196,14 +4132,12 @@ index 1f5dc607c0d7afa5d443b8bb119cf484dc9a8799..00000000000000000000000000000000
 -| "
 -"
 -| <font>
--|   class="Apple-style-span"
 -|   face="'courier new', monospace"
 -|   <div>
 -|     style="font-family: arial;"
 -|     "
 -"
 -|     <span>
--|       class="Apple-style-span"
 -|       style="font-family: 'courier new', monospace;"
 -|       "hello"
 -|   "
@@ -2211,14 +4145,13 @@ index 1f5dc607c0d7afa5d443b8bb119cf484dc9a8799..00000000000000000000000000000000
 -|   <div>
 -|     style="font-family: arial; "
 -|     <span>
--|       class="Apple-style-span"
 -|       style="font-family: 'courier new', monospace;"
 -|       " WebKit"
 -| "
 -"
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-delete-insertion-position-skip-paragraph.html b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-delete-insertion-position-skip-paragraph.html
 deleted file mode 100644
-index 254f03ad22b13e7884455624966879583e06b83a..0000000000000000000000000000000000000000
+index d4b8b60b6b2618bae388165347db8ec3a38279c0..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-delete-insertion-position-skip-paragraph.html
 +++ /dev/null
 @@ -1,32 +0,0 @@
@@ -2228,9 +4161,9 @@ index 254f03ad22b13e7884455624966879583e06b83a..00000000000000000000000000000000
 -<p id="description">This test ensures WebKit does not skip paragraphs when determining the insertion position for paste.<br>
 -You should see "hello world&lt;caret&gt; WebKit" below.</p>
 -<div id="test" contenteditable>
--<font class="Apple-style-span" face="'courier new', monospace"><div style="font-family: arial;">
--<span class="Apple-style-span" style="font-family: 'courier new', monospace;">hello</span></div>
--<div style="font-family: arial; "><span class="Apple-style-span" style="font-family: 'courier new', monospace;">&nbsp;WebKit</span></div></font>
+-<font face="'courier new', monospace"><div style="font-family: arial;">
+-<span style="font-family: 'courier new', monospace;">hello</span></div>
+-<div style="font-family: arial; "><span style="font-family: 'courier new', monospace;">&nbsp;WebKit</span></div></font>
 -</div>
 -<script src="../editing.js"></script>
 -<script src="../../resources/dump-as-markup.js"></script>
@@ -2241,7 +4174,7 @@ index 254f03ad22b13e7884455624966879583e06b83a..00000000000000000000000000000000
 -moveSelectionForwardByLineBoundaryCommand();
 -Markup.dump('test', 'Initial markup');
 -
--insertHTMLCommand('<span class="Apple-style-span" style="background-color: #fee;">&nbsp;world</span>');
+-insertHTMLCommand('<span style="background-color: #fee;">&nbsp;world</span>');
 -Markup.dump('test', 'After inserting " world"');
 -
 -for (var i = 0; i < 5; i++) // Make sure we're at the very end.
@@ -2611,7 +4544,7 @@ index f3fe09d90fa3270ab2225e9dbb03787771ded19c..00000000000000000000000000000000
 -|     "(This text should be blue.<#selection-caret>)"
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-into-blockquote-with-document-font-color.html b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-into-blockquote-with-document-font-color.html
 deleted file mode 100644
-index 7ea7c35c0104af2fc70b758dce4a9bf86a61fd15..0000000000000000000000000000000000000000
+index 4d3122f426d988cb482a2243c296e0ae32c5c45f..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-into-blockquote-with-document-font-color.html
 +++ /dev/null
 @@ -1,30 +0,0 @@
@@ -2638,7 +4571,7 @@ index 7ea7c35c0104af2fc70b758dce4a9bf86a61fd15..00000000000000000000000000000000
 -var s = window.getSelection();
 -s.collapse(edit.firstChild.firstChild.firstChild, 1);
 -
--document.execCommand("InsertHTML", false, "<span class='Apple-style-span' style='color: black;'>This text should be blue.</span>");
+-document.execCommand("InsertHTML", false, "<span style='color: black;'>This text should be blue.</span>");
 -
 -Markup.description(description.textContent);
 -Markup.dump('edit');
@@ -5052,10 +6985,10 @@ index eccdf7e337f394d9cc80175866f1ba432cfe5ab8..00000000000000000000000000000000
 -</html>
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-001-expected.txt b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-001-expected.txt
 deleted file mode 100644
-index 2436d81e384dc1f153a7d219ded1d7a9be920d80..0000000000000000000000000000000000000000
+index 8c191391f08ca86e1238d9c87b80d7e859039b71..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-001-expected.txt
 +++ /dev/null
-@@ -1,20 +0,0 @@
+@@ -1,19 +0,0 @@
 -EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
 -EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
 -EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification
@@ -5070,7 +7003,6 @@ index 2436d81e384dc1f153a7d219ded1d7a9be920d80..00000000000000000000000000000000
 -|   id="test"
 -|   "aax<#selection-caret>"
 -|   <span>
--|     class="Apple-tab-span"
 -|     style="white-space:pre"
 -|     "			"
 -|   "z"
@@ -5078,7 +7010,7 @@ index 2436d81e384dc1f153a7d219ded1d7a9be920d80..00000000000000000000000000000000
 -"
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-001.html b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-001.html
 deleted file mode 100644
-index 2eee52197022d0fc0e6e997a6e9abe176c1deafe..0000000000000000000000000000000000000000
+index 67444a914623664ca0d45e8a548ac8c52cb9ab9e..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-001.html
 +++ /dev/null
 @@ -1,28 +0,0 @@
@@ -5086,7 +7018,7 @@ index 2eee52197022d0fc0e6e997a6e9abe176c1deafe..00000000000000000000000000000000
 -<html>
 -<body style="word-wrap: break-word; -khtml-nbsp-mode: space; -khtml-line-break: after-white-space; ">
 -<div contenteditable id="root" style="border: 2px solid red; padding: 12px; font-size: 24px">
--<span id="test">a<span class="Apple-tab-span" style="white-space:pre">			</span>z</span>
+-<span id="test">a<span style="white-space:pre">			</span>z</span>
 -</div>
 -<script src="../editing.js"></script>
 -<script src="../../resources/dump-as-markup.js"></script>
@@ -5112,7 +7044,7 @@ index 2eee52197022d0fc0e6e997a6e9abe176c1deafe..00000000000000000000000000000000
 -</html>
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-002.html b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-002.html
 deleted file mode 100644
-index 679908edfecdda22588c44ef7526d42b2989518a..0000000000000000000000000000000000000000
+index c744548eecc9e61ad6e08c478813632e8ad6ede5..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-002.html
 +++ /dev/null
 @@ -1,33 +0,0 @@
@@ -5130,7 +7062,7 @@ index 679908edfecdda22588c44ef7526d42b2989518a..00000000000000000000000000000000
 -    [
 -      '<div contenteditable>',
 -        'a',
--        '<span class="Apple-tab-span" style="white-space:pre">	|		</span>',
+-        '<span style="white-space:pre">	|		</span>',
 -        'z',
 -      '</div>'
 -    ].join(''),
@@ -5141,9 +7073,9 @@ index 679908edfecdda22588c44ef7526d42b2989518a..00000000000000000000000000000000
 -    [
 -      '<div contenteditable>',
 -        'a',
--        '<span class="Apple-tab-span" style="white-space:pre">	</span>',
+-        '<span style="white-space:pre">	</span>',
 -        'a|',
--        '<span class="Apple-tab-span" style="white-space:pre">		</span>',
+-        '<span style="white-space:pre">		</span>',
 -        'z',
 -      '</div>'
 -    ].join(''));
@@ -5151,7 +7083,7 @@ index 679908edfecdda22588c44ef7526d42b2989518a..00000000000000000000000000000000
 -</script>
 diff --git a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-003.html b/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-003.html
 deleted file mode 100644
-index 19aafaee7c77195a8be2660672bec4bca2a08f03..0000000000000000000000000000000000000000
+index e33439204f5d02f43ffd90f8285db9bc3fc7c594..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/pasteboard/paste-text-at-tabspan-003.html
 +++ /dev/null
 @@ -1,38 +0,0 @@
@@ -5184,7 +7116,7 @@ index 19aafaee7c77195a8be2660672bec4bca2a08f03..00000000000000000000000000000000
 -</head> 
 -<body style="word-wrap: break-word; -khtml-nbsp-mode: space; -khtml-line-break: after-white-space; ">
 -<div contenteditable id="root" class="editing">
--<span id="test">a<span class="Apple-tab-span" style="white-space:pre">			</span>z</span>
+-<span id="test">a<span style="white-space:pre">			</span>z</span>
 -</div>
 -
 -<script>
@@ -9788,37 +11720,6 @@ index 209b0a83d3b320002aba80ecf246f76649ad70f2..00000000000000000000000000000000
 -  </a>
 -</svg><div id="div2">world</div>
 -</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/14971.html b/third_party/WebKit/LayoutTests/editing/selection/14971.html
-deleted file mode 100644
-index 0cdd62dc1705044e13a09241db70146b1570ea7b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/14971.html
-+++ /dev/null
-@@ -1,25 +0,0 @@
--<p>This tests to make sure that a drag-selecting through a -webkit-user-select:ignore region works.  The selection should end somewhere inside the word 'World' below.</p>
--<div><span id="start">Hello</span> <span id="end" style="-webkit-user-select:ignore;">World</span></div>
--
--<script>
--if (window.testRunner) {
--    start = document.getElementById("start");
--    end = document.getElementById("end");
--
--    x = start.offsetParent.offsetLeft + start.offsetLeft - 5;
--    y = start.offsetParent.offsetTop + start.offsetTop + start.offsetHeight / 2;
--    
--    eventSender.mouseMoveTo(x, y);
--    eventSender.mouseDown();
--    
--    eventSender.mouseMoveTo(x + 10, y);
--    eventSender.mouseMoveTo(x + 20, y);
--    eventSender.mouseMoveTo(x + 30, y);
--    
--    x = end.offsetParent.offsetLeft + end.offsetLeft + end.offsetWidth / 2;
--    y = end.offsetParent.offsetTop + end.offsetTop + end.offsetHeight / 2;
--    
--    eventSender.mouseMoveTo(x, y);
--    eventSender.mouseUp();
--}
--</script>
 diff --git a/third_party/WebKit/LayoutTests/editing/selection/3690719.html b/third_party/WebKit/LayoutTests/editing/selection/3690719.html
 deleted file mode 100644
 index 5b58a4beccc68b3a480de98d1845c83b0dbd34f6..0000000000000000000000000000000000000000
@@ -10535,30 +12436,6 @@ index 7b93004db22be8970204bba7ccc9e56f67850bd3..00000000000000000000000000000000
 -<script>runTest();</script>
 -</body>
 -</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/5240265.html b/third_party/WebKit/LayoutTests/editing/selection/5240265.html
-deleted file mode 100644
-index af90d839893ebc7456d1eb933db3e5072d9704af..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/5240265.html
-+++ /dev/null
-@@ -1,18 +0,0 @@
--<p>This tests to see that clicking on content outside of an editable region with -webkit-user-select: ignore doesn't remove the selection from the editable region. To run it manually, click on the button.  The editable region should not be focused, but the text inside of it should be selected.</p>
--<input id="button" type="button" style="-webkit-user-select: ignore;" value="Click on me">
--<div id="div" contenteditable="true">This text should be selected.</div>
--
--<script>
--div = document.getElementById("div");
--sel = window.getSelection();
--sel.collapse(div, 0);
--document.execCommand("SelectAll");
--if (window.testRunner) {
--    button = document.getElementById("button");
--    x = button.offsetParent.offsetLeft + button.offsetLeft + button.offsetWidth / 2;
--    y = button.offsetParent.offsetTop + button.offsetTop + button.offsetHeight / 2;
--    eventSender.mouseMoveTo(x, y);
--    eventSender.mouseDown();
--    eventSender.mouseUp();
--}
--</script>
 diff --git a/third_party/WebKit/LayoutTests/editing/selection/5241148-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/5241148-expected.txt
 deleted file mode 100644
 index f31f41dc9c01519fc3f51b2065febe2a30e06534..0000000000000000000000000000000000000000
@@ -11947,7 +13824,7 @@ index a8322582cabbd833cff7315e1f79d62c6602154c..00000000000000000000000000000000
 -
 diff --git a/third_party/WebKit/LayoutTests/editing/selection/button-right-click.html b/third_party/WebKit/LayoutTests/editing/selection/button-right-click.html
 deleted file mode 100644
-index e2d7180c281b4081bbeeb799190b875eb86b9cdd..0000000000000000000000000000000000000000
+index c9616343ffc0e76ded1b45c1c29f9fac5707f116..0000000000000000000000000000000000000000
 --- a/third_party/WebKit/LayoutTests/editing/selection/button-right-click.html
 +++ /dev/null
 @@ -1,25 +0,0 @@
@@ -11956,7 +13833,7 @@ index e2d7180c281b4081bbeeb799190b875eb86b9cdd..00000000000000000000000000000000
 -<title>Right clicking on the button should not crash.</title> 
 -</head> 
 -<body>
--<span class="Apple-style-span" style="font-family: Tahoma, Arial; font-size: 13px;">
+-<span style="font-family: Tahoma, Arial; font-size: 13px;">
 -<button type="button" style="margin-top: 0px; margin-right: 0px; margin-bottom: 0px; margin-left: 0px; border-top-width: 1px; border-right-width: 1px; border-bottom-width: 1px; border-left-width: 1px; border-style: initial; border-color: initial; padding-top: 0.2em; padding-right: 0.2em; padding-bottom: 0.2em; padding-left: 0.2em; line-height: normal; font: inherit; color: inherit; white-space: nowrap; background-repeat: repeat-x; border-top-style: solid; border-right-style: solid; border-bottom-style: solid; border-left-style: solid; border-top-color: rgb(222, 222, 222); border-right-color: rgb(222, 222, 222); border-bottom-color: rgb(222, 222, 222); border-left-color: rgb(222, 222, 222); cursor: pointer; vertical-align: middle; text-align: center; -webkit-background-clip: initial; -webkit-background-origin: initial; background-color: rgb(255, 255, 255); -webkit-user-select: none; background-position: 0% 0%; ">
 -    <div style="margin-top: 0px; margin-right: 0px; margin-bottom: 0px; margin-left: 0px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; border-top-width: 0px; border-right-width: 0px; border-bottom-width: 0px; border-left-width: 0px; border-style: initial; border-color: initial; line-height: normal; font: inherit; color: inherit; display: inline-block; border-style: initial; border-color: initial; vertical-align: middle; "></div>
 -    <div id="test" style="margin-top: 0px; margin-right: 0px; margin-bottom: 0px; margin-left: 0px; padding-top: 0px; padding-right: 0.3em; padding-bottom: 0px; padding-left: 0.3em; border-top-width: 0px; border-right-width: 0px; border-bottom-width: 0px; border-left-width: 0px; border-style: initial; border-color: initial; line-height: normal; font: inherit; color: inherit; display: inline-block; border-style: initial; border-color: initial; vertical-align: middle; ">Color</div>
@@ -14325,6 +16202,13 @@ index 325f529edf016827e630686718fc87794802ee76..00000000000000000000000000000000
 -</script>
 -</body>
 -</html>
+diff --git a/third_party/WebKit/LayoutTests/editing/selection/collapse/OWNERS b/third_party/WebKit/LayoutTests/editing/selection/collapse/OWNERS
+deleted file mode 100644
+index aa698c25c025ae4df7e7866c6069c3aba7e8b0d0..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/selection/collapse/OWNERS
++++ /dev/null
+@@ -1 +0,0 @@
+-# TEAM: chrome-editing@chromium.org
 diff --git a/third_party/WebKit/LayoutTests/editing/selection/collapse/collapse_around_table.html b/third_party/WebKit/LayoutTests/editing/selection/collapse/collapse_around_table.html
 deleted file mode 100644
 index c468b60e09dfcfd9322d80b3cb7e899e321a916c..0000000000000000000000000000000000000000
@@ -14520,6 +16404,48 @@ index a89b43b4f7cc0e1ec2f47ccedbc2ce79819f6a28..00000000000000000000000000000000
 -    assert_equals(internals.visibleSelectionAnchorOffset, 2, 'Canonicalized anchorOffset');
 -});
 -</script>
+diff --git a/third_party/WebKit/LayoutTests/editing/selection/collapseto_in_text_fields.html b/third_party/WebKit/LayoutTests/editing/selection/collapseto_in_text_fields.html
+deleted file mode 100644
+index 5e2cbab69988923b3e5d0a8528d4f19eeec7a28d..0000000000000000000000000000000000000000
+--- a/third_party/WebKit/LayoutTests/editing/selection/collapseto_in_text_fields.html
++++ /dev/null
+@@ -1,36 +0,0 @@
+-<!DOCTYPE html>
+-<title>Tests for crbug.com/716725</title>
+-<body>
+-<script src="../../resources/testharness.js"></script>
+-<script src="../../resources/testharnessreport.js"></script>
+-
+-<input value="abcdef">
+-<textarea>abcdef</textarea>
+-
+-<script>
+-function testCollapseToStart(element) {
+-  test(() => {
+-    element.focus();
+-    element.setSelectionRange(1, 5);
+-    getSelection().collapseToStart();
+-    assert_equals(element.selectionStart, 1);
+-    assert_equals(element.selectionEnd, 1);
+-  }, 'Selection.collapseToStart() should collapse text selection in ' + element.tagName);
+-}
+-
+-function testCollapseToEnd(element) {
+-  test(() => {
+-    element.focus();
+-    element.setSelectionRange(1, 5);
+-    getSelection().collapseToEnd();
+-    assert_equals(element.selectionStart, 5);
+-    assert_equals(element.selectionEnd, 5);
+-  }, 'Selection.collapseToEnd() should collapse text selection in ' + element.tagName);
+-}
+-
+-testCollapseToStart(document.querySelector('input'));
+-testCollapseToStart(document.querySelector('textarea'));
+-testCollapseToEnd(document.querySelector('input'));
+-testCollapseToEnd(document.querySelector('textarea'));
+-</script>
+-</body>
 diff --git a/third_party/WebKit/LayoutTests/editing/selection/commit-pending-selection-crash.html b/third_party/WebKit/LayoutTests/editing/selection/commit-pending-selection-crash.html
 deleted file mode 100644
 index 1d1881fe34fff6550a134bf52375ed1b8275e3e7..0000000000000000000000000000000000000000
@@ -17985,1796 +19911,3 @@ index ad390ec0d39843565a6fa82d1fe2a6f92e26c60c..00000000000000000000000000000000
 -Markup.description("Tests basic dump-as-markup functionality.");
 -window.getSelection().selectAllChildren(bar)
 -</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/editable-div-clear-on-keydown-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/editable-div-clear-on-keydown-expected.txt
-deleted file mode 100644
-index 16e8c02dfd3673b01ef488b8370f96d2129b060b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/editable-div-clear-on-keydown-expected.txt
-+++ /dev/null
-@@ -1,7 +0,0 @@
--Tests behavior of code that clears the text from a focused editable div. 
--
--To run manually press any key to clear the text in the div.
--The key that was typed should replace the text in the editable div and div should still have the focus and a blinking caret.
--
--a
--PASS
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/editable-div-clear-on-keydown.html b/third_party/WebKit/LayoutTests/editing/selection/editable-div-clear-on-keydown.html
-deleted file mode 100644
-index ec320ad81aefbdff649f1976e57f6aeac89673eb..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/editable-div-clear-on-keydown.html
-+++ /dev/null
-@@ -1,42 +0,0 @@
--<!DOCTYPE HTML>
--<html>
--<head>
--</head>
--<body>
--<p>Tests behavior of code that clears the text from a focused editable div. 
--<br><br>To run manually press any key to clear the text in the div.<br>The key that was typed should replace the text in the editable div and div should still have the focus and a blinking caret.</p>
--<div id="it" style="-webkit-user-modify: read-write;" onkeydown="resetIt(event)" onkeypress="typedChar(event)" onkeyup="checkResult(event)">text</div>
--<p id="result">TEST NOT RUN YET</p>
--<script>
--if (window.testRunner)
--    testRunner.dumpAsText();
--
--var it = document.getElementById("it");
--it.focus();
--
--function resetIt(event) {
--    var it = document.getElementById("it");
--    it.innerText = '';
--    it.focus();
--}
--
--var lastTypedChar = '';
--function typedChar(event) {
--    lastTypedChar = String.fromCharCode(event.keyCode);
--}
--
--function checkResult(event) {
--    if (lastTypedChar != '') {
--        var text = document.getElementById("it").innerText;  
--        if (text != lastTypedChar)
--            document.getElementById("result").innerHTML = "FAIL: editable div content is '" + text + "' and it should be '" + lastTypedChar + "'" ;
--        else
--            document.getElementById("result").innerHTML = "PASS";
--    }
--}
--
--if (window.eventSender)
--    eventSender.keyDown("a");
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/editable-links.html b/third_party/WebKit/LayoutTests/editing/selection/editable-links.html
-deleted file mode 100644
-index a4e3f37bfbee699a7ffa76e691c47f3de9b1c4fa..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/editable-links.html
-+++ /dev/null
-@@ -1,23 +0,0 @@
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--<body>
--<script>
--document.designMode = "on";
--// Write out the link instead of putting it in the source.  The changes necessary to make links accept a caret aren't made until a layout happens.  This is a bug.
--document.write("This is an <a id='link' href='http://www.google.com/'>editable link</a>.");
--
--if (window.testRunner) {
--    var link = document.getElementById("link");
--    var x = link.offsetLeft + link.offsetParent.offsetLeft + link.offsetWidth / 2;
--    var y = link.offsetTop + link.offsetParent.offsetTop + link.offsetHeight / 2;
--    
--    
--    
--    eventSender.mouseMoveTo(x, y);
--    eventSender.mouseDown();
--    eventSender.mouseUp();
--}
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/empty-cell-right-click-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/empty-cell-right-click-expected.txt
-deleted file mode 100644
-index e0c1ba4a6b2a94dad85da9a46ecb8dcb46237f4f..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/empty-cell-right-click-expected.txt
-+++ /dev/null
-@@ -1,2 +0,0 @@
--Before: selection type is Caret
--After: selection type is Caret
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/empty-cell-right-click.html b/third_party/WebKit/LayoutTests/editing/selection/empty-cell-right-click.html
-deleted file mode 100644
-index ed29b8cf322fa0c8e5a5f08426ef13bbd1b7ed04..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/empty-cell-right-click.html
-+++ /dev/null
-@@ -1,36 +0,0 @@
--<html> 
--<head>
--<title>Right clicking on an empty cell should not extend the selection to the next cell.</title> 
--</head> 
--<body>
--<div contentEditable="true">
--<table border="1" cellspacing="0"><tr><td id="first" width="50" height="25pt"></td><td width="50" height="25pt"></td><td width="50" height="25pt"></td></tr></table>
--</div>
--<ul id="console"></ul>
--</body>
--<script>
--if (window.testRunner) {
--    testRunner.dumpAsText();
--    var elem = document.getElementById("first");
--    x = elem.offsetLeft + elem.offsetWidth / 2;
--    y = elem.offsetTop + elem.offsetHeight / 2;
--    eventSender.mouseMoveTo(x, y);
--    eventSender.mouseDown();
--    eventSender.mouseUp();
--
--    log("Before: selection type is " + window.getSelection().type);
--    
--    eventSender.contextClick();
--    
--    log("After: selection type is " + window.getSelection().type);
--}
--
--function log(str) {
--    var li = document.createElement("li");
--    li.appendChild(document.createTextNode(str));
--    var console = document.getElementById("console");
--    console.appendChild(li);
--}
--
--</script>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/expanding-selections.html b/third_party/WebKit/LayoutTests/editing/selection/expanding-selections.html
-deleted file mode 100644
-index 2d9e755686d264f56cedaadda2e7f7c9ca556635..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/expanding-selections.html
-+++ /dev/null
-@@ -1,33 +0,0 @@
--<html> 
--<head>
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--
--
--<script>
--
--function editingTest() {
--    var elem = document.getElementById("end");
--    x = elem.offsetLeft + elem.offsetWidth + 10;
--    y = elem.offsetTop + 10;
--    
--    eventSender.mouseMoveTo(x, y);
--    eventSender.mouseDown();
--    eventSender.mouseUp();
--    eventSender.mouseDown();
--    eventSender.mouseUp();
--}
--
--</script>
--</head>
--<body>
--<p>This tests double clicking inside and at the end of an editable div.  The selection that is created should not extend outside the editable region.</p>
--<div id="editablediv" contenteditable="true">This text is inside an editable div<span id="end">&nbsp;</span></div>
--<p style="overflow: hidden;">This text is not editable.</p>
--</body>
--<script>
--editingTest();
--</script>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/expanding-selections2.html b/third_party/WebKit/LayoutTests/editing/selection/expanding-selections2.html
-deleted file mode 100644
-index c54cc1d22fbe385cd59adf45ac472c20d67176a0..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/expanding-selections2.html
-+++ /dev/null
-@@ -1,35 +0,0 @@
--<html> 
--<head>
--<script>
--if (window.testRunner)
--     testRunner.dumpEditingCallbacks();
--</script>
--
--
--<script>
--
--function editingTest() {
--    var elem = document.getElementById("end");
--    x = elem.offsetLeft + elem.offsetWidth + 10;
--    y = elem.offsetTop + 10;
--    
--    eventSender.mouseMoveTo(x, y);
--    eventSender.mouseDown();
--    eventSender.mouseUp();
--    eventSender.mouseDown();
--    eventSender.mouseUp();
--}
--
--</script>
--</head>
--<body>
--<p>This tests double clicking inside and at the end of an editable div.  The selection that is created should not extend outside the editable region.</p>
--<div contenteditable="true">This text is in an editable div<span id="end">.</span></div>
--
--This text is outside the editable region.
--
--</body>
--<script>
--editingTest();
--</script>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-after-mouse-selection-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-after-mouse-selection-expected.txt
-deleted file mode 100644
-index f89947e863314aa03c4d2903f4a2c924ab11ccf6..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-after-mouse-selection-expected.txt
-+++ /dev/null
-@@ -1,27 +0,0 @@
--a bc 
--d ef 
--ghi
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 2 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](ef) anchorOffset: 2 focusNode: [object Text](a ) focusOffset: 1 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](ef) anchorOffset: 2 focusNode: [object Text](bc) focusOffset: 0 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text]( ) anchorOffset: 1 focusNode: [object Text](bc) focusOffset: 0 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text]( ) anchorOffset: 1 focusNode: [object Text](a ) focusOffset: 0 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 2 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 1 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 2 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text]( ) focusOffset: 1 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object HTMLSpanElement](null) focusOffset: 4 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 2 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 1 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 2 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text]( ) focusOffset: 1 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object HTMLSpanElement](null) focusOffset: 4 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 2 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 1 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text](ef) focusOffset: 2 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object Text]( ) focusOffset: 1 isCollapsed: false]
--PASS Selection is [anchorNode: [object Text](bc) anchorOffset: 0 focusNode: [object HTMLSpanElement](null) focusOffset: 4 isCollapsed: false]
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-after-mouse-selection.html b/third_party/WebKit/LayoutTests/editing/selection/extend-after-mouse-selection.html
-deleted file mode 100644
-index 8a05b2741a06ad99137bbaabe30e1f477543ab69..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-after-mouse-selection.html
-+++ /dev/null
-@@ -1,84 +0,0 @@
--<html>
--<head>
--
--<style>
--.editing {
--    border: 2px solid red;
--    font-size: 24px;
--}
--</style>
--<script src="../editing.js"></script>
--<script src="../../resources/js-test.js"></script>
--<script src="resources/js-test-selection-shared.js"></script>
--
--<script>
--
--function editingTest(editingBehavior) {
--
--    if (window.internals)
--        internals.settings.setEditingBehavior(editingBehavior);
--
--    var startTarget = document.getElementById('start');
--    var endTarget = document.getElementById('end');
--
--    eventSender.mouseMoveTo(startTarget.offsetLeft, startTarget.offsetTop + 10);
--    // Double-click to select at word-granularity to workaround eventSender bug with selecting text at
--    // character granularity (i.e. that it just doesn't work).
--    eventSender.mouseDown();
--    eventSender.mouseUp();
--    eventSender.mouseDown();
--    eventSender.mouseMoveTo(endTarget.offsetLeft, endTarget.offsetTop + 10);
--    eventSender.mouseUp();
--
--    assertSelectionAt(startTarget.firstChild, 0, endTarget.firstChild, 2);
--
--    extendSelectionBackwardByCharacterCommand();
--
--    // On Win/Linux the anchor is be fixed after the mouse-selection and never changes.
--    // On Mac, the first character-granularity selection after a mouse-selection resets the anchor/focus.
--    if (editingBehavior == "mac")
--        assertSelectionAt(endTarget.firstChild, 2, startTarget.previousSibling, 1);
--    else
--        assertSelectionAt(startTarget.firstChild, 0, endTarget.firstChild, 1);
--
--    extendSelectionForwardByCharacterCommand();
--    if (editingBehavior == "mac")
--        assertSelectionAt(endTarget.firstChild, 2, startTarget.firstChild, 0);
--    else
--        assertSelectionAt(startTarget.firstChild, 0, endTarget.firstChild, 2);
--
--    extendSelectionForwardByLineBoundaryCommand();
--
--    if (editingBehavior == "mac")
--        assertSelectionAt(endTarget.nextSibling, 1, startTarget.firstChild, 0);
--    else
--        assertSelectionAt(startTarget.firstChild, 0, endTarget.nextSibling, 1);
--
--    extendSelectionBackwardByLineBoundaryCommand();
--
--    if (editingBehavior == "mac")
--        assertSelectionAt(endTarget.nextSibling, 1, startTarget.previousSibling, 0);
--    else
--        assertSelectionAt(startTarget.firstChild, 0, document.getElementById('test'), 4);
--}
--
--</script>
--
--<title>Editing Test</title>
--</head>
--<body>
--<div contenteditable id="root" class="editing">
--    <span id="test">a <span id="start">bc</span> <br>d <span id="end">ef</span> <br>ghi</span>
--</div>
--
--<div id="console"></div>
--
--<script>
--editingTest("mac");
--editingTest("win");
--editingTest("unix");
--editingTest("android");
--</script>
--
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-backward-by-word-over-non-editable-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-backward-by-word-over-non-editable-expected.txt
-deleted file mode 100644
-index b52b0a9e799b23ea8d96a171fa59e247a983fe79..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-backward-by-word-over-non-editable-expected.txt
-+++ /dev/null
-@@ -1,4 +0,0 @@
--PASS for LTR
--PASS for RTL
--foo bar baz qux quux
--שוּרה שוּרה שוּרה שוּרה שוּרה
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-backward-by-word-over-non-editable.html b/third_party/WebKit/LayoutTests/editing/selection/extend-backward-by-word-over-non-editable.html
-deleted file mode 100644
-index 888fe4d30793b94bcd65bd73f1c6f0511c9a0c38..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-backward-by-word-over-non-editable.html
-+++ /dev/null
-@@ -1,39 +0,0 @@
--<!DOCTYPE html>
--<pre id="log"></pre>
--
--<div id="ltrTextContainer" contenteditable>foo bar <span contenteditable=false>baz</span> qux quux</div>
--<div id="rtlTextContainer" contenteditable dir="rtl">&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; &#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;
--<span contenteditable=false>&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;</span>
--&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; &#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;</div>
--
--<script>
--function log(s) {
--  document.getElementById("log").appendChild(document.createTextNode(s + "\n"));
--}
--
--function placeCursorAfterFirstNoneditableChild(container) {
--  for (var i = 0; i < container.childNodes.length; i++) {
--    var node = container.childNodes[i];
--    if (node.isContentEditable !== undefined && !node.isContentEditable) {
--      getSelection().collapse(node.nextSibling, 0);
--      return node;
--    }
--  }
--  throw "Couldn't find noneditable child of " + container.textContent;
--}
--
--function extendBackwardByWord(container, bidiName) {
--  noneditableChild = placeCursorAfterFirstNoneditableChild(container);
--  getSelection().modify("extend", "backward", "word");
--  if (getSelection().toString() === noneditableChild.textContent)
--    log("PASS for " + bidiName);
--  else
--    log("FAIL for " + bidiName + ", selection is \"" + getSelection() + "\" but should be \"" + noneditableChild.textContent + "\"");
--}
--
--extendBackwardByWord(document.getElementById("ltrTextContainer"), "LTR");
--extendBackwardByWord(document.getElementById("rtlTextContainer"), "RTL");
--
--if (window.testRunner)
--    testRunner.dumpAsText();
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-anonymous-content-crash-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-anonymous-content-crash-expected.txt
-deleted file mode 100644
-index e40a89c93f3249ff6084464495ef3271fcdb06ff..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-anonymous-content-crash-expected.txt
-+++ /dev/null
-@@ -1,4 +0,0 @@
--Test for rdar://problem/6081309, a crash when moving or extending the selection with line granularity.
--
--foo
--baz
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-anonymous-content-crash.html b/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-anonymous-content-crash.html
-deleted file mode 100644
-index 2cf862b983fc228e56b681e424e5421a9fe79241..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-anonymous-content-crash.html
-+++ /dev/null
-@@ -1,17 +0,0 @@
--<style>
--    #b:before { content: "bar"; }
--</style>
--<p>
--    Test for <a href="rdar://problem/6081309">rdar://problem/6081309</a>, a crash when moving or extending the selection with line granularity.
--</p>
--<div id="target">foo</div>
--<div id="b">baz</div>
--<script>
--    if (window.testRunner)
--        testRunner.dumpAsText();
--
--    var sel = getSelection();
--    var start = document.getElementById("target").firstChild;
--    sel.setBaseAndExtent(start, 0, start, 1);
--    sel.modify("extend", "forward", "line");
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-in-empty-document-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-in-empty-document-expected.txt
-deleted file mode 100644
-index 08df5eadea9cab3fec6a36314bc1b714c99ce00b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-in-empty-document-expected.txt
-+++ /dev/null
-@@ -1,3 +0,0 @@
--This test ensures WebKit does not crash when extending selection forward by line in an empty document.
--
--PASS.
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-in-empty-document.html b/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-in-empty-document.html
-deleted file mode 100644
-index 95edbd98d121d698a24f1e3cb41d3f0a0a97b9b3..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-by-line-in-empty-document.html
-+++ /dev/null
-@@ -1,18 +0,0 @@
--<!DOCTYPE>
--<html>
--<body onload="runTest()">
--<script>
--
--if (window.testRunner)
--    testRunner.dumpAsText();
--
--function runTest() {
--    document.open();
--    getSelection().collapse(document, 0);
--    getSelection().modify("move", "forward", "line");
--    document.writeln('This test ensures WebKit does not crash when extending selection forward by line in an empty document.<br><br>');
--    document.writeln('PASS.');
--}
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-by-sentence-001.html b/third_party/WebKit/LayoutTests/editing/selection/extend-by-sentence-001.html
-deleted file mode 100644
-index 0698272ee39ce13d2acae0335d8f82fd23b0cbab..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-by-sentence-001.html
-+++ /dev/null
-@@ -1,41 +0,0 @@
--<html> 
--<head>
--
--<style>
--.editing { 
--    border: 2px solid red; 
--    padding: 12px; 
--    font-size: 24px; 
--}
--.cell { 
--    padding: 12px; 
--    font-size: 24px;
--    height: 48px; 
--}
--</style>
--<script src=../editing.js language="JavaScript" type="text/JavaScript" ></script>
--
--<script>
--
--function editingTest() {
--	moveSelectionForwardByLineCommand();    
--	moveSelectionForwardByWordCommand();    
--	moveSelectionBackwardBySentenceCommand();    
--	extendSelectionForwardBySentenceCommand();    
--}
--
--</script>
--
--<title>Editing Test</title> 
--</head> 
--<body>
--<div contenteditable id="root" class="editing">
--<frijole style="display:block;" id="test">one two three<frijole>
--<doodad style="display:block;">four five six</doodad>
--
--<script>
--runEditingTest();
--</script>
--
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-by-sentence-002-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-by-sentence-002-expected.txt
-deleted file mode 100644
-index 1ba316c39aae2ec93ff3528e2fa5961da8bddf9e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-by-sentence-002-expected.txt
-+++ /dev/null
-@@ -1,3 +0,0 @@
--All of this should be selected
--None of this should be selected.
--PASS
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-by-sentence-002.html b/third_party/WebKit/LayoutTests/editing/selection/extend-by-sentence-002.html
-deleted file mode 100644
-index 66f9ac5396b4241a19ce7e690ccf890d799bad69..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-by-sentence-002.html
-+++ /dev/null
-@@ -1,20 +0,0 @@
--<div id="target">All of this should be selected</div><div>None of this should be selected.</div>
--<p id="result"></p>
--<script>
--    if (window.testRunner)
--        testRunner.dumpAsText();
--
--    var target = document.getElementById("target");
--    var result = document.getElementById("result");
--    var sel = getSelection();
--    sel.setBaseAndExtent(target, 0, target, 1);
--    sel.modify("extend", "forward", "sentence");
--    var selectedRange = sel.getRangeAt(0);
--
--    if (selectedRange.startContainer === target.firstChild && selectedRange.startOffset === 0
--        && selectedRange.endContainer === target.nextSibling && selectedRange.endOffset === 0) {
--        result.innerText = "PASS";
--    } else {
--        result.innerText = "FAIL: Selected range is '" + selectedRange + "'";
--    }
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-byline-withfloat-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-byline-withfloat-expected.txt
-deleted file mode 100644
-index 43aae7512613236d684376b6667ba4cfa989f15c..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-byline-withfloat-expected.txt
-+++ /dev/null
-@@ -1,6 +0,0 @@
--This is the test case for bug 7615758
--
--between a rock and a hard rock cafe 
--by rahcel (rahcel), 11 hours, 31 minutes ago.  
--Favorited by
--PASSPASS
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-byline-withfloat.html b/third_party/WebKit/LayoutTests/editing/selection/extend-byline-withfloat.html
-deleted file mode 100644
-index ebf1e5dbb941c6c69830143082d045dfb24c9d3a..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-byline-withfloat.html
-+++ /dev/null
-@@ -1,53 +0,0 @@
--<html>
--<head><meta charset="utf-8"/>
--<style>
--html,body,div,span,applet,object,iframe,h1,h2,h3,h4,h5,h6,p,blockquote,pre,a,abbr,acronym,address,big,cite,code,del,dfn,em,font,img,ins,kbd,q,s,samp,small,strike,strong,sub,sup,tt,var,dl,dt,dd,ol,ul,li,fieldset,form,label,legend,table,caption,tbody,tfoot,thead,tr,th,td{
--    margin:0;
--    padding:0;
--    border:0;
--    outline:0;
--    font-weight:inherit;
--    font-style:inherit;
--    font-size:100%;
--    font-family:inherit;
--    vertical-align:baseline
--}
--p{margin-top:5px;margin-bottom:10px}
--a{color:#f33e1b;text-decoration:none}
--span{padding-bottom:10px;height:53px;font-family:Helvetica;font-weight:300}
--a.subtle{text-decoration:none;color:inherit}
--.twitter_username,a.twitter_username{font-size:small;font-weight:bold;color:#555; text-decoration:none}
--.tweet_text_big a.very_subtle{visibility:hidden;text-decoration:none}
--.tweet_text_big{width:600px;margin-bottom:5px;left:160px;float:left}
--.tweet_subtext{display:block;margin-top:3px;padding-bottom:4px;font-size:small;color:#666}
--.tweet_subtext span.favoriteers-header{float:left;display:block;margin-top:8px;padding-top:8px;padding-right:5px}
--</style>
--</head>
--<body style="font-family: 'Helvetica'">
--<p>This is the test case for bug <a href="<rdar://problem/7615758>">7615758</a></p>
--<p class="tweet_text_big">
--    
--    between a rock and a hard rock cafe
--    <br>
--    <span class="tweet_subtext">
--        by <a href="http://twitter.com/rahcel" class="twitter_username">rahcel</a> (rahcel),
--        <a href="http://twitter.com/rahcel/status/8639030323" class="subtle">11 hours, 31 minutes ago</a>.
--        <a href="/tweet/8639030323" title="Permalink" class="very_subtle">¶</a>
--        <br>
--        <span class="favoriteers-header">Favorited by</span>
--    </span>
--    </p>
--</body>
--<script>
--    if (window.testRunner)
--        testRunner.dumpAsText();
--
--    document.execCommand("FindString", false, "populist");
--    var sel = getSelection();
--    sel.modify("extend", "forward", "line");
--    sel.modify("extend", "forward", "line");
--    document.write("PASS");
--    sel.modify("extend", "backward", "line");
--    document.write("PASS");
--</script>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-crash.html b/third_party/WebKit/LayoutTests/editing/selection/extend-crash.html
-deleted file mode 100644
-index b92dcc9c609f6e5d2d3b3e9d1fe1ef37621c96ce..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-crash.html
-+++ /dev/null
-@@ -1,15 +0,0 @@
--<!DOCTYPE html>
--<script src="../../resources/testharness.js"></script>
--<script src="../../resources/testharnessreport.js"></script>
--<div contenteditable="true">foo</div>
--<script>
--test(() => {
--  // Note that this test can be removed when crbug.com/690272 is fixed.
--  let selection = getSelection();
--  let editor = document.querySelector('div');
--  editor.addEventListener('focus', () => { selection.removeAllRanges(); });
--  selection.collapse(editor, 0);
--  assert_throws('InvalidStateError', () => { selection.extend(editor, 1);});
--}, 'Focus event handler should not make inconsistent state of Selection, and extend() should not crash.');
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-expected.txt
-deleted file mode 100644
-index 0aec32eaa545820fc08a918c42c723a7d2ce1b1b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-expected.txt
-+++ /dev/null
-@@ -1,8 +0,0 @@
--foobarbaz
--Success: window.getSelection() is ar.
--Success: s.extend(span2.firstChild, 4) raised IndexSizeError: Failed to execute 'extend' on 'Selection': The offset 4 is larger than the node's length (3)..
--Success: s.extend(span2.firstChild, -1) raised IndexSizeError: Failed to execute 'extend' on 'Selection': The offset 4294967295 is larger than the node's length (3)..
--Success: window.getSelection() is b.
--Success: window.getSelection() is arbaz.
--Success: s.extend() raised TypeError: Failed to execute 'extend' on 'Selection': 1 argument required, but only 0 present..
--Success: s.extend(null, 0) raised TypeError: Failed to execute 'extend' on 'Selection': parameter 1 is not of type 'Node'..
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-forward-after-set-base-and-extent-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-forward-after-set-base-and-extent-expected.txt
-deleted file mode 100644
-index 7571e05a0ac992ef3e9f8516000d65e062143906..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-forward-after-set-base-and-extent-expected.txt
-+++ /dev/null
-@@ -1,5 +0,0 @@
--A selection created with setBaseAndExtent should be directional
--
--There should be four characters selected in this sentence.
--Success
--
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-forward-after-set-base-and-extent.html b/third_party/WebKit/LayoutTests/editing/selection/extend-forward-after-set-base-and-extent.html
-deleted file mode 100644
-index 0a8a5d2c4b855ed3234ba88ebc782c376750f721..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-forward-after-set-base-and-extent.html
-+++ /dev/null
-@@ -1,29 +0,0 @@
--<p>A selection created with setBaseAndExtent should be directional</p>
--<div id="div" contenteditable="true">There should be four characters selected in this sentence.</div>
--<ul id="console"></ul>
--<script>
--function log(str) {
--  document.getElementById("console").innerHTML += str + "<br>";
--}
--
--if (window.testRunner) {
--    window.testRunner.dumpAsText();
--
--    var text = document.getElementById("div").firstChild;
--    var selection = window.getSelection();
--
--    selection.collapse(text, 0);
--    selection.modify("move", "forward", "character");
--    
--    selection.setBaseAndExtent(text, 5 + 7, text, 5);
--    // Extending this 5 character selection will select 6 characters.
--    testRunner.execCommand("MoveForwardAndModifySelection");
--    var selectedText = selection.toString();
--    var expectedText = "should";
--    if (selectedText != expectedText)
--        log("Failure: Selected text was \"" + selectedText + "\" and should be \"" + expectedText + "\"");
--    else
--        log("Success");
--} else
--    log("Failure: This test cannot be run manually.")
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-forward-by-word-over-non-editable-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-forward-by-word-over-non-editable-expected.txt
-deleted file mode 100644
-index a9dfa9cd6fd5437feeb15146dbeca943aefb8184..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-forward-by-word-over-non-editable-expected.txt
-+++ /dev/null
-@@ -1,8 +0,0 @@
--PASS for LTR
--PASS for RTL
--PASS for LTR-multi
--PASS for RTL-multi
--foo bar baz qux quux
--שוּרה שוּרה שוּרה שוּרה שוּרה
--foo bar baz baz baz qux quux
--שוּרה שוּרה שוּרה שוּרה שוּרה שוּרה שוּרה
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-forward-by-word-over-non-editable.html b/third_party/WebKit/LayoutTests/editing/selection/extend-forward-by-word-over-non-editable.html
-deleted file mode 100644
-index a1afecaeecc11d6a6c26766397fbb65de61c9acd..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-forward-by-word-over-non-editable.html
-+++ /dev/null
-@@ -1,49 +0,0 @@
--<!DOCTYPE html>
--<pre id="log"></pre>
--
--<div id="ltrTextContainer" contenteditable>foo bar <span contenteditable=false>baz</span> qux quux</div>
--<div id="rtlTextContainer" contenteditable dir="rtl">&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; &#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;
--<span contenteditable=false>&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;</span>
--&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; &#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;</div>
--
--<div id="ltrMultiTextContainer" contenteditable>foo bar <span contenteditable=false>baz baz baz</span> qux quux</div>
--<div id="rtlMultiTextContainer" contenteditable dir="rtl">&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; &#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;
--<span contenteditable=false>&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; &#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; &#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;</span>
--&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; &#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;</div>
--
--<script>
--function log(s) {
--  document.getElementById("log").appendChild(document.createTextNode(s + "\n"));
--}
--
--function placeCursorBeforeFirstNoneditableChild(container) {
--  for (var i = 0; i < container.childNodes.length; i++) {
--    var node = container.childNodes[i];
--    if (node.isContentEditable !== undefined && !node.isContentEditable) {
--      var previous = node.previousSibling;
--      getSelection().collapse(previous, previous.textContent.length);
--      return node;
--    }
--  }
--  throw "Couldn't find noneditable child of " + container.textContent;
--}
--
--function extendForwardByWord(container, bidiName) {
--  noneditableChild = placeCursorBeforeFirstNoneditableChild(container);
--  getSelection().modify("extend", "forward", "word");
--  if (getSelection().toString() === noneditableChild.textContent)
--    log("PASS for " + bidiName);
--  else
--    log("FAIL for " + bidiName + ", selection is \"" + getSelection() + "\" but should be \"" + noneditableChild.textContent + "\"");
--}
--
--if (window.internals)
--    internals.settings.setEditingBehavior("mac");
--extendForwardByWord(document.getElementById("ltrTextContainer"), "LTR");
--extendForwardByWord(document.getElementById("rtlTextContainer"), "RTL");
--extendForwardByWord(document.getElementById("ltrMultiTextContainer"), "LTR-multi");
--extendForwardByWord(document.getElementById("rtlMultiTextContainer"), "RTL-multi");
--
--if (window.testRunner)
--    testRunner.dumpAsText();
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-inside-transforms-backward.html b/third_party/WebKit/LayoutTests/editing/selection/extend-inside-transforms-backward.html
-deleted file mode 100644
-index 3844e6c5d8cc68ed03c73c9d8aad6a49458a90f7..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-inside-transforms-backward.html
-+++ /dev/null
-@@ -1,20 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<style> p { margin: 0px; } </style>
--</head>
--<body>
--<div style="font-family: monospace; monospace; transform: rotate(-45deg); width: 200px; height: 200px; -webkit-transform-origin: top right;font-size:50px;">
--<p>hello</p>
--<p>world</p>
--</div>
--<script>
--
--// This test ensures WebKit can extend selection vertically inside transform.
--
--window.getSelection().collapse(document.getElementsByTagName('p')[1].firstChild, 3);
--window.getSelection().modify('extend', 'backward', 'line');
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-inside-transforms-forward.html b/third_party/WebKit/LayoutTests/editing/selection/extend-inside-transforms-forward.html
-deleted file mode 100644
-index 1b802a72e1ab79aaf700f5c0c600a0a987ecbbd4..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-inside-transforms-forward.html
-+++ /dev/null
-@@ -1,20 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<style> p { margin: 0px; } </style>
--</head>
--<body>
--<div style="font-family: monospace; monospace; transform: rotate(-45deg); width: 200px; height: 200px; -webkit-transform-origin: top right; font-size:50px;">
--<p>hello</p>
--<p>world</p>
--</div>
--<script>
--
--// This test ensures WebKit can extend selection vertically inside transform.
--
--window.getSelection().collapse(document.getElementsByTagName('p')[0].firstChild, 2);
--window.getSelection().modify('extend', 'forward', 'line');
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-left-right-by-lineboundary-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-left-right-by-lineboundary-expected.txt
-deleted file mode 100644
-index 4d4ed92ed34dec1af803e5199a5e99739037f57e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-left-right-by-lineboundary-expected.txt
-+++ /dev/null
-@@ -1,41 +0,0 @@
--Testing ltr container with contents "זחט יךכ לםמ זחט יךכ לםמ":
--PASS (extend left from left)
--PASS (extend left from left again)
--PASS (extend right from left)
--PASS (extend right from left again)
--PASS (extend right from right)
--PASS (extend right from right again)
--PASS (extend left from right)
--PASS (extend left from right again)
--
--Testing ltr container with contents "this is some ltr text in an rtl container":
--PASS (extend left from left)
--PASS (extend left from left again)
--PASS (extend right from left)
--PASS (extend right from left again)
--PASS (extend right from right)
--PASS (extend right from right again)
--PASS (extend left from right)
--PASS (extend left from right again)
--
--Testing rtl container with contents "זחט יךכ לםמ זחט יךכ לםמ":
--PASS (extend left from left)
--PASS (extend left from left again)
--PASS (extend right from left)
--PASS (extend right from left again)
--PASS (extend right from right)
--PASS (extend right from right again)
--PASS (extend left from right)
--PASS (extend left from right again)
--
--Testing rtl container with contents "this is some ltr text in an rtl container":
--PASS (extend left from left)
--PASS (extend left from left again)
--PASS (extend right from left)
--PASS (extend right from left again)
--PASS (extend right from right)
--PASS (extend right from right again)
--PASS (extend left from right)
--PASS (extend left from right again)
--
--
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-left-right-by-lineboundary.html b/third_party/WebKit/LayoutTests/editing/selection/extend-left-right-by-lineboundary.html
-deleted file mode 100644
-index d528320c2ab1776522b1fa9f7853cf9e3a97f870..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-left-right-by-lineboundary.html
-+++ /dev/null
-@@ -1,80 +0,0 @@
--<!DOCTYPE html>
--<div contenteditable dir="ltr">&#1494;&#1495;&#1496; &#1497;&#1498;&#1499; &#1500;&#1501;&#1502; &#1494;&#1495;&#1496; &#1497;&#1498;&#1499; &#1500;&#1501;&#1502;</div>
--<div contenteditable dir="ltr">this is some ltr text in an rtl container</div>
--<div contenteditable dir="rtl">&#1494;&#1495;&#1496; &#1497;&#1498;&#1499; &#1500;&#1501;&#1502; &#1494;&#1495;&#1496; &#1497;&#1498;&#1499; &#1500;&#1501;&#1502;</div>
--<div contenteditable dir="rtl">this is some ltr text in an rtl container</div>
--<pre id="console"></pre>
--
--<script>
--function log(text)
--{
--    document.getElementById("console").appendChild(document.createTextNode(text + "\n"));
--}
--
--function showNode(node)
--{
--    var tagName = node.tagName ? node.tagName : "TEXT";
--    return "<" + tagName + ">" + node.textContent + "</" + tagName + ">";
--}
--
--function assertSelectionEquals(expectedNode, expectedBaseOffset, expectedExtentOffset, message)
--{
--    var selection = getSelection();
--    if (selection.baseNode !== expectedNode
--            || selection.baseOffset !== expectedBaseOffset
--            || selection.extentNode !== expectedNode
--            || selection.extentOffset !== expectedExtentOffset)
--        log("FAIL (" + message + "):\n" +
--            "     expected base offset " + expectedBaseOffset + " in node " + showNode(expectedNode) + "\n" +
--            "        and extent offset " + expectedExtentOffset + " in node " + showNode(expectedNode) + "\n" +
--            "  ... but got base offset " + selection.baseOffset + " in node " + showNode(selection.baseNode) + "\n" +
--            "        and extent offset " + selection.extentOffset + " in node " + showNode(selection.extentNode));
--    else
--        log("PASS (" + message + ")");
--}
--
--function runTestForContainer(container)
--{
--    log("Testing " + container.dir + " container with contents \"" + container.textContent + "\":");
--
--    var textNode = container.childNodes[0];
--    var rightmostOffset = container.dir === "rtl" ? 0 : textNode.length;
--    var leftmostOffset = container.dir === "rtl" ? textNode.length : 0;
--
--    getSelection().collapse(textNode, leftmostOffset);
--    getSelection().modify("extend", "left", "lineboundary");
--    assertSelectionEquals(textNode, leftmostOffset, leftmostOffset, "extend left from left");
--    getSelection().modify("extend", "left", "lineboundary");
--    assertSelectionEquals(textNode, leftmostOffset, leftmostOffset, "extend left from left again");
--
--    getSelection().collapse(textNode, leftmostOffset);
--    getSelection().modify("extend", "right", "lineboundary");
--    assertSelectionEquals(textNode, leftmostOffset, rightmostOffset, "extend right from left");
--    getSelection().modify("extend", "right", "lineboundary");
--    assertSelectionEquals(textNode, leftmostOffset, rightmostOffset, "extend right from left again");
--
--    getSelection().collapse(textNode, rightmostOffset);
--    getSelection().modify("extend", "right", "lineboundary");
--    assertSelectionEquals(textNode, rightmostOffset, rightmostOffset, "extend right from right");
--    getSelection().modify("extend", "right", "lineboundary");
--    assertSelectionEquals(textNode, rightmostOffset, rightmostOffset, "extend right from right again");
--
--    getSelection().collapse(textNode, rightmostOffset);
--    getSelection().modify("extend", "left", "lineboundary");
--    assertSelectionEquals(textNode, rightmostOffset, leftmostOffset, "extend left from right");
--    getSelection().modify("extend", "left", "lineboundary");
--    assertSelectionEquals(textNode, rightmostOffset, leftmostOffset, "extend left from right again");
--
--    log("");
--}
--
--var testContainers = document.getElementsByTagName("div");
--for (var i = 0; i < testContainers.length; i++)
--    runTestForContainer(testContainers[i]);
--
--if (window.testRunner) {
--    while (testContainers.length > 0)
--        document.body.removeChild(testContainers[0]);
--    testRunner.dumpAsText();
--}
--</script>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-over-file-input-by-drag-crash-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-over-file-input-by-drag-crash-expected.txt
-deleted file mode 100644
-index 8590a9f7050f874fe3cf9242b86f34a8b707ab49..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-over-file-input-by-drag-crash-expected.txt
-+++ /dev/null
-@@ -1,3 +0,0 @@
--This test ensures WebKit does not crash when selecting text across an element with type=file. To manually test, start selection in "start" and extend the selection by dragging to "end" moving across the input element. WebKit should not crash.
--
--PASS
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-over-file-input-by-drag-crash.html b/third_party/WebKit/LayoutTests/editing/selection/extend-over-file-input-by-drag-crash.html
-deleted file mode 100644
-index e4321eefa10622b4209f627ff209999466fe2635..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-over-file-input-by-drag-crash.html
-+++ /dev/null
-@@ -1,34 +0,0 @@
--<!DOCTYPE>
--<html>
--<body>
--<p>This test ensures WebKit does not crash when selecting text across an element with type=file.
--To manually test, start selection in "start" and extend the selection by dragging to "end" moving across the input element.
--WebKit should not crash.</p>
--<span id="test">start<input type=file>end</span>
--<script>
--
--if (window.testRunner && window.eventSender) {
--    testRunner.dumpAsText();
--
--    var test = document.getElementById('test');
--    var input = test.getElementsByTagName('input')[0];
--
--    var y = test.offsetTop + test.offsetHeight / 2;
--    eventSender.mouseMoveTo(test.offsetLeft + 5, y);
--    eventSender.mouseDown();
--
--    eventSender.leapForward(200);
--    eventSender.mouseMoveTo(input.offsetLeft + input.offsetWidth / 2, y);
--    eventSender.leapForward(200);
--
--    eventSender.mouseMoveTo(test.offsetLeft + test.offsetWidth - 5, y);
--    eventSender.mouseDown();
--
--    test.parentNode.removeChild(test);
--
--    document.write('PASS');
--}
--
--</script>
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-after-double-click-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-after-double-click-expected.txt
-deleted file mode 100644
-index 4310759197a4383ac475201559f50dd1cb9df531..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-after-double-click-expected.txt
-+++ /dev/null
-@@ -1,9 +0,0 @@
--This tests modifying a selection created with a double click with shift arrow key.
--
--This test does not run interactively. It uses the event sender to do mouse clicks. To run it manually, double click on the blue "g", then press shift-left-arrow twice. Then repeat those steps again. The selection should include the words "a paragraph" on mac and "paragra" on win/linux..
--
--This is a paragraph.
--
--SUCCESS
--SUCCESS
--
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-after-double-click.html b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-after-double-click.html
-deleted file mode 100644
-index 252602ca2a27e1c4f084f49afd5be97a79427edd..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-after-double-click.html
-+++ /dev/null
-@@ -1,66 +0,0 @@
--<html> 
--<head>
--<script>
--    function doubleClickWord()
--    {
--        var start = document.getElementById("start");
--        
--        var x = start.offsetLeft + 2;
--        var y = start.offsetTop + 10;
--        
--        eventSender.leapForward(1000);
--        eventSender.mouseMoveTo(x, y);
--        eventSender.mouseDown();
--        eventSender.mouseUp();
--        eventSender.leapForward(1);
--        eventSender.mouseDown();
--        eventSender.mouseUp();
--        eventSender.leapForward(1000);
--    }
--
--    function logResult(result)
--    {
--        document.getElementById("result").innerHTML += result + "<br/>";
--    }
--
--    function runTests()
--    {
--        if (!window.eventSender || !window.testRunner || !window.internals)
--            return;
--
--        testRunner.dumpAsText();
--
--        runTest("mac", "a paragraph");
--        runTest("win", "paragra");
--    }
--
--    function runTest(behavior, expectedText)
--    {
--        internals.settings.setEditingBehavior(behavior);
--        doubleClickWord();
--        getSelection().modify("extend", "backward", "character");
--        getSelection().modify("extend", "backward", "character");
--        doubleClickWord();
--        getSelection().modify("extend", "backward", "character");
--        getSelection().modify("extend", "backward", "character");
--
--        var selectedText = getSelection().toString();
--        if (selectedText == expectedText)
--            logResult("SUCCESS");
--        else
--            logResult("FAILURE: The selected text is \"" + selectedText + "\" and should be \"" + expectedText + "\".");
--    }
--</script>
--</head>
--<body onload="runTests()">
--<p>This tests modifying a selection created with a double click with shift arrow key.</p>
--<p style="color:green">
--    This test does not run interactively.
--    It uses the event sender to do mouse clicks.
--    To run it manually, double click on the blue "g", then press shift-left-arrow twice.
--    Then repeat those steps again.
--    The selection should include the words "a paragraph" on mac and "paragra" on win/linux..
--</p>
--<p>This is a para<span style="color:blue" id="start">g</span>raph.</p>
--<p id="result"></p>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-bidi.html b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-bidi.html
-deleted file mode 100644
-index 085c40f594d3b121a1250d285ff4bacc1de0ec76..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-bidi.html
-+++ /dev/null
-@@ -1,44 +0,0 @@
--<html>
--<head>
--<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
--
--<style>
--.editing {
--    border: 2px solid red;
--    padding: 12px;
--    font-size: 24px;
--}
--
--.selected {
--    background-color: #afdaff;
--}
--</style>
--<script src=../editing.js language="JavaScript" type="text/JavaScript" ></script>
--
--<script>
--
--function editingTest() {
--    for (i = 0; i < 9; i++) {
--        extendSelectionForwardByCharacterCommand();
--    }
--}
--
--</script>
--
--<title>Bidi Extend Selection Test</title>
--</head>
--<body>
--The selection range in the red box should look like this:&nbsp;&nbsp;
--<span class="selected">abc אבג 1</span>23 דהו def
--<br><br>
--
--<div contenteditable id="root" class="editing">
--<span id="test">abc אבג 123 דהו def</span>
--</div>
--
--<script>
--runEditingTest();
--</script>
--
--</body>
--</html>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-character-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-character-expected.txt
-deleted file mode 100644
-index a7f20a57bb945c54f790767e1755de87530ea69e..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-character-expected.txt
-+++ /dev/null
-@@ -1,173 +0,0 @@
--
--
--
--Extending by character
--Test 1, LTR:
--  Extending right:    "\nabc ABC xyz DEF def\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14), (1,15), (1,16), (1,17), (1,18), (1,19), (1,20)]
--  Extending left:     "\nabc ABC xyz DEF def\n"[(1,20), (1,19), (1,18), (1,17), (1,16), (1,15), (1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--  Extending forward:  "\nabc ABC xyz DEF def\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14), (1,15), (1,16), (1,17), (1,18), (1,19), (1,20)]
--  Extending backward: "\nabc ABC xyz DEF def\n"[(1,20), (1,19), (1,18), (1,17), (1,16), (1,15), (1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--Test 1, RTL:
--  Extending left:     "\nabc ABC xyz DEF def\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14), (1,15), (1,16), (1,17), (1,18), (1,19), (1,20)]
--  Extending right:    "\nabc ABC xyz DEF def\n"[(1,20), (1,19), (1,18), (1,17), (1,16), (1,15), (1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--  Extending forward:  "\nabc ABC xyz DEF def\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14), (1,15), (1,16), (1,17), (1,18), (1,19), (1,20)]
--  Extending backward: "\nabc ABC xyz DEF def\n"[(1,20), (1,19), (1,18), (1,17), (1,16), (1,15), (1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 2, LTR:
--  Extending right:    "\nABC xyz DEF def GHI\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14), (1,15), (1,16), (1,17), (1,18), (1,19), (1,20)]
--  Extending left:     "\nABC xyz DEF def GHI\n"[(1,20), (1,19), (1,18), (1,17), (1,16), (1,15), (1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--  Extending forward:  "\nABC xyz DEF def GHI\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14), (1,15), (1,16), (1,17), (1,18), (1,19), (1,20)]
--  Extending backward: "\nABC xyz DEF def GHI\n"[(1,20), (1,19), (1,18), (1,17), (1,16), (1,15), (1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--Test 2, RTL:
--  Extending left:     "\nABC xyz DEF def GHI\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14), (1,15), (1,16), (1,17), (1,18), (1,19), (1,20)]
--  Extending right:    "\nABC xyz DEF def GHI\n"[(1,20), (1,19), (1,18), (1,17), (1,16), (1,15), (1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--  Extending forward:  "\nABC xyz DEF def GHI\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14), (1,15), (1,16), (1,17), (1,18), (1,19), (1,20)]
--  Extending backward: "\nABC xyz DEF def GHI\n"[(1,20), (1,19), (1,18), (1,17), (1,16), (1,15), (1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 3, LTR:
--  Extending right:    "\nABC DEF ABC\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12)]
--  Extending left:     "\nABC DEF ABC\n"[(1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--  Extending forward:  "\nABC DEF ABC\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12)]
--  Extending backward: "\nABC DEF ABC\n"[(1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--Test 3, RTL:
--  Extending left:     "\nABC DEF ABC\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12)]
--  Extending right:    "\nABC DEF ABC\n"[(1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--  Extending forward:  "\nABC DEF ABC\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12)]
--  Extending backward: "\nABC DEF ABC\n"[(1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 4, LTR:
--  Extending right:    "\nabc efd dabeb\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14)]
--  Extending left:     "\nabc efd dabeb\n"[(1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--  Extending forward:  "\nabc efd dabeb\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14)]
--  Extending backward: "\nabc efd dabeb\n"[(1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--Test 4, RTL:
--  Extending left:     "\nabc efd dabeb\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14)]
--  Extending right:    "\nabc efd dabeb\n"[(1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--  Extending forward:  "\nabc efd dabeb\n"[(1,1), (1,2), (1,3), (1,4), (1,5), (1,6), (1,7), (1,8), (1,9), (1,10), (1,11), (1,12), (1,13), (1,14)]
--  Extending backward: "\nabc efd dabeb\n"[(1,14), (1,13), (1,12), (1,11), (1,10), (1,9), (1,8), (1,7), (1,6), (1,5), (1,4), (1,3), (1,2), (1,1)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 5, LTR:
--  Extending right:    "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending left:     " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending backward: " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--Test 5, RTL:
--  Extending left:     "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending right:    " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending backward: " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 6, LTR:
--  Extending right:    "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending left:     " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending backward: " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--Test 6, RTL:
--  Extending left:     "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending right:    " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending backward: " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 7, LTR:
--  Extending right:    "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending left:     " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending backward: " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--Test 7, RTL:
--  Extending left:     "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending right:    " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending backward: " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 8, LTR:
--  Extending right:    "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending left:     " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending backward: " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--Test 8, RTL:
--  Extending left:     "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending right:    " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6)], "ipsum dolor sit"[(0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amet"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending backward: " amet"[(0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "Lorem "[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-character.html b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-character.html
-deleted file mode 100644
-index ea42fb431556577fd4f5c82c2420d35ec8428aeb..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-character.html
-+++ /dev/null
-@@ -1,14 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
--<link rel="stylesheet" type="text/css" href="resources/extend-selection.css" />
--<script src="resources/extend-selection.js"></script>
--</head>
--<body>
--<pre id="console"></pre>
--<script>
--log("\n\n\nExtending by character\n");
--runSelectionTestsWithGranularity(createCharAndWordNodes(), "character");
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-mac-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-mac-expected.txt
-deleted file mode 100644
-index a0fa35a46f1c78457cc2180a806586d94940d6ef..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-mac-expected.txt
-+++ /dev/null
-@@ -1,17 +0,0 @@
--
--
--
--Extending by character
--Test 1, LTR:
--  Extending right: "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5)], "ipsum dolor sit"[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amett"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending left:  " amett"[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)], "Lorem "[(0,5), (0,4), (0,3), (0,2), (0,1)]
--
--
--
--
--
--Extending by word
--Test 1, LTR:
--  Extending right: "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amett"[(0,6), (0,1)]
--  Extending left:  " amett"[(0,6), (0,1)], "ipsum dolor sit"[(0,12), (0,6), (0,0)], "Lorem "[(0,0), (0,5)]
--
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-mac.html b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-mac.html
-deleted file mode 100644
-index afc10e0a03c401bf171419e965ad2356b252b90b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-mac.html
-+++ /dev/null
-@@ -1,34 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
--<link rel="stylesheet" type="text/css" href="resources/extend-selection.css" />
--<script src="resources/extend-selection.js"></script>
--</head>
--<body>
--<pre id="console"></pre>
--<script>
--if (window.internals)
--    internals.settings.setEditingBehavior("mac");
--
--function runSelectionTestsWithGranularityForEnclosingBlock(testNodes, granularity)
--{
--    for (var i = 0; i < testNodes.length; ++i) {
--        getSelection().collapse(testNodes[i], 0);
--
--        log("Test " + (i + 1) + ", LTR:\n");
--        log("  Extending right: ");
--        extendAndLogSelectionWithinBlock("right", granularity, "mac");
--
--        log("  Extending left:  ");
--        extendAndLogSelectionWithinBlock("left", granularity, "mac");
--    }
--}
--
--log("\n\n\nExtending by character\n");
--runSelectionTestsWithGranularityForEnclosingBlock(createEnclosingBlockNodes(), "character");
--
--log("\n\n\n\n\nExtending by word\n");
--runSelectionTestsWithGranularityForEnclosingBlock(createEnclosingBlockNodes(), "word");
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-win-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-win-expected.txt
-deleted file mode 100644
-index 3a688b4bdac57dbf802e19bbc0c3775a125a18d0..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-win-expected.txt
-+++ /dev/null
-@@ -1,17 +0,0 @@
--
--
--
--Extending by character
--Test 1, LTR:
--  Extending right: "Lorem "[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5)], "ipsum dolor sit"[(0,0), (0,1), (0,2), (0,3), (0,4), (0,5), (0,6), (0,7), (0,8), (0,9), (0,10), (0,11), (0,12), (0,13), (0,14), (0,15)], " amett"[(0,1), (0,2), (0,3), (0,4), (0,5)]
--  Extending left:  " amett"[(0,6), (0,5), (0,4), (0,3), (0,2), (0,1)], "ipsum dolor sit"[(0,15), (0,14), (0,13), (0,12), (0,11), (0,10), (0,9), (0,8), (0,7), (0,6), (0,5), (0,4), (0,3), (0,2), (0,1), (0,0)], "Lorem "[(0,5), (0,4), (0,3), (0,2), (0,1)]
--
--
--
--
--
--Extending by word
--Test 1, LTR:
--  Extending right: "Lorem "[(0,0)], "ipsum dolor sit"[(0,0), (0,6), (0,12)], " amett"[(0,1), (0,6)]
--  Extending left:  " amett"[(0,6), (0,1)], "ipsum dolor sit"[(0,12), (0,6), (0,0)]
--
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-win.html b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-win.html
-deleted file mode 100644
-index 1991028b948800d6ace2ccd8ff4198242a6e84c0..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-enclosing-block-win.html
-+++ /dev/null
-@@ -1,33 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
--<link rel="stylesheet" type="text/css" href="resources/extend-selection.css" />
--<script src="resources/extend-selection.js"></script>
--</head>
--<body>
--<pre id="console"></pre>
--<script>
--function runSelectionTestsWithGranularityForEnclosingBlock(testNodes, granularity)
--{
--    for (var i = 0; i < testNodes.length; ++i) {
--        getSelection().collapse(testNodes[i], 0);
--
--        log("Test " + (i + 1) + ", LTR:\n");
--        log("  Extending right: ");
--        extendAndLogSelectionWithinBlock("right", granularity, "win");
--
--        log("  Extending left:  ");
--        extendAndLogSelectionWithinBlock("left", granularity, "win");
--    }
--}
--
--if (window.internals)
--    internals.settings.setEditingBehavior("win");
--log("\n\n\nExtending by character\n");
--runSelectionTestsWithGranularityForEnclosingBlock(createEnclosingBlockNodes(), "character");
--
--log("\n\n\n\n\nExtending by word\n");
--runSelectionTestsWithGranularityForEnclosingBlock(createEnclosingBlockNodes(), "word");
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-home-end.html b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-home-end.html
-deleted file mode 100644
-index 16cd57a695c78c53ded95b9323ae2bf2eb48336c..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-home-end.html
-+++ /dev/null
-@@ -1,14 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
--<link rel="stylesheet" type="text/css" href="resources/extend-selection.css" />
--<script src="resources/extend-selection.js"></script>
--</head>
--<body>
--<pre id="console"></pre>
--<script>
--log("\n\n\nExtending by lineboundary\n");
--runSelectionTestsWithGranularity(createAllNodes(), "lineBoundary");
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-word-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-word-expected.txt
-deleted file mode 100644
-index b90fa364a5e27aa99eda5552656825e5f0bf15fc..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-word-expected.txt
-+++ /dev/null
-@@ -1,175 +0,0 @@
--
--
--
--
--
--Extending by word
--Test 1, LTR:
--  Extending right:    "\nabc ABC xyz DEF def\n"[(1,1), (1,4), (1,8), (1,12), (1,16), (1,20)]
--  Extending left:     "\nabc ABC xyz DEF def\n"[(1,20), (1,17), (1,13), (1,9), (1,5), (1,1)]
--  Extending forward:  "\nabc ABC xyz DEF def\n"[(1,1), (1,4), (1,8), (1,12), (1,16), (1,20)]
--  Extending backward: "\nabc ABC xyz DEF def\n"[(1,20), (1,17), (1,13), (1,9), (1,5), (1,1)]
--Test 1, RTL:
--  Extending left:     "\nabc ABC xyz DEF def\n"[(1,1), (1,4), (1,8), (1,12), (1,16), (1,20)]
--  Extending right:    "\nabc ABC xyz DEF def\n"[(1,20), (1,17), (1,13), (1,9), (1,5), (1,1)]
--  Extending forward:  "\nabc ABC xyz DEF def\n"[(1,1), (1,4), (1,8), (1,12), (1,16), (1,20)]
--  Extending backward: "\nabc ABC xyz DEF def\n"[(1,20), (1,17), (1,13), (1,9), (1,5), (1,1)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 2, LTR:
--  Extending right:    "\nABC xyz DEF def GHI\n"[(1,1), (1,4), (1,8), (1,12), (1,16), (1,20)]
--  Extending left:     "\nABC xyz DEF def GHI\n"[(1,20), (1,17), (1,13), (1,9), (1,5), (1,1)]
--  Extending forward:  "\nABC xyz DEF def GHI\n"[(1,1), (1,4), (1,8), (1,12), (1,16), (1,20)]
--  Extending backward: "\nABC xyz DEF def GHI\n"[(1,20), (1,17), (1,13), (1,9), (1,5), (1,1)]
--Test 2, RTL:
--  Extending left:     "\nABC xyz DEF def GHI\n"[(1,1), (1,4), (1,8), (1,12), (1,16), (1,20)]
--  Extending right:    "\nABC xyz DEF def GHI\n"[(1,20), (1,17), (1,13), (1,9), (1,5), (1,1)]
--  Extending forward:  "\nABC xyz DEF def GHI\n"[(1,1), (1,4), (1,8), (1,12), (1,16), (1,20)]
--  Extending backward: "\nABC xyz DEF def GHI\n"[(1,20), (1,17), (1,13), (1,9), (1,5), (1,1)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 3, LTR:
--  Extending right:    "\nABC DEF ABC\n"[(1,1), (1,4), (1,8), (1,12)]
--  Extending left:     "\nABC DEF ABC\n"[(1,12), (1,9), (1,5), (1,1)]
--  Extending forward:  "\nABC DEF ABC\n"[(1,1), (1,4), (1,8), (1,12)]
--  Extending backward: "\nABC DEF ABC\n"[(1,12), (1,9), (1,5), (1,1)]
--Test 3, RTL:
--  Extending left:     "\nABC DEF ABC\n"[(1,1), (1,4), (1,8), (1,12)]
--  Extending right:    "\nABC DEF ABC\n"[(1,12), (1,9), (1,5), (1,1)]
--  Extending forward:  "\nABC DEF ABC\n"[(1,1), (1,4), (1,8), (1,12)]
--  Extending backward: "\nABC DEF ABC\n"[(1,12), (1,9), (1,5), (1,1)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 4, LTR:
--  Extending right:    "\nabc efd dabeb\n"[(1,1), (1,4), (1,8), (1,14)]
--  Extending left:     "\nabc efd dabeb\n"[(1,14), (1,9), (1,5), (1,1)]
--  Extending forward:  "\nabc efd dabeb\n"[(1,1), (1,4), (1,8), (1,14)]
--  Extending backward: "\nabc efd dabeb\n"[(1,14), (1,9), (1,5), (1,1)]
--Test 4, RTL:
--  Extending left:     "\nabc efd dabeb\n"[(1,1), (1,4), (1,8), (1,14)]
--  Extending right:    "\nabc efd dabeb\n"[(1,14), (1,9), (1,5), (1,1)]
--  Extending forward:  "\nabc efd dabeb\n"[(1,1), (1,4), (1,8), (1,14)]
--  Extending backward: "\nabc efd dabeb\n"[(1,14), (1,9), (1,5), (1,1)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 5, LTR:
--  Extending right:    "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending left:     " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending backward: " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--Test 5, RTL:
--  Extending left:     "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending right:    " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending backward: " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 6, LTR:
--  Extending right:    "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending left:     " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending backward: " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--Test 6, RTL:
--  Extending left:     "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending right:    " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending backward: " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 7, LTR:
--  Extending right:    "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending left:     " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending backward: " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--Test 7, RTL:
--  Extending left:     "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending right:    " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending backward: " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--Test 8, LTR:
--  Extending right:    "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending left:     " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending backward: " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--Test 8, RTL:
--  Extending left:     "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending right:    " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--  Extending forward:  "Lorem "[(0,0), (0,5)], "ipsum dolor sit"[(0,5), (0,11), (0,15)], " amet"[(0,5)]
--  Extending backward: " amet"[(0,5), (0,1)], "ipsum dolor sit"[(0,12), (0,6)], "Lorem "[(0,6), (0,0)]
--
--
--  validating ltrRight and ltrLeft
--  validating ltrRight and ltrForward
--  validating ltrForward and rtlForward
--  validating ltrLeft and ltrBackward
--  validating ltrBackward and rtlBackward
--  validating ltrRight and rtlLeft
--  validating ltrLeft and rtlRight
--
--
--
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-word.html b/third_party/WebKit/LayoutTests/editing/selection/extend-selection-word.html
-deleted file mode 100644
-index 01d950ff70bf3339ad3031b3c362836ab682ac4a..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-selection-word.html
-+++ /dev/null
-@@ -1,14 +0,0 @@
--<!DOCTYPE html>
--<html>
--<head>
--<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
--<link rel="stylesheet" type="text/css" href="resources/extend-selection.css" />
--<script src="resources/extend-selection.js"></script>
--</head>
--<body>
--<pre id="console"></pre>
--<script>
--log("\n\n\n\n\nExtending by word\n");
--runSelectionTestsWithGranularity(createCharAndWordNodes(), "word");
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-to-line-boundary-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-to-line-boundary-expected.txt
-deleted file mode 100644
-index 7f5dc1b42e57d9fb90054042e995093b3bf705a9..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-to-line-boundary-expected.txt
-+++ /dev/null
-@@ -1,5 +0,0 @@
--PASS for LTR
--PASS for RTL
--
--the quick brown fox jumps the quick brown fox jumps the quick brown fox jumps
--שוּרה שוּרה שוּרה שוּרה שוּרה שוּרה שוּרה שוּרה שוּרה
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-to-line-boundary.html b/third_party/WebKit/LayoutTests/editing/selection/extend-to-line-boundary.html
-deleted file mode 100644
-index 5bdd7df753233bd613e07e4ee94a4e7c96a1205b..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-to-line-boundary.html
-+++ /dev/null
-@@ -1,70 +0,0 @@
--<!DOCTYPE html>
--<body>
--<pre id="console"></pre>
--<script>
--function log(s) {
--    document.getElementById("console").innerHTML += s + "\n";
--}
--
--function createEditableMultilineDiv(text, numLines) {
--    // Put text in a span so that the width can be measured.
--    var span = document.createElement("span");
--    span.innerHTML = text;
--    document.body.appendChild(span);
--    var widthPx = Math.ceil(span.getBoundingClientRect().width);
--    document.body.removeChild(span);
--
--    // Make div with those dimensions so that the text wraps predictably regardless of platform.
--    var lines = text;
--    for (var i = 1; i < numLines; i++)
--        lines += " " + text;
--
--    var div = document.createElement("div");
--    div.setAttribute("style", "width: " + widthPx + "px");
--    div.contentEditable = true;
--    div.innerHTML = lines;
--
--    return div;
--}
--
--function selectSecondLine(element) {
--    getSelection().collapse(element.childNodes[0], 0);
--    getSelection().modify("move", "forward", "line");
--    getSelection().modify("extend", "forward", "lineboundary");
--}
--
--function unescapeRtl(rtlText) {
--    var e = document.createElement("span");
--    e.innerHTML = rtlText;
--    return e.innerHTML;
--}
--
--ltrText = "the quick brown fox jumps";
--ltrTextContainer = createEditableMultilineDiv(ltrText, 3);
--document.body.appendChild(ltrTextContainer);
--selectSecondLine(ltrTextContainer);
--
--if (getSelection().toString() === ltrText + " ")
--    log("PASS for LTR");
--else
--    log("FAIL for LTR, selection is '" + getSelection() + "' but should be '" + ltrText + " '");
--
--rtlText = unescapeRtl("&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; " +
--                      "&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4; " +
--                      "&#x05E9;&#x05D5;&#x05BC;&#x05E8;&#x05D4;");
--rtlTextContainer = createEditableMultilineDiv(rtlText, 3);
--rtlTextContainer.setAttribute("dir", "rtl");
--document.body.appendChild(rtlTextContainer);
--selectSecondLine(rtlTextContainer);
--
--if (getSelection().toString() === rtlText + " ")
--    log("PASS for RTL");
--else
--    log("FAIL for RTL, selection is '" + getSelection() + "' but should be '" + rtlText + " '");
--
--log("");
--
--if (window.testRunner)
--    testRunner.dumpAsText();
--</script>
--</body>
-diff --git a/third_party/WebKit/LayoutTests/editing/selection/extend-to-trailing-spaces-expected.txt b/third_party/WebKit/LayoutTests/editing/selection/extend-to-trailing-spaces-expected.txt
-deleted file mode 100644
-index d2c90e1d3d81ea488c4ab11fd6299680fb296313..0000000000000000000000000000000000000000
---- a/third_party/WebKit/LayoutTests/editing/selection/extend-to-trailing-spaces-expected.txt
-+++ /dev/null
-@@ -1,17 +0,0 @@
--Ensure that extending a selection to trailing spaces does not cause exceptions.
--
--On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
--
--
--PASS <div id="test">0123</div>
--PASS <div id="test">012 </div>
--PASS <div id="test">012  </div>
--PASS <div id="test">012
--</div>
--PASS <div id="test">012
--
--</div>
--PASS successfullyParsed is true
--
--TEST COMPLETE
--
