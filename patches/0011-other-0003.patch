@@ -1,3 +1,508 @@
+diff --git a/native_client/pnacl/support/clang_direct/nacl-arm-macros.s b/native_client/pnacl/support/clang_direct/nacl-arm-macros.s
+new file mode 100644
+index 0000000000000000000000000000000000000000..aff20503ae2dd39fc5a1fc6ff00665290656e4de
+--- /dev/null
++++ b/native_client/pnacl/support/clang_direct/nacl-arm-macros.s
+@@ -0,0 +1,386 @@
++@ Copyright (c) 2014 The Native Client Authors. All rights reserved.
++@ Use of this source code is governed by a BSD-style license that can be
++@ found in the LICENSE file.
++
++@ GAS assembler macros for NaCl ARM
++@ NB: GCC emits code using only a few of these, noted below.
++@ TODO(mcgrathr): not really clear if this should live with gcc or elsewhere
++
++@ This turns on instruction bundling in the assembler, with 16-byte bundles.
++.bundle_align_mode 4
++
++.macro _sfi_cmask reg, cond=
++	bic\cond \reg, \reg, #0xC000000F
++.endm
++
++.macro _sfi_dmask reg, cond=
++	bic\cond \reg, \reg, #0xC0000000
++.endm
++
++.macro _sfi_for_each_cond macro, args:vararg
++	\macro eq, \args
++	\macro ne, \args
++	\macro cs, \args
++	\macro hs, \args
++	\macro cc, \args
++	\macro lo, \args
++	\macro mi, \args
++	\macro pl, \args
++	\macro vs, \args
++	\macro vc, \args
++	\macro hi, \args
++	\macro ls, \args
++	\macro ge, \args
++	\macro lt, \args
++	\macro gt, \args
++	\macro le, \args
++	\macro al, \args
++	\macro nv, \args
++.endm
++
++@ Used in place of bx (indirect jump), no difference but the mnemonic.
++@ NB: GCC output uses this.
++.macro sfi_bx reg, cond=
++	.bundle_lock
++	_sfi_cmask \reg, \cond
++	bx\cond \reg
++	.bundle_unlock
++.endm
++
++.macro _sfi_bl label, target, cond=
++	adr\cond lr, \label
++	b\cond \target
++	.p2align 4
++\label\():
++.endm
++
++@ Used in place of bl (direct call), no difference but the mnemonic.
++@ NB: GCC output uses this.
++.macro sfi_bl target, cond=
++	_sfi_bl .Lsfi.\@, \target, \cond
++.endm
++
++.macro _sfi_blx label, reg, cond
++	adr lr, \label
++	.bundle_lock
++	_sfi_cmask \reg, \cond
++	bx\cond \reg
++	.bundle_unlock
++	.p2align 4
++\label\():
++.endm
++
++@ Used in place of blx (indirect call), no difference but the mnemonic.
++@ NB: GCC output uses this.
++.macro sfi_blx target, cond=
++	_sfi_blx .Lsfi.\@, \target, \cond
++.endm
++
++.macro _sfi_condify_1 cond, macro
++	.macro \macro\cond args:vararg
++	\macro \args, \cond
++	.endm
++.endm
++.macro _sfi_condify macro
++	_sfi_for_each_cond _sfi_condify_1, \macro
++.endm
++
++@ Conditionalized variants of the branching macros.
++@ NB: GCC output uses (some of) these.
++_sfi_condify sfi_bl
++_sfi_condify sfi_blx
++_sfi_condify sfi_bx
++
++.purgem _sfi_condify_1
++.purgem _sfi_condify
++
++@ ldr/str syntax cheat sheet:
++@ [Rn, offset] => *(Rn + offset)
++@ [Rn, offset]! => *(Rn += offset)
++@ [Rn], offset => *Rn, Rn += offset
++
++@ sfi_mem* macros have the feature that they specify each parameter
++@ only once.  They all have the form:
++@	sfi_mem... opcode value-register, base-register [, ...]
++@ opcode		is the normal mnemonic (ldr, str, ldrb, etc.)
++@ value-register	is the destination for a load and source for a store
++@ 			(i.e. the first operand in normal ARM syntax);
++@ base-register		is the base register in the address computation;
++@			this is what's touched by the SFI masking instruction
++
++@ For simple register or register+offset cases, e.g.:
++@	sfi_mem ldr r0, r1		@ ldr r0, [r1]
++@	sfi_mem str r1, r2, #4		@ str r1, [r2, #4]
++.macro sfi_mem op, dest, basereg, offset=#0
++	.bundle_lock
++	_sfi_dmask \basereg
++	\op \dest, [\basereg, \offset]
++	.bundle_unlock
++.endm
++
++@ For "increment before" cases, e.g.:
++@	sfi_memib ldr r0, r1, #4	@ ldr r0, [r1, #4]!
++.macro sfi_memib op, dest, basereg, offset
++	.bundle_lock
++	_sfi_dmask \basereg
++	\op \dest, [\basereg, \offset]!
++	.bundle_unlock
++.endm
++
++@ For "increment after" cases, e.g.:
++@	sfi_memia ldr r0, r1, #4	@ ldr r0, [r1], #4
++.macro sfi_memia op, dest, basereg, offset
++	.bundle_lock
++	_sfi_dmask \basereg
++	\op \dest, [\basereg], \offset
++	.bundle_unlock
++.endm
++
++@ For register pair cases (i.e. ldrd or strd), e.g.:
++@	sfi_memd ldrd r2, r3, r0	@ ldrd r2, r3, [r0]
++@ (Note we don't support the pre-indexed case.)
++.macro sfi_memd op, dest, dest2, basereg, offset=#0
++	.bundle_lock
++	_sfi_dmask \basereg
++	\op \dest,\dest2, [\basereg, \offset]
++	.bundle_unlock
++.endm
++
++@ For "increment after" register pair cases (i.e. ldrd or strd), e.g.:
++@	sfi_memdia ldrd r2, r3, r0, -r1	@ ldrd r2, r3, [r0], -r1
++.macro sfi_memdia op, dest, dest2, basereg, offset
++	.bundle_lock
++	_sfi_dmask \basereg
++	\op \dest,\dest2, [\basereg], \offset
++	.bundle_unlock
++.endm
++
++@ For load/store multiple cases, e.g.:
++@	sfi_memm ldm r0, {r1, r2, r3}	@ ldm r0, {r1, r2, r3}
++@ Note you don't want to use this for sp, since SFI is not required.
++.macro sfi_memm op basereg, reglist:vararg
++	.bundle_lock
++	_sfi_dmask \basereg
++	\op \basereg, \reglist
++	.bundle_unlock
++.endm
++
++@ For "increment after" load/store multiple cases, e.g.:
++@	sfi_memm ldmia r0!, {r5-r8}	@ ldmia r0!, {r5-r8}
++@ Note you don't want to use this for sp, since SFI is not required.
++.macro sfi_memmia op basereg, reglist:vararg
++	.bundle_lock
++	_sfi_dmask \basereg
++	\op \basereg!, \reglist
++	.bundle_unlock
++.endm
++
++
++@ For popping multiple registers, including sp.
++@ Note you don't want to use this if sp is not touched.
++.macro sfi_popm reglist:vararg
++	.bundle_lock
++	pop \reglist
++	_sfi_dmask sp
++	.bundle_unlock
++.endm
++
++
++@ Alternative scheme with just one macro.  This has the feature that
++@ most of the line is exactly the usual ARM instruction syntax,
++@ unmodified.  If the instruction is wholly unmodified, this has the
++@ downside that the base register appears twice, thus introducing the
++@ possibility of errors where the base register in the first parameter
++@ is not the actual base register used in the addressing mode syntax.
++@ However, you can instead modify the instruction only slightly: just
++@ replace the base register with \B (backslash followed by capital B).
++@ Then the instruction syntax remains normal, idiosyncrasies of ARM
++@ addressing mode syntaxes all supported--only the base register part of
++@ the addressing mode syntax is replaced--and there is no error-prone
++@ duplication of the base register.
++@ NB: GCC output uses this.
++.macro sfi_breg basereg, insn, operands:vararg
++	.macro _sfi_breg_doit B
++	\insn \operands
++	.endm
++	.bundle_lock
++	_sfi_breg_dmask_\insn \basereg
++	_sfi_breg_doit \basereg
++	.bundle_unlock
++	.purgem _sfi_breg_doit
++.endm
++
++.macro _sfi_breg_dmask_define insn, suffix1=, suffix2=
++	_sfi_for_each_cond _sfi_breg_dmask_define_1, \insn, \suffix1, \suffix2
++	_sfi_breg_dmask_define_1 \(), \insn, \suffix1, \suffix2
++.endm
++
++.macro _sfi_breg_dmask_define_1 cond, insn, suffix1=, suffix2=
++	.ifb \suffix1
++	.macro _sfi_breg_dmask_\insn\cond basereg
++	_sfi_dmask \basereg, \cond
++	.endm
++	.else
++	.macro _sfi_breg_dmask_\insn\cond\suffix1\suffix2 basereg
++	_sfi_dmask \basereg, \cond
++	.endm
++	.ifnb \cond
++	.macro _sfi_breg_dmask_\insn\suffix1\cond\suffix2 basereg
++	_sfi_dmask \basereg, \cond
++	.endm
++	.ifnb \suffix2
++	.macro _sfi_breg_dmask_\insn\suffix1\suffix2\cond basereg
++	_sfi_dmask \basereg, \cond
++	.endm
++	.endif
++	.endif
++	.endif
++.endm
++
++@ We need to name here all the instructions that might appear in sfi_breg,
++@ so as to handle all their conditionalized forms.
++.macro _sfi_breg_dmask_define_ldst insn
++	_sfi_breg_dmask_define \insn
++	_sfi_breg_dmask_define \insn, h
++	_sfi_breg_dmask_define \insn, sh
++	_sfi_breg_dmask_define \insn, b
++	_sfi_breg_dmask_define \insn, sb
++	_sfi_breg_dmask_define \insn, d
++.endm
++.macro _sfi_breg_dmask_define_ldmstm insn, suffix=
++	_sfi_breg_dmask_define \insn, \suffix
++	_sfi_breg_dmask_define \insn, ia, \suffix
++	_sfi_breg_dmask_define \insn, fd, \suffix
++	_sfi_breg_dmask_define \insn, da, \suffix
++	_sfi_breg_dmask_define \insn, fa, \suffix
++	_sfi_breg_dmask_define \insn, db, \suffix
++	_sfi_breg_dmask_define \insn, ea, \suffix
++	_sfi_breg_dmask_define \insn, ib, \suffix
++	_sfi_breg_dmask_define \insn, ed, \suffix
++.endm
++.macro _sfi_breg_dmask_define_neon insn
++	_sfi_breg_dmask_define \insn, .8
++	_sfi_breg_dmask_define \insn, .16
++	_sfi_breg_dmask_define \insn, .32
++	_sfi_breg_dmask_define \insn, .64
++.endm
++_sfi_breg_dmask_define_ldst ldr
++_sfi_breg_dmask_define_ldst ldrex
++_sfi_breg_dmask_define_ldst ldc
++_sfi_breg_dmask_define_ldst str
++_sfi_breg_dmask_define_ldst strex
++_sfi_breg_dmask_define_ldst stc
++_sfi_breg_dmask_define_ldmstm ldm
++_sfi_breg_dmask_define_ldmstm stm
++_sfi_breg_dmask_define pld
++_sfi_breg_dmask_define pldw
++_sfi_breg_dmask_define pldi
++_sfi_breg_dmask_define_ldmstm vldm
++_sfi_breg_dmask_define_ldmstm vldm, .32
++_sfi_breg_dmask_define_ldmstm vldm, .64
++_sfi_breg_dmask_define_ldmstm vstm
++_sfi_breg_dmask_define_ldmstm vstm, .32
++_sfi_breg_dmask_define_ldmstm vstm, .64
++_sfi_breg_dmask_define fld, s
++_sfi_breg_dmask_define fld, d
++_sfi_breg_dmask_define fst, s
++_sfi_breg_dmask_define fst, d
++_sfi_breg_dmask_define_ldmstm fldm, s
++_sfi_breg_dmask_define_ldmstm fldm, d
++_sfi_breg_dmask_define_ldmstm fstm, s
++_sfi_breg_dmask_define_ldmstm fstm, d
++_sfi_breg_dmask_define vldr
++_sfi_breg_dmask_define vldr, .32
++_sfi_breg_dmask_define vldr, .64
++_sfi_breg_dmask_define vstr
++_sfi_breg_dmask_define vstr, .32
++_sfi_breg_dmask_define vstr, .64
++_sfi_breg_dmask_define_neon vld1
++_sfi_breg_dmask_define_neon vld2
++_sfi_breg_dmask_define_neon vld3
++_sfi_breg_dmask_define_neon vld4
++_sfi_breg_dmask_define_neon vst1
++_sfi_breg_dmask_define_neon vst2
++_sfi_breg_dmask_define_neon vst3
++_sfi_breg_dmask_define_neon vst4
++_sfi_breg_dmask_define ldcl
++_sfi_breg_dmask_define stcl
++
++.purgem _sfi_breg_dmask_define
++.purgem _sfi_breg_dmask_define_1
++.purgem _sfi_breg_dmask_define_ldst
++.purgem _sfi_breg_dmask_define_ldmstm
++.purgem _sfi_breg_dmask_define_neon
++
++@ Macro to precede an instruction that touches sp.
++@ NB: GCC output uses this.
++.macro sfi_sp insn:vararg
++	.bundle_lock
++	\insn
++	_sfi_dmask sp
++	.bundle_unlock
++.endm
++
++@ Macro to start a naturally aligned 16-byte constant pool fragment.
++@ NB: GCC output uses this.
++.macro sfi_constant_barrier
++	bkpt 0x5be0
++.endm
++
++@ Macro to do a guaranteed safely nonresumable trap.
++@ There is no assembler mnemonic for the UDF instruction.
++@ This word is chosen so that in ARM it is a UDF instruction
++@ and in (little-endian) Thumb-2 it is a UDF followed by a branch-to-self
++@ (and vice versa in big-endian Thumb-2).
++@ NB: GCC output uses this.
++.macro sfi_trap
++	@ .inst is like .word, but doesn't emit a $d mapping symbol.
++	.inst 0xe7fedef0
++.endm
++
++.purgem _sfi_for_each_cond
++
++@ TODO(mcgrathr): examples don't belong here
++.if 0
++@ Example uses of all the macros (nops just to ease reading of disassembly)
++	nop
++Tbx:	sfi_bx r0
++	nop
++Tbl:	sfi_bl foobar
++	nop
++Tblx:	sfi_blx r1
++	nop
++Tret:	sfi_ret
++
++	nop
++Tloads: sfi_mem ldr r0, r1
++	sfi_mem ldr r0, r1, #8
++	sfi_mem str r0, r1, #8
++	sfi_memib ldr r0, r1, #8
++	sfi_memia ldr r0, r1, #8
++	sfi_memm ldm r0, {r2, r3, r4}
++	sfi_memmia ldmia r0, {r2, r3, r4}
++	sfi_memm stm r0, {r2, r3, r4}
++	sfi_memmia stmia r0, {r2, r3, r4}
++	sfi_popm {r5, sp, lr}
++
++Talternate:
++	sfi_breg r1, ldr r0, [r1]
++	sfi_breg r1, ldr r0, [r1, #8]
++	sfi_breg r1, str r0, [r1, #8]
++	sfi_breg r1, ldr r0, [r1, #8]!
++	sfi_breg r1, ldr r0, [r1], #8
++	sfi_breg r0, ldm r0, {r2, r3, r4}
++	sfi_breg r0, ldmia r0!, {r2, r3, r4}
++	sfi_breg r0, stm r0, {r2, r3, r4}
++	sfi_breg r0, stmia r0!, {r2, r3, r4}
++.endif
++
++.pushsection .note.NaCl.ABI.arm, "aG", %note, .note.NaCl.ABI.arm, comdat
++	.int 1f - 0f, 3f - 2f, 1
++	.balign 4
++0:	.string "NaCl"
++1:	.balign 4
++2:	.string "arm"
++3:	.balign 4
++.popsection
+diff --git a/native_client/pnacl/support/clang_direct/nacl-tp-offset.c b/native_client/pnacl/support/clang_direct/nacl-tp-offset.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..0a122be6d72ac9a78836530c1b0bf107f941f25a
+--- /dev/null
++++ b/native_client/pnacl/support/clang_direct/nacl-tp-offset.c
+@@ -0,0 +1,12 @@
++/*
++ * Copyright (c) 2015 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/*
++ * Define __nacl_tp_tls_offset and __nacl_tp_tdb_offset for MIPS32 nacl-clang.
++ */
++
++#define NACL_DEFINE_EXTERNAL_NATIVE_SUPPORT_FUNCS
++#include "native_client/src/untrusted/nacl/tls_params.h"
+diff --git a/native_client/pnacl/support/crtbegin.c b/native_client/pnacl/support/crtbegin.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..d6f9c521ded252f97be5c0aa1d25160e7c3ed218
+--- /dev/null
++++ b/native_client/pnacl/support/crtbegin.c
+@@ -0,0 +1,89 @@
++/*
++ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/* This is the native crtbegin (crtbegin.o).
++ *
++ * It contains the constructor/destructor for exception handling,
++ * and the symbol for __EH_FRAME_BEGIN__. This is native because
++ * exception handling is also native (externally provided).
++ *
++ * We also need to sneak in the native PPAPI shim library between
++ * these bookends because otherwise the unwind tables will be messed
++ * up, c.f.
++ * https://chromiumcodereview.appspot.com/9909016/
++ * TODO(robertm): see whether this problem goes away once we switch
++ * eh_frame_headers
++ */
++
++/* This goes first to ensure that tls_params.h hasn't been #included before. */
++#define NACL_DEFINE_EXTERNAL_NATIVE_SUPPORT_FUNCS
++#include "native_client/src/untrusted/nacl/pnacl.h"
++#include "native_client/src/untrusted/nacl/tls_params.h"
++
++#include <stdint.h>
++
++#include "native_client/pnacl/support/pnacl_irt.h"
++#include "native_client/pnacl/support/relocate.h"
++
++
++void _pnacl_wrapper_start(uint32_t *info);
++
++/*
++ * HACK:
++ * The real structure is defined in unwind-dw2-fde.h
++ * this is something that is at least twice as big.
++ */
++struct object {
++  void *p[16] __attribute__((aligned(8)));
++};
++
++/*
++ * __[de]register_frame_info() are provided by libgcc_eh. When not linking
++ * with libgcc_eh, dummy implementations are provided.
++ * See: gcc/unwind-dw2-fde.c
++ */
++
++#ifdef LINKING_WITH_LIBGCC_EH
++extern void __register_frame_info(void *begin, struct object *ob);
++extern void __deregister_frame_info(const void *begin);
++#else /* not LINKING_WITH_LIBGCC_EH */
++void __register_frame_info(void *begin, struct object *ob) {}
++void __deregister_frame_info(const void *begin) {}
++#endif /* LINKING_WITH_LIBGCC_EH */
++
++
++/*
++ * Exception handling frames are aggregated into a single section called
++ * .eh_frame.  The runtime system needs to (1) have a symbol for the beginning
++ * of this section, and needs to (2) mark the end of the section by a NULL.
++ */
++
++static char __EH_FRAME_BEGIN__[]
++    __attribute__((section(".eh_frame"), aligned(4)))
++    = { };
++
++static void __do_eh_ctor(void) {
++  static struct object object;
++  __register_frame_info (__EH_FRAME_BEGIN__, &object);
++}
++
++/* This defines the entry point for a nexe produced by the PNaCl translator. */
++void __pnacl_start(uint32_t *info) {
++#if defined(__native_client_nonsfi__)
++  apply_relocations();
++#endif
++
++  __pnacl_init_irt(info);
++
++  /*
++   * We must register exception handling unwind info before calling
++   * any user code.  Note that we do not attempt to deregister the
++   * unwind info at exit, but there is no particular need to do so.
++   */
++  __do_eh_ctor();
++
++  _pnacl_wrapper_start(info);
++}
 diff --git a/native_client/pnacl/support/crtend.c b/native_client/pnacl/support/crtend.c
 new file mode 100644
 index 0000000000000000000000000000000000000000..7b70ca977644d1b6c2786c3582b7acf433fd64dc
@@ -37718,7 +38223,7 @@ index 0000000000000000000000000000000000000000..35aa8425dd7255cc79f5530ea10a00ab
 +}
 diff --git a/native_client/src/shared/platform/posix/nacl_threads.c b/native_client/src/shared/platform/posix/nacl_threads.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..b27ea9932d61ab7a4e985af1f978d4e49ef7a9b3
+index 0000000000000000000000000000000000000000..7069dbb9f5204981ed5631e93fd84f115d33c6a6
 --- /dev/null
 +++ b/native_client/src/shared/platform/posix/nacl_threads.c
 @@ -0,0 +1,127 @@
@@ -37773,13 +38278,13 @@ index 0000000000000000000000000000000000000000..b27ea9932d61ab7a4e985af1f978d4e4
 +  }
 +  if (0 != (code = pthread_attr_init(&attr))) {
 +    NaClLog(LOG_ERROR,
-+            "NaClThreadCtor: pthread_atr_init returned %d",
++            "NaClThreadCtor: pthread_atr_init returned %d\n",
 +            code);
 +    goto done;
 +  }
 +  if (0 != (code = pthread_attr_setstacksize(&attr, stack_size))) {
 +    NaClLog(LOG_ERROR,
-+            "NaClThreadCtor: pthread_attr_setstacksize returned %d",
++            "NaClThreadCtor: pthread_attr_setstacksize returned %d\n",
 +            code);
 +    goto done_attr_dtor;
 +  }
@@ -37787,7 +38292,7 @@ index 0000000000000000000000000000000000000000..b27ea9932d61ab7a4e985af1f978d4e4
 +    if (0 != (code = pthread_attr_setdetachstate(&attr,
 +                                                 PTHREAD_CREATE_DETACHED))) {
 +      NaClLog(LOG_ERROR,
-+              "nacl_thread: pthread_attr_setdetachstate returned %d",
++              "nacl_thread: pthread_attr_setdetachstate returned %d\n",
 +              code);
 +      goto done_attr_dtor;
 +    }
@@ -37797,7 +38302,7 @@ index 0000000000000000000000000000000000000000..b27ea9932d61ab7a4e985af1f978d4e4
 +                                  (void *(*)(void *)) start_fn,
 +                                  state))) {
 +    NaClLog(LOG_ERROR,
-+            "nacl_thread: pthread_create returned %d",
++            "nacl_thread: pthread_create returned %d\n",
 +            code);
 +    goto done_attr_dtor;
 +  }
@@ -92464,261 +92969,3 @@ index 0000000000000000000000000000000000000000..2eb7247d2c4d4aa9bb95c4271359c71a
 +  sig_ctx->lr        = 0;
 +  sig_ctx->cpsr      = 0;
 +}
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/sel_rt.h b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..eafaa3eb4ffd1c5c792281536a314a82e0d13dd6
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/sel_rt.h
-@@ -0,0 +1,135 @@
-+/*
-+ * Copyright (c) 2012 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * NaCl Secure Runtime
-+ */
-+
-+#ifndef __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_SEL_RT_H__
-+#define __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_SEL_RT_H__ 1
-+
-+/* This file can be #included from assembly to get the #defines. */
-+#if !defined(__ASSEMBLER__)
-+
-+#include <stddef.h>
-+
-+#include "native_client/src/include/nacl_base.h"
-+#include "native_client/src/include/nacl_macros.h"
-+#include "native_client/src/include/portability.h"
-+
-+EXTERN_C_BEGIN
-+
-+uint32_t NaClGetStackPtr(void);
-+
-+typedef uint32_t nacl_reg_t;
-+
-+#define NACL_PRIdNACL_REG NACL_PRId32
-+#define NACL_PRIiNACL_REG NACL_PRIi32
-+#define NACL_PRIoNACL_REG NACL_PRIo32
-+#define NACL_PRIuNACL_REG NACL_PRIu32
-+#define NACL_PRIxNACL_REG NACL_PRIx32
-+#define NACL_PRIXNACL_REG NACL_PRIX32
-+
-+struct NaClThreadContext {
-+  /*
-+   * r4 through to fp correspond to NACL_CALLEE_SAVE_LIST, and the assembly
-+   * code expects them to appear at the start of the struct.
-+   */
-+  nacl_reg_t  r4, r5, r6, r7, r8, r9, r10, fp, stack_ptr, prog_ctr;
-+  /*           0   4   8   c  10  14   18  1c         20        24 */
-+  /*
-+   * sys_ret and new_prog_ctr are not a part of the thread's register
-+   * set, but are needed by NaClSwitch.  By including them here, the
-+   * two use the same interface.
-+   */
-+  uint32_t  sysret;
-+  /*            28 */
-+  uint32_t  new_prog_ctr;
-+  /*            2c */
-+  uint32_t  trusted_stack_ptr;
-+  /*            30 */
-+  uint32_t  tls_idx;
-+  /*            34 */
-+  uint32_t  fpscr;
-+  /*            38 */
-+  uint32_t  sys_fpscr;
-+  /*            3c */
-+  uint32_t  tls_value1;
-+  /*            40 */
-+  uint32_t  tls_value2;
-+  /*            44 */
-+  uint32_t  syscall_routine;  /* Address of NaClSyscallSeg routine */
-+  /*            48 */
-+  uint32_t  guard_token;
-+  /*            4c */
-+};
-+
-+static INLINE uintptr_t NaClGetThreadCtxSp(struct NaClThreadContext *th_ctx) {
-+  return th_ctx->stack_ptr;
-+}
-+
-+NORETURN void NaClStartSwitch(struct NaClThreadContext *);
-+
-+#endif /* !defined(__ASSEMBLER__) */
-+
-+/*
-+ * List of registers at the start of NaClThreadContext, for use with the
-+ * instructions LDM and STM.
-+ *
-+ * Note that we omit "sp" from this list and save/restore it separately,
-+ * because using "sp" with LDM/STM is considered deprecated (see
-+ * https://crbug.com/564044).
-+ */
-+#define NACL_CALLEE_SAVE_LIST {r4, r5, r6, r7, r8, r9, r10, fp}
-+
-+/*
-+ * Given an offset for a field in NaClThreadContext, this returns the
-+ * field's offset from r9, given that r9 points to tls_value1.
-+ */
-+#define NACL_R9_OFFSET(offset) \
-+    ((offset) - NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1)
-+
-+#define NACL_THREAD_CONTEXT_OFFSET_STACK_PTR 0x20
-+#define NACL_THREAD_CONTEXT_OFFSET_SYSRET 0x28
-+#define NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR 0x30
-+#define NACL_THREAD_CONTEXT_OFFSET_TLS_IDX 0x34
-+#define NACL_THREAD_CONTEXT_OFFSET_FPSCR 0x38
-+#define NACL_THREAD_CONTEXT_OFFSET_SYS_FPSCR 0x3c
-+#define NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1 0x40
-+#define NACL_THREAD_CONTEXT_OFFSET_SYSCALL_ROUTINE 0x48
-+#define NACL_THREAD_CONTEXT_OFFSET_GUARD_TOKEN 0x4c
-+
-+#if !defined(__ASSEMBLER__)
-+
-+/*
-+ * This function exists as a function only because compile-time
-+ * assertions need to be inside a function.  This function does not
-+ * need to be called for the assertions to be checked.
-+ */
-+static INLINE void NaClThreadContextOffsetCheck(void) {
-+#define NACL_CHECK_FIELD(offset_name, field) \
-+    NACL_COMPILE_TIME_ASSERT(offset_name == \
-+                             offsetof(struct NaClThreadContext, field));
-+
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_STACK_PTR, stack_ptr);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_SYSRET, sysret);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_TRUSTED_STACK_PTR,
-+                   trusted_stack_ptr);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_TLS_IDX, tls_idx);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_FPSCR, fpscr);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_SYS_FPSCR, sys_fpscr);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_TLS_VALUE1, tls_value1);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_SYSCALL_ROUTINE, syscall_routine);
-+  NACL_CHECK_FIELD(NACL_THREAD_CONTEXT_OFFSET_GUARD_TOKEN, guard_token);
-+
-+#undef NACL_CHECK_FIELD
-+}
-+
-+EXTERN_C_END
-+
-+#endif /* !defined(__ASSEMBLER__) */
-+
-+#endif /* __NATIVE_CLIENT_SERVICE_RUNTIME_ARCH_ARM_SEL_RT_H___ */
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.S b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.S
-new file mode 100644
-index 0000000000000000000000000000000000000000..f104d5325ed87dff4648481aba9588b7a7eca462
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.S
-@@ -0,0 +1,87 @@
-+/*
-+ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_ldr_arm.h"
-+#include "native_client/src/trusted/service_runtime/arch/arm/sel_rt.h"
-+#include "native_client/src/trusted/service_runtime/nacl_config.h"
-+
-+        /*
-+         * This is code, but it is not code that is actually part of the
-+         * program/library being linked.  Marking it as read-only data
-+         * instead ensures that nothing like linker code-rewriting will
-+         * be applied to this code.
-+         */
-+        NACL_RODATA
-+
-+/*
-+ * Assembly code template.
-+ * This is linked into the service runtime but is unused as code -- it is used
-+ * as data to be patched into a NaCl app's address space.
-+ *
-+ * Trampoline to transfer control from native client module to
-+ * sel_ldr's NaClSyscallSeg residing in the service runtime portion of address
-+ * space. Trampolines are patched into nacl module's address space in the
-+ * trampoline region. They are patched by NaClLoadTrampoline() code (sel_ldr.c).
-+ * Each trampoline code segment corresponds to a system call, so the trampoline
-+ * region is full of identical trampoline code segments. Service runtime
-+ * distinguish which system call is requested using the address of an executed
-+ * trampoline (it is saved on stack in NaClSyscallSeg()).
-+ *
-+ * ARM passes parameters to a callee in registers r0-r3. If there are more
-+ * than 4 parameters, the first four are passed in registers and the rest are
-+ * placed on the stack. This code saves all parameters from registers into the
-+ * stack; thus, we keep all parameters on the stack as follows:
-+ * top - arg0, arg1, arg2, arg3 .... argN
-+ *
-+ * On top of that we save the return address, so we will know where to return
-+ * after the system call.
-+ *
-+ * At the point this code calls NaClSyscallSeg, the stack layout is as follows:
-+ *
-+ *   sp+0x04: argument 5 (if present)
-+ *   sp:      argument 4 (if present)
-+ *   sp-0x04: argument 3
-+ *   sp-0x08: argument 2
-+ *   sp-0x0c: argument 1
-+ *   sp-0x10: argument 0
-+ *   sp-0x14: return address to untrusted code
-+ *  (sp-0x18: return address to trampoline - saved later by NaClSyscallSeg)
-+ *
-+ * Usually, signal-safe code will not save data below the stack
-+ * pointer, but it is safe to do so here because the trusted signal
-+ * handler will never run on the untrusted stack.
-+ *
-+ * When service runtime serves a system call, it first creates a structure which
-+ * utilizes these arguments. The structure is created by Decoder functions in
-+ * nacl_syscall_handlers.c. (nacl_syscall_handlers.c is an automatically
-+ * generated file and placed in
-+ * scons-out//gen/native_client/src/trusted/service_runtime).
-+ */
-+
-+DEFINE_GLOBAL_HIDDEN_LOCATION(NaCl_trampoline_seg_code):
-+  /*
-+   * Save first 4 syscall arguments below the stack pointer.  Any
-+   * further arguments are already on the stack.
-+   */
-+  stmfd sp, {r0, r1, r2, r3}
-+  /* Save the return address. */
-+  str lr, [sp, #-0x14]
-+
-+  ldr r0, [r9, #NACL_R9_OFFSET(NACL_THREAD_CONTEXT_OFFSET_SYSCALL_ROUTINE)]
-+  /* NOTE: we use the blx instead of bx because the return addres */
-+  /*       is used to determine which trampoline was used */
-+
-+  blx r0
-+
-+  /* NORETURN */
-+
-+  /* Fill second bundle: */
-+  .word NACL_INSTR_ARM_HALT_FILL
-+  .word NACL_INSTR_ARM_HALT_FILL
-+  .word NACL_INSTR_ARM_HALT_FILL
-+  .word NACL_INSTR_ARM_HALT_FILL
-+
-+DEFINE_GLOBAL_HIDDEN_LOCATION(NaCl_trampoline_seg_end):
-diff --git a/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..03e786640b561a682cf814c2e49a03badb8452b8
---- /dev/null
-+++ b/native_client/src/trusted/service_runtime/arch/arm/tramp_arm.h
-@@ -0,0 +1,18 @@
-+/*
-+ * Copyright (c) 2011 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+#ifndef NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_ARCH_ARM_TRAMP_ARM_H_
-+#define NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_ARCH_ARM_TRAMP_ARM_H_
-+
-+extern const char NaCl_trampoline_seg_code;
-+extern const char NaCl_trampoline_seg_end;
-+extern const char NaCl_trampoline_syscall_seg_addr;
-+
-+extern void NaClSyscallSeg(void);
-+extern void NaClSyscallSegRegsSaved(void);
-+extern void NaClSyscallSegEnd(void);
-+
-+#endif  /* NATIVE_CLIENT_SRC_TRUSTED_SERVICE_RUNTIME_ARCH_ARM_TRAMP_ARM_H_ */

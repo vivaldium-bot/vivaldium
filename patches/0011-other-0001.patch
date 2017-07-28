@@ -14,7 +14,7 @@ index 74328c47613e95ba8ef5f25629247789329db88c..4f4f98ffbc3a5d8cb04d0599f0dc5bf8
 +*.sh text eol=lf
 diff --git a/.gitmodules b/.gitmodules
 new file mode 100644
-index 0000000000000000000000000000000000000000..2b41d0923869710aff4c0ca368b551e0caf82ce5
+index 0000000000000000000000000000000000000000..abaebab442bda2c13c871d25a5bc562ffa9c2a58
 --- /dev/null
 +++ b/.gitmodules
 @@ -0,0 +1,273 @@
@@ -99,8 +99,8 @@ index 0000000000000000000000000000000000000000..2b41d0923869710aff4c0ca368b551e0
 +[submodule "third_party/fontconfig/src"]
 +	path = third_party/fontconfig/src
 +	url = ../../external/fontconfig.git
-+[submodule "third_party/freetype-android/src"]
-+	path = third_party/freetype-android/src
++[submodule "third_party/freetype/src"]
++	path = third_party/freetype/src
 +	url = ../src/third_party/freetype2.git
 +[submodule "third_party/gestures/gestures"]
 +	path = third_party/gestures/gestures
@@ -153,6 +153,9 @@ index 0000000000000000000000000000000000000000..2b41d0923869710aff4c0ca368b551e0
 +[submodule "third_party/libphonenumber/dist"]
 +	path = third_party/libphonenumber/dist
 +	url = ../../external/libphonenumber.git
++[submodule "third_party/libprotobuf-mutator/src"]
++	path = third_party/libprotobuf-mutator/src
++	url = ../../external/github.com/google/libprotobuf-mutator.git
 +[submodule "third_party/libsrtp"]
 +	path = third_party/libsrtp
 +	url = ../deps/libsrtp.git
@@ -210,9 +213,6 @@ index 0000000000000000000000000000000000000000..2b41d0923869710aff4c0ca368b551e0
 +[submodule "third_party/re2/src"]
 +	path = third_party/re2/src
 +	url = ../../external/github.com/google/re2.git
-+[submodule "third_party/scan-build/src"]
-+	path = third_party/scan-build/src
-+	url = ../llvm-project/cfe/tools/scan-build.git
 +[submodule "third_party/scons-2.0.1"]
 +	path = third_party/scons-2.0.1
 +	url = ../../native_client/src/third_party/scons-2.0.1.git
@@ -230,7 +230,7 @@ index 0000000000000000000000000000000000000000..2b41d0923869710aff4c0ca368b551e0
 +	url = ../../external/smhasher.git
 +[submodule "third_party/snappy/src"]
 +	path = third_party/snappy/src
-+	url = ../../external/snappy.git
++	url = ../../external/github.com/google/snappy.git
 +[submodule "third_party/spirv-headers/src"]
 +	path = third_party/spirv-headers/src
 +	url = ../../android/platform/external/shaderc/spirv-headers.git
@@ -291,64 +291,8 @@ index 0000000000000000000000000000000000000000..2b41d0923869710aff4c0ca368b551e0
 +[submodule "v8"]
 +	path = v8
 +	url = ../../v8/v8.git
-diff --git a/apps/app_load_service.cc b/apps/app_load_service.cc
-index c89a3692bf4ef15e29492daa8dfb93af37162753..9b94b1409cb1b2089eb4334706fd157305e77a43 100644
---- a/apps/app_load_service.cc
-+++ b/apps/app_load_service.cc
-@@ -4,12 +4,14 @@
- 
- #include "apps/app_load_service.h"
- 
-+#include "app/vivaldi_apptools.h"
- #include "apps/app_load_service_factory.h"
- #include "apps/app_restore_service.h"
- #include "apps/launcher.h"
- #include "chrome/browser/extensions/extension_service.h"
- #include "chrome/browser/extensions/unpacked_installer.h"
- #include "chrome/browser/profiles/profile.h"
-+#include "content/public/browser/browser_thread.h"
- #include "content/public/browser/notification_details.h"
- #include "content/public/browser/notification_service.h"
- #include "content/public/browser/notification_types.h"
-@@ -21,6 +23,8 @@
- #include "extensions/browser/notification_types.h"
- #include "extensions/common/extension.h"
- 
-+#include "extensions/tools/vivaldi_tools.h"
-+
- using extensions::Extension;
- using extensions::ExtensionPrefs;
- using extensions::ExtensionSystem;
-@@ -134,7 +138,26 @@ void AppLoadService::OnExtensionUnloaded(
-     extensions::UnloadedExtensionInfo::Reason reason) {
-   if (!extension->is_platform_app())
-     return;
--
-+#if defined(VIVALDI_BUILD)
-+  if (vivaldi::IsVivaldiApp(extension->id())) {
-+    static int attempts = 5;  // avoid endless restart loop
-+    if (reason == extensions::UnloadedExtensionInfo::REASON_TERMINATE &&
-+        attempts > 0) {
-+      attempts--;
-+
-+      const int kRestartAppDelaySec = 4; // wait until app unloading done
-+      content::BrowserThread::PostDelayedTask(
-+        content::BrowserThread::UI,
-+        FROM_HERE,
-+        base::Bind(&AppLoadService::RestartApplication,
-+                   base::Unretained(this),
-+                   extension->id()),
-+        base::TimeDelta::FromSeconds(kRestartAppDelaySec));
-+
-+      return;
-+    }
-+  }
-+#endif
-   extensions::ExtensionPrefs* extension_prefs =
-       extensions::ExtensionPrefs::Get(browser_context);
-   if (WasUnloadedForReload(extension->id(), reason) &&
 diff --git a/apps/launcher.cc b/apps/launcher.cc
-index 4782fb604d65ed84a9504b4843cb1baf76de2c1d..db8ec0d09fb8d85b68ebe9592b63147cabcf80be 100644
+index d1925112dd93844ee1b767a0fda026749912f2b1..c66aed15ae8e01c8f468301d51f5994210d1bbdc 100644
 --- a/apps/launcher.cc
 +++ b/apps/launcher.cc
 @@ -40,6 +40,9 @@
@@ -377,7 +321,7 @@ index 4782fb604d65ed84a9504b4843cb1baf76de2c1d..db8ec0d09fb8d85b68ebe9592b63147c
 +      }
 +      //GURL url = GURL(command_line.GetArgs()[0]);
 +      AppRuntimeEventRouter::DispatchOnLaunchedEventWithUrl(
-+        profile, app,
++        context, app,
 +        "None", //const std::string& handler_id,
 +        url, //const GURL& url,
 +        GURL() //const GURL& referrer_url);
@@ -468,10 +412,10 @@ index eb8284ee58fef43df064d3365dd1b0e8a65c9f49..73573df4029b9f51baf96ddfdcff5db0
  #else
    return "org.chromium.Chromium";
 diff --git a/base/memory/shared_memory_posix.cc b/base/memory/shared_memory_posix.cc
-index 3a18faa83dd70e82c8381d33cc247afa270339a9..6f26ea763c147f252d1965af2ea71f339c3b1546 100644
+index bf29e9f02a1ec5f188ef0f4ff10e12c037835bee..a434de4c30e0cb4b5f2c1d149d64e1f9f83ed0a6 100644
 --- a/base/memory/shared_memory_posix.cc
 +++ b/base/memory/shared_memory_posix.cc
-@@ -342,7 +342,9 @@ bool SharedMemory::FilePathForMemoryName(const std::string& mem_name,
+@@ -347,7 +347,9 @@ bool SharedMemory::FilePathForMemoryName(const std::string& mem_name,
    if (!GetShmemTempDir(false, &temp_dir))
      return false;
  
@@ -510,7 +454,7 @@ index 1b9d3949300bb9c3286f8f365c8588a4540936fa..dc34b8aa73582fe5489320b6b56fde9a
        return false;
    }
 diff --git a/base/process/process_win.cc b/base/process/process_win.cc
-index 623212654ee5cdabfee2355f81a8dc87f5f57d94..b0a93ba10306b5a015d1446f1f52478f4cd9b87d 100644
+index 9232c6dbcacd64d4f0b044c6059c2ffbc22ad4e7..dec8a47faba2bd50342bd82281c2637e25219ba5 100644
 --- a/base/process/process_win.cc
 +++ b/base/process/process_win.cc
 @@ -67,7 +67,8 @@ Process Process::OpenWithAccess(ProcessId pid, DWORD desired_access) {
@@ -524,7 +468,7 @@ index 623212654ee5cdabfee2355f81a8dc87f5f57d94..b0a93ba10306b5a015d1446f1f52478f
    if (!::DuplicateHandle(GetCurrentProcess(), handle,
                           GetCurrentProcess(), &out_handle,
 diff --git a/base/test/launcher/unit_test_launcher.cc b/base/test/launcher/unit_test_launcher.cc
-index c9f0eb0afb139f02094dcb62408f747379fdda67..d42f0bf1cf399be8006c76592cec38f44fa8ac1b 100644
+index 44c440fb76f4be9355a783bcfcc7b09def078bcc..a13edc860a64e56f0cf8e578e24b72c0725e4920 100644
 --- a/base/test/launcher/unit_test_launcher.cc
 +++ b/base/test/launcher/unit_test_launcher.cc
 @@ -35,6 +35,9 @@
@@ -12809,10 +12753,10 @@ index 0000000000000000000000000000000000000000..3ad48e501554a243cfe8448f909861e0
 +}
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper.cc b/breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c35e0e9583eafdffbfc6610e832e8e35853d6492
+index 0000000000000000000000000000000000000000..30b8f3ddcd496e961c1b588983d1c2e6013de80d
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_ptrace_dumper.cc
-@@ -0,0 +1,355 @@
+@@ -0,0 +1,357 @@
 +// Copyright (c) 2012, Google Inc.
 +// All rights reserved.
 +//
@@ -13064,6 +13008,8 @@ index 0000000000000000000000000000000000000000..c35e0e9583eafdffbfc6610e832e8e35
 +#endif
 +
 +#if defined(__mips__)
++  sys_ptrace(PTRACE_PEEKUSER, tid,
++             reinterpret_cast<void*>(PC), &info->mcontext.pc);
 +  sys_ptrace(PTRACE_PEEKUSER, tid,
 +             reinterpret_cast<void*>(DSP_BASE), &info->mcontext.hi1);
 +  sys_ptrace(PTRACE_PEEKUSER, tid,
@@ -13848,10 +13794,10 @@ index 0000000000000000000000000000000000000000..2ef1c4941397937bd7061c8f2498e67c
 +}
 diff --git a/breakpad/src/client/linux/minidump_writer/minidump_writer.cc b/breakpad/src/client/linux/minidump_writer/minidump_writer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..5c2a339e5879872b2d6f6a20fef34b6a85a994b0
+index 0000000000000000000000000000000000000000..d11ba6e522374bf076ae1be2aeda34824c9a1659
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/minidump_writer.cc
-@@ -0,0 +1,1458 @@
+@@ -0,0 +1,1500 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -14001,6 +13947,7 @@ index 0000000000000000000000000000000000000000..5c2a339e5879872b2d6f6a20fef34b6a
 +        skip_stacks_if_mapping_unreferenced_(
 +            skip_stacks_if_mapping_unreferenced),
 +        principal_mapping_address_(principal_mapping_address),
++        principal_mapping_(nullptr),
 +    sanitize_stacks_(sanitize_stacks) {
 +    // Assert there should be either a valid fd or a valid path, not both.
 +    assert(fd_ != -1 || minidump_path);
@@ -14011,12 +13958,22 @@ index 0000000000000000000000000000000000000000..5c2a339e5879872b2d6f6a20fef34b6a
 +    if (!dumper_->Init())
 +      return false;
 +
++    if (!dumper_->ThreadsSuspend() || !dumper_->LateInit())
++      return false;
++
++    if (skip_stacks_if_mapping_unreferenced_) {
++      principal_mapping_ =
++          dumper_->FindMappingNoBias(principal_mapping_address_);
++      if (!CrashingThreadReferencesPrincipalMapping())
++        return false;
++    }
++
 +    if (fd_ != -1)
 +      minidump_writer_.SetFile(fd_);
 +    else if (!minidump_writer_.Open(path_))
 +      return false;
 +
-+    return dumper_->ThreadsSuspend() && dumper_->LateInit();
++    return true;
 +  }
 +
 +  ~MinidumpWriter() {
@@ -14025,6 +13982,38 @@ index 0000000000000000000000000000000000000000..5c2a339e5879872b2d6f6a20fef34b6a
 +    if (fd_ == -1)
 +      minidump_writer_.Close();
 +    dumper_->ThreadsResume();
++  }
++
++  bool CrashingThreadReferencesPrincipalMapping() {
++    if (!ucontext_ || !principal_mapping_)
++      return false;
++
++    const uintptr_t low_addr =
++        principal_mapping_->system_mapping_info.start_addr;
++    const uintptr_t high_addr =
++        principal_mapping_->system_mapping_info.end_addr;
++
++    const uintptr_t stack_pointer = UContextReader::GetStackPointer(ucontext_);
++    const uintptr_t pc = UContextReader::GetInstructionPointer(ucontext_);
++
++    if (pc >= low_addr && pc < high_addr)
++      return true;
++
++    uint8_t* stack_copy;
++    const void* stack;
++    size_t stack_len;
++
++    if (!dumper_->GetStackInfo(&stack, &stack_len, stack_pointer))
++      return false;
++
++    stack_copy = reinterpret_cast<uint8_t*>(Alloc(stack_len));
++    dumper_->CopyFromProcess(stack_copy, GetCrashThread(), stack, stack_len);
++
++    uintptr_t stack_pointer_offset =
++        stack_pointer - reinterpret_cast<uintptr_t>(stack);
++
++    return dumper_->StackHasPointerToMapping(
++        stack_copy, stack_len, stack_pointer_offset, *principal_mapping_);
 +  }
 +
 +  bool Dump() {
@@ -14156,17 +14145,15 @@ index 0000000000000000000000000000000000000000..5c2a339e5879872b2d6f6a20fef34b6a
 +      uintptr_t stack_pointer_offset =
 +          stack_pointer - reinterpret_cast<uintptr_t>(stack);
 +      if (skip_stacks_if_mapping_unreferenced_) {
-+        const MappingInfo* principal_mapping =
-+            dumper_->FindMappingNoBias(principal_mapping_address_);
-+        if (!principal_mapping) {
++        if (!principal_mapping_) {
 +          return true;
 +        }
-+        uintptr_t low_addr = principal_mapping->system_mapping_info.start_addr;
-+        uintptr_t high_addr = principal_mapping->system_mapping_info.end_addr;
++        uintptr_t low_addr = principal_mapping_->system_mapping_info.start_addr;
++        uintptr_t high_addr = principal_mapping_->system_mapping_info.end_addr;
 +        if ((pc < low_addr || pc > high_addr) &&
 +            !dumper_->StackHasPointerToMapping(*stack_copy, stack_len,
 +                                               stack_pointer_offset,
-+                                               *principal_mapping)) {
++                                               *principal_mapping_)) {
 +          return true;
 +        }
 +      }
@@ -15157,6 +15144,7 @@ index 0000000000000000000000000000000000000000..5c2a339e5879872b2d6f6a20fef34b6a
 +  // mapping containing principal_mapping_address_.
 +  bool skip_stacks_if_mapping_unreferenced_;
 +  uintptr_t principal_mapping_address_;
++  const MappingInfo* principal_mapping_;
 +  // If true, apply stack sanitization to stored stack data.
 +  bool sanitize_stacks_;
 +};
@@ -15460,10 +15448,10 @@ index 0000000000000000000000000000000000000000..d1dc331215a3355e1fedbe8dc852cc9d
 +#endif  // CLIENT_LINUX_MINIDUMP_WRITER_MINIDUMP_WRITER_H_
 diff --git a/breakpad/src/client/linux/minidump_writer/minidump_writer_unittest.cc b/breakpad/src/client/linux/minidump_writer/minidump_writer_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..f3b78a22aaecce577a9ed738d92ddb690bfe7af8
+index 0000000000000000000000000000000000000000..4759ea8f87a9a96cb2a736d05b8e8e8b2b163835
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/minidump_writer_unittest.cc
-@@ -0,0 +1,865 @@
+@@ -0,0 +1,915 @@
 +// Copyright (c) 2011 Google Inc.
 +// All rights reserved.
 +//
@@ -15681,8 +15669,9 @@ index 0000000000000000000000000000000000000000..f3b78a22aaecce577a9ed738d92ddb69
 +  close(fds[1]);
 +}
 +
-+// Test that stacks can be skipped while writing minidumps.
-+TEST(MinidumpWriterTest, StacksSkippedIfRequested) {
++// Test that minidumping is skipped while writing minidumps if principal mapping
++// is not referenced.
++TEST(MinidumpWriterTest, MinidumpSkippedIfRequested) {
 +  int fds[2];
 +  ASSERT_NE(-1, pipe(fds));
 +
@@ -15705,20 +15694,69 @@ index 0000000000000000000000000000000000000000..f3b78a22aaecce577a9ed738d92ddb69
 +  string templ = temp_dir.path() + kMDWriterUnitTestFileName;
 +
 +  // pass an invalid principal mapping address, which will force
-+  // WriteMinidump to not dump any thread stacks.
-+  ASSERT_TRUE(WriteMinidump(templ.c_str(), child, &context, sizeof(context),
++  // WriteMinidump to not write a minidump.
++  ASSERT_FALSE(WriteMinidump(templ.c_str(), child, &context, sizeof(context),
 +                            true, static_cast<uintptr_t>(0x0102030405060708ull),
 +                            false));
++  close(fds[1]);
++}
 +
-+  // Read the minidump. And ensure that no thread memory was dumped.
++// Test that minidumping is skipped while writing minidumps if principal mapping
++// is not referenced.
++TEST(MinidumpWriterTest, MinidumpStacksSkippedIfRequested) {
++  int fds[2];
++  ASSERT_NE(-1, pipe(fds));
++
++  const pid_t child = fork();
++  if (child == 0) {
++    close(fds[1]);
++
++    // Create a thread that does not return, and only references libc (not the
++    // current executable). This thread should not be captured in the minidump.
++    pthread_t thread;
++    pthread_attr_t thread_attributes;
++    pthread_attr_init(&thread_attributes);
++    pthread_attr_setdetachstate(&thread_attributes, PTHREAD_CREATE_DETACHED);
++    sigset_t sigset;
++    sigemptyset(&sigset);
++    pthread_create(&thread, &thread_attributes,
++                   reinterpret_cast<void* (*)(void*)>(&sigsuspend), &sigset);
++
++    char b;
++    IGNORE_RET(HANDLE_EINTR(read(fds[0], &b, sizeof(b))));
++    close(fds[0]);
++    syscall(__NR_exit);
++  }
++  close(fds[0]);
++
++  ExceptionHandler::CrashContext context;
++  memset(&context, 0, sizeof(context));
++  ASSERT_EQ(0, getcontext(&context.context));
++  context.tid = child;
++
++  AutoTempDir temp_dir;
++  string templ = temp_dir.path() + kMDWriterUnitTestFileName;
++
++  // Pass an invalid principal mapping address, which will force
++  // WriteMinidump to not dump any thread stacks.
++  ASSERT_TRUE(WriteMinidump(
++      templ.c_str(), child, &context, sizeof(context), true,
++      reinterpret_cast<uintptr_t>(google_breakpad::WriteFile), false));
++
++  // Read the minidump. And ensure that thread memory was dumped only for the
++  // main thread.
 +  Minidump minidump(templ);
 +  ASSERT_TRUE(minidump.Read());
 +
 +  MinidumpThreadList *threads = minidump.GetThreadList();
++  int threads_with_stacks = 0;
 +  for (unsigned int i = 0; i < threads->thread_count(); ++i) {
 +    MinidumpThread *thread = threads->GetThreadAtIndex(i);
-+    ASSERT_TRUE(thread->GetMemory() == nullptr);
++    if (thread->GetMemory()) {
++      ++threads_with_stacks;
++    }
 +  }
++  ASSERT_EQ(1, threads_with_stacks);
 +  close(fds[1]);
 +}
 +
@@ -45833,10 +45871,10 @@ index 0000000000000000000000000000000000000000..5f6aa464df0ada0d79211eca2dfd0966
 +@end
 diff --git a/breakpad/src/client/mac/sender/uploader.mm b/breakpad/src/client/mac/sender/uploader.mm
 new file mode 100644
-index 0000000000000000000000000000000000000000..42a43bfc337e5ecc9dc642e6267d6c6e0938fc03
+index 0000000000000000000000000000000000000000..c74c05836a18983504391868803f3224b0b7f616
 --- /dev/null
 +++ b/breakpad/src/client/mac/sender/uploader.mm
-@@ -0,0 +1,636 @@
+@@ -0,0 +1,680 @@
 +// Copyright (c) 2011, Google Inc.
 +// All rights reserved.
 +//
@@ -46007,6 +46045,12 @@ index 0000000000000000000000000000000000000000..42a43bfc337e5ecc9dc642e6267d6c6e
 +
 +// Records the uploaded crash ID to the log file.
 +- (void)logUploadWithID:(const char *)uploadID;
++
++// Builds an URL parameter for a given dictionary key. Uses Uploader's
++// parameters to provide its value. Returns nil if no item is stored for the
++// given key.
++- (NSURLQueryItem *)queryItemWithName:(NSString *)queryItemName
++                          forParamKey:(NSString *)key;
 +@end
 +
 +@implementation Uploader
@@ -46371,8 +46415,46 @@ index 0000000000000000000000000000000000000000..42a43bfc337e5ecc9dc642e6267d6c6e
 +}
 +
 +//=============================================================================
++- (NSURLQueryItem *)queryItemWithName:(NSString *)queryItemName
++                          forParamKey:(NSString *)key {
++  NSString *value = [parameters_ objectForKey:key];
++  NSString *escapedValue =
++    [value stringByAddingPercentEncodingWithAllowedCharacters:
++      [NSCharacterSet URLQueryAllowedCharacterSet]];
++  return [NSURLQueryItem queryItemWithName:queryItemName value:escapedValue];
++}
++
++//=============================================================================
 +- (void)report {
 +  NSURL *url = [NSURL URLWithString:[parameters_ objectForKey:@BREAKPAD_URL]];
++
++  NSString *serverType = [parameters_ objectForKey:@BREAKPAD_SERVER_TYPE];
++  if ([serverType length] == 0 ||
++      [serverType isEqualToString:kGoogleServerType]) {
++    // when communicating to Google's crash collecting service, add URL params
++    // which identify the product
++    NSURLComponents *urlComponents = [NSURLComponents componentsWithURL:url
++                                                resolvingAgainstBaseURL:false];
++    NSMutableArray *queryItemsToAdd = [urlComponents.queryItems mutableCopy];
++    if (queryItemsToAdd == nil) {
++      queryItemsToAdd = [[NSMutableArray alloc] init];
++    }
++
++    NSURLQueryItem *queryItemProduct =
++      [self queryItemWithName:@"product" forParamKey:@BREAKPAD_PRODUCT];
++    NSURLQueryItem *queryItemVersion =
++      [self queryItemWithName:@"version" forParamKey:@BREAKPAD_VERSION];
++    NSURLQueryItem *queryItemGuid =
++      [self queryItemWithName:@"guid" forParamKey:@"guid"];
++
++    if (queryItemProduct != nil) [queryItemsToAdd addObject:queryItemProduct];
++    if (queryItemVersion != nil) [queryItemsToAdd addObject:queryItemVersion];
++    if (queryItemGuid != nil) [queryItemsToAdd addObject:queryItemGuid];
++
++    urlComponents.queryItems = queryItemsToAdd;
++    url = [urlComponents URL];
++  }
++
 +  HTTPMultipartUpload *upload = [[HTTPMultipartUpload alloc] initWithURL:url];
 +  NSMutableDictionary *uploadParameters = [NSMutableDictionary dictionary];
 +
@@ -57548,10 +57630,10 @@ index 0000000000000000000000000000000000000000..457f731957264f15edde0d1f8d443ecd
 +#endif  // CLIENT_WINDOWS_CRASH_GENERATION_CRASH_GENERATION_CLIENT_H_
 diff --git a/breakpad/src/client/windows/crash_generation/crash_generation_server.cc b/breakpad/src/client/windows/crash_generation/crash_generation_server.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..bb0968fe01af946369ab2fd2079fb63af0c0c71a
+index 0000000000000000000000000000000000000000..0af213ba2655764398c6656f2e11fd799346cd4f
 --- /dev/null
 +++ b/breakpad/src/client/windows/crash_generation/crash_generation_server.cc
-@@ -0,0 +1,931 @@
+@@ -0,0 +1,943 @@
 +// Copyright (c) 2008, Google Inc.
 +// All rights reserved.
 +//
@@ -58476,9 +58558,21 @@ index 0000000000000000000000000000000000000000..bb0968fe01af946369ab2fd2079fb63a
 +                                   client.assert_info(),
 +                                   client.dump_type(),
 +                                   true);
++
 +  if (!dump_generator.GenerateDumpFile(dump_path)) {
 +    return false;
 +  }
++
++  // If the client requests a full memory dump, we will write a normal mini
++  // dump and a full memory dump. Both dump files use the same uuid as file
++  // name prefix.
++  if (client.dump_type() & MiniDumpWithFullMemory) {
++    std::wstring full_dump_path;
++    if (!dump_generator.GenerateFullDumpFile(&full_dump_path)) {
++      return false;
++    }
++  }
++
 +  return dump_generator.WriteMinidump();
 +}
 +
@@ -58790,10 +58884,10 @@ index 0000000000000000000000000000000000000000..0ea90e5100fa672ee9a8d6baf02063a7
 +#endif  // CLIENT_WINDOWS_CRASH_GENERATION_CRASH_GENERATION_SERVER_H__
 diff --git a/breakpad/src/client/windows/crash_generation/minidump_generator.cc b/breakpad/src/client/windows/crash_generation/minidump_generator.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..786c9b93720d2f67c07a8848743d2c247b24e0c8
+index 0000000000000000000000000000000000000000..100e365a65344415cc88db6fa29556b444e8ed25
 --- /dev/null
 +++ b/breakpad/src/client/windows/crash_generation/minidump_generator.cc
-@@ -0,0 +1,579 @@
+@@ -0,0 +1,583 @@
 +// Copyright (c) 2008, Google Inc.
 +// All rights reserved.
 +//
@@ -59067,12 +59161,14 @@ index 0000000000000000000000000000000000000000..786c9b93720d2f67c07a8848743d2c24
 +      dump_type_(dump_type),
 +      is_client_pointers_(is_client_pointers),
 +      dump_path_(dump_path),
++      uuid_generated_(false),
 +      dump_file_(INVALID_HANDLE_VALUE),
 +      full_dump_file_(INVALID_HANDLE_VALUE),
 +      dump_file_is_internal_(false),
 +      full_dump_file_is_internal_(false),
 +      additional_streams_(NULL),
 +      callback_info_(NULL) {
++  uuid_ = {0};
 +  InitializeCriticalSection(&module_load_sync_);
 +  InitializeCriticalSection(&get_proc_address_sync_);
 +}
@@ -59358,15 +59454,17 @@ index 0000000000000000000000000000000000000000..786c9b93720d2f67c07a8848743d2c24
 +}
 +
 +bool MinidumpGenerator::GenerateDumpFilePath(wstring* file_path) {
-+  UUID id = {0};
++  if (!uuid_generated_) {
++    UuidCreateType create_uuid = GetCreateUuid();
++    if (!create_uuid) {
++      return false;
++    }
 +
-+  UuidCreateType create_uuid = GetCreateUuid();
-+  if (!create_uuid) {
-+    return false;
++    create_uuid(&uuid_);
++    uuid_generated_ = true;
 +  }
 +
-+  create_uuid(&id);
-+  wstring id_str = GUIDString::GUIDToWString(&id);
++  wstring id_str = GUIDString::GUIDToWString(&uuid_);
 +
 +  *file_path = dump_path_ + TEXT("\\") + id_str + TEXT(".dmp");
 +  return true;
@@ -59375,10 +59473,10 @@ index 0000000000000000000000000000000000000000..786c9b93720d2f67c07a8848743d2c24
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/client/windows/crash_generation/minidump_generator.h b/breakpad/src/client/windows/crash_generation/minidump_generator.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..a3c123056fa954ff38518773a3fc5f0bd9aa0753
+index 0000000000000000000000000000000000000000..a707c0bb1d68861288c47bdba8488e4c81f0aabb
 --- /dev/null
 +++ b/breakpad/src/client/windows/crash_generation/minidump_generator.h
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,203 @@
 +// Copyright (c) 2008, Google Inc.
 +// All rights reserved.
 +//
@@ -59548,6 +59646,10 @@ index 0000000000000000000000000000000000000000..a3c123056fa954ff38518773a3fc5f0b
 +
 +  // Folder path to store dump files.
 +  std::wstring dump_path_;
++
++  // UUID used to make dump file names.
++  UUID uuid_;
++  bool uuid_generated_;
 +
 +  // The file where the dump will be written.
 +  HANDLE dump_file_;
@@ -63486,10 +63588,10 @@ index 0000000000000000000000000000000000000000..6cef48d814648fe7764834cdcff25b10
 +#endif  // CLIENT_WINDOWS_UNITTESTS_DUMP_ANALYSIS_H_
 diff --git a/breakpad/src/client/windows/unittests/exception_handler_death_test.cc b/breakpad/src/client/windows/unittests/exception_handler_death_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..079ca3d6fd37ac19632e04dfda4974ac20181464
+index 0000000000000000000000000000000000000000..30600d410eab7a172459027d6b0dac232a58c579
 --- /dev/null
 +++ b/breakpad/src/client/windows/unittests/exception_handler_death_test.cc
-@@ -0,0 +1,582 @@
+@@ -0,0 +1,587 @@
 +// Copyright 2009, Google Inc.
 +// All rights reserved.
 +//
@@ -63849,8 +63951,8 @@ index 0000000000000000000000000000000000000000..079ca3d6fd37ac19632e04dfda4974ac
 +
 +  // Read the minidump. Locate the exception record and the
 +  // memory list, and then ensure that there is a memory region
-+  // in the memory list that covers the instruction pointer from
-+  // the exception record.
++  // in the memory list that covers at least 128 bytes on either
++  // side of the instruction pointer from the exception record.
 +  {
 +    Minidump minidump(minidump_filename);
 +    ASSERT_TRUE(minidump.Read());
@@ -63871,18 +63973,23 @@ index 0000000000000000000000000000000000000000..079ca3d6fd37ac19632e04dfda4974ac
 +        memory_list->GetMemoryRegionForAddress(instruction_pointer);
 +    ASSERT_TRUE(region);
 +
-+    EXPECT_EQ(kMemorySize, region->GetSize());
++    EXPECT_LE(kMemorySize, region->GetSize());
 +    const uint8_t* bytes = region->GetMemory();
 +    ASSERT_TRUE(bytes);
++
++    uint64_t ip_offset = instruction_pointer - region->GetBase();
++    EXPECT_GE(region->GetSize() - kOffset, ip_offset);
++    EXPECT_LE(kOffset, ip_offset);
 +
 +    uint8_t prefix_bytes[kOffset];
 +    uint8_t suffix_bytes[kMemorySize - kOffset - sizeof(instructions)];
 +    memset(prefix_bytes, 0, sizeof(prefix_bytes));
 +    memset(suffix_bytes, 0, sizeof(suffix_bytes));
-+    EXPECT_EQ(0, memcmp(bytes, prefix_bytes, sizeof(prefix_bytes)));
-+    EXPECT_EQ(0, memcmp(bytes + kOffset, instructions, sizeof(instructions)));
-+    EXPECT_EQ(0, memcmp(bytes + kOffset + sizeof(instructions),
-+                        suffix_bytes, sizeof(suffix_bytes)));
++    EXPECT_EQ(0, memcmp(bytes + ip_offset - kOffset, prefix_bytes,
++                        sizeof(prefix_bytes)));
++    EXPECT_EQ(0, memcmp(bytes + ip_offset, instructions, sizeof(instructions)));
++    EXPECT_EQ(0, memcmp(bytes + ip_offset + sizeof(instructions), suffix_bytes,
++                        sizeof(suffix_bytes)));
 +  }
 +
 +  DeleteFileW(minidump_filename_wide.c_str());
@@ -64407,10 +64514,10 @@ index 0000000000000000000000000000000000000000..3ae1d7cd05256532d4a9674f9ff9c4ff
 +}  // namespace
 diff --git a/breakpad/src/client/windows/unittests/exception_handler_test.cc b/breakpad/src/client/windows/unittests/exception_handler_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..55275323ee3a8d5232e5a063c3c9c427827d6c55
+index 0000000000000000000000000000000000000000..0e8ee9ff6ab6f8d62b7aad7ce8a9acb9599a0e30
 --- /dev/null
 +++ b/breakpad/src/client/windows/unittests/exception_handler_test.cc
-@@ -0,0 +1,501 @@
+@@ -0,0 +1,503 @@
 +// Copyright 2009, Google Inc.
 +// All rights reserved.
 +//
@@ -64660,6 +64767,7 @@ index 0000000000000000000000000000000000000000..55275323ee3a8d5232e5a063c3c9c427
 +  EXPECT_EXIT(DoCrashInvalidParameter(), ::testing::ExitedWithCode(0), "");
 +  ASSERT_TRUE(!dump_file.empty() && !full_dump_file.empty());
 +  ASSERT_TRUE(DoesPathExist(dump_file.c_str()));
++  ASSERT_TRUE(DoesPathExist(full_dump_file.c_str()));
 +
 +  // Verify the dump for infos.
 +  DumpAnalysis mini(dump_file);
@@ -64731,6 +64839,7 @@ index 0000000000000000000000000000000000000000..55275323ee3a8d5232e5a063c3c9c427
 +  EXPECT_EXIT(DoCrashPureVirtualCall(), ::testing::ExitedWithCode(0), "");
 +  ASSERT_TRUE(!dump_file.empty() && !full_dump_file.empty());
 +  ASSERT_TRUE(DoesPathExist(dump_file.c_str()));
++  ASSERT_TRUE(DoesPathExist(full_dump_file.c_str()));
 +
 +  // Verify the dump for infos.
 +  DumpAnalysis mini(dump_file);
@@ -87259,7 +87368,7 @@ index 0000000000000000000000000000000000000000..7c0fcfd35a627ae4ee27e6531678d1e0
 +}
 diff --git a/breakpad/src/common/language.cc b/breakpad/src/common/language.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..3929c0c6fc19bc8fa226866654d6504ccf1345c3
+index 0000000000000000000000000000000000000000..978fb85567b71238c670bb5e4bae68d9202fb380
 --- /dev/null
 +++ b/breakpad/src/common/language.cc
 @@ -0,0 +1,197 @@
@@ -87416,7 +87525,7 @@ index 0000000000000000000000000000000000000000..3929c0c6fc19bc8fa226866654d6504c
 +  }
 +
 +  virtual DemangleResult DemangleName(const string& mangled,
-+                                      std::string* demangled) const {
++                                      string* demangled) const {
 +    // Rust names use GCC C++ name mangling, but demangling them with
 +    // abi_demangle doesn't produce stellar results due to them having
 +    // another layer of encoding.
@@ -87708,10 +87817,10 @@ index 0000000000000000000000000000000000000000..e3d9db92bef2a1418c6ee5b5e33ed7ff
 +#endif  // COMMON_LINUX_CRC32_H_
 diff --git a/breakpad/src/common/linux/dump_symbols.cc b/breakpad/src/common/linux/dump_symbols.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..40b9e478b60bff47adb608e2969cc479c64919f2
+index 0000000000000000000000000000000000000000..d029ca1413bb2fa196e6b37c58c991fe99d6faa9
 --- /dev/null
 +++ b/breakpad/src/common/linux/dump_symbols.cc
-@@ -0,0 +1,1084 @@
+@@ -0,0 +1,1101 @@
 +// Copyright (c) 2011 Google Inc.
 +// All rights reserved.
 +//
@@ -88324,7 +88433,6 @@ index 0000000000000000000000000000000000000000..40b9e478b60bff47adb608e2969cc479
 +  typedef typename ElfClass::Addr Addr;
 +  typedef typename ElfClass::Phdr Phdr;
 +  typedef typename ElfClass::Shdr Shdr;
-+  typedef typename ElfClass::Word Word;
 +
 +  Addr loading_addr = GetLoadingAddress<ElfClass>(
 +      GetOffset<ElfClass, Phdr>(elf_header, elf_header->e_phoff),
@@ -88332,8 +88440,6 @@ index 0000000000000000000000000000000000000000..40b9e478b60bff47adb608e2969cc479
 +  module->SetLoadAddress(loading_addr);
 +  info->set_loading_addr(loading_addr, obj_file);
 +
-+  Word debug_section_type =
-+      elf_header->e_machine == EM_MIPS ? SHT_MIPS_DWARF : SHT_PROGBITS;
 +  const Shdr* sections =
 +      GetOffset<ElfClass, Shdr>(elf_header, elf_header->e_shoff);
 +  const Shdr* section_names = sections + elf_header->e_shstrndx;
@@ -88389,9 +88495,19 @@ index 0000000000000000000000000000000000000000..40b9e478b60bff47adb608e2969cc479
 +
 +    // Look for DWARF debugging information, and load it if present.
 +    const Shdr* dwarf_section =
-+      FindElfSectionByName<ElfClass>(".debug_info", debug_section_type,
++      FindElfSectionByName<ElfClass>(".debug_info", SHT_PROGBITS,
 +                                     sections, names, names_end,
 +                                     elf_header->e_shnum);
++
++    // .debug_info section type is SHT_PROGBITS for mips on pnacl toolchains,
++    // but MIPS_DWARF for regular gnu toolchains, so both need to be checked
++    if (elf_header->e_machine == EM_MIPS && !dwarf_section) {
++      dwarf_section =
++        FindElfSectionByName<ElfClass>(".debug_info", SHT_MIPS_DWARF,
++                                       sections, names, names_end,
++                                       elf_header->e_shnum);
++    }
++
 +    if (dwarf_section) {
 +      found_debug_info_section = true;
 +      found_usable_info = true;
@@ -88466,9 +88582,19 @@ index 0000000000000000000000000000000000000000..40b9e478b60bff47adb608e2969cc479
 +    // Dwarf Call Frame Information (CFI) is actually independent from
 +    // the other DWARF debugging information, and can be used alone.
 +    const Shdr* dwarf_cfi_section =
-+        FindElfSectionByName<ElfClass>(".debug_frame", debug_section_type,
++        FindElfSectionByName<ElfClass>(".debug_frame", SHT_PROGBITS,
 +                                       sections, names, names_end,
 +                                       elf_header->e_shnum);
++
++    // .debug_frame section type is SHT_PROGBITS for mips on pnacl toolchains,
++    // but MIPS_DWARF for regular gnu toolchains, so both need to be checked
++    if (elf_header->e_machine == EM_MIPS && !dwarf_cfi_section) {
++      dwarf_cfi_section =
++          FindElfSectionByName<ElfClass>(".debug_frame", SHT_MIPS_DWARF,
++                                        sections, names, names_end,
++                                        elf_header->e_shnum);
++    }
++
 +    if (dwarf_cfi_section) {
 +      // Ignore the return value of this function; even without call frame
 +      // information, the other debugging information could be perfectly
@@ -97583,10 +97709,10 @@ index 0000000000000000000000000000000000000000..42e8fed390890f0f960a4ec4213f07e4
 +@end
 diff --git a/breakpad/src/common/mac/HTTPMultipartUpload.m b/breakpad/src/common/mac/HTTPMultipartUpload.m
 new file mode 100644
-index 0000000000000000000000000000000000000000..9ac886d53ea2b20254f04513ec7576a013c9f21e
+index 0000000000000000000000000000000000000000..f6d081e4c8d8b67885d13067ef8c2df2e87b9baf
 --- /dev/null
 +++ b/breakpad/src/common/mac/HTTPMultipartUpload.m
-@@ -0,0 +1,269 @@
+@@ -0,0 +1,267 @@
 +// Copyright (c) 2006, Google Inc.
 +// All rights reserved.
 +//
@@ -97638,13 +97764,13 @@ index 0000000000000000000000000000000000000000..9ac886d53ea2b20254f04513ec7576a0
 +
 +// As -[NSURLConnection sendSynchronousRequest:returningResponse:error:] has
 +// been deprecated with iOS 9.0 / OS X 10.11 SDKs, this function re-implements
-+// it using -[NSURLSession dataTaskWithRequest:completionHandler:] when using
-+// those SDKs.
++// it using -[NSURLSession dataTaskWithRequest:completionHandler:] which is
++// available on iOS 7+.
 +static NSData *SendSynchronousNSURLRequest(NSURLRequest *req,
 +                                           NSURLResponse **out_response,
 +                                           NSError **out_error) {
-+#if (defined(__IPHONE_OS_VERSION_MIN_REQUIRED) && defined(__IPHONE_9_0) &&     \
-+     __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_9_0) ||                      \
++#if (defined(__IPHONE_OS_VERSION_MIN_REQUIRED) && defined(__IPHONE_7_0) &&     \
++     __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_7_0) ||                      \
 +    (defined(MAC_OS_X_VERSION_MIN_REQUIRED) &&                                 \
 +     defined(MAC_OS_X_VERSION_10_11) &&                                        \
 +     MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_11)
@@ -97812,9 +97938,7 @@ index 0000000000000000000000000000000000000000..9ac886d53ea2b20254f04513ec7576a0
 +
 +  // Add any files to the message
 +  NSArray *fileNames = [files_ allKeys];
-+  count = [fileNames count];
-+  for (NSInteger i = 0; i < count; ++i) {
-+    NSString *name = [fileNames objectAtIndex:i];
++  for (NSString *name in fileNames) {
 +    id fileOrData = [files_ objectForKey:name];
 +    NSData *fileData;
 +
@@ -118812,7 +118936,7 @@ index 0000000000000000000000000000000000000000..7fe66bd406e425687894dff10cc17068
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/common/windows/pdb_source_line_writer.cc b/breakpad/src/common/windows/pdb_source_line_writer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c2e22e40f6199aae8f94c557d3a19f0f6f683784
+index 0000000000000000000000000000000000000000..31920ba7ae4973534009ef2e025d7c720102a9a3
 --- /dev/null
 +++ b/breakpad/src/common/windows/pdb_source_line_writer.cc
 @@ -0,0 +1,1412 @@
@@ -119093,7 +119217,7 @@ index 0000000000000000000000000000000000000000..c2e22e40f6199aae8f94c557d3a19f0f
 +    AddressRangeVector ranges;
 +    MapAddressRange(image_map_, AddressRange(rva, length), &ranges);
 +    for (size_t i = 0; i < ranges.size(); ++i) {
-+      fprintf(output_, "%x %x %d %d\n", ranges[i].rva, ranges[i].length,
++      fprintf(output_, "%lx %lx %lu %lu\n", ranges[i].rva, ranges[i].length,
 +              line_num, source_id);
 +    }
 +    line.Release();
@@ -119138,7 +119262,7 @@ index 0000000000000000000000000000000000000000..c2e22e40f6199aae8f94c557d3a19f0f
 +  MapAddressRange(image_map_, AddressRange(rva, static_cast<DWORD>(length)),
 +                  &ranges);
 +  for (size_t i = 0; i < ranges.size(); ++i) {
-+    fprintf(output_, "FUNC %x %x %x %ws\n",
++    fprintf(output_, "FUNC %lx %lx %x %ws\n",
 +            ranges[i].rva, ranges[i].length, stack_param_size,
 +            name.m_str);
 +  }
@@ -119491,7 +119615,7 @@ index 0000000000000000000000000000000000000000..c2e22e40f6199aae8f94c557d3a19f0f
 +
 +      for (size_t i = 0; i < frame_infos.size(); ++i) {
 +        const FrameInfo& fi(frame_infos[i]);
-+        fprintf(output_, "STACK WIN %x %x %x %x %x %x %x %x %x %d ",
++        fprintf(output_, "STACK WIN %lx %lx %lx %lx %x %lx %lx %lx %lx %d ",
 +                type, fi.rva, fi.code_size, fi.prolog_size,
 +                0 /* epilog_size */, parameter_size, saved_register_size,
 +                local_size, max_stack_size, program_string_result == S_OK);
@@ -119637,10 +119761,10 @@ index 0000000000000000000000000000000000000000..c2e22e40f6199aae8f94c557d3a19f0f
 +        unwind_info = NULL;
 +      }
 +    } while (unwind_info);
-+    fprintf(output_, "STACK CFI INIT %x %x .cfa: $rsp .ra: .cfa %d - ^\n",
++    fprintf(output_, "STACK CFI INIT %lx %lx .cfa: $rsp .ra: .cfa %lu - ^\n",
 +            funcs[i].BeginAddress,
 +            funcs[i].EndAddress - funcs[i].BeginAddress, rip_offset);
-+    fprintf(output_, "STACK CFI %x .cfa: $rsp %d +\n",
++    fprintf(output_, "STACK CFI %lx .cfa: $rsp %lu +\n",
 +            funcs[i].BeginAddress, stack_size);
 +  }
 +
@@ -119680,7 +119804,7 @@ index 0000000000000000000000000000000000000000..c2e22e40f6199aae8f94c557d3a19f0f
 +  AddressRangeVector ranges;
 +  MapAddressRange(image_map_, AddressRange(rva, 1), &ranges);
 +  for (size_t i = 0; i < ranges.size(); ++i) {
-+    fprintf(output_, "PUBLIC %x %x %ws\n", ranges[i].rva,
++    fprintf(output_, "PUBLIC %lx %x %ws\n", ranges[i].rva,
 +            stack_param_size > 0 ? stack_param_size : 0,
 +            name.m_str);
 +  }
@@ -119712,7 +119836,7 @@ index 0000000000000000000000000000000000000000..c2e22e40f6199aae8f94c557d3a19f0f
 +    AddressRangeVector next_ranges;
 +    MapAddressRange(image_map_, AddressRange(rva, 1), &next_ranges);
 +    for (size_t i = 0; i < next_ranges.size(); ++i) {
-+      fprintf(output_, "PUBLIC %x %x %ws\n", next_ranges[i].rva,
++      fprintf(output_, "PUBLIC %lx %x %ws\n", next_ranges[i].rva,
 +              stack_param_size > 0 ? stack_param_size : 0, name.m_str);
 +    }
 +  }
@@ -119798,7 +119922,7 @@ index 0000000000000000000000000000000000000000..c2e22e40f6199aae8f94c557d3a19f0f
 +
 +    // Look for an EXE or DLL file.
 +    const wchar_t *extensions[] = { L"exe", L"dll" };
-+    for (int i = 0; i < sizeof(extensions) / sizeof(extensions[0]); i++) {
++    for (size_t i = 0; i < sizeof(extensions) / sizeof(extensions[0]); i++) {
 +      size_t dot_pos = file.find_last_of(L".");
 +      if (dot_pos != wstring::npos) {
 +        file.replace(dot_pos + 1, wstring::npos, extensions[i]);
@@ -135323,10 +135447,10 @@ index 0000000000000000000000000000000000000000..352905f20dacb199c8193263b5c06a37
 +}
 diff --git a/breakpad/src/processor/dump_context.cc b/breakpad/src/processor/dump_context.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..762d4fe21d7ad03c907cb7c1d77151e03da00170
+index 0000000000000000000000000000000000000000..8dd671e6f831bfb45b321b0c1a88bc0b816e9e2f
 --- /dev/null
 +++ b/breakpad/src/processor/dump_context.cc
-@@ -0,0 +1,659 @@
+@@ -0,0 +1,663 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -135878,22 +136002,26 @@ index 0000000000000000000000000000000000000000..762d4fe21d7ad03c907cb7c1d77151e0
 +
 +    case MD_CONTEXT_ARM: {
 +      const MDRawContextARM* context_arm = GetContextARM();
++      const char * const names[] = {
++        "r0",  "r1",  "r2",  "r3",  "r4",  "r5",  "r6",  "r7",
++        "r8",  "r9",  "r10", "r11", "r12", "sp",  "lr",  "pc",
++      };
 +      printf("MDRawContextARM\n");
-+      printf("  context_flags       = 0x%x\n",
++      printf("  context_flags        = 0x%x\n",
 +             context_arm->context_flags);
 +      for (unsigned int ireg_index = 0;
 +           ireg_index < MD_CONTEXT_ARM_GPR_COUNT;
 +           ++ireg_index) {
-+        printf("  iregs[%2d]            = 0x%x\n",
-+               ireg_index, context_arm->iregs[ireg_index]);
++        printf("  %-3s                  = 0x%x\n",
++               names[ireg_index], context_arm->iregs[ireg_index]);
 +      }
-+      printf("  cpsr                = 0x%x\n", context_arm->cpsr);
++      printf("  cpsr                 = 0x%x\n", context_arm->cpsr);
 +      printf("  float_save.fpscr     = 0x%" PRIx64 "\n",
 +             context_arm->float_save.fpscr);
 +      for (unsigned int fpr_index = 0;
 +           fpr_index < MD_FLOATINGSAVEAREA_ARM_FPR_COUNT;
 +           ++fpr_index) {
-+        printf("  float_save.regs[%2d] = 0x%" PRIx64 "\n",
++        printf("  float_save.regs[%2d]  = 0x%" PRIx64 "\n",
 +               fpr_index, context_arm->float_save.regs[fpr_index]);
 +      }
 +      for (unsigned int fpe_index = 0;
@@ -140942,10 +141070,10 @@ index 0000000000000000000000000000000000000000..a8b0e0df5ae1fcadf9c3d476fc7a3a3a
 +MICRODUMP_SUPPORTED_ARCHS="arm arm64"
 diff --git a/breakpad/src/processor/minidump.cc b/breakpad/src/processor/minidump.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c9fa4d8124d55d8bdf5e2d666dd664c3d865ddb4
+index 0000000000000000000000000000000000000000..1040004797ee8c24c00649f0465adc6f7dd111da
 --- /dev/null
 +++ b/breakpad/src/processor/minidump.cc
-@@ -0,0 +1,5381 @@
+@@ -0,0 +1,5383 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -142936,7 +143064,9 @@ index 0000000000000000000000000000000000000000..c9fa4d8124d55d8bdf5e2d666dd664c3
 +          // GetMiscRecord already byte-swapped the data[] field if it contains
 +          // UTF-16, so pass false as the swap argument.
 +          scoped_ptr<string> new_file(UTF16ToUTF8(string_utf16, false));
-+          file = *new_file;
++          if (new_file.get() != nullptr) {
++            file = *new_file;
++          }
 +        }
 +      }
 +    }
@@ -151878,3 +152008,372 @@ index 0000000000000000000000000000000000000000..1bff4cb01777524a0a0760d891613120
 +
 +  return RunTests() ? 0 : 1;
 +}
+diff --git a/breakpad/src/processor/postfix_evaluator-inl.h b/breakpad/src/processor/postfix_evaluator-inl.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..d7dbeac205163404a135f2d95017b135017283e7
+--- /dev/null
++++ b/breakpad/src/processor/postfix_evaluator-inl.h
+@@ -0,0 +1,363 @@
++// -*- mode: c++ -*-
++
++// Copyright (c) 2010 Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// postfix_evaluator-inl.h: Postfix (reverse Polish) notation expression
++// evaluator.
++//
++// Documentation in postfix_evaluator.h.
++//
++// Author: Mark Mentovai
++
++#ifndef PROCESSOR_POSTFIX_EVALUATOR_INL_H__
++#define PROCESSOR_POSTFIX_EVALUATOR_INL_H__
++
++#include "processor/postfix_evaluator.h"
++
++#include <stdio.h>
++
++#include <sstream>
++
++#include "google_breakpad/processor/memory_region.h"
++#include "processor/logging.h"
++
++namespace google_breakpad {
++
++using std::istringstream;
++using std::ostringstream;
++
++
++// A small class used in Evaluate to make sure to clean up the stack
++// before returning failure.
++class AutoStackClearer {
++ public:
++  explicit AutoStackClearer(vector<string> *stack) : stack_(stack) {}
++  ~AutoStackClearer() { stack_->clear(); }
++
++ private:
++  vector<string> *stack_;
++};
++
++
++template<typename ValueType>
++bool PostfixEvaluator<ValueType>::EvaluateToken(
++    const string &token,
++    const string &expression,
++    DictionaryValidityType *assigned) {
++  // There are enough binary operations that do exactly the same thing
++  // (other than the specific operation, of course) that it makes sense
++  // to share as much code as possible.
++  enum BinaryOperation {
++    BINARY_OP_NONE = 0,
++    BINARY_OP_ADD,
++    BINARY_OP_SUBTRACT,
++    BINARY_OP_MULTIPLY,
++    BINARY_OP_DIVIDE_QUOTIENT,
++    BINARY_OP_DIVIDE_MODULUS,
++    BINARY_OP_ALIGN
++  };
++
++  BinaryOperation operation = BINARY_OP_NONE;
++  if (token == "+")
++    operation = BINARY_OP_ADD;
++  else if (token == "-")
++    operation = BINARY_OP_SUBTRACT;
++  else if (token == "*")
++    operation = BINARY_OP_MULTIPLY;
++  else if (token == "/")
++    operation = BINARY_OP_DIVIDE_QUOTIENT;
++  else if (token == "%")
++    operation = BINARY_OP_DIVIDE_MODULUS;
++  else if (token == "@")
++    operation = BINARY_OP_ALIGN;
++
++  if (operation != BINARY_OP_NONE) {
++    // Get the operands.
++    ValueType operand1 = ValueType();
++    ValueType operand2 = ValueType();
++    if (!PopValues(&operand1, &operand2)) {
++      BPLOG(ERROR) << "Could not PopValues to get two values for binary "
++                      "operation " << token << ": " << expression;
++      return false;
++    }
++
++    // Perform the operation.
++    ValueType result;
++    switch (operation) {
++      case BINARY_OP_ADD:
++        result = operand1 + operand2;
++        break;
++      case BINARY_OP_SUBTRACT:
++        result = operand1 - operand2;
++        break;
++      case BINARY_OP_MULTIPLY:
++        result = operand1 * operand2;
++        break;
++      case BINARY_OP_DIVIDE_QUOTIENT:
++        result = operand1 / operand2;
++        break;
++      case BINARY_OP_DIVIDE_MODULUS:
++        result = operand1 % operand2;
++        break;
++      case BINARY_OP_ALIGN:
++	result =
++	  operand1 & (static_cast<ValueType>(-1) ^ (operand2 - 1));
++        break;
++      case BINARY_OP_NONE:
++        // This will not happen, but compilers will want a default or
++        // BINARY_OP_NONE case.
++        BPLOG(ERROR) << "Not reached!";
++        return false;
++        break;
++    }
++
++    // Save the result.
++    PushValue(result);
++  } else if (token == "^") {
++    // ^ for unary dereference.  Can't dereference without memory.
++    if (!memory_) {
++      BPLOG(ERROR) << "Attempt to dereference without memory: " <<
++                      expression;
++      return false;
++    }
++
++    ValueType address;
++    if (!PopValue(&address)) {
++      BPLOG(ERROR) << "Could not PopValue to get value to derefence: " <<
++                      expression;
++      return false;
++    }
++
++    ValueType value;
++    if (!memory_->GetMemoryAtAddress(address, &value)) {
++      BPLOG(ERROR) << "Could not dereference memory at address " <<
++                      HexString(address) << ": " << expression;
++      return false;
++    }
++
++    PushValue(value);
++  } else if (token == "=") {
++    // = for assignment.
++    ValueType value;
++    if (!PopValue(&value)) {
++      BPLOG(INFO) << "Could not PopValue to get value to assign: " <<
++                     expression;
++      return false;
++    }
++
++    // Assignment is only meaningful when assigning into an identifier.
++    // The identifier must name a variable, not a constant.  Variables
++    // begin with '$'.
++    string identifier;
++    if (PopValueOrIdentifier(NULL, &identifier) != POP_RESULT_IDENTIFIER) {
++      BPLOG(ERROR) << "PopValueOrIdentifier returned a value, but an "
++                      "identifier is needed to assign " <<
++                      HexString(value) << ": " << expression;
++      return false;
++    }
++    if (identifier.empty() || identifier[0] != '$') {
++      BPLOG(ERROR) << "Can't assign " << HexString(value) << " to " <<
++                      identifier << ": " << expression;
++      return false;
++    }
++
++    (*dictionary_)[identifier] = value;
++    if (assigned)
++      (*assigned)[identifier] = true;
++  } else {
++    // The token is not an operator, it's a literal value or an identifier.
++    // Push it onto the stack as-is.  Use push_back instead of PushValue
++    // because PushValue pushes ValueType as a string, but token is already
++    // a string.
++    stack_.push_back(token);
++  }
++  return true;
++}
++
++template<typename ValueType>
++bool PostfixEvaluator<ValueType>::EvaluateInternal(
++    const string &expression,
++    DictionaryValidityType *assigned) {
++  // Tokenize, splitting on whitespace.
++  istringstream stream(expression);
++  string token;
++  while (stream >> token) {
++    // Normally, tokens are whitespace-separated, but occasionally, the
++    // assignment operator is smashed up against the next token, i.e.
++    // $T0 $ebp 128 + =$eip $T0 4 + ^ =$ebp $T0 ^ =
++    // This has been observed in program strings produced by MSVS 2010 in LTO
++    // mode.
++    if (token.size() > 1 && token[0] == '=') {
++      if (!EvaluateToken("=", expression, assigned)) {
++        return false;
++      }
++
++      if (!EvaluateToken(token.substr(1), expression, assigned)) {
++        return false;
++      }
++    } else if (!EvaluateToken(token, expression, assigned)) {
++      return false;
++    }
++  }
++
++  return true;
++}
++
++template<typename ValueType>
++bool PostfixEvaluator<ValueType>::Evaluate(const string &expression,
++                                           DictionaryValidityType *assigned) {
++  // Ensure that the stack is cleared before returning.
++  AutoStackClearer clearer(&stack_);
++
++  if (!EvaluateInternal(expression, assigned))
++    return false;
++
++  // If there's anything left on the stack, it indicates incomplete execution.
++  // This is a failure case.  If the stack is empty, evalution was complete
++  // and successful.
++  if (stack_.empty())
++    return true;
++
++  BPLOG(ERROR) << "Incomplete execution: " << expression;
++  return false;
++}
++
++template<typename ValueType>
++bool PostfixEvaluator<ValueType>::EvaluateForValue(const string &expression,
++                                                   ValueType *result) {
++  // Ensure that the stack is cleared before returning.
++  AutoStackClearer clearer(&stack_);
++
++  if (!EvaluateInternal(expression, NULL))
++    return false;
++
++  // A successful execution should leave exactly one value on the stack.
++  if (stack_.size() != 1) {
++    BPLOG(ERROR) << "Expression yielded bad number of results: "
++                 << "'" << expression << "'";
++    return false;
++  }
++
++  return PopValue(result);
++}
++
++template<typename ValueType>
++typename PostfixEvaluator<ValueType>::PopResult
++PostfixEvaluator<ValueType>::PopValueOrIdentifier(
++    ValueType *value, string *identifier) {
++  // There needs to be at least one element on the stack to pop.
++  if (!stack_.size())
++    return POP_RESULT_FAIL;
++
++  string token = stack_.back();
++  stack_.pop_back();
++
++  // First, try to treat the value as a literal. Literals may have leading
++  // '-' sign, and the entire remaining string must be parseable as
++  // ValueType. If this isn't possible, it can't be a literal, so treat it
++  // as an identifier instead.
++  //
++  // Some versions of the libstdc++, the GNU standard C++ library, have
++  // stream extractors for unsigned integer values that permit a leading
++  // '-' sign (6.0.13); others do not (6.0.9). Since we require it, we
++  // handle it explicitly here.
++  istringstream token_stream(token);
++  ValueType literal = ValueType();
++  bool negative;
++  if (token_stream.peek() == '-') {
++    negative = true;
++    token_stream.get();
++  } else {
++    negative = false;
++  }
++  if (token_stream >> literal && token_stream.peek() == EOF) {
++    if (value) {
++      *value = literal;
++    }
++    if (negative)
++      *value = -*value;
++    return POP_RESULT_VALUE;
++  } else {
++    if (identifier) {
++      *identifier = token;
++    }
++    return POP_RESULT_IDENTIFIER;
++  }
++}
++
++
++template<typename ValueType>
++bool PostfixEvaluator<ValueType>::PopValue(ValueType *value) {
++  ValueType literal = ValueType();
++  string token;
++  PopResult result;
++  if ((result = PopValueOrIdentifier(&literal, &token)) == POP_RESULT_FAIL) {
++    return false;
++  } else if (result == POP_RESULT_VALUE) {
++    // This is the easy case.
++    *value = literal;
++  } else {  // result == POP_RESULT_IDENTIFIER
++    // There was an identifier at the top of the stack.  Resolve it to a
++    // value by looking it up in the dictionary.
++    typename DictionaryType::const_iterator iterator =
++        dictionary_->find(token);
++    if (iterator == dictionary_->end()) {
++      // The identifier wasn't found in the dictionary.  Don't imply any
++      // default value, just fail.
++      BPLOG(INFO) << "Identifier " << token << " not in dictionary";
++      return false;
++    }
++
++    *value = iterator->second;
++  }
++
++  return true;
++}
++
++
++template<typename ValueType>
++bool PostfixEvaluator<ValueType>::PopValues(ValueType *value1,
++                                            ValueType *value2) {
++  return PopValue(value2) && PopValue(value1);
++}
++
++
++template<typename ValueType>
++void PostfixEvaluator<ValueType>::PushValue(const ValueType &value) {
++  ostringstream token_stream;
++  token_stream << value;
++  stack_.push_back(token_stream.str());
++}
++
++
++}  // namespace google_breakpad
++
++
++#endif  // PROCESSOR_POSTFIX_EVALUATOR_INL_H__

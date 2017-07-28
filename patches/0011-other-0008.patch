@@ -1,3 +1,429 @@
+diff --git a/sdch/open-vcdiff/src/compile_assert.h b/sdch/open-vcdiff/src/compile_assert.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..301e906e38393500790fd334bd3388a7c0693cd5
+--- /dev/null
++++ b/sdch/open-vcdiff/src/compile_assert.h
+@@ -0,0 +1,85 @@
++// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++#ifndef OPEN_VCDIFF_COMPILE_ASSERT_H_
++#define OPEN_VCDIFF_COMPILE_ASSERT_H_
++
++#include <config.h>
++
++namespace open_vcdiff {
++
++// The VCD_COMPILE_ASSERT macro can be used to verify that a compile-time
++// expression is true. For example, you could use it to verify the
++// size of a static array:
++//
++//   VCD_COMPILE_ASSERT(ARRAYSIZE(content_type_names) == CONTENT_NUM_TYPES,
++//                      content_type_names_incorrect_size);
++//
++// or to make sure a struct is smaller than a certain size:
++//
++//   VCD_COMPILE_ASSERT(sizeof(foo) < 128, foo_too_large);
++//
++// For the second argument to VCD_COMPILE_ASSERT, the programmer should supply
++// a variable name that meets C++ naming rules, but that provides
++// a description of the compile-time rule that has been violated.
++// (In the example above, the name used is "foo_too_large".)
++// If the expression is false, most compilers will issue a warning/error
++// containing the name of the variable.
++// This refinement (adding a descriptive variable name argument)
++// is what differentiates VCD_COMPILE_ASSERT from Boost static asserts.
++
++template <bool>
++struct CompileAssert {
++};
++
++}  // namespace open_vcdiff
++
++#if __cplusplus >= 201103L
++#define VCD_COMPILE_ASSERT(expr, msg) static_assert(expr, #msg)
++#else
++#define VCD_COMPILE_ASSERT(expr, msg) \
++  typedef open_vcdiff::CompileAssert<static_cast<bool>(expr)> \
++      msg[static_cast<bool>(expr) ? 1 : -1]
++#endif  // __cplusplus >= 201103L
++
++// Implementation details of VCD_COMPILE_ASSERT:
++//
++// - VCD_COMPILE_ASSERT works by defining an array type that has -1
++//   elements (and thus is invalid) when the expression is false.
++//
++// - The simpler definition
++//
++//     #define VCD_COMPILE_ASSERT(expr, msg) typedef char msg[(expr) ? 1 : -1]
++//
++//   does not work, as gcc supports variable-length arrays whose sizes
++//   are determined at run-time (this is gcc's extension and not part
++//   of the C++ standard).  As a result, gcc fails to reject the
++//   following code with the simple definition:
++//
++//     int foo;
++//     VCD_COMPILE_ASSERT(foo, msg); // not supposed to compile as foo is
++//                               // not a compile-time constant.
++//
++// - By using the type CompileAssert<(static_cast<bool>(expr))>, we ensure that
++//   expr is a compile-time constant.  (Template arguments must be
++//   determined at compile-time.)
++//
++// - The array size is (static_cast<bool>(expr) ? 1 : -1), instead of simply
++//
++//     ((expr) ? 1 : -1).
++//
++//   This is to avoid running into a bug in MS VC 7.1, which
++//   causes ((0.0) ? 1 : -1) to incorrectly evaluate to 1.
++
++#endif  // OPEN_VCDIFF_COMPILE_ASSERT_H_
+diff --git a/sdch/open-vcdiff/src/config.h.in b/sdch/open-vcdiff/src/config.h.in
+new file mode 100644
+index 0000000000000000000000000000000000000000..139d5dfc964adb53220cf412ce011d422705d6f5
+--- /dev/null
++++ b/sdch/open-vcdiff/src/config.h.in
+@@ -0,0 +1,53 @@
++// Copyright 2016 The open-vcdiff Authors. All Rights Reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++/* Defined to PROJECT_VERSION from CMakeLists.txt */
++#cmakedefine OPEN_VCDIFF_VERSION "${OPEN_VCDIFF_VERSION}"
++
++/* Define to 1 if you have the <ext/rope> header file. */
++#cmakedefine HAVE_EXT_ROPE
++
++/* Define to 1 if you have the `gettimeofday' function. */
++#cmakedefine HAVE_GETTIMEOFDAY
++
++/* Define to 1 if you have the <malloc.h> header file. */
++#cmakedefine HAVE_MALLOC_H
++
++/* Define to 1 if you have the `memalign' function. */
++#cmakedefine HAVE_MEMALIGN
++
++/* Define to 1 if you have the `mprotect' function. */
++#cmakedefine HAVE_MPROTECT
++
++/* Define to 1 if you have the `posix_memalign' function. */
++#cmakedefine HAVE_POSIX_MEMALIGN
++
++/* Define to 1 if you have the <sys/mman.h> header file. */
++#cmakedefine HAVE_SYS_MMAN_H
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#cmakedefine HAVE_SYS_STAT_H
++
++/* Define to 1 if you have the <sys/time.h> header file. */
++#cmakedefine HAVE_SYS_TIME_H
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#cmakedefine HAVE_UNISTD_H
++
++/* Define to 1 if you have the <windows.h> header file. */
++#cmakedefine HAVE_WINDOWS_H
++
++/* Use custom compare function instead of memcmp */
++#cmakedefine VCDIFF_USE_BLOCK_COMPARE_WORDS
++
+diff --git a/sdch/open-vcdiff/src/decodetable.cc b/sdch/open-vcdiff/src/decodetable.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..05f08c950776a664fe84cc9a9cdb93951ef03ee6
+--- /dev/null
++++ b/sdch/open-vcdiff/src/decodetable.cc
+@@ -0,0 +1,113 @@
++// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// VCDiffCodeTableReader is a class to interpret a stream of opcodes
++// as VCDIFF instruction types, based on a VCDiffCodeTableData structure.
++
++#include <config.h>
++#include "decodetable.h"
++#include "codetable.h"
++#include "logging.h"
++#include "varint_bigendian.h"
++#include "vcdiff_defs.h"
++
++namespace open_vcdiff {
++
++VCDiffCodeTableReader::VCDiffCodeTableReader()
++    : code_table_data_(&VCDiffCodeTableData::kDefaultCodeTableData),
++      non_default_code_table_data_(NULL),
++      instructions_and_sizes_(NULL),
++      instructions_and_sizes_end_(NULL),
++      last_instruction_start_(NULL),
++      pending_second_instruction_(kNoOpcode),
++      last_pending_second_instruction_(kNoOpcode) {
++}
++
++bool VCDiffCodeTableReader::UseCodeTable(
++    const VCDiffCodeTableData& code_table_data, unsigned char max_mode) {
++  if (!code_table_data.Validate(max_mode)) return false;
++  if (!non_default_code_table_data_.get()) {
++    non_default_code_table_data_.reset(new VCDiffCodeTableData);
++  }
++  *non_default_code_table_data_ = code_table_data;
++  code_table_data_ = non_default_code_table_data_.get();
++  return true;
++}
++
++VCDiffInstructionType VCDiffCodeTableReader::GetNextInstruction(
++    int32_t* size,
++    unsigned char* mode) {
++  if (!instructions_and_sizes_) {
++    VCD_ERROR << "Internal error: GetNextInstruction() called before Init()"
++              << VCD_ENDL;
++    return VCD_INSTRUCTION_ERROR;
++  }
++  last_instruction_start_ = *instructions_and_sizes_;
++  last_pending_second_instruction_ = pending_second_instruction_;
++  unsigned char opcode = 0;
++  unsigned char instruction_type = VCD_NOOP;
++  int32_t instruction_size = 0;
++  unsigned char instruction_mode = 0;
++  do {
++    if (pending_second_instruction_ != kNoOpcode) {
++      // There is a second instruction left over
++      // from the most recently processed opcode.
++      opcode = static_cast<unsigned char>(pending_second_instruction_);
++      pending_second_instruction_ = kNoOpcode;
++      instruction_type = code_table_data_->inst2[opcode];
++      instruction_size = code_table_data_->size2[opcode];
++      instruction_mode = code_table_data_->mode2[opcode];
++      break;
++    }
++    if (*instructions_and_sizes_ >= instructions_and_sizes_end_) {
++      // Ran off end of instruction stream
++      return VCD_INSTRUCTION_END_OF_DATA;
++    }
++    opcode = **instructions_and_sizes_;
++    if (code_table_data_->inst2[opcode] != VCD_NOOP) {
++      // This opcode contains two instructions; process the first one now, and
++      // save a pointer to the second instruction, which should be returned
++      // by the next call to GetNextInstruction
++      pending_second_instruction_ = **instructions_and_sizes_;
++    }
++    ++(*instructions_and_sizes_);
++    instruction_type = code_table_data_->inst1[opcode];
++    instruction_size = code_table_data_->size1[opcode];
++    instruction_mode = code_table_data_->mode1[opcode];
++  // This do-while loop is necessary in case inst1 == VCD_NOOP for an opcode
++  // that was actually used in the encoding.  That case is unusual, but it
++  // is not prohibited by the standard.
++  } while (instruction_type == VCD_NOOP);
++  if (instruction_size == 0) {
++    // Parse the size as a Varint in the instruction stream.
++    switch (*size = VarintBE<int32_t>::Parse(instructions_and_sizes_end_,
++                                             instructions_and_sizes_)) {
++      case RESULT_ERROR:
++        VCD_ERROR << "Instruction size is not a valid variable-length integer"
++                  << VCD_ENDL;
++        return VCD_INSTRUCTION_ERROR;
++      case RESULT_END_OF_DATA:
++        UnGetInstruction();  // Rewind to instruction start
++        return VCD_INSTRUCTION_END_OF_DATA;
++      default:
++        break;  // Successfully parsed Varint
++    }
++  } else {
++    *size = instruction_size;
++  }
++  *mode = instruction_mode;
++  return static_cast<VCDiffInstructionType>(instruction_type);
++}
++
++};  // namespace open_vcdiff
+diff --git a/sdch/open-vcdiff/src/decodetable.h b/sdch/open-vcdiff/src/decodetable.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..0c9f5e37f2016224c412ed874e8e5474137f2cce
+--- /dev/null
++++ b/sdch/open-vcdiff/src/decodetable.h
+@@ -0,0 +1,151 @@
++// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++#ifndef OPEN_VCDIFF_DECODETABLE_H_
++#define OPEN_VCDIFF_DECODETABLE_H_
++
++#include <config.h>
++#include <stddef.h>     // NULL
++#include <stdint.h>     // int32_t
++#include <memory>       // auto_ptr
++#include "codetable.h"  // VCDiffInstructi...
++#include "logging.h"
++
++namespace open_vcdiff {
++
++// This class is used by the decoder.  It can use a standard or
++// non-standard code table, and will translate the opcodes in the code table
++// into delta instructions.
++//
++// NOT threadsafe.
++//
++class VCDiffCodeTableReader {
++ public:
++  // When constructed, the object will be set up to use the default code table.
++  // If a non-default code table is to be used, then UseCodeTable()
++  // should be called after the VCDiffCodeTableReader has been constructed.
++  // In any case, the Init() method must be called before GetNextInstruction()
++  // may be used.
++  //
++  VCDiffCodeTableReader();
++
++  // Sets up a non-standard code table.  The caller
++  // may free the memory occupied by the argument code table after
++  // passing it to this method, because the argument code table
++  // allocates space to store a copy of it.
++  // UseCodeTable() may be called either before or after calling Init().
++  // Returns true if the code table was accepted, or false if the
++  // argument did not appear to be a valid code table.
++  //
++  bool UseCodeTable(const VCDiffCodeTableData& code_table_data,
++                    unsigned char max_mode);
++
++  // Defines the buffer containing the instructions and sizes.
++  // This method must be called before GetNextInstruction() may be used.
++  // Init() may be called any number of times to reset the state of
++  // the object.
++  //
++  void Init(const char** instructions_and_sizes,
++            const char* instructions_and_sizes_end) {
++    instructions_and_sizes_ = instructions_and_sizes;
++    instructions_and_sizes_end_ = instructions_and_sizes_end;
++    last_instruction_start_ = NULL;
++    pending_second_instruction_ = kNoOpcode;
++    last_pending_second_instruction_ = kNoOpcode;
++  }
++
++  // Updates the pointers to the buffer containing the instructions and sizes,
++  // but leaves the rest of the reader state intact, so that (for example)
++  // any pending second instruction or unread instruction will still be
++  // read when requested.  NOTE: UnGetInstruction() will not work immediately
++  // after using UpdatePointers(); GetNextInstruction() must be called first.
++  //
++  void UpdatePointers(const char** instructions_and_sizes,
++                      const char* instructions_and_sizes_end) {
++    instructions_and_sizes_ = instructions_and_sizes;
++    instructions_and_sizes_end_ = instructions_and_sizes_end;
++    last_instruction_start_ = *instructions_and_sizes;
++    // pending_second_instruction_ is unchanged
++    last_pending_second_instruction_ = pending_second_instruction_;
++  }
++
++  // Returns the next instruction from the stream of opcodes,
++  // or VCD_INSTRUCTION_END_OF_DATA if the end of the opcode stream is reached,
++  // or VCD_INSTRUCTION_ERROR if an error occurred.
++  // In the first of these cases, increments *instructions_and_sizes_
++  // past the values it reads, and populates *size
++  // with the corresponding size for the returned instruction;
++  // otherwise, the value of *size is undefined, and is not
++  // guaranteed to be preserved.
++  // If the instruction returned is VCD_COPY, *mode will
++  // be populated with the copy mode; otherwise, the value of *mode
++  // is undefined, and is not guaranteed to be preserved.
++  // Any occurrences of VCD_NOOP in the opcode stream
++  // are skipped over and ignored, not returned.
++  // If Init() was not called before calling this method, then
++  // VCD_INSTRUCTION_ERROR will be returned.
++  //
++  VCDiffInstructionType GetNextInstruction(int32_t* size, unsigned char* mode);
++
++  // Puts a single instruction back onto the front of the
++  // instruction stream.  The next call to GetNextInstruction()
++  // will return the same value that was returned by the last
++  // call.  Calling UnGetInstruction() more than once before calling
++  // GetNextInstruction() will have no additional effect; you can
++  // only rewind one instruction.
++  //
++  void UnGetInstruction() {
++    if (last_instruction_start_) {
++      if (last_instruction_start_ > *instructions_and_sizes_) {
++        VCD_DFATAL << "Internal error: last_instruction_start past end of "
++                      "instructions_and_sizes in UnGetInstruction" << VCD_ENDL;
++      }
++      *instructions_and_sizes_ = last_instruction_start_;
++      if ((pending_second_instruction_ != kNoOpcode) &&
++          (last_pending_second_instruction_ != kNoOpcode)) {
++        VCD_DFATAL << "Internal error: two pending instructions in a row "
++                      "in UnGetInstruction" << VCD_ENDL;
++      }
++      pending_second_instruction_ = last_pending_second_instruction_;
++    }
++  }
++
++ private:
++  // A pointer to the code table.  This is the object that will be used
++  // to interpret opcodes in GetNextInstruction().
++  const VCDiffCodeTableData* code_table_data_;
++
++  // If the default code table is not being used, then space for the
++  // code table data will be allocated using this pointer and freed
++  // when the VCDiffCodeTableReader is destroyed.  This will keep the
++  // code that uses the object from having to worry about memory
++  // management for the non-standard code table, whose contents have
++  // been read as part of the encoded data file/stream.
++  //
++  std::auto_ptr<VCDiffCodeTableData> non_default_code_table_data_;
++
++  const char** instructions_and_sizes_;
++  const char* instructions_and_sizes_end_;
++  const char* last_instruction_start_;
++  OpcodeOrNone pending_second_instruction_;
++  OpcodeOrNone last_pending_second_instruction_;
++
++  // Making these private avoids implicit copy constructor & assignment operator
++  VCDiffCodeTableReader(const VCDiffCodeTableReader&);
++  void operator=(const VCDiffCodeTableReader&);
++};
++
++};  // namespace open_vcdiff
++
++#endif  // OPEN_VCDIFF_DECODETABLE_H_
 diff --git a/sdch/open-vcdiff/src/decodetable_test.cc b/sdch/open-vcdiff/src/decodetable_test.cc
 new file mode 100644
 index 0000000000000000000000000000000000000000..d1689541b38166eda6dfc42ca517c657c1392385
