@@ -1,23 +1,41 @@
-diff --git a/net/cert/cert_verify_proc_unittest.cc b/net/cert/cert_verify_proc_unittest.cc
-index 93437474b3373e42aa14165d6cfa9dd86d0036e0..0d880ce372313ae1a70ec9c60b57d81eb2bf6a06 100644
---- a/net/cert/cert_verify_proc_unittest.cc
-+++ b/net/cert/cert_verify_proc_unittest.cc
-@@ -700,6 +700,13 @@ class CertVerifyProcInspectSignatureAlgorithmsTest : public ::testing::Test {
-     LOG(INFO) << "Skipping test on iOS because certs with mismatched "
-                  "algorithms cannot be imported";
-     return false;
-+#elif defined(OS_MACOSX)
-+    if (base::mac::IsAtLeastOS10_12()) {
-+      LOG(INFO) << "Skipping test on macOS >= 10.12 because certs with "
-+                   "mismatched algorithms cannot be imported";
-+      return false;
-+    }
-+    return true;
- #else
-     return true;
+diff --git a/net/http/transport_security_state.cc b/net/http/transport_security_state.cc
+index 2e829ad4a9e101fbc669934991b8bfe82a194849..228bfab777fe3115853e6dfd436512bd5a7d4213 100644
+--- a/net/http/transport_security_state.cc
++++ b/net/http/transport_security_state.cc
+@@ -739,7 +739,7 @@ TransportSecurityState::TransportSecurityState()
+       sent_reports_cache_(kMaxHPKPReportCacheEntries) {
+ // Static pinning is only enabled for official builds to make sure that
+ // others don't end up with pins that cannot be easily updated.
+-#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_ANDROID) || defined(OS_IOS)
++#if (!defined(GOOGLE_CHROME_BUILD) && !defined (VIVALDI_BUILD))|| defined(OS_ANDROID) || defined(OS_IOS)
+   enable_static_pins_ = false;
+   enable_static_expect_ct_ = false;
  #endif
+diff --git a/net/ssl/client_cert_store_unittest-inl.h b/net/ssl/client_cert_store_unittest-inl.h
+index b72ba254f841a5224ad332436e8fcfeee2d54f7c..df561f3b9abffe71a1d5919d38d923f3b81690d4 100644
+--- a/net/ssl/client_cert_store_unittest-inl.h
++++ b/net/ssl/client_cert_store_unittest-inl.h
+@@ -93,7 +93,8 @@ TYPED_TEST_P(ClientCertStoreTest, AllIssuersAllowed) {
+ 
+ // Verify that certificates are correctly filtered against CertRequestInfo with
+ // |cert_authorities| containing only |authority_1_DN|.
+-TYPED_TEST_P(ClientCertStoreTest, CertAuthorityFiltering) {
++// Flaky: https://crbug.com/716730
++TYPED_TEST_P(ClientCertStoreTest, DISABLED_CertAuthorityFiltering) {
+   scoped_refptr<X509Certificate> cert_1(
+       ImportCertFromFile(GetTestCertsDirectory(), "client_1.pem"));
+   ASSERT_TRUE(cert_1.get());
+@@ -129,7 +130,7 @@ TYPED_TEST_P(ClientCertStoreTest, CertAuthorityFiltering) {
+ REGISTER_TYPED_TEST_CASE_P(ClientCertStoreTest,
+                            EmptyQuery,
+                            AllIssuersAllowed,
+-                           CertAuthorityFiltering);
++                           DISABLED_CertAuthorityFiltering);
+ 
+ }  // namespace net
+ 
 diff --git a/net/ssl/ssl_config.cc b/net/ssl/ssl_config.cc
-index 726ce48f1e9b53eb14f1bf0c9762a2a3b356a9b2..3357da6323501e3ec36d09156053f67e52d6d8af 100644
+index 528ff2add80115b2f4ed70e1aeec796d9f49f6dd..41f38041fab69c1fd3295f3b97cd2cb45c088cf2 100644
 --- a/net/ssl/ssl_config.cc
 +++ b/net/ssl/ssl_config.cc
 @@ -6,6 +6,8 @@
@@ -53,12 +71,12 @@ index 0f89bd9c9e4ad8aec00628a3a8ea2bdc849abddc..d528a6f070a09d8dcc4ad59abde6cda7
  
  void EmbeddedTestServer::ServeFilesFromSourceDirectory(
 diff --git a/services/ui/gpu/gpu_service.cc b/services/ui/gpu/gpu_service.cc
-index f5e5b1f179bcdf34da4450fb22d8905a4a2a21e7..42115f3187a19f17cf2757cfab930057a8a7a883 100644
+index 146e54890d444ba693e980fc312e13b02f055098..608d4bb40bcefe97856e1b916959b15ee6f36879 100644
 --- a/services/ui/gpu/gpu_service.cc
 +++ b/services/ui/gpu/gpu_service.cc
-@@ -35,6 +35,10 @@
- #include "ui/gl/init/gl_factory.h"
- #include "url/gurl.h"
+@@ -44,6 +44,10 @@
+ #include "media/gpu/content_video_view_overlay_allocator.h"
+ #endif
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +#include "platform_media/gpu/pipeline/propmedia_gpu_channel_manager.h"
@@ -66,8 +84,8 @@ index f5e5b1f179bcdf34da4450fb22d8905a4a2a21e7..42115f3187a19f17cf2757cfab930057
 +
  namespace ui {
  
- GpuService::GpuService(const gpu::GPUInfo& gpu_info,
-@@ -90,7 +94,11 @@ void GpuService::InitializeWithHost(mojom::GpuHostPtr gpu_host,
+ namespace {
+@@ -179,7 +183,11 @@ void GpuService::InitializeWithHost(mojom::GpuHostPtr gpu_host,
    // Defer creation of the render thread. This is to prevent it from handling
    // IPC messages before the sandbox has been enabled and all other necessary
    // initialization has succeeded.
@@ -76,17 +94,17 @@ index f5e5b1f179bcdf34da4450fb22d8905a4a2a21e7..42115f3187a19f17cf2757cfab930057
 +#else
    gpu_channel_manager_.reset(new gpu::GpuChannelManager(
 +#endif
-       gpu_preferences_, this, watchdog_thread_.get(),
-       base::ThreadTaskRunnerHandle::Get().get(), io_runner_.get(),
-       shutdown_event ? shutdown_event : &shutdown_event_, sync_point_manager_,
+       gpu_preferences_, gpu_workarounds_, this, watchdog_thread_.get(),
+       base::ThreadTaskRunnerHandle::Get(), io_runner_, sync_point_manager_,
+       gpu_memory_buffer_factory_.get(), gpu_feature_info_,
 diff --git a/services/ui/public/cpp/gpu/gpu.cc b/services/ui/public/cpp/gpu/gpu.cc
-index 45ba2595fcd7a5c9a20961d317c748552c20f130..4a7a2ed8379e7eef4d7bd1d2a76ff6404939fff0 100644
+index e0073d5d174cffd0ed178768ececa925dab01573..b952900dddfb45f974bab21d84748f3635e6b1e5 100644
 --- a/services/ui/public/cpp/gpu/gpu.cc
 +++ b/services/ui/public/cpp/gpu/gpu.cc
-@@ -102,11 +102,11 @@ void Gpu::EstablishGpuChannel(
-     connector_->BindInterface(ui::mojom::kServiceName, &gpu_);
-   else
-     interface_provider_->GetInterface(&gpu_);
+@@ -92,11 +92,11 @@ void Gpu::EstablishGpuChannel(
+     return;
+ 
+   connector_->BindInterface(service_name_, &gpu_);
 -  gpu_->EstablishGpuChannel(
 +  gpu_->EstablishGpuChannel(false,
        base::Bind(&Gpu::OnEstablishedGpuChannel, base::Unretained(this)));
@@ -97,8 +115,8 @@ index 45ba2595fcd7a5c9a20961d317c748552c20f130..4a7a2ed8379e7eef4d7bd1d2a76ff640
    DCHECK(IsMainThread());
    if (GetGpuChannel())
      return gpu_channel_;
-@@ -120,7 +120,7 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync() {
-     interface_provider_->GetInterface(&gpu_);
+@@ -107,7 +107,7 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync() {
+   connector_->BindInterface(service_name_, &gpu_);
  
    mojo::SyncCallRestrictions::ScopedAllowSyncCall allow_sync_call;
 -  if (!gpu_->EstablishGpuChannel(&client_id, &channel_handle, &gpu_info)) {
@@ -107,10 +125,10 @@ index 45ba2595fcd7a5c9a20961d317c748552c20f130..4a7a2ed8379e7eef4d7bd1d2a76ff640
          << "Channel encountered error while establishing gpu channel.";
      return nullptr;
 diff --git a/services/ui/public/cpp/gpu/gpu.h b/services/ui/public/cpp/gpu/gpu.h
-index f99250a65d4376a258ead4a999646095ac263d7b..03864c7d5efdcc3c00021f3fdb2a31272aa1e592 100644
+index 2ca485288ed24110349a59108b447ddf90482db9..fde3265c5dfd303ecc8df332eb839fde6f358b7d 100644
 --- a/services/ui/public/cpp/gpu/gpu.h
 +++ b/services/ui/public/cpp/gpu/gpu.h
-@@ -50,7 +50,7 @@ class Gpu : public gpu::GpuChannelHostFactory,
+@@ -47,7 +47,7 @@ class Gpu : public gpu::GpuChannelHostFactory,
    // gpu::GpuChannelEstablishFactory:
    void EstablishGpuChannel(
        const gpu::GpuChannelEstablishedCallback& callback) override;
@@ -132,16 +150,29 @@ index 552b9ebc9dc68071fc4ebd7eebbddda1e7d66c45..7df1925123cce3d400c481831d7f3078
                              handle<message_pipe>? channel_handle,
                              gpu.mojom.GpuInfo gpu_info);
  
-diff --git a/services/ui/ws/gpu_host.cc b/services/ui/ws/gpu_host.cc
-index bfa771d2719096c64545be4756218e0c0cb422b4..a0ba66cd1fbf9e70577788ccdef22644867fdf1b 100644
---- a/services/ui/ws/gpu_host.cc
-+++ b/services/ui/ws/gpu_host.cc
-@@ -57,7 +57,7 @@ class GpuClient : public mojom::Gpu {
-   }
+diff --git a/services/ui/ws/gpu_client.cc b/services/ui/ws/gpu_client.cc
+index c0ec4e6b5286054068e08380c6c5e083a8394106..6e04e04d637b2d201b4871f5013668947c3498c6 100644
+--- a/services/ui/ws/gpu_client.cc
++++ b/services/ui/ws/gpu_client.cc
+@@ -34,7 +34,7 @@ void GpuClient::OnGpuChannelEstablished(
+ }
  
+ // mojom::Gpu overrides:
+-void GpuClient::EstablishGpuChannel(
++void GpuClient::EstablishGpuChannel(bool force_access_to_gpu,
+     const EstablishGpuChannelCallback& callback) {
+   // TODO(sad): crbug.com/617415 figure out how to generate a meaningful
+   // tracing id.
+diff --git a/services/ui/ws/gpu_client.h b/services/ui/ws/gpu_client.h
+index ac5f07292b23d2fe1859076bc803b9280cadf2ec..90d60da0a24b8f43330d2fb347e8bcc59956f908 100644
+--- a/services/ui/ws/gpu_client.h
++++ b/services/ui/ws/gpu_client.h
+@@ -40,7 +40,7 @@ class GpuClient : public mojom::Gpu {
+   void OnGpuChannelEstablished(const EstablishGpuChannelCallback& callback,
+                                mojo::ScopedMessagePipeHandle channel_handle);
    // mojom::Gpu overrides:
 -  void EstablishGpuChannel(
 +  void EstablishGpuChannel(bool force_access_to_gpu,
-       const EstablishGpuChannelCallback& callback) override {
-     // TODO(sad): crbug.com/617415 figure out how to generate a meaningful
-     // tracing id.
+       const EstablishGpuChannelCallback& callback) override;
+   void CreateGpuMemoryBuffer(
+       gfx::GpuMemoryBufferId id,
