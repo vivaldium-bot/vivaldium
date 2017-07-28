@@ -1,3 +1,1439 @@
+diff --git a/third_party/angle/util/osx/OSXWindow.h b/third_party/angle/util/osx/OSXWindow.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..980f8165d77fb24780d9a82e19b1b9595e6c59cd
+--- /dev/null
++++ b/third_party/angle/util/osx/OSXWindow.h
+@@ -0,0 +1,63 @@
++//
++// Copyright (c) 2015 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++
++// OSXWindow.h: Definition of the implementation of OSWindow for OSX
++
++#ifndef UTIL_OSX_WINDOW_H_
++#define UTIL_OSX_WINDOW_H_
++
++#import <Cocoa/Cocoa.h>
++
++#include "OSWindow.h"
++
++class OSXWindow;
++
++@interface WindowDelegate : NSObject
++{
++    OSXWindow *mWindow;
++}
++- (id) initWithWindow: (OSXWindow*) window;
++@end
++
++@interface ContentView : NSView
++{
++    OSXWindow *mWindow;
++    NSTrackingArea *mTrackingArea;
++    int mCurrentModifier;
++}
++- (id) initWithWindow: (OSXWindow*) window;
++@end
++
++class OSXWindow : public OSWindow
++{
++  public:
++    OSXWindow();
++    ~OSXWindow();
++
++    bool initialize(const std::string &name, size_t width, size_t height) override;
++    void destroy() override;
++
++    EGLNativeWindowType getNativeWindow() const override;
++    EGLNativeDisplayType getNativeDisplay() const override;
++
++    void messageLoop() override;
++
++    void setMousePosition(int x, int y) override;
++    bool setPosition(int x, int y) override;
++    bool resize(int width, int height) override;
++    void setVisible(bool isVisible) override;
++
++    void signalTestEvent() override;
++
++    NSWindow *getNSWindow() const;
++
++  private:
++    NSWindow *mWindow;
++    WindowDelegate *mDelegate;
++    ContentView *mView;
++};
++
++#endif // UTIL_OSX_WINDOW_H_
+diff --git a/third_party/angle/util/osx/OSXWindow.mm b/third_party/angle/util/osx/OSXWindow.mm
+new file mode 100644
+index 0000000000000000000000000000000000000000..98e71248d6becd3bfef4ecf8676b42ab456167a1
+--- /dev/null
++++ b/third_party/angle/util/osx/OSXWindow.mm
+@@ -0,0 +1,697 @@
++//
++// Copyright (c) 2015 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++
++// OSXWindow.mm: Implementation of OSWindow for OSX
++
++#include "osx/OSXWindow.h"
++
++#include <set>
++// Include Carbon to use the keycode names in Carbon's Event.h
++#include <Carbon/Carbon.h>
++
++#include "common/debug.h"
++
++// On OSX 10.12 a number of AppKit interfaces have been renamed for consistency, and the previous
++// symbols tagged as deprecated. However we can't simply use the new symbols as it would break
++// compilation on our automated testing that doesn't use OSX 10.12 yet. So we just ignore the
++// warnings.
++#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
++
++// Some events such as "ShouldTerminate" are sent to the whole application so we keep a list of
++// all the windows in order to forward the event to each of them. However this and calling pushEvent
++// in ApplicationDelegate is inherently unsafe in a multithreaded environment.
++static std::set<OSXWindow*> gAllWindows;
++
++@interface Application : NSApplication
++@end
++
++@implementation Application
++    - (void) sendEvent: (NSEvent*) nsEvent
++    {
++        if ([nsEvent type] == NSApplicationDefined)
++        {
++            for (auto window : gAllWindows)
++            {
++                if ([window->getNSWindow() windowNumber] == [nsEvent windowNumber])
++                {
++                    Event event;
++                    event.Type = Event::EVENT_TEST;
++                    window->pushEvent(event);
++                }
++            }
++        }
++        [super sendEvent: nsEvent];
++    }
++@end
++
++// The Delegate receiving application-wide events.
++@interface ApplicationDelegate : NSObject
++@end
++
++@implementation ApplicationDelegate
++    - (NSApplicationTerminateReply) applicationShouldTerminate: (NSApplication*) sender
++    {
++        Event event;
++        event.Type = Event::EVENT_CLOSED;
++        for (auto window : gAllWindows)
++        {
++            window->pushEvent(event);
++        }
++        return NSTerminateCancel;
++    }
++@end
++static ApplicationDelegate *gApplicationDelegate = nil;
++
++static bool InitializeAppKit()
++{
++    if (NSApp != nil)
++    {
++        return true;
++    }
++
++    // Initialize the global variable "NSApp"
++    [Application sharedApplication];
++
++    // Make us appear in the dock
++    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
++
++    // Register our global event handler
++    gApplicationDelegate = [[ApplicationDelegate alloc] init];
++    if (gApplicationDelegate == nil)
++    {
++        return false;
++    }
++    [NSApp setDelegate: static_cast<id>(gApplicationDelegate)];
++
++    // Set our status to "started" so we are not bouncing in the doc and can activate
++    [NSApp finishLaunching];
++    return true;
++}
++
++// NS's and CG's coordinate systems start at the bottom left, while OSWindow's coordinate
++// system starts at the top left. This function converts the Y coordinate accordingly.
++static float YCoordToFromCG(float y)
++{
++    float screenHeight = CGDisplayBounds(CGMainDisplayID()).size.height;
++    return screenHeight - y;
++}
++
++// Delegate for window-wide events, note that the protocol doesn't contain anything input related.
++@implementation WindowDelegate
++    - (id) initWithWindow: (OSXWindow*) window
++    {
++        self = [super init];
++        if (self != nil)
++        {
++            mWindow = window;
++        }
++        return self;
++    }
++
++    - (void) onOSXWindowDeleted
++    {
++        mWindow = nil;
++    }
++
++    - (BOOL) windowShouldClose: (id) sender
++    {
++        Event event;
++        event.Type = Event::EVENT_CLOSED;
++        mWindow->pushEvent(event);
++        return NO;
++    }
++
++    - (void) windowDidResize: (NSNotification*) notification
++    {
++        NSSize windowSize = [[mWindow->getNSWindow() contentView] frame].size;
++        Event event;
++        event.Type = Event::EVENT_RESIZED;
++        event.Size.Width = windowSize.width;
++        event.Size.Height = windowSize.height;
++        mWindow->pushEvent(event);
++    }
++
++    - (void) windowDidMove: (NSNotification*) notification
++    {
++        NSRect screenspace = [mWindow->getNSWindow() frame];
++        Event event;
++        event.Type = Event::EVENT_MOVED;
++        event.Move.X = screenspace.origin.x;
++        event.Move.Y = YCoordToFromCG(screenspace.origin.y + screenspace.size.height);
++        mWindow->pushEvent(event);
++    }
++
++    - (void) windowDidBecomeKey: (NSNotification*) notification
++    {
++        Event event;
++        event.Type = Event::EVENT_GAINED_FOCUS;
++        mWindow->pushEvent(event);
++        [self retain];
++    }
++
++    - (void) windowDidResignKey: (NSNotification*) notification
++    {
++        if (mWindow != nil)
++        {
++            Event event;
++            event.Type = Event::EVENT_LOST_FOCUS;
++            mWindow->pushEvent(event);
++        }
++        [self release];
++    }
++@end
++
++static Key NSCodeToKey(int keyCode)
++{
++    // Missing KEY_PAUSE
++    switch (keyCode)
++    {
++      case kVK_Shift:               return KEY_LSHIFT;
++      case kVK_RightShift:          return KEY_RSHIFT;
++      case kVK_Option:              return KEY_LALT;
++      case kVK_RightOption:         return KEY_RALT;
++      case kVK_Control:             return KEY_LCONTROL;
++      case kVK_RightControl:        return KEY_RCONTROL;
++      case kVK_Command:             return KEY_LSYSTEM;
++      // Right System doesn't have a name, but shows up as 0x36.
++      case 0x36:                    return KEY_RSYSTEM;
++      case kVK_Function:            return KEY_MENU;
++
++      case kVK_ANSI_Semicolon:      return KEY_SEMICOLON;
++      case kVK_ANSI_Slash:          return KEY_SLASH;
++      case kVK_ANSI_Equal:          return KEY_EQUAL;
++      case kVK_ANSI_Minus:          return KEY_DASH;
++      case kVK_ANSI_LeftBracket:    return KEY_LBRACKET;
++      case kVK_ANSI_RightBracket:   return KEY_RBRACKET;
++      case kVK_ANSI_Comma:          return KEY_COMMA;
++      case kVK_ANSI_Period:         return KEY_PERIOD;
++      case kVK_ANSI_Backslash:      return KEY_BACKSLASH;
++      case kVK_ANSI_Grave:          return KEY_TILDE;
++      case kVK_Escape:              return KEY_ESCAPE;
++      case kVK_Space:               return KEY_SPACE;
++      case kVK_Return:              return KEY_RETURN;
++      case kVK_Delete:              return KEY_BACK;
++      case kVK_Tab:                 return KEY_TAB;
++      case kVK_PageUp:              return KEY_PAGEUP;
++      case kVK_PageDown:            return KEY_PAGEDOWN;
++      case kVK_End:                 return KEY_END;
++      case kVK_Home:                return KEY_HOME;
++      case kVK_Help:                return KEY_INSERT;
++      case kVK_ForwardDelete:       return KEY_DELETE;
++      case kVK_ANSI_KeypadPlus:     return KEY_ADD;
++      case kVK_ANSI_KeypadMinus:    return KEY_SUBTRACT;
++      case kVK_ANSI_KeypadMultiply: return KEY_MULTIPLY;
++      case kVK_ANSI_KeypadDivide:   return KEY_DIVIDE;
++
++      case kVK_F1:                  return KEY_F1;
++      case kVK_F2:                  return KEY_F2;
++      case kVK_F3:                  return KEY_F3;
++      case kVK_F4:                  return KEY_F4;
++      case kVK_F5:                  return KEY_F5;
++      case kVK_F6:                  return KEY_F6;
++      case kVK_F7:                  return KEY_F7;
++      case kVK_F8:                  return KEY_F8;
++      case kVK_F9:                  return KEY_F9;
++      case kVK_F10:                 return KEY_F10;
++      case kVK_F11:                 return KEY_F11;
++      case kVK_F12:                 return KEY_F12;
++      case kVK_F13:                 return KEY_F13;
++      case kVK_F14:                 return KEY_F14;
++      case kVK_F15:                 return KEY_F15;
++
++      case kVK_LeftArrow:           return KEY_LEFT;
++      case kVK_RightArrow:          return KEY_RIGHT;
++      case kVK_DownArrow:           return KEY_DOWN;
++      case kVK_UpArrow:             return KEY_UP;
++
++      case kVK_ANSI_Keypad0:        return KEY_NUMPAD0;
++      case kVK_ANSI_Keypad1:        return KEY_NUMPAD1;
++      case kVK_ANSI_Keypad2:        return KEY_NUMPAD2;
++      case kVK_ANSI_Keypad3:        return KEY_NUMPAD3;
++      case kVK_ANSI_Keypad4:        return KEY_NUMPAD4;
++      case kVK_ANSI_Keypad5:        return KEY_NUMPAD5;
++      case kVK_ANSI_Keypad6:        return KEY_NUMPAD6;
++      case kVK_ANSI_Keypad7:        return KEY_NUMPAD7;
++      case kVK_ANSI_Keypad8:        return KEY_NUMPAD8;
++      case kVK_ANSI_Keypad9:        return KEY_NUMPAD9;
++
++      case kVK_ANSI_A:              return KEY_A;
++      case kVK_ANSI_B:              return KEY_B;
++      case kVK_ANSI_C:              return KEY_C;
++      case kVK_ANSI_D:              return KEY_D;
++      case kVK_ANSI_E:              return KEY_E;
++      case kVK_ANSI_F:              return KEY_F;
++      case kVK_ANSI_G:              return KEY_G;
++      case kVK_ANSI_H:              return KEY_H;
++      case kVK_ANSI_I:              return KEY_I;
++      case kVK_ANSI_J:              return KEY_J;
++      case kVK_ANSI_K:              return KEY_K;
++      case kVK_ANSI_L:              return KEY_L;
++      case kVK_ANSI_M:              return KEY_M;
++      case kVK_ANSI_N:              return KEY_N;
++      case kVK_ANSI_O:              return KEY_O;
++      case kVK_ANSI_P:              return KEY_P;
++      case kVK_ANSI_Q:              return KEY_Q;
++      case kVK_ANSI_R:              return KEY_R;
++      case kVK_ANSI_S:              return KEY_S;
++      case kVK_ANSI_T:              return KEY_T;
++      case kVK_ANSI_U:              return KEY_U;
++      case kVK_ANSI_V:              return KEY_V;
++      case kVK_ANSI_W:              return KEY_W;
++      case kVK_ANSI_X:              return KEY_X;
++      case kVK_ANSI_Y:              return KEY_Y;
++      case kVK_ANSI_Z:              return KEY_Z;
++
++      case kVK_ANSI_1:              return KEY_NUM1;
++      case kVK_ANSI_2:              return KEY_NUM2;
++      case kVK_ANSI_3:              return KEY_NUM3;
++      case kVK_ANSI_4:              return KEY_NUM4;
++      case kVK_ANSI_5:              return KEY_NUM5;
++      case kVK_ANSI_6:              return KEY_NUM6;
++      case kVK_ANSI_7:              return KEY_NUM7;
++      case kVK_ANSI_8:              return KEY_NUM8;
++      case kVK_ANSI_9:              return KEY_NUM9;
++      case kVK_ANSI_0:              return KEY_NUM0;
++    }
++
++    return Key(0);
++}
++
++static void AddNSKeyStateToEvent(Event *event, int state)
++{
++    event->Key.Shift = state & NSShiftKeyMask;
++    event->Key.Control = state & NSControlKeyMask;
++    event->Key.Alt = state & NSAlternateKeyMask;
++    event->Key.System = state & NSCommandKeyMask;
++}
++
++static MouseButton TranslateMouseButton(int button)
++{
++    switch (button)
++    {
++      case 2:
++        return MOUSEBUTTON_MIDDLE;
++      case 3:
++        return MOUSEBUTTON_BUTTON4;
++      case 4:
++        return MOUSEBUTTON_BUTTON5;
++      default:
++        return MOUSEBUTTON_UNKNOWN;
++    }
++}
++
++// Delegate for NSView events, mostly the input events
++@implementation ContentView
++    - (id) initWithWindow: (OSXWindow*) window
++    {
++        self = [super init];
++        if (self != nil)
++        {
++            mWindow = window;
++            mTrackingArea = nil;
++            mCurrentModifier = 0;
++            [self updateTrackingAreas];
++        }
++        return self;
++    }
++
++    - (void) dealloc
++    {
++        [mTrackingArea release];
++        [super dealloc];
++    }
++
++    - (void) updateTrackingAreas
++    {
++        if (mTrackingArea != nil)
++        {
++            [self removeTrackingArea: mTrackingArea];
++            [mTrackingArea release];
++            mTrackingArea = nil;
++        }
++
++        NSRect bounds = [self bounds];
++        NSTrackingAreaOptions flags = NSTrackingMouseEnteredAndExited |
++                                      NSTrackingActiveInKeyWindow |
++                                      NSTrackingCursorUpdate |
++                                      NSTrackingInVisibleRect |
++                                      NSTrackingAssumeInside;
++        mTrackingArea = [[NSTrackingArea alloc] initWithRect: bounds
++                                                    options: flags
++                                                      owner: self
++                                                   userInfo: nil];
++
++        [self addTrackingArea: mTrackingArea];
++        [super updateTrackingAreas];
++    }
++
++    // Helps with performance
++    - (BOOL) isOpaque
++    {
++        return YES;
++    }
++
++    - (BOOL) canBecomeKeyView
++    {
++        return YES;
++    }
++
++    - (BOOL) acceptsFirstResponder
++    {
++        return YES;
++    }
++
++    // Handle mouse events from the NSResponder protocol
++    - (float) translateMouseY: (float) y
++    {
++        return [self frame].size.height - y;
++    }
++
++    - (void) addButtonEvent: (NSEvent*) nsEvent type:(Event::EventType) eventType button:(MouseButton) button
++    {
++        Event event;
++        event.Type = eventType;
++        event.MouseButton.Button = button;
++        event.MouseButton.X = [nsEvent locationInWindow].x;
++        event.MouseButton.Y = [self translateMouseY: [nsEvent locationInWindow].y];
++        mWindow->pushEvent(event);
++    }
++
++    - (void) mouseDown: (NSEvent*) event
++    {
++        [self addButtonEvent: event
++                        type: Event::EVENT_MOUSE_BUTTON_PRESSED
++                      button: MOUSEBUTTON_LEFT];
++    }
++
++    - (void) mouseDragged: (NSEvent*) event
++    {
++        [self mouseMoved: event];
++    }
++
++    - (void) mouseUp: (NSEvent*) event
++    {
++        [self addButtonEvent: event
++                        type: Event::EVENT_MOUSE_BUTTON_RELEASED
++                      button: MOUSEBUTTON_LEFT];
++    }
++
++    - (void) mouseMoved: (NSEvent*) nsEvent
++    {
++        Event event;
++        event.Type = Event::EVENT_MOUSE_MOVED;
++        event.MouseMove.X = [nsEvent locationInWindow].x;
++        event.MouseMove.Y = [self translateMouseY: [nsEvent locationInWindow].y];
++        mWindow->pushEvent(event);
++    }
++
++    - (void) mouseEntered: (NSEvent*) nsEvent
++    {
++        Event event;
++        event.Type = Event::EVENT_MOUSE_ENTERED;
++        mWindow->pushEvent(event);
++    }
++
++    - (void) mouseExited: (NSEvent*) nsEvent
++    {
++        Event event;
++        event.Type = Event::EVENT_MOUSE_LEFT;
++        mWindow->pushEvent(event);
++    }
++
++    - (void)rightMouseDown:(NSEvent *)event
++    {
++        [self addButtonEvent: event
++                        type: Event::EVENT_MOUSE_BUTTON_PRESSED
++                      button: MOUSEBUTTON_RIGHT];
++    }
++
++    - (void) rightMouseDragged: (NSEvent*) event
++    {
++        [self mouseMoved: event];
++    }
++
++    - (void) rightMouseUp: (NSEvent*)event
++    {
++        [self addButtonEvent: event
++                        type: Event::EVENT_MOUSE_BUTTON_RELEASED
++                      button: MOUSEBUTTON_RIGHT];
++    }
++
++    - (void) otherMouseDown: (NSEvent*) event
++    {
++        [self addButtonEvent: event
++                        type: Event::EVENT_MOUSE_BUTTON_PRESSED
++                      button: TranslateMouseButton([event buttonNumber])];
++    }
++
++    - (void) otherMouseDragged: (NSEvent*) event
++    {
++        [self mouseMoved: event];
++    }
++
++    - (void) otherMouseUp: (NSEvent*) event
++    {
++        [self addButtonEvent: event
++                        type: Event::EVENT_MOUSE_BUTTON_RELEASED
++                      button: TranslateMouseButton([event buttonNumber])];
++    }
++
++    - (void) scrollWheel: (NSEvent*) nsEvent
++    {
++        if (static_cast<int>([nsEvent deltaY]) == 0)
++        {
++            return;
++        }
++
++        Event event;
++        event.Type = Event::EVENT_MOUSE_WHEEL_MOVED;
++        event.MouseWheel.Delta = [nsEvent deltaY];
++        mWindow->pushEvent(event);
++    }
++
++    // Handle key events from the NSResponder protocol
++    - (void) keyDown: (NSEvent*) nsEvent
++    {
++        // TODO(cwallez) also send text events
++        Event event;
++        event.Type = Event::EVENT_KEY_PRESSED;
++        event.Key.Code = NSCodeToKey([nsEvent keyCode]);
++        AddNSKeyStateToEvent(&event, [nsEvent modifierFlags]);
++        mWindow->pushEvent(event);
++    }
++
++    - (void) keyUp: (NSEvent*) nsEvent
++    {
++        Event event;
++        event.Type = Event::EVENT_KEY_RELEASED;
++        event.Key.Code = NSCodeToKey([nsEvent keyCode]);
++        AddNSKeyStateToEvent(&event, [nsEvent modifierFlags]);
++        mWindow->pushEvent(event);
++    }
++
++    // Modifier keys do not trigger keyUp/Down events but only flagsChanged events.
++    - (void) flagsChanged: (NSEvent*) nsEvent
++    {
++        Event event;
++
++        // Guess if the key has been pressed or released with the change of modifiers
++        // It currently doesn't work when modifiers are unchanged, such as when pressing
++        // both shift keys. GLFW has a solution for this but it requires tracking the
++        // state of the keys. Implementing this is still TODO(cwallez)
++        int modifier = [nsEvent modifierFlags] & NSDeviceIndependentModifierFlagsMask;
++        if (modifier < mCurrentModifier)
++        {
++            event.Type = Event::EVENT_KEY_RELEASED;
++        }
++        else
++        {
++            event.Type = Event::EVENT_KEY_PRESSED;
++        }
++        mCurrentModifier = modifier;
++
++        event.Key.Code = NSCodeToKey([nsEvent keyCode]);
++        AddNSKeyStateToEvent(&event, [nsEvent modifierFlags]);
++        mWindow->pushEvent(event);
++    }
++@end
++
++OSXWindow::OSXWindow()
++    : mWindow(nil),
++      mDelegate(nil),
++      mView(nil)
++{
++}
++
++OSXWindow::~OSXWindow()
++{
++    destroy();
++}
++
++bool OSXWindow::initialize(const std::string &name, size_t width, size_t height)
++{
++    if (!InitializeAppKit())
++    {
++        return false;
++    }
++
++    unsigned int styleMask = NSTitledWindowMask | NSClosableWindowMask | NSResizableWindowMask |
++                             NSMiniaturizableWindowMask;
++    mWindow = [[NSWindow alloc] initWithContentRect: NSMakeRect(0, 0, width, height)
++                                          styleMask: styleMask
++                                            backing: NSBackingStoreBuffered
++                                              defer: NO];
++
++    if (mWindow == nil)
++    {
++        return false;
++    }
++
++    mDelegate = [[WindowDelegate alloc] initWithWindow: this];
++    if (mDelegate == nil)
++    {
++        return false;
++    }
++    [mWindow setDelegate: static_cast<id>(mDelegate)];
++
++    mView = [[ContentView alloc] initWithWindow: this];
++    if (mView == nil)
++    {
++        return false;
++    }
++    [mView setWantsLayer:YES];
++
++    [mWindow setContentView: mView];
++    [mWindow setTitle: [NSString stringWithUTF8String: name.c_str()]];
++    [mWindow setAcceptsMouseMovedEvents: YES];
++    [mWindow center];
++
++    [NSApp activateIgnoringOtherApps: YES];
++
++    mX = 0;
++    mY = 0;
++    mWidth = width;
++    mHeight = height;
++
++    gAllWindows.insert(this);
++    return true;
++}
++
++void OSXWindow::destroy()
++{
++    gAllWindows.erase(this);
++
++    [mView release];
++    mView = nil;
++    [mDelegate onOSXWindowDeleted];
++    [mDelegate release];
++    mDelegate = nil;
++    [mWindow release];
++    mWindow = nil;
++}
++
++EGLNativeWindowType OSXWindow::getNativeWindow() const
++{
++    return [mView layer];
++}
++
++EGLNativeDisplayType OSXWindow::getNativeDisplay() const
++{
++    // TODO(cwallez): implement it once we have defined what EGLNativeDisplayType is
++    return static_cast<EGLNativeDisplayType>(0);
++}
++
++void OSXWindow::messageLoop()
++{
++    @autoreleasepool
++    {
++        while (true)
++        {
++            NSEvent* event = [NSApp nextEventMatchingMask: NSAnyEventMask
++                                                untilDate: [NSDate distantPast]
++                                                   inMode: NSDefaultRunLoopMode
++                                                  dequeue: YES];
++            if (event == nil)
++            {
++                break;
++            }
++
++            if ([event type] == NSAppKitDefined)
++            {
++                continue;
++            }
++            [NSApp sendEvent: event];
++        }
++    }
++}
++
++void OSXWindow::setMousePosition(int x, int y)
++{
++    y = [mWindow frame].size.height - y -1;
++    NSPoint screenspace;
++
++    #if MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_7
++        screenspace = [mWindow convertBaseToScreen: NSMakePoint(x, y)];
++    #else
++        screenspace = [mWindow convertRectToScreen: NSMakeRect(x, y, 0, 0)].origin;
++    #endif
++    CGWarpMouseCursorPosition(CGPointMake(screenspace.x, YCoordToFromCG(screenspace.y)));
++}
++
++bool OSXWindow::setPosition(int x, int y)
++{
++    // Given CG and NS's coordinate system, the "Y" position of a window is the Y coordinate
++    // of the bottom of the window.
++    int newBottom = [mWindow frame].size.height + y;
++    NSRect emptyRect = NSMakeRect(x, YCoordToFromCG(newBottom), 0, 0);
++    [mWindow setFrameOrigin: [mWindow frameRectForContentRect: emptyRect].origin];
++    return true;
++}
++
++bool OSXWindow::resize(int width, int height)
++{
++    [mWindow setContentSize: NSMakeSize(width, height)];
++    return true;
++}
++
++void OSXWindow::setVisible(bool isVisible)
++{
++    if (isVisible)
++    {
++        [mWindow makeKeyAndOrderFront: nil];
++    }
++    else
++    {
++        [mWindow orderOut: nil];
++    }
++}
++
++void OSXWindow::signalTestEvent()
++{
++    @autoreleasepool
++    {
++        NSEvent *event = [NSEvent otherEventWithType: NSApplicationDefined
++                                            location: NSMakePoint(0, 0)
++                                       modifierFlags: 0
++                                           timestamp: 0.0
++                                        windowNumber: [mWindow windowNumber]
++                                             context: nil
++                                             subtype: 0
++                                               data1: 0
++                                               data2: 0];
++        [NSApp postEvent: event atStart: YES];
++    }
++}
++
++NSWindow* OSXWindow::getNSWindow() const
++{
++    return mWindow;
++}
++
++OSWindow *CreateOSWindow()
++{
++    return new OSXWindow;
++}
+diff --git a/third_party/angle/util/ozone/OzonePixmap.cpp b/third_party/angle/util/ozone/OzonePixmap.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..cc310a7a0531ba2fc96f6917df2a23e65dd94607
+--- /dev/null
++++ b/third_party/angle/util/ozone/OzonePixmap.cpp
+@@ -0,0 +1,12 @@
++//
++// Copyright (c) 2016 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++
++#include "OSPixmap.h"
++
++OSPixmap *CreateOSPixmap()
++{
++    return nullptr;
++}
+diff --git a/third_party/angle/util/ozone/OzoneWindow.cpp b/third_party/angle/util/ozone/OzoneWindow.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..9feece2161f266a6914220dc3f0984a90e4d633a
+--- /dev/null
++++ b/third_party/angle/util/ozone/OzoneWindow.cpp
+@@ -0,0 +1,82 @@
++//
++// Copyright (c) 2016 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++
++// OzoneWindow.cpp: Implementation of OSWindow for Ozone
++
++#include "ozone/OzoneWindow.h"
++
++int OzoneWindow::sLastDepth = 0;
++
++OzoneWindow::OzoneWindow()
++{
++}
++
++OzoneWindow::~OzoneWindow()
++{
++}
++
++bool OzoneWindow::initialize(const std::string &name, size_t width, size_t height)
++{
++    mNative.x = mX = 0;
++    mNative.y = mY = 0;
++    mNative.width = mWidth = width;
++    mNative.height = mHeight = height;
++    mNative.borderWidth  = 5;
++    mNative.borderHeight = 5;
++    mNative.visible      = 0;
++    mNative.depth        = sLastDepth++;
++    return true;
++}
++
++void OzoneWindow::destroy()
++{
++}
++
++EGLNativeWindowType OzoneWindow::getNativeWindow() const
++{
++    return reinterpret_cast<EGLNativeWindowType>(&mNative);
++}
++
++EGLNativeDisplayType OzoneWindow::getNativeDisplay() const
++{
++    return EGL_DEFAULT_DISPLAY;
++}
++
++void OzoneWindow::messageLoop()
++{
++}
++
++void OzoneWindow::setMousePosition(int x, int y)
++{
++}
++
++bool OzoneWindow::setPosition(int x, int y)
++{
++    mNative.x = mX = x;
++    mNative.y = mY = y;
++    return true;
++}
++
++bool OzoneWindow::resize(int width, int height)
++{
++    mNative.width = mWidth = width;
++    mNative.height = mHeight = height;
++    return true;
++}
++
++void OzoneWindow::setVisible(bool isVisible)
++{
++    mNative.visible = isVisible;
++}
++
++void OzoneWindow::signalTestEvent()
++{
++}
++
++OSWindow *CreateOSWindow()
++{
++    return new OzoneWindow();
++}
+diff --git a/third_party/angle/util/ozone/OzoneWindow.h b/third_party/angle/util/ozone/OzoneWindow.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..1a2fed50ceb7286f743d9cc85ccaee74d9547147
+--- /dev/null
++++ b/third_party/angle/util/ozone/OzoneWindow.h
+@@ -0,0 +1,54 @@
++//
++// Copyright (c) 2016 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++
++// OzoneWindow.h: Definition of the implementation of OSWindow for Ozone
++
++#ifndef UTIL_OZONE_WINDOW_H
++#define UTIL_OZONE_WINDOW_H
++
++#include <string>
++
++#include "OSWindow.h"
++
++class OzoneWindow : public OSWindow
++{
++  public:
++    OzoneWindow();
++    ~OzoneWindow();
++
++    bool initialize(const std::string &name, size_t width, size_t height) override;
++    void destroy() override;
++
++    EGLNativeWindowType getNativeWindow() const override;
++    EGLNativeDisplayType getNativeDisplay() const override;
++
++    void messageLoop() override;
++
++    void setMousePosition(int x, int y) override;
++    bool setPosition(int x, int y) override;
++    bool resize(int width, int height) override;
++    void setVisible(bool isVisible) override;
++
++    void signalTestEvent() override;
++
++  private:
++    struct Native
++    {
++        int32_t x;
++        int32_t y;
++        int32_t width;
++        int32_t height;
++        int32_t borderWidth;
++        int32_t borderHeight;
++        int32_t visible;
++        int32_t depth;
++    };
++
++    Native mNative;
++    static int sLastDepth;
++};
++
++#endif  // UTIL_OZONE_WINDOW_H
+diff --git a/third_party/angle/util/posix/Posix_system_utils.cpp b/third_party/angle/util/posix/Posix_system_utils.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..010735b3bf6b049ff04b2733e8ea74e83ca753de
+--- /dev/null
++++ b/third_party/angle/util/posix/Posix_system_utils.cpp
+@@ -0,0 +1,91 @@
++//
++// Copyright (c) 2015 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++
++// Posix_system_utils.cpp: Implementation of OS-specific functions for Posix systems
++
++#include "system_utils.h"
++
++#include <sys/resource.h>
++#include <dlfcn.h>
++#include <sched.h>
++#include <time.h>
++#include <unistd.h>
++
++namespace angle
++{
++
++void Sleep(unsigned int milliseconds)
++{
++    // On Windows Sleep(0) yields while it isn't guaranteed by Posix's sleep
++    // so we replicate Windows' behavior with an explicit yield.
++    if (milliseconds == 0)
++    {
++        sched_yield();
++    }
++    else
++    {
++        timespec sleepTime =
++        {
++            .tv_sec = milliseconds / 1000,
++            .tv_nsec = (milliseconds % 1000) * 1000000,
++        };
++
++        nanosleep(&sleepTime, nullptr);
++    }
++}
++
++void SetLowPriorityProcess()
++{
++    setpriority(PRIO_PROCESS, getpid(), 10);
++}
++
++void WriteDebugMessage(const char *format, ...)
++{
++    // TODO(jmadill): Implement this
++}
++
++class PosixLibrary : public Library
++{
++  public:
++    PosixLibrary(const std::string &libraryName);
++    ~PosixLibrary() override;
++
++    void *getSymbol(const std::string &symbolName) override;
++
++  private:
++    void *mModule;
++};
++
++PosixLibrary::PosixLibrary(const std::string &libraryName) : mModule(nullptr)
++{
++    const auto &fullName = libraryName + "." + GetSharedLibraryExtension();
++    mModule              = dlopen(fullName.c_str(), RTLD_NOW);
++}
++
++PosixLibrary::~PosixLibrary()
++{
++    if (mModule)
++    {
++        dlclose(mModule);
++    }
++}
++
++void *PosixLibrary::getSymbol(const std::string &symbolName)
++{
++    if (!mModule)
++    {
++        return nullptr;
++    }
++
++    return dlsym(mModule, symbolName.c_str());
++}
++
++Library *loadLibrary(const std::string &libraryName)
++{
++    return new PosixLibrary(libraryName);
++}
++
++} // namespace angle
+diff --git a/third_party/angle/util/random_utils.cpp b/third_party/angle/util/random_utils.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..2968a3f9113145dc452ef3960901cf2b9cda94c3
+--- /dev/null
++++ b/third_party/angle/util/random_utils.cpp
+@@ -0,0 +1,75 @@
++//
++// Copyright (c) 2014 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++// random_utils:
++//   Helper functions for random number generation.
++//
++
++#include "random_utils.h"
++
++#include <chrono>
++
++#include <cstdlib>
++
++namespace angle
++{
++
++// Seed from clock
++RNG::RNG()
++{
++    long long timeSeed = std::chrono::system_clock::now().time_since_epoch().count();
++    mGenerator.seed(static_cast<unsigned int>(timeSeed));
++}
++
++// Seed from fixed number.
++RNG::RNG(unsigned int seed) : mGenerator(seed)
++{
++}
++
++RNG::~RNG()
++{
++}
++
++void RNG::reseed(unsigned int newSeed)
++{
++    mGenerator.seed(newSeed);
++}
++
++int RNG::randomInt()
++{
++    std::uniform_int_distribution<int> intDistribution;
++    return intDistribution(mGenerator);
++}
++
++int RNG::randomIntBetween(int min, int max)
++{
++    std::uniform_int_distribution<int> intDistribution(min, max);
++    return intDistribution(mGenerator);
++}
++
++unsigned int RNG::randomUInt()
++{
++    std::uniform_int_distribution<unsigned int> uintDistribution;
++    return uintDistribution(mGenerator);
++}
++
++float RNG::randomFloat()
++{
++    std::uniform_real_distribution<float> floatDistribution;
++    return floatDistribution(mGenerator);
++}
++
++float RNG::randomFloatBetween(float min, float max)
++{
++    std::uniform_real_distribution<float> floatDistribution(min, max);
++    return floatDistribution(mGenerator);
++}
++
++float RNG::randomNegativeOneToOne()
++{
++    return randomFloatBetween(-1.0f, 1.0f);
++}
++
++}  // namespace angle
+diff --git a/third_party/angle/util/random_utils.h b/third_party/angle/util/random_utils.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..1128e033268c3a81fb971740374a7941ba24ed2c
+--- /dev/null
++++ b/third_party/angle/util/random_utils.h
+@@ -0,0 +1,55 @@
++//
++// Copyright (c) 2014 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++// random_utils:
++//   Helper functions for random number generation.
++//
++
++#ifndef UTIL_RANDOM_UTILS_H
++#define UTIL_RANDOM_UTILS_H
++
++// TODO(jmadill): Rework this if Chromium decides to ban <random>
++#include <random>
++
++#include <export.h>
++
++namespace angle
++{
++
++class ANGLE_EXPORT RNG
++{
++  public:
++    // Seed from clock
++    RNG();
++    // Seed from fixed number.
++    RNG(unsigned int seed);
++    ~RNG();
++
++    void reseed(unsigned int newSeed);
++
++    int randomInt();
++    int randomIntBetween(int min, int max);
++    unsigned int randomUInt();
++    float randomFloat();
++    float randomFloatBetween(float min, float max);
++    float randomNegativeOneToOne();
++
++  private:
++    std::default_random_engine mGenerator;
++};
++
++// Implemented htis way because of cross-module allocation issues.
++inline void FillVectorWithRandomUBytes(std::vector<uint8_t> *data)
++{
++    RNG rng;
++    for (size_t i = 0; i < data->size(); ++i)
++    {
++        (*data)[i] = static_cast<uint8_t>(rng.randomIntBetween(0, 255));
++    }
++}
++
++}  // namespace angle
++
++#endif // UTIL_RANDOM_UTILS_H
+diff --git a/third_party/angle/util/shader_utils.cpp b/third_party/angle/util/shader_utils.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..4970f62c5c47588df8ff46864893c031be5dede7
+--- /dev/null
++++ b/third_party/angle/util/shader_utils.cpp
+@@ -0,0 +1,208 @@
++//
++// Copyright (c) 2014 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++
++#include "shader_utils.h"
++
++#include <vector>
++#include <iostream>
++#include <fstream>
++
++static std::string ReadFileToString(const std::string &source)
++{
++    std::ifstream stream(source.c_str());
++    if (!stream)
++    {
++        std::cerr << "Failed to load shader file: " << source;
++        return "";
++    }
++
++    std::string result;
++
++    stream.seekg(0, std::ios::end);
++    result.reserve(static_cast<unsigned int>(stream.tellg()));
++    stream.seekg(0, std::ios::beg);
++
++    result.assign((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
++
++    return result;
++}
++
++GLuint CompileShader(GLenum type, const std::string &source)
++{
++    GLuint shader = glCreateShader(type);
++
++    const char *sourceArray[1] = { source.c_str() };
++    glShaderSource(shader, 1, sourceArray, NULL);
++    glCompileShader(shader);
++
++    GLint compileResult;
++    glGetShaderiv(shader, GL_COMPILE_STATUS, &compileResult);
++
++    if (compileResult == 0)
++    {
++        GLint infoLogLength;
++        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLogLength);
++
++        // Info log length includes the null terminator, so 1 means that the info log is an empty
++        // string.
++        if (infoLogLength > 1)
++        {
++            std::vector<GLchar> infoLog(infoLogLength);
++            glGetShaderInfoLog(shader, static_cast<GLsizei>(infoLog.size()), NULL, &infoLog[0]);
++            std::cerr << "shader compilation failed: " << &infoLog[0];
++        }
++        else
++        {
++            std::cerr << "shader compilation failed. <Empty log message>";
++        }
++
++        glDeleteShader(shader);
++        shader = 0;
++    }
++
++    return shader;
++}
++
++GLuint CompileShaderFromFile(GLenum type, const std::string &sourcePath)
++{
++    std::string source = ReadFileToString(sourcePath);
++    if (source.empty())
++    {
++        return 0;
++    }
++
++    return CompileShader(type, source);
++}
++
++GLuint CheckLinkStatusAndReturnProgram(GLuint program, bool outputErrorMessages)
++{
++    if (glGetError() != GL_NO_ERROR)
++        return 0;
++
++    GLint linkStatus;
++    glGetProgramiv(program, GL_LINK_STATUS, &linkStatus);
++    if (linkStatus == 0)
++    {
++        if (outputErrorMessages)
++        {
++            GLint infoLogLength;
++            glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLogLength);
++
++            // Info log length includes the null terminator, so 1 means that the info log is an
++            // empty string.
++            if (infoLogLength > 1)
++            {
++                std::vector<GLchar> infoLog(infoLogLength);
++                glGetProgramInfoLog(program, static_cast<GLsizei>(infoLog.size()), nullptr,
++                                    &infoLog[0]);
++
++                std::cerr << "program link failed: " << &infoLog[0];
++            }
++            else
++            {
++                std::cerr << "program link failed. <Empty log message>";
++            }
++        }
++
++        glDeleteProgram(program);
++        return 0;
++    }
++
++    return program;
++}
++
++GLuint CompileProgramWithTransformFeedback(
++    const std::string &vsSource,
++    const std::string &fsSource,
++    const std::vector<std::string> &transformFeedbackVaryings,
++    GLenum bufferMode)
++{
++    GLuint program = glCreateProgram();
++
++    GLuint vs = CompileShader(GL_VERTEX_SHADER, vsSource);
++    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fsSource);
++
++    if (vs == 0 || fs == 0)
++    {
++        glDeleteShader(fs);
++        glDeleteShader(vs);
++        glDeleteProgram(program);
++        return 0;
++    }
++
++    glAttachShader(program, vs);
++    glDeleteShader(vs);
++
++    glAttachShader(program, fs);
++    glDeleteShader(fs);
++
++    if (transformFeedbackVaryings.size() > 0)
++    {
++        std::vector<const char *> constCharTFVaryings;
++
++        for (const std::string &transformFeedbackVarying : transformFeedbackVaryings)
++        {
++            constCharTFVaryings.push_back(transformFeedbackVarying.c_str());
++        }
++
++        glTransformFeedbackVaryings(program, static_cast<GLsizei>(transformFeedbackVaryings.size()),
++                                    &constCharTFVaryings[0], bufferMode);
++    }
++
++    glLinkProgram(program);
++
++    return CheckLinkStatusAndReturnProgram(program, true);
++}
++
++GLuint CompileProgram(const std::string &vsSource, const std::string &fsSource)
++{
++    std::vector<std::string> emptyVector;
++    return CompileProgramWithTransformFeedback(vsSource, fsSource, emptyVector, GL_NONE);
++}
++
++GLuint CompileProgramFromFiles(const std::string &vsPath, const std::string &fsPath)
++{
++    std::string vsSource = ReadFileToString(vsPath);
++    std::string fsSource = ReadFileToString(fsPath);
++    if (vsSource.empty() || fsSource.empty())
++    {
++        return 0;
++    }
++
++    return CompileProgram(vsSource, fsSource);
++}
++
++GLuint CompileComputeProgram(const std::string &csSource, bool outputErrorMessages)
++{
++    GLuint program = glCreateProgram();
++
++    GLuint cs = CompileShader(GL_COMPUTE_SHADER, csSource);
++    if (cs == 0)
++    {
++        glDeleteProgram(program);
++        return 0;
++    }
++
++    glAttachShader(program, cs);
++
++    glLinkProgram(program);
++
++    return CheckLinkStatusAndReturnProgram(program, outputErrorMessages);
++}
++
++GLuint LoadBinaryProgramOES(const std::vector<uint8_t> &binary, GLenum binaryFormat)
++{
++    GLuint program = glCreateProgram();
++    glProgramBinaryOES(program, binaryFormat, binary.data(), static_cast<GLint>(binary.size()));
++    return CheckLinkStatusAndReturnProgram(program, true);
++}
++
++GLuint LoadBinaryProgramES3(const std::vector<uint8_t> &binary, GLenum binaryFormat)
++{
++    GLuint program = glCreateProgram();
++    glProgramBinary(program, binaryFormat, binary.data(), static_cast<GLint>(binary.size()));
++    return CheckLinkStatusAndReturnProgram(program, true);
++}
+diff --git a/third_party/angle/util/shader_utils.h b/third_party/angle/util/shader_utils.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..706b6d7b7a69d42d0b65e1d284a185e43d8e0e7a
+--- /dev/null
++++ b/third_party/angle/util/shader_utils.h
+@@ -0,0 +1,39 @@
++//
++// Copyright (c) 2014 The ANGLE Project Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++
++#ifndef SAMPLE_UTIL_SHADER_UTILS_H
++#define SAMPLE_UTIL_SHADER_UTILS_H
++
++#include <export.h>
++#include <GLES3/gl31.h>
++#include <GLES3/gl3.h>
++#include <GLES2/gl2.h>
++#include <GLES2/gl2ext.h>
++#include <EGL/egl.h>
++#include <EGL/eglext.h>
++
++#include <string>
++#include <vector>
++
++#define SHADER_SOURCE(...) #__VA_ARGS__
++
++ANGLE_EXPORT GLuint CompileShader(GLenum type, const std::string &source);
++ANGLE_EXPORT GLuint CompileShaderFromFile(GLenum type, const std::string &sourcePath);
++
++ANGLE_EXPORT GLuint
++CompileProgramWithTransformFeedback(const std::string &vsSource,
++                                    const std::string &fsSource,
++                                    const std::vector<std::string> &transformFeedbackVaryings,
++                                    GLenum bufferMode);
++ANGLE_EXPORT GLuint CompileProgram(const std::string &vsSource, const std::string &fsSource);
++ANGLE_EXPORT GLuint CompileProgramFromFiles(const std::string &vsPath, const std::string &fsPath);
++ANGLE_EXPORT GLuint CompileComputeProgram(const std::string &csSource,
++                                          bool outputErrorMessages = true);
++
++ANGLE_EXPORT GLuint LoadBinaryProgramOES(const std::vector<uint8_t> &binary, GLenum binaryFormat);
++ANGLE_EXPORT GLuint LoadBinaryProgramES3(const std::vector<uint8_t> &binary, GLenum binaryFormat);
++
++#endif // SAMPLE_UTIL_SHADER_UTILS_H
 diff --git a/third_party/angle/util/system_utils.h b/third_party/angle/util/system_utils.h
 new file mode 100644
 index 0000000000000000000000000000000000000000..1da43b8103042b092fdf0fb1f6aec76920d5b416
@@ -270910,405 +272346,3 @@ index 0000000000000000000000000000000000000000..8a1ef0a6ddc96e2965024d475b0b5424
 +#, c-format
 +msgid "syntax error, unexpected %s, expecting %s or %s or %s or %s"
 +msgstr "syntaksivirhe, odottamaton %s, odotetaan %s tai %s tai %s tai %s"
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/fr.gmo b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/fr.gmo
-new file mode 100644
-index 0000000000000000000000000000000000000000..11c009e296b9bab3ee98efdf2bab1c11d8c7c76e
-GIT binary patch
-literal 1296
-zcmbu8-A)rh6vqd|uZ;%3?lkel!~|le?ABDv77#@+O{fqo-cPsVc64{9nVm7^0el3#
-z^GP)E5qttoyd>V}mAC$vLI?p#gh~GS&Dr^%Gaoto{o2HPh7mxwpbWYUeTK^M3%UaR
-zhAu(lV~pJdC&6j(9ykMTf_3m6*aSa;WxYS(b@0YGV;?Y|0w)oFIm6gh@GE#5`~h-s
-zY=W`-;0!nmCg3CRBX|e=2A28kEW7|hhSW0LxdXs1K<A+IWq@&U1ct2{%Vlot7Rg~>
-z_`=B^E4H)~Lz31SdmyNg*K#<J30!oyIBu<idZkh6^uL^B><Rp*$vPr8rbK9M9CbzV
-zhWudfqN*T~cU9_*FW9;@uW>=%>hYJ-7Ru<Do;}~Bt}2Y?)@!G7NwsPeY{-GJj<<_c
-z_4pH?7QAC(>iU%Lco$RctH!3m`dWuCSt%T9@u$Mcm}+6z;8Bf75k(K<@Bt6&VF)AN
-zkZ)DF=f1Db!&zR7C~U-GIP$HE!tst3y2ykxHm0^p`ZA*p(^XEWER!^6cjt?(jkW4#
-z+h~UqWYwj|3&E<;sTZl_9VzmdR;<)XpXQtuJ)bO&P#%0CXt&zS`>zmH!(a)8q{i-B
-z16;$&p_>_GLg^+YePIjf=36h;c%xCD<<Y*mJnAcH`La$-53LhZ18?Ml^~_t5@fBn9
-zA|^f935)q!lSb3|DNPF$O*aFUZ|6o?N!tUjifzfz#nM~qNgB2F5nn3kI8s_ToVe!?
-uXB=Fw(8ws1D?9a2{o~wZ{0VbToB6MNyr!gq^p31dd?xpPc)8o@KiOZA-g&M7
-
-literal 0
-HcmV?d00001
-
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/fr.po b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/fr.po
-new file mode 100644
-index 0000000000000000000000000000000000000000..6e9e317ebfa4528530e1070f1f972445ffdc166e
---- /dev/null
-+++ b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/fr.po
-@@ -0,0 +1,60 @@
-+# Messages français pour Bison.
-+# Copyright © 2004 Free Software Foundation, Inc.
-+# Michel Robitaille <robitail@IRO.UMontreal.CA>, traducteur depuis/since 1996
-+# Dominique Boucher a été le traducteur de 1996 à 2000
-+#
-+msgid ""
-+msgstr ""
-+"Project-Id-Version: GNU bison-runtime 2.1\n"
-+"Report-Msgid-Bugs-To: bug-bison@gnu.org\n"
-+"POT-Creation-Date: 2008-12-11 17:06-0500\n"
-+"PO-Revision-Date: 2005-09-21 08:00-0500\n"
-+"Last-Translator: Michel Robitaille <robitail@IRO.UMontreal.CA>\n"
-+"Language-Team: French <traduc@traduc.org>\n"
-+"MIME-Version: 1.0\n"
-+"Content-Type: text/plain; charset=ISO-8859-1\n"
-+"Content-Transfer-Encoding: 8-bit\n"
-+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
-+
-+#: data/glr.c:923 data/yacc.c:630
-+msgid "syntax error: cannot back up"
-+msgstr "erreur de syntaxe: ne peut reculer"
-+
-+#: data/glr.c:1806
-+msgid "syntax is ambiguous"
-+msgstr "syntaxe ambiguë"
-+
-+#: data/glr.c:2181 data/glr.c:2187 data/glr.c:2455 data/lalr1.cc:878
-+#: data/yacc.c:1491 data/yacc.c:1519
-+msgid "syntax error"
-+msgstr "erreur de syntaxe"
-+
-+#: data/glr.c:2515 data/yacc.c:1106 data/yacc.c:1108 data/yacc.c:1284
-+#: data/yacc.c:1640
-+msgid "memory exhausted"
-+msgstr "mémoire épuisée"
-+
-+#: data/yacc.c:918
-+#, c-format
-+msgid "syntax error, unexpected %s"
-+msgstr "erreur de syntaxe, %s inattendu"
-+
-+#: data/yacc.c:919
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s"
-+msgstr "erreur de syntaxe, %s inattendu, attendait %s"
-+
-+#: data/yacc.c:920
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s"
-+msgstr "erreur de syntaxe, %s inattendu, attendait %s ou %s"
-+
-+#: data/yacc.c:921
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s or %s"
-+msgstr "erreur de syntaxe, %s inattendu, attendait %s ou %s ou %s"
-+
-+#: data/yacc.c:922
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s or %s or %s"
-+msgstr "erreur de syntaxe, %s inattendu, attendait %s ou %s ou %s ou %s"
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/ga.gmo b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/ga.gmo
-new file mode 100644
-index 0000000000000000000000000000000000000000..6b4fec2f1afb5026a2538578c89e8e3c3b36e632
-GIT binary patch
-literal 1324
-zcmb`FPiqrF7{<q1{{{b1JqUVu5d_6dx*LtgZ7spJLNKMJO?#j0PIpH)Ght>{(+}WB
-z@b1x@A3#rj5W$0o9s-Jp(38)$m7-ShPX``;`);21nRz$!c4GV)!>T}+pd2~{y@ty5
-z0XhqPgib<ZhZwsEo&m3c*TG3}6>NY{!71<+Smu2J&w=O17<+=}tKezW&kr*;0low;
-zgKxkHd=Iuj8fWZ2D8LT*0xW%>!7}f{5ylY5P%^YIl-n}^>^O83I#w1~Cw9QFHDi6*
-zH+F;MFcXFIGGT5*dod(wt+C$~RVuU`4rB}$U2(trt%|(TsC4>QPBQi%{QuLnPj5uA
-z(As$FiTDu}gKvW>N21?TX<-V-maKV*0eL&&YtlMpbVNPnjOMn`UiBr_Yhh(s4vh7D
-z!KEtU_lnf<u7R&e`L?%}>Y`?BT3K4`@>wf|M-HD8UPe?8f+i2^JPawk9R;^|&<Fw;
-z`LcYh%Ki3y4IbR#VUy}NqVVR9uOpo2T`RQ9g*P^$2k6qYB)nA^YNeb|<~dEf-KW+{
-zXSFszw>nel2%Q!pmAorOKcco(E~DvGNR{IyPMj-U3|qN!-qoBbY%JF?gRE)kXDSQr
-zh55ZN64rvstkGU-oMvNyvAi7m$w4lZo}xGt)=7W2y|T!g%?4)JGnYqSmzK}#*d(|{
-z5jA_tS6E!Aex@aj66G_=q_Fm#N)ToGncY-&zgJb<DN2PdT?%vW)AggJO1*4kd?xUp
-zr{uO&PPr_v=Fc1cX)EbZ2N7_fF~1CpNRMcJQzgn$yp?aUc=!8Kl5O@fJ2G*`z5)v}
-Bl|cXi
-
-literal 0
-HcmV?d00001
-
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/ga.po b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/ga.po
-new file mode 100644
-index 0000000000000000000000000000000000000000..45c29d82e104e6db3416bad7e9b1e80a69c73893
---- /dev/null
-+++ b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/ga.po
-@@ -0,0 +1,60 @@
-+# Irish translations for bison.
-+# Copyright (C) 2004 Free Software Foundation, Inc.
-+# This file is distributed under the same license as the bison package.
-+# Kevin Patrick Scannell <scannell@SLU.EDU>, 2004, 2005.
-+#
-+msgid ""
-+msgstr ""
-+"Project-Id-Version: bison-runtime 2.1\n"
-+"Report-Msgid-Bugs-To: bug-bison@gnu.org\n"
-+"POT-Creation-Date: 2008-12-11 17:06-0500\n"
-+"PO-Revision-Date: 2005-09-18 23:14-0500\n"
-+"Last-Translator: Kevin Patrick Scannell <scannell@SLU.EDU>\n"
-+"Language-Team: Irish <gaeilge-gnulinux@lists.sourceforge.net>\n"
-+"MIME-Version: 1.0\n"
-+"Content-Type: text/plain; charset=ISO-8859-1\n"
-+"Content-Transfer-Encoding: 8bit\n"
-+
-+#: data/glr.c:923 data/yacc.c:630
-+msgid "syntax error: cannot back up"
-+msgstr "earráid chomhréire: ní féidir cúlú"
-+
-+#: data/glr.c:1806
-+msgid "syntax is ambiguous"
-+msgstr "comhréir dhébhríoch"
-+
-+#: data/glr.c:2181 data/glr.c:2187 data/glr.c:2455 data/lalr1.cc:878
-+#: data/yacc.c:1491 data/yacc.c:1519
-+msgid "syntax error"
-+msgstr "earráid chomhréire"
-+
-+#: data/glr.c:2515 data/yacc.c:1106 data/yacc.c:1108 data/yacc.c:1284
-+#: data/yacc.c:1640
-+msgid "memory exhausted"
-+msgstr "cuimhne ídithe"
-+
-+#: data/yacc.c:918
-+#, c-format
-+msgid "syntax error, unexpected %s"
-+msgstr "earráid chomhréire, %s gan choinne"
-+
-+#: data/yacc.c:919
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s"
-+msgstr "earráid chomhréire, %s gan choinne, bhíothas ag súil le %s"
-+
-+#: data/yacc.c:920
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s"
-+msgstr "earráid chomhréire, %s gan choinne, bhíothas ag súil le %s nó %s"
-+
-+#: data/yacc.c:921
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s or %s"
-+msgstr "earráid chomhréire, %s gan choinne, bhíothas ag súil le %s nó %s nó %s"
-+
-+#: data/yacc.c:922
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s or %s or %s"
-+msgstr ""
-+"earráid chomhréire, %s gan choinne, bhíothas ag súil le %s nó %s nó %s nó %s"
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/hr.gmo b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/hr.gmo
-new file mode 100644
-index 0000000000000000000000000000000000000000..bf3cf01b4d696f66c5b7c1134712182499440dcb
-GIT binary patch
-literal 529
-zcmY+B&2AGh5XTn;mpviQAk7g3v$dBNf|G@av`Cd25vqv0vpd~5aqN}ttrDJsOJ9$d
-z;02fshlr7X@>u%Mm*@BMCl49hW99|(mU+rdn86mzGv+(<>rs}i_<qU!VV}=`Hsr{5
-zwDaKrv|sB!CTg-p@EfWVUN`uILNwkfSefV@$l~3(&TpynA>ll>rok_L8*%Ab(YJV1
-zO<UI&KD7Db+Y)Dibm9znsS_zEg&3hMQA&^>lz5NgLI@V(E!~@;(n(jMI7ca<ELADq
-z2$|pLm~a`ii&iHe6kL)s5pHz7_4lTRNkew<r+4;H#IP;yC=~1Pi345R>y~gydZ%C(
-zJh!ABOswB(Ykun5Z1mI`*YA(|`StwjG`TE9KJzY-<LZZwhe)(fXPwo?jiFxa5Ghss
-zJvbU&e8lo39$Mud@XFP`F|JiGTA7qDY#+46uRiRe0@od%u`0*#&#hj$s*>;-1SpWN
-a$9ZOA9Xh+=apAZuvx!>+fnv|w$^HT~RG8EN
-
-literal 0
-HcmV?d00001
-
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/hr.po b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/hr.po
-new file mode 100644
-index 0000000000000000000000000000000000000000..636789da845d181f0468b9d8ba5840fab6940ab8
---- /dev/null
-+++ b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/hr.po
-@@ -0,0 +1,61 @@
-+# Translation of bision to Croatian
-+# Copyright (C) 2002 Free Software Foundation, Inc.
-+# Denis Lackovic <delacko@fly.srk.fer.hr>, 2002.
-+# This file is distributed under the same license as the bison package.
-+# Denis Lackovic <delacko@fly.srk.fer.hr>, 2002.
-+#
-+msgid ""
-+msgstr ""
-+"Project-Id-Version: bison 1.34a\n"
-+"Report-Msgid-Bugs-To: bug-bison@gnu.org\n"
-+"POT-Creation-Date: 2008-12-11 17:06-0500\n"
-+"PO-Revision-Date: 2002-04-10 22:20+01\n"
-+"Last-Translator: Denis Lackovic <delacko@fly.srk.fer.hr>\n"
-+"Language-Team: Croatian <lokalizacija@linux.hr>\n"
-+"MIME-Version: 1.0\n"
-+"Content-Type: text/plain; charset=iso-8859-2\n"
-+"Content-Transfer-Encoding: 8bit\n"
-+"Plural-Forms: nplurals=2; plural=(n==1 ? 0 : 1);\n"
-+
-+#: data/glr.c:923 data/yacc.c:630
-+msgid "syntax error: cannot back up"
-+msgstr ""
-+
-+#: data/glr.c:1806
-+msgid "syntax is ambiguous"
-+msgstr ""
-+
-+#: data/glr.c:2181 data/glr.c:2187 data/glr.c:2455 data/lalr1.cc:878
-+#: data/yacc.c:1491 data/yacc.c:1519
-+msgid "syntax error"
-+msgstr ""
-+
-+#: data/glr.c:2515 data/yacc.c:1106 data/yacc.c:1108 data/yacc.c:1284
-+#: data/yacc.c:1640
-+msgid "memory exhausted"
-+msgstr "iscrpljeni memorijski resursi"
-+
-+#: data/yacc.c:918
-+#, c-format
-+msgid "syntax error, unexpected %s"
-+msgstr ""
-+
-+#: data/yacc.c:919
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s"
-+msgstr ""
-+
-+#: data/yacc.c:920
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s"
-+msgstr ""
-+
-+#: data/yacc.c:921
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s or %s"
-+msgstr ""
-+
-+#: data/yacc.c:922
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s or %s or %s"
-+msgstr ""
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/id.gmo b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/id.gmo
-new file mode 100644
-index 0000000000000000000000000000000000000000..649f2d9a8e3a4b3978443543a77ac3f697048f00
-GIT binary patch
-literal 1393
-zcmb`G%T5$Q6oyN{TSwz{r;FNXP^Ox06oDQ=0s;~x5Hb*Vrlz~-DW|)tQx`My06u~*
-z;A`l!xN_x6R&M>9mJkCPFI4j9>#F|GsXBG}bbag{K?|VUPyt<rK0<Z-3SEWvp-a%n
-z8A5J>SHOGV1UL!qfYabxunm3y>wMq98{o~6W^5d+^L!p9<QljS-UUa;2$=!zgHOON
-zxCXulH^DF9IGCJm)|Y}vO)yN5f}nd)13)f7=b-a-2kl}5f~g59MXAk@ib0Qi>qJKE
-zP&q!J!WeCS>a?g=Vo-?`E_%oQ?q3V}YNJ&7Upc8Z|KR_hs1srnnsTMIqg|f%sjm(T
-zm6r0dD|4^CC0j<nMuBWSW4ppwsZ~O|(rU$wS5B6KPK8l7lv%JXDs3Fwu({0GlFu#c
-zXn1|j4*ZL`@}V|)u(jD?%SLdAT<j@#BB4`JG|S>C7RNN6NuozAnvNnE*|vBi>p72n
-z(=3`}@k4|p59TJK8Tejs>sZHdWee`KNoYr8l0Fkg4!LrgKE^r9SG~jj;*j^W4pUt&
-zAXMd^=Yn+vFB7`1GOdJ_Tp{R3!g_Xxzf5L}g|yCwR(q3*J=7vXCEP-=vA(f#v^#Ma
-z1<P7Fp|Gl9h4P#jxXG&EQnhK?<Hia%ztdS|vq!#qvOQtgib{2c+mz7Ru5`gx;SDd?
-zsy3xfsHzUSc0O*?=5s!32QS&0P{K5&KVRZqQP4PyqoBF+lJ+<bfb@ms1@ECWD{=Ar
-zCycakC#jPe@6$|ToxJLEbv*DyTZ@)L<%dD_<vupypT$w`xIcyX)6Vnjd^q4{&v?Zh
-SwxO)wQ~jKpeWp0u)RXVR;-1(5
-
-literal 0
-HcmV?d00001
-
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/id.po b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/id.po
-new file mode 100644
-index 0000000000000000000000000000000000000000..3f440d2f20044a23afc46c36037b28420d42c872
---- /dev/null
-+++ b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/id.po
-@@ -0,0 +1,65 @@
-+# translation of bison-runtime-2.0b.id.po to Indonesia
-+# bison-runtime-2.0b (Indonesian)
-+# Copyright (C) 2002, 2005 Free Software Foundation, Inc.
-+# This file is distributed under the same license as the bison 1.50 package.
-+# Tedi Heriyanto <tedi_heriyanto@yahoo.com>, 2002, 2003, 2005.
-+#
-+msgid ""
-+msgstr ""
-+"Project-Id-Version: bison-runtime 2.0b.id\n"
-+"Report-Msgid-Bugs-To: bug-bison@gnu.org\n"
-+"POT-Creation-Date: 2008-12-11 17:06-0500\n"
-+"PO-Revision-Date: 2005-09-14 20:39+0700\n"
-+"Last-Translator: Tedi Heriyanto <tedi_heriyanto@yahoo.com>\n"
-+"Language-Team: Indonesian <translation-team-id@lists.sourceforge.net>\n"
-+"MIME-Version: 1.0\n"
-+"Content-Type: text/plain; charset=UTF-8\n"
-+"Content-Transfer-Encoding: 8bit\n"
-+"Plural-Forms: nplurals=1; plural=0;\n"
-+"X-Generator: KBabel 1.10\n"
-+
-+#: data/glr.c:923 data/yacc.c:630
-+msgid "syntax error: cannot back up"
-+msgstr "kesalahan sintaks: tidak dapat membackup"
-+
-+#: data/glr.c:1806
-+msgid "syntax is ambiguous"
-+msgstr "sintaks rancu"
-+
-+#: data/glr.c:2181 data/glr.c:2187 data/glr.c:2455 data/lalr1.cc:878
-+#: data/yacc.c:1491 data/yacc.c:1519
-+msgid "syntax error"
-+msgstr "kesalahan sintaks"
-+
-+#: data/glr.c:2515 data/yacc.c:1106 data/yacc.c:1108 data/yacc.c:1284
-+#: data/yacc.c:1640
-+msgid "memory exhausted"
-+msgstr "memori habis"
-+
-+#: data/yacc.c:918
-+#, c-format
-+msgid "syntax error, unexpected %s"
-+msgstr "kesalahan sintaks, %s tidak diharapkan"
-+
-+#: data/yacc.c:919
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s"
-+msgstr "kesalahan sintaks, %s tidak diharapkan, mengharapkan %s"
-+
-+#: data/yacc.c:920
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s"
-+msgstr "kesalahan sintaks, %s tidak diharapkan, mengharapkan %s atau %s"
-+
-+#: data/yacc.c:921
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s or %s"
-+msgstr ""
-+"kesalahan sintaks, %s tidak diharapkan, mengharapkan %s atau %s atau %s"
-+
-+#: data/yacc.c:922
-+#, c-format
-+msgid "syntax error, unexpected %s, expecting %s or %s or %s or %s"
-+msgstr ""
-+"kesalahan sintaks, %s tidak diharapkan, mengharapkan %s atau %s atau %s atau "
-+"%s"
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/insert-header.sin b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/insert-header.sin
-new file mode 100644
-index 0000000000000000000000000000000000000000..b26de01f6c88c7b15bb4815a8fcd5120d479300d
---- /dev/null
-+++ b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/insert-header.sin
-@@ -0,0 +1,23 @@
-+# Sed script that inserts the file called HEADER before the header entry.
-+#
-+# At each occurrence of a line starting with "msgid ", we execute the following
-+# commands. At the first occurrence, insert the file. At the following
-+# occurrences, do nothing. The distinction between the first and the following
-+# occurrences is achieved by looking at the hold space.
-+/^msgid /{
-+x
-+# Test if the hold space is empty.
-+s/m/m/
-+ta
-+# Yes it was empty. First occurrence. Read the file.
-+r HEADER
-+# Output the file's contents by reading the next line. But don't lose the
-+# current line while doing this.
-+g
-+N
-+bb
-+:a
-+# The hold space was nonempty. Following occurrences. Do nothing.
-+x
-+:b
-+}
-diff --git a/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/it.gmo b/third_party/bison/src/bison/2.4.1/bison-2.4.1-src/runtime-po/it.gmo
-new file mode 100644
-index 0000000000000000000000000000000000000000..463e2913b5406df857dabaa10d056075cdb63ad5
-GIT binary patch
-literal 1232
-zcmbu7O=}ZD9L7hjZ$UwNt%rZ15v!eacVleaG_|xw2v{0w@G6t+xE<ZhEHkr`dhp^`
-z(6dJm`bGQ_q9^a-U7t-XK`0j6frsC`JkPxB{=dx6y<=#Xq3cirU4=eDW%~+UgT6sm
-zpdZiz^b1-p`)3$i1v_8^EWj4{5iIxn4!(xw&QAAvbB?ij%)bQ}!4Kdq@G}^KKfxw=
-zV~(-=;8QRF--FnO0Sp#)9y)B7(76Cz{4-I$rEEBov5_1Zdq8r$FAC>n!rX!OVocIn
-zWB(egP@&~GmqWOy>i)I1g8fRP(&>LW$=DP4Pm?+#8`Dr|Z9EOc@C6k)>sj+0kKx^f
-zKaticqhlH<XEa5%pt2`(V?Ez-sY>`(kviTtST9mO@oc8Ls2Q79db@qTZKd$Y^9RDq
-zn4%zP@-X6INa0!>+~q+d2w>!U@}(-znfV%6<58W$D6X&F4np`I3Fmp=3hgrCjg6@%
-zOlD}y=vPWBS|3b1hZopDK&ORBCGSfyimB^Gri7+-pKoT$c~{GnF2*(GH!3^bozCpB
-zA)dKyw3iwO9^|;Wmt()0XF}-~4fln0(zm;hcX_kfxW~hpxxC#oX?aHvO@eBOsfo|x
-zE4{3+BI6H@9l4lvJ{h`p)S_v(eN)q7o5JN*Wm=(1kaVK3$_q9rO-YF&r%<cTsUxOV
-zP)MZlkA(NqnIj$3C8|bCj^xB#4VT=pRzubLi4q9jIZY7x#&P+W)F?OjCIgj8LS1NK
-MB`KXK>8)YE0pF`&BLDyZ
-
-literal 0
-HcmV?d00001
-
