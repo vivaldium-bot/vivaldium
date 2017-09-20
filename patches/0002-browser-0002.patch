@@ -1,3 +1,117 @@
+diff --git a/chrome/installer/mac/third_party/xz/xz/src/liblzma/lz/lz_encoder_hash.h b/chrome/installer/mac/third_party/xz/xz/src/liblzma/lz/lz_encoder_hash.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..342a333d16823a7ca4bb9007b5d397a6d5aad773
+--- /dev/null
++++ b/chrome/installer/mac/third_party/xz/xz/src/liblzma/lz/lz_encoder_hash.h
+@@ -0,0 +1,108 @@
++///////////////////////////////////////////////////////////////////////////////
++//
++/// \file       lz_encoder_hash.h
++/// \brief      Hash macros for match finders
++//
++//  Author:     Igor Pavlov
++//
++//  This file has been put into the public domain.
++//  You can do whatever you want with this file.
++//
++///////////////////////////////////////////////////////////////////////////////
++
++#ifndef LZMA_LZ_ENCODER_HASH_H
++#define LZMA_LZ_ENCODER_HASH_H
++
++#if defined(WORDS_BIGENDIAN) && !defined(HAVE_SMALL)
++	// This is to make liblzma produce the same output on big endian
++	// systems that it does on little endian systems. lz_encoder.c
++	// takes care of including the actual table.
++	extern const uint32_t lzma_lz_hash_table[256];
++#	define hash_table lzma_lz_hash_table
++#else
++#	include "check.h"
++#	define hash_table lzma_crc32_table[0]
++#endif
++
++#define HASH_2_SIZE (UINT32_C(1) << 10)
++#define HASH_3_SIZE (UINT32_C(1) << 16)
++#define HASH_4_SIZE (UINT32_C(1) << 20)
++
++#define HASH_2_MASK (HASH_2_SIZE - 1)
++#define HASH_3_MASK (HASH_3_SIZE - 1)
++#define HASH_4_MASK (HASH_4_SIZE - 1)
++
++#define FIX_3_HASH_SIZE (HASH_2_SIZE)
++#define FIX_4_HASH_SIZE (HASH_2_SIZE + HASH_3_SIZE)
++#define FIX_5_HASH_SIZE (HASH_2_SIZE + HASH_3_SIZE + HASH_4_SIZE)
++
++// Endianness doesn't matter in hash_2_calc() (no effect on the output).
++#ifdef TUKLIB_FAST_UNALIGNED_ACCESS
++#	define hash_2_calc() \
++		const uint32_t hash_value = *(const uint16_t *)(cur)
++#else
++#	define hash_2_calc() \
++		const uint32_t hash_value \
++			= (uint32_t)(cur[0]) | ((uint32_t)(cur[1]) << 8)
++#endif
++
++#define hash_3_calc() \
++	const uint32_t temp = hash_table[cur[0]] ^ cur[1]; \
++	const uint32_t hash_2_value = temp & HASH_2_MASK; \
++	const uint32_t hash_value \
++			= (temp ^ ((uint32_t)(cur[2]) << 8)) & mf->hash_mask
++
++#define hash_4_calc() \
++	const uint32_t temp = hash_table[cur[0]] ^ cur[1]; \
++	const uint32_t hash_2_value = temp & HASH_2_MASK; \
++	const uint32_t hash_3_value \
++			= (temp ^ ((uint32_t)(cur[2]) << 8)) & HASH_3_MASK; \
++	const uint32_t hash_value = (temp ^ ((uint32_t)(cur[2]) << 8) \
++			^ (hash_table[cur[3]] << 5)) & mf->hash_mask
++
++
++// The following are not currently used.
++
++#define hash_5_calc() \
++	const uint32_t temp = hash_table[cur[0]] ^ cur[1]; \
++	const uint32_t hash_2_value = temp & HASH_2_MASK; \
++	const uint32_t hash_3_value \
++			= (temp ^ ((uint32_t)(cur[2]) << 8)) & HASH_3_MASK; \
++	uint32_t hash_4_value = (temp ^ ((uint32_t)(cur[2]) << 8) ^ \
++			^ hash_table[cur[3]] << 5); \
++	const uint32_t hash_value \
++			= (hash_4_value ^ (hash_table[cur[4]] << 3)) \
++				& mf->hash_mask; \
++	hash_4_value &= HASH_4_MASK
++
++/*
++#define hash_zip_calc() \
++	const uint32_t hash_value \
++			= (((uint32_t)(cur[0]) | ((uint32_t)(cur[1]) << 8)) \
++				^ hash_table[cur[2]]) & 0xFFFF
++*/
++
++#define hash_zip_calc() \
++	const uint32_t hash_value \
++			= (((uint32_t)(cur[2]) | ((uint32_t)(cur[0]) << 8)) \
++				^ hash_table[cur[1]]) & 0xFFFF
++
++#define mt_hash_2_calc() \
++	const uint32_t hash_2_value \
++			= (hash_table[cur[0]] ^ cur[1]) & HASH_2_MASK
++
++#define mt_hash_3_calc() \
++	const uint32_t temp = hash_table[cur[0]] ^ cur[1]; \
++	const uint32_t hash_2_value = temp & HASH_2_MASK; \
++	const uint32_t hash_3_value \
++			= (temp ^ ((uint32_t)(cur[2]) << 8)) & HASH_3_MASK
++
++#define mt_hash_4_calc() \
++	const uint32_t temp = hash_table[cur[0]] ^ cur[1]; \
++	const uint32_t hash_2_value = temp & HASH_2_MASK; \
++	const uint32_t hash_3_value \
++			= (temp ^ ((uint32_t)(cur[2]) << 8)) & HASH_3_MASK; \
++	const uint32_t hash_4_value = (temp ^ ((uint32_t)(cur[2]) << 8) ^ \
++			(hash_table[cur[3]] << 5)) & HASH_4_MASK
++
++#endif
 diff --git a/chrome/installer/mac/third_party/xz/xz/src/liblzma/lz/lz_encoder_hash_table.h b/chrome/installer/mac/third_party/xz/xz/src/liblzma/lz/lz_encoder_hash_table.h
 new file mode 100644
 index 0000000000000000000000000000000000000000..8c51717d704fe5ca56368e847be015cb7d127333
@@ -24191,7 +24305,7 @@ index 0000000000000000000000000000000000000000..c5cf2b3124293d8b8f9e188916c0d025
 +echo "Build completed successfully."
 +echo
 diff --git a/chrome/installer/mini_installer/BUILD.gn b/chrome/installer/mini_installer/BUILD.gn
-index 5d2fe25007f571db95ac3232c0cec08602391e94..50db05f9c89d557eb607bf8c3ad0dd1f69954f21 100644
+index 2afab1a3c6a3ba8af414846e31e8d9f6effb5033..b793c2e054ac941391f1fbfb4febcaf702190335 100644
 --- a/chrome/installer/mini_installer/BUILD.gn
 +++ b/chrome/installer/mini_installer/BUILD.gn
 @@ -2,6 +2,7 @@
@@ -24214,7 +24328,7 @@ index 5d2fe25007f571db95ac3232c0cec08602391e94..50db05f9c89d557eb607bf8c3ad0dd1f
    # Disable buffer security checking.
    cflags = [ "/GS-" ]
 diff --git a/chrome/installer/mini_installer/chrome.release b/chrome/installer/mini_installer/chrome.release
-index e29974a64e05fd66a4d1adaf15e967b20d4ef055..d2ef3fcd946a3614c682f7fd31c5d401d5933676 100644
+index c66d6dc04087f61a414cb0a8ccb6566e25f574bf..38ee5cc87a90d388d95d05c622ef6db5dedd7ca7 100644
 --- a/chrome/installer/mini_installer/chrome.release
 +++ b/chrome/installer/mini_installer/chrome.release
 @@ -4,9 +4,11 @@
@@ -24269,7 +24383,7 @@ index e29974a64e05fd66a4d1adaf15e967b20d4ef055..d2ef3fcd946a3614c682f7fd31c5d401
  #
  # VisualElements sub-dir.
  #
-@@ -63,11 +70,12 @@ swiftshader\libEGL.dll: %(VersionDir)s\swiftshader\
+@@ -67,11 +74,12 @@ swiftshader\libEGL.dll: %(VersionDir)s\swiftshader\
  swiftshader\libGLESv2.dll: %(VersionDir)s\swiftshader\
  
  [HIDPI]
@@ -24385,7 +24499,7 @@ index 2862d6b50a5506138e30cdd41e4890b427e70023..ad99020f1be2a5e9b2fc83cadfd32a4e
              VALUE "ProductShortName", "@PRODUCT_INSTALLER_SHORTNAME@"
              VALUE "LastChange", "@LASTCHANGE@"
 diff --git a/chrome/installer/setup/BUILD.gn b/chrome/installer/setup/BUILD.gn
-index 34f5b77d99d80d1a47e9c855992539ed3550ee33..c69e088e3bcc6e0379a77347f15988c9289165fe 100644
+index 6bf0d0bfe69ffb4acc8e620eec74b8f2fe5f7ee4..0a94e529b7ba9ce9e2d9ae14e617bbb4370ddbec 100644
 --- a/chrome/installer/setup/BUILD.gn
 +++ b/chrome/installer/setup/BUILD.gn
 @@ -3,9 +3,19 @@
@@ -24411,14 +24525,14 @@ index 34f5b77d99d80d1a47e9c855992539ed3550ee33..c69e088e3bcc6e0379a77347f15988c9
 @@ -25,7 +35,7 @@ if (is_win) {
        ":lib",
        ":setup_exe_version",
-       "//build/config/sanitizers:deps",
+       "//build/config:exe_and_shlib_deps",
 -      "//build/win:default_exe_manifest",
 +      ":dpi_aware_exe_manifest",
        "//chrome/install_static:install_static_util",
        "//components/crash/content/app:app",
        "//components/crash/content/app:run_as_crashpad_handler",
 diff --git a/chrome/installer/setup/install.cc b/chrome/installer/setup/install.cc
-index 85ff23a315f79bf8da2e757bbd4939fe96618d7a..4983b77ccb78065262e635e21d2d528672636d8b 100644
+index 2bb42f1eec62517c9f5552028d0e9ae291d37645..d2e22c33ed9db42a2b3cea18da9d39ef6ff00cf4 100644
 --- a/chrome/installer/setup/install.cc
 +++ b/chrome/installer/setup/install.cc
 @@ -42,6 +42,11 @@
@@ -24490,7 +24604,7 @@ index 85ff23a315f79bf8da2e757bbd4939fe96618d7a..4983b77ccb78065262e635e21d2d5286
    // Try to add Chrome to Media Player shim inclusion list. We don't do any
    // error checking here because this operation will fail if user doesn't
    // have admin rights and we want to ignore the error.
-@@ -457,6 +489,19 @@ void RegisterChromeOnMachine(const installer::InstallerState& installer_state,
+@@ -457,6 +489,20 @@ void RegisterChromeOnMachine(const installer::InstallerState& installer_state,
    } else {
      ShellUtil::RegisterChromeBrowser(dist, chrome_exe, base::string16(), false);
    }
@@ -24501,16 +24615,17 @@ index 85ff23a315f79bf8da2e757bbd4939fe96618d7a..4983b77ccb78065262e635e21d2d5286
 +       (!base::win::ReadCommandFromAutoRun(
 +            HKEY_CURRENT_USER, vivaldi::kUpdateNotifierAutorunName, &command) ||
 +        command.empty()))) {
++    command = installer_state.target_path()
++        .Append(installer::kVivaldiUpdateNotifierExe)
++        .value();
++    command = L"\"" + command + L"\"";
 +    base::win::AddCommandToAutoRun(
-+        HKEY_CURRENT_USER, vivaldi::kUpdateNotifierAutorunName,
-+        installer_state.target_path()
-+            .Append(installer::kVivaldiUpdateNotifierExe)
-+            .value());
-+  }
++        HKEY_CURRENT_USER, vivaldi::kUpdateNotifierAutorunName, command);
++   }
  }
  
  InstallStatus InstallOrUpdateProduct(
-@@ -483,6 +528,16 @@ InstallStatus InstallOrUpdateProduct(
+@@ -483,6 +529,16 @@ InstallStatus InstallOrUpdateProduct(
    installer_state.SetStage(CREATING_VISUAL_MANIFEST);
    CreateVisualElementsManifest(src_path, new_version);
  
@@ -24527,7 +24642,7 @@ index 85ff23a315f79bf8da2e757bbd4939fe96618d7a..4983b77ccb78065262e635e21d2d5286
    std::unique_ptr<base::Version> existing_version;
    InstallStatus result =
        InstallNewVersion(original_state, installer_state, setup_path,
-@@ -552,13 +607,43 @@ InstallStatus InstallOrUpdateProduct(
+@@ -552,13 +608,43 @@ InstallStatus InstallOrUpdateProduct(
          installer_state, chrome_product,
          make_chrome_default || force_chrome_default_for_user, new_version);
  
@@ -24572,7 +24687,7 @@ index 85ff23a315f79bf8da2e757bbd4939fe96618d7a..4983b77ccb78065262e635e21d2d5286
      // Delete files that belong to old versions of Chrome. If that fails during
      // a not-in-use update, launch a --delete-old-version process. If this is an
      // in-use update, a --delete-old-versions process will be launched when
-@@ -572,6 +657,7 @@ InstallStatus InstallOrUpdateProduct(
+@@ -572,6 +658,7 @@ InstallStatus InstallOrUpdateProduct(
                .Append(setup_path.BaseName());
        LaunchDeleteOldVersionsProcess(new_version_setup_path, installer_state);
      }
@@ -24580,7 +24695,7 @@ index 85ff23a315f79bf8da2e757bbd4939fe96618d7a..4983b77ccb78065262e635e21d2d5286
    }
  
    return result;
-@@ -589,6 +675,15 @@ void LaunchDeleteOldVersionsProcess(const base::FilePath& setup_path,
+@@ -589,6 +676,15 @@ void LaunchDeleteOldVersionsProcess(const base::FilePath& setup_path,
    // failures possible.
    command_line.AppendSwitch(switches::kVerboseLogging);
  
@@ -24597,10 +24712,26 @@ index 85ff23a315f79bf8da2e757bbd4939fe96618d7a..4983b77ccb78065262e635e21d2d5286
    launch_options.start_hidden = true;
    // Make sure not to launch from a version directory. Otherwise, it wouldn't be
 diff --git a/chrome/installer/setup/install_worker.cc b/chrome/installer/setup/install_worker.cc
-index 840baf2f4a065186ec56b1e896fd961ce0a1bd99..bad160a1aeef7938d7dfc2ea72b5aefef84045d2 100644
+index 0eeac1b299b2ae75b8ee2bb6475c468504727849..3b6ad387a46e174f96f37fcc2fa51870ada80062 100644
 --- a/chrome/installer/setup/install_worker.cc
 +++ b/chrome/installer/setup/install_worker.cc
-@@ -247,6 +247,30 @@ void AddChromeWorkItems(const InstallationState& original_state,
+@@ -224,10 +224,14 @@ void AddChromeWorkItems(const InstallationState& original_state,
+ 
+   install_list->AddDeleteTreeWorkItem(new_chrome_exe, temp_path);
+ 
++  // For Vivaldi, always copy file to destination. We terminate all processes
++  // before updating so no need to check if file in use.
+   install_list->AddCopyTreeWorkItem(
+       src_path.Append(installer::kChromeExe).value(),
+       target_path.Append(installer::kChromeExe).value(), temp_path.value(),
+-      WorkItem::NEW_NAME_IF_IN_USE, new_chrome_exe.value());
++      installer_state.is_vivaldi() ? WorkItem::ALWAYS :
++          WorkItem::NEW_NAME_IF_IN_USE,
++      new_chrome_exe.value());
+ 
+   // Install kVisualElementsManifest if it is present in |src_path|. No need to
+   // make this a conditional work item as if the file is not there now, it will
+@@ -247,6 +251,30 @@ void AddChromeWorkItems(const InstallationState& original_state,
          temp_path);
    }
  
@@ -24631,7 +24762,7 @@ index 840baf2f4a065186ec56b1e896fd961ce0a1bd99..bad160a1aeef7938d7dfc2ea72b5aefe
    // In the past, we copied rather than moved for system level installs so that
    // the permissions of %ProgramFiles% would be picked up.  Now that |temp_path|
    // is in %ProgramFiles% for system level installs (and in %LOCALAPPDATA%
-@@ -728,10 +752,12 @@ void AddInstallWorkItems(const InstallationState& original_state,
+@@ -714,10 +742,12 @@ void AddInstallWorkItems(const InstallationState& original_state,
    const bool add_language_identifier = !installer_state.system_install();
  
    const Product& product = installer_state.product();
@@ -24645,7 +24776,7 @@ index 840baf2f4a065186ec56b1e896fd961ce0a1bd99..bad160a1aeef7938d7dfc2ea72b5aefe
    AddVersionKeyWorkItems(root, dist->GetVersionKey(), dist->GetDisplayName(),
                           new_version, add_language_identifier, install_list);
  
-@@ -739,6 +765,8 @@ void AddInstallWorkItems(const InstallationState& original_state,
+@@ -725,6 +755,8 @@ void AddInstallWorkItems(const InstallationState& original_state,
  
    AddActiveSetupWorkItems(installer_state, new_version, product, install_list);
  
@@ -24654,7 +24785,7 @@ index 840baf2f4a065186ec56b1e896fd961ce0a1bd99..bad160a1aeef7938d7dfc2ea72b5aefe
    AddOsUpgradeWorkItems(installer_state, setup_path, new_version, product,
                          install_list);
    AddFirewallRulesWorkItems(installer_state, dist, current_version == nullptr,
-@@ -868,6 +896,8 @@ void AppendUninstallCommandLineFlags(const InstallerState& installer_state,
+@@ -854,6 +886,8 @@ void AppendUninstallCommandLineFlags(const InstallerState& installer_state,
      uninstall_cmd->AppendSwitch(installer::switches::kSystemLevel);
    if (installer_state.verbose_logging())
      uninstall_cmd->AppendSwitch(installer::switches::kVerboseLogging);
@@ -25041,7 +25172,7 @@ index 93517edced1608329cb111abbfb27b98a911ed4f..9e02ff34edcccbcf47adf78fd3f394b0
              VALUE "ProductShortName", "@PRODUCT_INSTALLER_SHORTNAME@"
              VALUE "LastChange", "@LASTCHANGE@"
 diff --git a/chrome/installer/setup/setup_main.cc b/chrome/installer/setup/setup_main.cc
-index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44976002ec 100644
+index 2627ecc32c7e775ea08ea6f2d7ae1d2f29b018f0..e4abfdb00a91b2086971f9893aa111bcf90b1403 100644
 --- a/chrome/installer/setup/setup_main.cc
 +++ b/chrome/installer/setup/setup_main.cc
 @@ -14,6 +14,8 @@
@@ -25127,7 +25258,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
    if (!installer_state.system_install()) {
      // This is a user-level installation. Make sure that we are not installing
      // on top of an existing system-level installation.
-@@ -816,6 +843,11 @@ bool HandleNonInstallCmdLineOptions(const base::FilePath& setup_exe,
+@@ -819,6 +846,11 @@ bool HandleNonInstallCmdLineOptions(const base::FilePath& setup_exe,
    // TODO(tommi): Split these checks up into functions and use a data driven
    // map of switch->function.
    if (cmd_line.HasSwitch(installer::switches::kUpdateSetupExe)) {
@@ -25139,7 +25270,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
      installer_state->SetStage(installer::UPDATING_SETUP);
      installer::InstallStatus status = installer::SETUP_PATCH_FAILED;
      // If --update-setup-exe command line option is given, we apply the given
-@@ -1061,6 +1093,7 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
+@@ -1064,6 +1096,7 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
                                      base::FilePath* installer_directory,
                                      ArchiveType* archive_type) {
    DCHECK(archive_type);
@@ -25147,7 +25278,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
    const bool system_install = installer_state.system_install();
    InstallStatus install_status = UNKNOWN_STATUS;
  
-@@ -1087,7 +1120,7 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
+@@ -1090,7 +1123,7 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
        previous_version = base::Version(cmd_line.GetSwitchValueASCII(
            installer::switches::kPreviousVersion));
      }
@@ -25156,7 +25287,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
      std::unique_ptr<ArchivePatchHelper> archive_helper(
          CreateChromeArchiveHelper(
              setup_exe, cmd_line, installer_state, unpack_path,
-@@ -1108,9 +1141,17 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
+@@ -1111,9 +1144,17 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
        }
        uncompressed_archive = archive_helper->target();
        DCHECK(!uncompressed_archive.empty());
@@ -25175,7 +25306,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
    // Check for an uncompressed archive alongside the current executable if one
    // was not given or generated.
    if (uncompressed_archive.empty())
-@@ -1120,7 +1161,7 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
+@@ -1123,7 +1164,7 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
      // An archive was not uncompressed or patched above.
      if (uncompressed_archive.empty() ||
          !base::PathExists(uncompressed_archive)) {
@@ -25184,7 +25315,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
        installer_state.WriteInstallerResult(
            INVALID_ARCHIVE, IDS_INSTALL_INVALID_ARCHIVE_BASE, NULL);
        return INVALID_ARCHIVE;
-@@ -1177,10 +1218,14 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
+@@ -1180,10 +1221,14 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
          LOG(ERROR) << "Higher version of "
                     << product.distribution()->GetDisplayName()
                     << " is already installed.";
@@ -25203,7 +25334,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
        }
      }
  
-@@ -1224,7 +1269,44 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
+@@ -1227,7 +1272,44 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
  
        installer_state.WriteInstallerResult(install_status, install_msg_base,
            write_chrome_launch_string ? &quoted_chrome_exe : NULL);
@@ -25249,10 +25380,31 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
        if (install_status == FIRST_INSTALL_SUCCESS) {
          VLOG(1) << "First install successful.";
          // We never want to launch Chrome in system level install mode.
-@@ -1239,9 +1321,83 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
+@@ -1242,9 +1324,107 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
          DCHECK_NE(chrome_exe.value(), base::string16());
          RemoveChromeLegacyRegistryKeys(chrome.distribution(), chrome_exe);
        }
++      }
++      // For Vivaldi, if this is a standalone install, write the stp.viv file
++      // to the same location as the executable.
++      if (installer_state.is_standalone() &&
++          (install_status == FIRST_INSTALL_SUCCESS ||
++          install_status == INSTALL_REPAIRED ||
++          install_status == NEW_VERSION_UPDATED ||
++          install_status == IN_USE_UPDATED)) {
++        std::string content_str("// Vivaldi Standalone");
++        base::FilePath stp_viv_path =
++            installer_state.target_path().
++                Append(installer::kStandaloneProfileHelper);
++        int size = static_cast<int>(content_str.size());
++        if (base::WriteFile(stp_viv_path,
++                            content_str.c_str(),
++                            size) == size) {
++          VLOG(1) << "Successfully wrote: " << stp_viv_path.value();
++        } else {
++          PLOG(ERROR) << "Error writing: " << stp_viv_path.value();
++          return installer::INSTALL_FAILED;
++        }
 +      }
 +      // For Vivaldi, if this is a patch install, we will try to patch
 +      // setup.exe as well.
@@ -25314,6 +25466,9 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
 +        // We need to use the custom ShellExecuteFromExplorer to avoid
 +        // launching vivaldi.exe with elevated privileges.
 +        // The setup.exe process could be elevated.
++        VLOG(1) << "Launching: " << vivaldi_path.value()
++            << ", is_standalone() = " << installer_state.is_standalone()
++            << ", install_status = " << static_cast<int>(install_status);
 +        vivaldi::ShellExecuteFromExplorer(vivaldi_path,
 +                                          new_features_url,
 +                                          base::FilePath(),
@@ -25334,7 +25489,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
    // There might be an experiment (for upgrade usually) that needs to happen.
    // An experiment's outcome can include chrome's uninstallation. If that is
    // the case we would not do that directly at this point but in another
-@@ -1262,6 +1418,7 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
+@@ -1265,6 +1445,7 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
    }
  
    // If the installation completed successfully...
@@ -25342,7 +25497,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
    if (InstallUtil::GetInstallReturnCode(install_status) == 0) {
      // Update the DisplayVersion created by an MSI-based install.
      base::FilePath master_preferences_file(
-@@ -1308,6 +1465,31 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
+@@ -1311,6 +1492,31 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
  
  }  // namespace installer
  
@@ -25374,7 +25529,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
  int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
                      wchar_t* command_line, int show_command) {
    // Check to see if the CPU is supported before doing anything else. There's
-@@ -1338,13 +1520,181 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
+@@ -1341,13 +1547,200 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
    const MasterPreferences& prefs = MasterPreferences::ForCurrentProcess();
    installer::InitInstallerLogging(prefs);
  
@@ -25497,6 +25652,25 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
 +          .Append(installer::kChromeExe));
 +
 +  if (is_vivaldi && !is_uninstall) {
++    std::vector<base::FilePath::StringType> components;
++    vivaldi_exe_path.GetComponents(&components);
++
++    wchar_t path_sz[MAX_PATH];
++    DWORD res = ::QueryDosDevice(components[0].c_str(),
++                                 (LPWSTR)path_sz, MAX_PATH - 1);
++
++    std::wstring target_path_str(path_sz);
++    if (res && (target_path_str.find(L"\\??\\", 0, 4) != std::wstring::npos)) {
++      // this is a virtual drive
++      VLOG(1) << "Virtual drive: " << target_path_str;
++      target_path_str.erase(0, 4);
++      base::FilePath target_path = base::FilePath(target_path_str);
++      for (size_t i = 2; i < components.size(); ++i) {
++        target_path = target_path.Append(components[i]);
++      }
++      vivaldi_exe_path = target_path;
++    }
++
 +    std::vector<base::win::ScopedHandle> vivaldi_processes(
 +        installer::GetRunningProcessesForPath(vivaldi_exe_path));
 +    if (!vivaldi_processes.empty()) {
@@ -25557,7 +25731,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
    VLOG(1) << "system install is " << system_install;
  
    InstallationState original_state;
-@@ -1360,9 +1710,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
+@@ -1363,9 +1756,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
        installer::PersistentHistogramStorage::GetReportedStorageDir(
            installer_state.target_path()));
  
@@ -25569,7 +25743,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
  
    // Make sure the process exits cleanly on unexpected errors.
    base::EnableTerminationOnHeapCorruption();
-@@ -1370,8 +1722,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
+@@ -1373,8 +1768,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
    base::win::RegisterInvalidParamHandler();
    base::win::SetupCRT(cmd_line);
  
@@ -25578,7 +25752,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
    // Check to make sure current system is Win7 or later. If not, log
    // error message and get out.
    if (!InstallUtil::IsOSSupported()) {
-@@ -1443,6 +1793,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
+@@ -1446,6 +1839,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
        if (!new_cmd.HasSwitch(installer::switches::kSystemLevel))
          new_cmd.AppendSwitch(installer::switches::kSystemLevel);
  
@@ -25597,7 +25771,7 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
        DWORD exit_code = installer::UNKNOWN_STATUS;
        InstallUtil::ExecuteExeAsAdmin(new_cmd, &exit_code);
        return exit_code;
-@@ -1464,6 +1826,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
+@@ -1467,6 +1872,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
      return installer::SETUP_SINGLETON_ACQUISITION_FAILED;
    }
  
@@ -25607,32 +25781,8 @@ index d76f6ce6c2dcd7f530ca88f1736375576eaaa727..38ff9e85e5bf05a5c86ebb53f2a63a44
    base::FilePath installer_directory;
    installer::InstallStatus install_status = installer::UNKNOWN_STATUS;
    // If --uninstall option is given, uninstall the identified product(s)
-@@ -1503,7 +1868,33 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
-     return_code = InstallUtil::GetInstallReturnCode(install_status);
-   }
+@@ -1508,5 +1916,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
  
-+  if (return_code == 0 &&
-+      install_type == installer::VivaldiInstallDialog::INSTALL_STANDALONE) {
-+    std::string dummy_str("// Vivaldi Standalone");
-+    int size = (int)dummy_str.size();
-+
-+    vivaldi_target_path =
-+      vivaldi_target_path.Append(installer::kInstallBinaryDir);
-+    vivaldi_target_path =
-+      vivaldi_target_path.Append(installer::kStandaloneProfileHelper);
-+
-+    if (base::WriteFile(
-+      vivaldi_target_path, dummy_str.c_str(), size) == size) {
-+      VLOG(1) << "Successfully wrote " <<
-+        installer::kStandaloneProfileHelper << " to " <<
-+        vivaldi_target_path.value();
-+    } else {
-+      PLOG(ERROR) << "Error writing " << installer::kStandaloneProfileHelper <<
-+        " to " << vivaldi_target_path.value();
-+      return installer::INSTALL_FAILED;
-+    }
-+  }
-+
    VLOG(1) << "Installation complete, returning: " << return_code;
  
 +  if (is_vivaldi && !is_uninstall && !is_silent) {
@@ -25688,28 +25838,28 @@ index 93f8264959b55b99a9a301a011f67baf225f031f..359b895f42bcf7a2834379305d215fb2
  #endif
  #endif
 diff --git a/chrome/installer/setup/setup_util.cc b/chrome/installer/setup/setup_util.cc
-index b845061940951f2e1d58219e2e783832e9f205fe..e5e6a13406c610362785555fbb76363092aeafe7 100644
+index 9d3bf54e258e62b3d48751252eb3fb720aff2322..25d0f2a0a2c6491ac74fc8bb280fc72687e3f3e3 100644
 --- a/chrome/installer/setup/setup_util.cc
 +++ b/chrome/installer/setup/setup_util.cc
-@@ -9,6 +9,8 @@
- #include <windows.h>
+@@ -11,6 +11,8 @@
  #include <stddef.h>
+ #include <wtsapi32.h>
  
 +#include <tlhelp32.h>
 +
  #include <algorithm>
  #include <initializer_list>
  #include <iterator>
-@@ -16,6 +18,8 @@
- #include <set>
+@@ -19,6 +21,8 @@
  #include <string>
+ #include <utility>
  
 +#include <utility>
 +
  #include "base/bind.h"
+ #include "base/callback_helpers.h"
  #include "base/command_line.h"
- #include "base/cpu.h"
-@@ -51,6 +55,8 @@
+@@ -56,6 +60,8 @@
  #include "courgette/courgette.h"
  #include "courgette/third_party/bsdiff/bsdiff.h"
  
@@ -25718,7 +25868,7 @@ index b845061940951f2e1d58219e2e783832e9f205fe..e5e6a13406c610362785555fbb763630
  namespace installer {
  
  namespace {
-@@ -803,11 +809,81 @@ void DoLegacyCleanups(const InstallerState& installer_state,
+@@ -816,11 +822,14 @@ void DoLegacyCleanups(const InstallerState& installer_state,
    if (!install_static::InstallDetails::Get().is_primary_mode())
      return;
  
@@ -25730,15 +25880,20 @@ index b845061940951f2e1d58219e2e783832e9f205fe..e5e6a13406c610362785555fbb763630
    RemoveAppHostExe(installer_state);
    RemoveLegacyChromeAppCommands(installer_state);
 +#endif
-+}
-+
+ }
+ 
+ base::Time GetConsoleSessionStartTime() {
+@@ -848,6 +857,73 @@ base::Time GetConsoleSessionStartTime() {
+   return base::Time::FromFileTime(filetime);
+ }
+ 
 +std::vector<base::win::ScopedHandle> GetRunningProcessesForPath(
 +    const base::FilePath& path) {
 +  std::vector<base::win::ScopedHandle> processes;
 +
 +  if (path.empty())
 +    return processes;
-+
++  VLOG(1) << "GetRunningProcessesForPath: path=" << path.value();
 +  PROCESSENTRY32 entry = {sizeof(PROCESSENTRY32)};
 +  base::win::ScopedHandle snapshot(
 +      CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
@@ -25763,14 +25918,14 @@ index b845061940951f2e1d58219e2e783832e9f205fe..e5e6a13406c610362785555fbb763630
 +    if (QueryFullProcessImageName(process.Get(), 0, process_image_name,
 +                                  &size) == FALSE)
 +      continue;
-+
++    VLOG(1) << "GetRunningProcessesForPath: process_image_name=" << process_image_name;
 +    if (!base::FilePath::CompareEqualIgnoreCase(path.value(),
 +                                                process_image_name))
 +      continue;
-+
++ 
 +    processes.push_back(std::move(process));
 +  } while (Process32Next(snapshot.Get(), &entry) != FALSE);
-+
++  VLOG(1) << "GetRunningProcessesForPath: processes.size()=" << processes.size();
 +  return processes;
 +}
 +
@@ -25797,16 +25952,18 @@ index b845061940951f2e1d58219e2e783832e9f205fe..e5e6a13406c610362785555fbb763630
 +    CloseHandle(pi.hThread);
 +  }
 +  delete[] cmd_line;
- }
- 
++}
++
  ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)
+     : is_enabled_(false) {
+   HANDLE temp_handle;
 diff --git a/chrome/installer/setup/setup_util.h b/chrome/installer/setup/setup_util.h
-index b8607dfb087322c831ef9ad10e0f8c29ef9cab38..cafeffd86fdd8ad67c13a4f0158e20b2ae79ab77 100644
+index 007c75f9bba4b998abdff92cd3e8570353c6bc3d..ff835cbdce49030e0890744432f2138ce629b479 100644
 --- a/chrome/installer/setup/setup_util.h
 +++ b/chrome/installer/setup/setup_util.h
-@@ -145,6 +145,15 @@ bool AreBinariesInstalled(const InstallerState& installer_state);
- void DoLegacyCleanups(const InstallerState& installer_state,
-                       InstallStatus install_status);
+@@ -154,6 +154,15 @@ void DoLegacyCleanups(const InstallerState& installer_state,
+ // a null time in case of error.
+ base::Time GetConsoleSessionStartTime();
  
 +// Gets handles to all active processes on the system running from a given path,
 +// that could be opened with the |desired_access|.
@@ -25863,10 +26020,10 @@ index 12e4d1ab2e6af4bb9cc99d3e44ec0ce00a280a5f..8a390ecbd43c308d9508adfc63d2ab79
    const ProductState* product_state =
        original_state.GetProductState(installer_state.system_install());
 diff --git a/chrome/installer/util/BUILD.gn b/chrome/installer/util/BUILD.gn
-index 8d04ce75b23509bb956123c3ac77aa5f1f01ccc3..f7f53111d1d9299d83cbdcc0b00442b2766fc705 100644
+index ca2c3f1646f153f75d2d9ca2b53d38e758d74e7b..3baaa3f5db9efb5808cd61032464fc5d781741a0 100644
 --- a/chrome/installer/util/BUILD.gn
 +++ b/chrome/installer/util/BUILD.gn
-@@ -225,8 +225,14 @@ action("generate_strings") {
+@@ -227,8 +227,14 @@ action("generate_strings") {
    ]
    script = "prebuild/create_string_rc.py"
  
@@ -25993,22 +26150,6 @@ index 36671db0761b33b6b339fb5e38794b84711947da..40cc53b1a007383f3a8f1af3a6834291
  }
  
  void ChromeBrowserOperations::LaunchUserExperiment(
-diff --git a/chrome/installer/util/copy_tree_work_item.cc b/chrome/installer/util/copy_tree_work_item.cc
-index eb9e342bd7dcfa82c280c8226d94670ce2dcc604..d014951311ec8079719a06a4e93791bf5e1f5f90 100644
---- a/chrome/installer/util/copy_tree_work_item.cc
-+++ b/chrome/installer/util/copy_tree_work_item.cc
-@@ -131,9 +131,9 @@ bool CopyTreeWorkItem::IsFileInUse(const base::FilePath& path) {
-   if (!base::PathExists(path))
-     return false;
- 
--  HANDLE handle = ::CreateFile(path.value().c_str(), FILE_ALL_ACCESS,
-+  HANDLE handle = ::CreateFile(path.value().c_str(), GENERIC_WRITE,
-                                NULL, NULL, OPEN_EXISTING, NULL, NULL);
--  if (handle  == INVALID_HANDLE_VALUE)
-+  if (handle == INVALID_HANDLE_VALUE)
-     return true;
- 
-   CloseHandle(handle);
 diff --git a/chrome/installer/util/google_update_constants.cc b/chrome/installer/util/google_update_constants.cc
 index 710a7229d9b33ffb386907537458132c89af3f24..6e7a378a96f54d503478e82fa52279f702c3d24e 100644
 --- a/chrome/installer/util/google_update_constants.cc
@@ -26138,10 +26279,10 @@ index 7e184ee607996712d99a67f8a079337e43ec1787..f8b5d41ba1fff7fcdfeeec794e6149ec
  #else  // CHROMIUM_BUILD
        FILE_PATH_LITERAL("chromium_installer.log");
 diff --git a/chrome/installer/util/prebuild/create_string_rc.py b/chrome/installer/util/prebuild/create_string_rc.py
-index ec654661d5a5198ee16ff3c57fc7d589a8fe48bd..cc9e7cf381f2f92ef3f8e1ed3d34d720cc44c425 100755
+index ce885e05e62af97777314397c79d1f05aa0dc36a..29e466e0449cadeca4aeb0eedaf3bc6fc617405a 100755
 --- a/chrome/installer/util/prebuild/create_string_rc.py
 +++ b/chrome/installer/util/prebuild/create_string_rc.py
-@@ -111,6 +111,9 @@ MODE_SPECIFIC_STRINGS = {
+@@ -109,6 +109,9 @@ MODE_SPECIFIC_STRINGS = {
      'chromium': [
        'IDS_APP_SHORTCUTS_SUBDIR_NAME',
      ],
@@ -26161,7 +26302,7 @@ index ec654661d5a5198ee16ff3c57fc7d589a8fe48bd..cc9e7cf381f2f92ef3f8e1ed3d34d720
    },
    'IDS_INBOUND_MDNS_RULE_NAME': {
      'google_chrome': [
-@@ -129,6 +135,9 @@ MODE_SPECIFIC_STRINGS = {
+@@ -131,6 +137,9 @@ MODE_SPECIFIC_STRINGS = {
      'chromium': [
        'IDS_INBOUND_MDNS_RULE_NAME',
      ],
@@ -26171,7 +26312,7 @@ index ec654661d5a5198ee16ff3c57fc7d589a8fe48bd..cc9e7cf381f2f92ef3f8e1ed3d34d720
    },
    # In contrast to the strings above, this one (IDS_PRODUCT_NAME) is used
    # throughout Chrome in mode-independent contexts. Within the installer (the
-@@ -142,6 +151,9 @@ MODE_SPECIFIC_STRINGS = {
+@@ -146,6 +155,9 @@ MODE_SPECIFIC_STRINGS = {
      'chromium': [
        'IDS_PRODUCT_NAME',
      ],
@@ -26182,10 +26323,10 @@ index ec654661d5a5198ee16ff3c57fc7d589a8fe48bd..cc9e7cf381f2f92ef3f8e1ed3d34d720
  }
  # Note: Update the test expectations in GetBaseMessageIdForMode.GoogleStringIds
 diff --git a/chrome/installer/util/shell_util.cc b/chrome/installer/util/shell_util.cc
-index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e9d3f000a 100644
+index e68c01e83632fcc8b3c4e9347b1d59dcd6660217..f8fd0c72daac6b58087f6e558143c2b812d5fcde 100644
 --- a/chrome/installer/util/shell_util.cc
 +++ b/chrome/installer/util/shell_util.cc
-@@ -23,6 +23,7 @@
+@@ -24,6 +24,7 @@
  #include "base/bind.h"
  #include "base/callback_helpers.h"
  #include "base/command_line.h"
@@ -26193,7 +26334,7 @@ index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e
  #include "base/files/file_enumerator.h"
  #include "base/files/file_path.h"
  #include "base/files/file_util.h"
-@@ -66,6 +67,13 @@
+@@ -67,6 +68,13 @@
  
  using base::win::RegKey;
  
@@ -26207,7 +26348,7 @@ index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e
  namespace {
  
  // An enum used to tell QuickIsChromeRegistered() which level of registration
-@@ -373,14 +381,23 @@ void GetChromeProgIdEntries(
+@@ -374,14 +382,23 @@ void GetChromeProgIdEntries(
    app_info.file_type_icon_path = chrome_exe;
    app_info.file_type_icon_index = chrome_icon_index;
    app_info.command_line = ShellUtil::GetChromeShellOpenCmd(chrome_exe);
@@ -26232,7 +26373,7 @@ index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e
    app_info.application_icon_path = chrome_exe;
    app_info.application_icon_index = chrome_icon_index;
    app_info.application_description = dist->GetAppDescription();
-@@ -434,7 +451,8 @@ void GetShellIntegrationEntries(
+@@ -435,7 +452,8 @@ void GetShellIntegrationEntries(
    // TODO(grt): http://crbug.com/75152 Also set LocalizedString; see
    // http://msdn.microsoft.com/en-us/library/windows/desktop/cc144109(v=VS.85).aspx#registering_the_display_name
    entries->push_back(base::MakeUnique<RegistryEntry>(start_menu_entry,
@@ -26242,7 +26383,7 @@ index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e
    // Register the "open" verb for launching Chrome via the "Internet" link.
    entries->push_back(base::MakeUnique<RegistryEntry>(
        start_menu_entry + ShellUtil::kRegShellOpen, quoted_exe_path));
-@@ -475,21 +493,38 @@ void GetShellIntegrationEntries(
+@@ -476,21 +494,38 @@ void GetShellIntegrationEntries(
    entries->push_back(base::MakeUnique<RegistryEntry>(
        capabilities, ShellUtil::kRegApplicationIcon, icon_path));
    entries->push_back(base::MakeUnique<RegistryEntry>(
@@ -26282,7 +26423,7 @@ index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e
    }
  }
  
-@@ -693,12 +728,23 @@ bool ElevateAndRegisterChrome(BrowserDistribution* dist,
+@@ -694,12 +729,23 @@ bool ElevateAndRegisterChrome(BrowserDistribution* dist,
                                const base::string16& protocol) {
    // Check for setup.exe in the same directory as chrome.exe, as is the case
    // when running out of a build output directory.
@@ -26307,7 +26448,7 @@ index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e
    if (!base::PathExists(exe_path)) {
      RegKey key(is_per_user ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE,
                 dist->GetStateKey().c_str(), KEY_QUERY_VALUE | KEY_WOW64_32KEY);
-@@ -708,6 +754,7 @@ bool ElevateAndRegisterChrome(BrowserDistribution* dist,
+@@ -709,6 +755,7 @@ bool ElevateAndRegisterChrome(BrowserDistribution* dist,
        exe_path = base::FilePath(uninstall_string);
      }
    }
@@ -26315,7 +26456,7 @@ index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e
  
    if (base::PathExists(exe_path)) {
      base::CommandLine cmd(exe_path);
-@@ -1374,6 +1421,8 @@ bool RemoveShortcutFolderIfEmpty(ShellUtil::ShortcutLocation location,
+@@ -1379,6 +1426,8 @@ bool RemoveShortcutFolderIfEmpty(ShellUtil::ShortcutLocation location,
  
  }  // namespace
  
@@ -26324,7 +26465,7 @@ index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e
  const wchar_t* ShellUtil::kRegDefaultIcon = L"\\DefaultIcon";
  const wchar_t* ShellUtil::kRegShellPath = L"\\shell";
  const wchar_t* ShellUtil::kRegShellOpen = L"\\shell\\open\\command";
-@@ -1700,7 +1749,10 @@ base::string16 ShellUtil::GetCurrentInstallationSuffix(
+@@ -1705,7 +1754,10 @@ base::string16 ShellUtil::GetCurrentInstallationSuffix(
    //   2) Username (old-style).
    //   3) Unsuffixed (even worse).
    base::string16 tested_suffix;
@@ -26336,7 +26477,7 @@ index 77366da64e82be870622db3f2ebb89ae57b96e4e..fa7ef10a177f1f2e49d5d9f8074da96e
        (!GetUserSpecificRegistrySuffix(&tested_suffix) ||
         !QuickIsChromeRegistered(chrome_exe, tested_suffix,
                                  CONFIRM_PROGID_REGISTRATION)) &&
-@@ -2069,12 +2121,16 @@ bool ShellUtil::RegisterChromeBrowser(BrowserDistribution* dist,
+@@ -2074,12 +2126,16 @@ bool ShellUtil::RegisterChromeBrowser(BrowserDistribution* dist,
                   installer::switches::kRegisterChromeBrowserSuffix)) {
      suffix = command_line.GetSwitchValueNative(
          installer::switches::kRegisterChromeBrowserSuffix);
@@ -26510,19 +26651,29 @@ index 9259ac135736079e7dc8a5922fa039555d3e1ced..0eee06b3620533abf5ad09ef5e3de000
                               "template_file",
                             ])
 diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
-index 6323036503bc8aea513bf7b928abd32d94b5de08..fe39a82754ecb475010f49e837deb97342cff8e2 100644
+index 51e8e616838f365f3447c388de5b5f6caa004056..9a5e1300f1e7052e55bf27fde61fed61a4546232 100644
 --- a/chrome/renderer/chrome_content_renderer_client.cc
 +++ b/chrome/renderer/chrome_content_renderer_client.cc
-@@ -172,6 +172,8 @@
+@@ -176,6 +176,9 @@
  #include "chrome/renderer/media/webrtc_logging_message_filter.h"
  #endif
  
++#include "renderer/vivaldi_render_frame_observer.h"
 +#include "renderer/vivaldi_render_view_observer.h"
 +
  using autofill::AutofillAgent;
  using autofill::PasswordAutofillAgent;
  using autofill::PasswordGenerationAgent;
-@@ -603,6 +605,7 @@ void ChromeContentRendererClient::RenderViewCreated(
+@@ -585,6 +588,8 @@ void ChromeContentRendererClient::RenderFrameCreated(
+ #if BUILDFLAG(ENABLE_SPELLCHECK)
+   new SpellCheckProvider(render_frame, spellcheck_.get());
+ #endif
++
++  new vivaldi::VivaldiRenderFrameObserver(render_frame);
+ }
+ 
+ void ChromeContentRendererClient::RenderViewCreated(
+@@ -610,6 +615,7 @@ void ChromeContentRendererClient::RenderViewCreated(
    new ChromeRenderViewObserver(render_view, web_cache_impl_.get());
  
    new password_manager::CredentialManagerClient(render_view);
@@ -26531,10 +26682,10 @@ index 6323036503bc8aea513bf7b928abd32d94b5de08..fe39a82754ecb475010f49e837deb973
  
  
 diff --git a/chrome/renderer/content_settings_observer.cc b/chrome/renderer/content_settings_observer.cc
-index 7056da3b4575558c8523638db70542d6dc61958e..6a7ec06488d18de9b91da590ae7dd3dc195dd5ad 100644
+index 9d26b8953df87e88cad9ac7cd33e9449188f1700..1a503a52f031b5f10bd188aa8fae1280b074cc55 100644
 --- a/chrome/renderer/content_settings_observer.cc
 +++ b/chrome/renderer/content_settings_observer.cc
-@@ -351,6 +351,12 @@ bool ContentSettingsObserver::AllowStorage(bool local) {
+@@ -352,6 +352,12 @@ bool ContentSettingsObserver::AllowStorage(bool local) {
        frame->Top()->GetSecurityOrigin().IsUnique())
      return false;
  
@@ -26547,7 +26698,7 @@ index 7056da3b4575558c8523638db70542d6dc61958e..6a7ec06488d18de9b91da590ae7dd3dc
    StoragePermissionsKey key(
        url::Origin(frame->GetDocument().GetSecurityOrigin()).GetURL(), local);
    const auto permissions = cached_storage_permissions_.find(key);
-@@ -359,7 +365,7 @@ bool ContentSettingsObserver::AllowStorage(bool local) {
+@@ -360,7 +366,7 @@ bool ContentSettingsObserver::AllowStorage(bool local) {
  
    bool result = false;
    Send(new ChromeViewHostMsg_AllowDOMStorage(
@@ -26585,11 +26736,11 @@ index bece62eefd4c955503347f97eb680860aff3a3fc..d4fe8f944bb5abb7f32874ebff88be3e
    // as a component.
    EXPECT_TRUE(key_systems_provider.IsKeySystemsUpdateNeeded());
 diff --git a/chrome/test/base/chrome_test_launcher.cc b/chrome/test/base/chrome_test_launcher.cc
-index a6e39530d5e307530e1de9bd951a0a9369f1db67..3b698d114fe5d39740a7399b97f526efc4ad689c 100644
+index 8ba431f05a8ead3c21cc473f4d9afaa6ae07b944..b9649ff5e8a7913c71f0d6346196da1bced9f4e7 100644
 --- a/chrome/test/base/chrome_test_launcher.cc
 +++ b/chrome/test/base/chrome_test_launcher.cc
-@@ -55,6 +55,10 @@
- #include "chrome/app/chrome_crash_reporter_client_win.h"
+@@ -58,6 +58,10 @@
+ #include "chrome/install_static/install_util.h"
  #endif
  
 +#if defined(VIVALDI_BUILD)
@@ -26599,7 +26750,7 @@ index a6e39530d5e307530e1de9bd951a0a9369f1db67..3b698d114fe5d39740a7399b97f526ef
  ChromeTestSuiteRunner::ChromeTestSuiteRunner() {}
  ChromeTestSuiteRunner::~ChromeTestSuiteRunner() {}
  
-@@ -93,7 +97,11 @@ bool ChromeTestLauncherDelegate::AdjustChildProcessCommandLine(
+@@ -102,7 +106,11 @@ bool ChromeTestLauncherDelegate::AdjustChildProcessCommandLine(
  
  content::ContentMainDelegate*
  ChromeTestLauncherDelegate::CreateContentMainDelegate() {
@@ -26610,12 +26761,12 @@ index a6e39530d5e307530e1de9bd951a0a9369f1db67..3b698d114fe5d39740a7399b97f526ef
 +#endif
  }
  
- int LaunchChromeTests(int default_jobs,
+ void ChromeTestLauncherDelegate::PreSharding() {
 diff --git a/chrome/test/base/in_process_browser_test.cc b/chrome/test/base/in_process_browser_test.cc
-index 45c8e2df8573450bd1eed05b6a26ecc4c8e44c40..d7287b0240e52dce76770196168f445ca2f206c8 100644
+index 8d8cac931a7f3c1e0e08a71af6cc84f7b01f7ed6..1be20e35a467bfbb1ec06368455b691d2a3c5254 100644
 --- a/chrome/test/base/in_process_browser_test.cc
 +++ b/chrome/test/base/in_process_browser_test.cc
-@@ -93,6 +93,8 @@
+@@ -94,6 +94,8 @@
  #include "ui/views/test/test_desktop_screen_x11.h"
  #endif
  
@@ -26624,7 +26775,7 @@ index 45c8e2df8573450bd1eed05b6a26ecc4c8e44c40..d7287b0240e52dce76770196168f445c
  namespace {
  
  // Passed as value of kTestType.
-@@ -282,7 +284,11 @@ void InProcessBrowserTest::SetUpDefaultCommandLine(
+@@ -283,7 +285,11 @@ void InProcessBrowserTest::SetUpDefaultCommandLine(
    subprocess_path = subprocess_path.DirName().DirName();
    DCHECK_EQ(subprocess_path.BaseName().value(), "Contents");
    subprocess_path =
