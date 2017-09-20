@@ -294883,10 +294883,10 @@ index 0000000000000000000000000000000000000000..7457573b4b618fc8584ebff05a706cac
 +}
 diff --git a/breakpad/src/tools/mac/upload_system_symbols/arch_constants.h b/breakpad/src/tools/mac/upload_system_symbols/arch_constants.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..2115e54e66b1b46fb3e3a43f116a51f3a0480b7c
+index 0000000000000000000000000000000000000000..07b1bc403f470c7a34aa0bb23e28b0829d354c1e
 --- /dev/null
 +++ b/breakpad/src/tools/mac/upload_system_symbols/arch_constants.h
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,62 @@
 +/* Copyright 2014, Google Inc.
 +All rights reserved.
 +
@@ -294948,12 +294948,13 @@ index 0000000000000000000000000000000000000000..2115e54e66b1b46fb3e3a43f116a51f3
 +const uint32_t kMachHeaderFtypeDylib = MH_DYLIB;
 +const uint32_t kMachHeaderFtypeBundle = MH_BUNDLE;
 +const uint32_t kMachHeaderFtypeExe = MH_EXECUTE;
++const uint32_t kMachHeaderFtypeDylinker = MH_DYLINKER;
 diff --git a/breakpad/src/tools/mac/upload_system_symbols/arch_reader.go b/breakpad/src/tools/mac/upload_system_symbols/arch_reader.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..f60648230c18d0d7cdcea0240b607656fe912f3e
+index 0000000000000000000000000000000000000000..0e286dada8c241fe7e5c6ea5027e12776b21b104
 --- /dev/null
 +++ b/breakpad/src/tools/mac/upload_system_symbols/arch_reader.go
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,66 @@
 +/* Copyright 2014, Google Inc.
 +All rights reserved.
 +
@@ -295015,13 +295016,14 @@ index 0000000000000000000000000000000000000000..f60648230c18d0d7cdcea0240b607656
 +}
 +
 +const (
-+	MachODylib  macho.Type = C.kMachHeaderFtypeDylib
-+	MachOBundle            = C.kMachHeaderFtypeBundle
-+	MachOExe               = C.kMachHeaderFtypeExe
++	MachODylib    macho.Type = C.kMachHeaderFtypeDylib
++	MachOBundle              = C.kMachHeaderFtypeBundle
++	MachOExe                 = C.kMachHeaderFtypeExe
++	MachODylinker            = C.kMachHeaderFtypeDylinker
 +)
 diff --git a/breakpad/src/tools/mac/upload_system_symbols/upload_system_symbols.go b/breakpad/src/tools/mac/upload_system_symbols/upload_system_symbols.go
 new file mode 100644
-index 0000000000000000000000000000000000000000..3556120868d5927ed828f3f083f17d5d59feffb0
+index 0000000000000000000000000000000000000000..eab93ed5acd9f735a8962e5cb6c5dfce81e073b2
 --- /dev/null
 +++ b/breakpad/src/tools/mac/upload_system_symbols/upload_system_symbols.go
 @@ -0,0 +1,420 @@
@@ -295431,7 +295433,7 @@ index 0000000000000000000000000000000000000000..3556120868d5927ed828f3f083f17d5d
 +}
 +
 +func (fq *findQueue) dumpMachOFile(fp string, image *macho.File) {
-+	if image.Type != MachODylib && image.Type != MachOBundle {
++	if image.Type != MachODylib && image.Type != MachOBundle && image.Type != MachODylinker {
 +		return
 +	}
 +
@@ -347631,12 +347633,12 @@ index de8f0d3d31e3bd84f72c10ab1108fe1ce4ec6ec8..3f0773224e2a5081740c2209e7968d6d
  FilterDisplayItem::~FilterDisplayItem() = default;
  
 diff --git a/cc/paint/filter_display_item.h b/cc/paint/filter_display_item.h
-index c4f18dcbc85cbf1a57bcbd8ae8244384e4a0a949..b427768e8004e910f13a537ecee414c2c06f2a80 100644
+index ad40ff977e28433927ac9ed49986f807a36b1b6b..370fe77097ae09d93c190c99d4a291ec58e28949 100644
 --- a/cc/paint/filter_display_item.h
 +++ b/cc/paint/filter_display_item.h
 @@ -27,7 +27,7 @@ class CC_PAINT_EXPORT FilterDisplayItem : public DisplayItem {
    }
-   int ApproximateOpCount() const { return 1; }
+   int OpCount() const { return 1; }
  
 -  const FilterOperations filters;
 +  FilterOperations filters;
@@ -347644,41 +347646,43 @@ index c4f18dcbc85cbf1a57bcbd8ae8244384e4a0a949..b427768e8004e910f13a537ecee414c2
    const gfx::PointF origin;
  };
 diff --git a/cc/surfaces/surface_manager.cc b/cc/surfaces/surface_manager.cc
-index d4b0d01397f901be736fd53ca035f0c7c37a7270..256b5fc95f13e5eb1f0639dd2518e5d49c117c59 100644
+index 07d2338009404168851632729f0830b1ec739e79..ae220aec8028e4e58b0e7d07d76855ae962f265b 100644
 --- a/cc/surfaces/surface_manager.cc
 +++ b/cc/surfaces/surface_manager.cc
-@@ -85,7 +85,30 @@ std::unique_ptr<Surface> SurfaceManager::CreateSurface(
+@@ -21,6 +21,8 @@
+ #include <sstream>
+ #endif
+ 
++#include "app/vivaldi_apptools.h"
++
+ namespace cc {
+ 
+ SurfaceManager::SurfaceManager(LifetimeType lifetime_type)
+@@ -86,6 +88,24 @@ std::unique_ptr<Surface> SurfaceManager::CreateSurface(
    // If no surface with this SurfaceId exists, simply create the surface and
    // return.
-   auto surface_iter = surface_map_.find(surface_id);
--  if (surface_iter == surface_map_.end()) {
-+  // NOTE(andre@vivaldi.com) : Since we delete the view, and then the
-+  // |SurfaceFactory| owned by the |Surface| in
+   auto surface_iter = surface_map_.find(surface_info.id());
++  // NOTE(andre@vivaldi.com) : Since we delete the view, in
 +  // WebContentsViewGuest::CreateViewForWidget we cannot reuse exsisting
 +  // Surfaces pending for destruction. Always clean up and return a new.
 +  // VB-28351.
-+  bool do_not_reuse = false;
-+  if (surface_iter != surface_map_.end()) {
-+    auto* tsurface = surface_iter->second;
-+    do_not_reuse = (tsurface->factory().get() == nullptr);
-+    if (do_not_reuse) {
-+      // make sure the surface is no longer referenced
-+      UnregisterSurface(surface_id);
-+      for (SurfaceDestroyList::iterator dead_iter =
-+               surfaces_to_destroy_.begin();
-+           dead_iter != surfaces_to_destroy_.end();) {
-+        if ((*dead_iter)->surface_id() == surface_id) {
-+          surfaces_to_destroy_.erase(dead_iter);
-+          break;
-+        }
-+        dead_iter++;
++  if (vivaldi::IsVivaldiRunning() && surface_iter != surface_map_.end()) {
++    // make sure the surface is no longer referenced since we al
++    UnregisterSurface(surface_info.id());
++    for (SurfaceDestroyList::iterator dead_iter = surfaces_to_destroy_.begin();
++         dead_iter != surfaces_to_destroy_.end();) {
++      if ((*dead_iter)->surface_id() == surface_info.id()) {
++        surfaces_to_destroy_.erase(dead_iter);
++        break;
 +      }
++      dead_iter++;
 +    }
++    // Advance from the one that got destroyed.
++    surface_iter = surface_map_.end();
 +  }
-+  if (do_not_reuse || surface_iter == surface_map_.end()) {
-     auto surface = base::MakeUnique<Surface>(surface_id, surface_factory);
-     surface_map_[surface->surface_id()] = surface.get();
-     return surface;
+   if (surface_iter == surface_map_.end()) {
+     auto surface =
+         base::MakeUnique<Surface>(surface_info, compositor_frame_sink_support);
 diff --git a/chrome_elf/chrome_elf.def b/chrome_elf/chrome_elf.def
 index b4c3936e3f0449b96043222d5d6a3f13be324b6a..4825da8f201389f801aa1720a1bb77e5b3c39572 100644
 --- a/chrome_elf/chrome_elf.def
@@ -347745,10 +347749,10 @@ index 444262686f0c782fa7b79a5019b56f5a1f7d4463..be917377b2664a512a02c03f50d89d5a
  
  // To avoid oscillations, set this to twice the expected update interval of a
 diff --git a/device/geolocation/network_location_request.cc b/device/geolocation/network_location_request.cc
-index 191f7a561baf8bc960a7e39fa3150f702961807e..d0c61fc193c809edb33cc0f14451066de9468b57 100644
+index 0db378af8d1e0e140b40f98ad127971ca2525834..b190dced67cc6c678c8ee77b775b65d7249a6150 100644
 --- a/device/geolocation/network_location_request.cc
 +++ b/device/geolocation/network_location_request.cc
-@@ -184,7 +184,8 @@ struct AccessPointLess {
+@@ -210,7 +210,8 @@ struct AccessPointLess {
  
  GURL FormRequestURL(const GURL& url) {
    if (url == LocationArbitrator::DefaultNetworkProviderURL()) {
@@ -347759,10 +347763,10 @@ index 191f7a561baf8bc960a7e39fa3150f702961807e..d0c61fc193c809edb33cc0f14451066d
        std::string query(url.query());
        if (!query.empty())
 diff --git a/google_apis/gaia/gaia_auth_util.cc b/google_apis/gaia/gaia_auth_util.cc
-index 2bbee2a8060b3dbea42872a24ad0ce85e6a9c20b..f308605b042b0d35032bb60b77dafe3ec176563a 100644
+index 6e1d9369f45bfecde39727ebdd6b3507ece7026a..5b6f057347d0da21e584d31859c88996c5645177 100644
 --- a/google_apis/gaia/gaia_auth_util.cc
 +++ b/google_apis/gaia/gaia_auth_util.cc
-@@ -19,6 +19,8 @@
+@@ -20,6 +20,8 @@
  #include "net/url_request/url_request.h"
  #include "url/gurl.h"
  
@@ -347771,7 +347775,7 @@ index 2bbee2a8060b3dbea42872a24ad0ce85e6a9c20b..f308605b042b0d35032bb60b77dafe3e
  namespace gaia {
  
  namespace {
-@@ -31,6 +33,8 @@ const void* kURLRequestUserDataKey =
+@@ -32,6 +34,8 @@ const void* kURLRequestUserDataKey =
  
  std::string CanonicalizeEmailImpl(const std::string& email_address,
                                    bool change_googlemail_to_gmail) {
@@ -347812,8 +347816,21 @@ index e0b1cf49a8cfb5531411e92753aa27eabd0c06d8..6a9b37fafd60f64147de9031bb6d1180
    // Struct that contains the information of an OAuth2 access token.
    struct CacheEntry {
      std::string access_token;
+diff --git a/ipc/ipc_channel.h b/ipc/ipc_channel.h
+index 25eac166c7e93dd74b81080cbf3c2f958b560ddc..366f3ecf921aabbfe751e3a407ef136a7f08643c 100644
+--- a/ipc/ipc_channel.h
++++ b/ipc/ipc_channel.h
+@@ -140,7 +140,7 @@ class IPC_EXPORT Channel : public Sender {
+ 
+   // The maximum message size in bytes. Attempting to receive a message of this
+   // size or bigger results in a channel error.
+-  static const size_t kMaximumMessageSize = 128 * 1024 * 1024;
++  static const size_t kMaximumMessageSize = 256 * 1024 * 1024;
+ 
+   // Amount of data to read at once from the pipe.
+   static const size_t kReadBufferSize = 4 * 1024;
 diff --git a/ipc/ipc_message_start.h b/ipc/ipc_message_start.h
-index e3d59a3aa89dd9a2471716c7bf5a1618d2e07e80..82e23ac956a0f27fffcb28155e42911a5b45f43b 100644
+index e3fda0e957c86c90c4c8126ffa916cd15b6c993b..e0f6e29871730d60fcbc27965512e0f7946d4b57 100644
 --- a/ipc/ipc_message_start.h
 +++ b/ipc/ipc_message_start.h
 @@ -71,6 +71,7 @@ enum IPCMessageStart {
@@ -347824,7 +347841,7 @@ index e3d59a3aa89dd9a2471716c7bf5a1618d2e07e80..82e23ac956a0f27fffcb28155e42911a
    PowerMonitorMsgStart,
    EncryptedMediaMsgStart,
    CacheStorageMsgStart,
-@@ -119,6 +120,7 @@ enum IPCMessageStart {
+@@ -118,6 +119,7 @@ enum IPCMessageStart {
    SurfaceViewManagerMsgStart,
    ExtensionWorkerMsgStart,
    SubresourceFilterMsgStart,
@@ -347833,10 +347850,10 @@ index e3d59a3aa89dd9a2471716c7bf5a1618d2e07e80..82e23ac956a0f27fffcb28155e42911a
  };
  
 diff --git a/ipc/ipc_message_utils.cc b/ipc/ipc_message_utils.cc
-index 23cfd1339b5cd2d382a371fa4a29eafdf1bb2f17..816458754cf648c704603abe6af7c5bab1776a84 100644
+index 8179cd4dfb2adcab8a92a84ded845df2f9b784eb..57a93041b090dc6695b1a6f78e9b5dd2dc4be4ab 100644
 --- a/ipc/ipc_message_utils.cc
 +++ b/ipc/ipc_message_utils.cc
-@@ -422,7 +422,8 @@ void ParamTraits<unsigned int>::Log(const param_type& p, std::string* l) {
+@@ -420,7 +420,8 @@ void ParamTraits<unsigned int>::Log(const param_type& p, std::string* l) {
  }
  
  #if defined(OS_WIN) || defined(OS_LINUX) || \
@@ -347847,10 +347864,10 @@ index 23cfd1339b5cd2d382a371fa4a29eafdf1bb2f17..816458754cf648c704603abe6af7c5ba
    l->append(base::Int64ToString(static_cast<int64_t>(p)));
  }
 diff --git a/ipc/ipc_message_utils.h b/ipc/ipc_message_utils.h
-index 2d51c984aa0c0fdf005b355c989bfb6774b72bf0..cb2a69aec4a2733ed08ed1b29b3ac1d9cb648f58 100644
+index 84324ebaf417f5aee89cdfb33b60d513ac19c7c5..e11ee75153f2de5366a8a63c9adc09cb22563d83 100644
 --- a/ipc/ipc_message_utils.h
 +++ b/ipc/ipc_message_utils.h
-@@ -209,7 +209,8 @@ struct ParamTraits<unsigned int> {
+@@ -212,7 +212,8 @@ struct ParamTraits<unsigned int> {
  // Since we want to support Android 32<>64 bit IPC, as long as we don't have
  // these traits for 32 bit ARM then that'll catch any errors.
  #if defined(OS_WIN) || defined(OS_LINUX) || \
@@ -347892,6 +347909,21 @@ index 9754b2c7be8043cfddfdf6e6d80b941d7f9a7bb8..fb2fe153bfacfbdf41f70665575d555c
    }
    return servers;
  }
+diff --git a/mojo/public/cpp/bindings/lib/message.cc b/mojo/public/cpp/bindings/lib/message.cc
+index 50d6d6758014d65465d55e4a6d30760377ab5d0f..6959f5738e974cca7cc14ceeaa921e576e7c3df1 100644
+--- a/mojo/public/cpp/bindings/lib/message.cc
++++ b/mojo/public/cpp/bindings/lib/message.cc
+@@ -65,6 +65,10 @@ void Message::Reset() {
+ 
+ void Message::Initialize(size_t capacity, bool zero_initialized) {
+   DCHECK(!buffer_);
++
++  if (capacity > 50*1024*1024)
++    LOG(ERROR) << "Message::Initialize " << capacity;
++
+   buffer_.reset(new internal::MessageBuffer(capacity, zero_initialized));
+ }
+ 
 diff --git a/native_client/.gitignore b/native_client/.gitignore
 new file mode 100644
 index 0000000000000000000000000000000000000000..a1146adcb3fdf5a5abbe7546df867d46fb79bf40
@@ -348065,7 +348097,7 @@ index 0000000000000000000000000000000000000000..1941a11f8ce94389160b458927a29ba2
 +OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 diff --git a/native_client/DEPS b/native_client/DEPS
 new file mode 100644
-index 0000000000000000000000000000000000000000..f691a28b4c4488dd14ba20b19724ffa97ecc33cf
+index 0000000000000000000000000000000000000000..adba8dc31f220496140a250e019c4b643c482fbc
 --- /dev/null
 +++ b/native_client/DEPS
 @@ -0,0 +1,256 @@
@@ -348080,18 +348112,18 @@ index 0000000000000000000000000000000000000000..f691a28b4c4488dd14ba20b19724ffa9
 +  # revisions at latest revision up to a high watermark from each slice.
 +  # Document the high watermark here:
 +  # chrome_rev: 428228
-+  "build_rev": "9f8cbc346228aa4b9cc6686282155756fab84641", # from cr commit position 428227
++  "build_rev": "f671d3baeb64d9dba628ad582e867cf1aebc0207", # from cr commit position 472940
 +  "binutils_rev": "8d77853bc9415bcb7bb4206fa2901de7603387db", # from cr commit position 392828
 +  # NOTE: be sure to update clang_lib_version in SConstruct whenever
 +  # updating this clang_rev (e.g., if LLVM changes from version 3.7 to 3.8).
-+  "clang_rev": "f878fcb93103c0f4be35449d026f3055e0c8abd9", # from cr commit position 427269
++  "clang_rev": "05f306039aa5029fa88768690e5c512097419f9d", # from cr commit position 473087
 +
 +  # Rolls of build_overrides_rev should done at the same time as a roll
 +  # of build_rev as build_overrides/ is tightly coupled with build/.
 +  # build_overrides/ is forked from chromium/src/build_overrides/ and
 +  # needs to be manually updated to keep in sync before a build_rev
 +  # update can be done.
-+  "build_overrides_rev": "736dde6d656d80706dc0346c8ae049217961bed1",
++  "build_overrides_rev": "6b368c7b14c2f573e15d8e1386f162e9cafca58f",
 +
 +  # NOTE!  These five should be kept up to date with their counterparts in
 +  # chromium/src/DEPS.
@@ -408942,189 +408974,3 @@ index 0000000000000000000000000000000000000000..3007c88a7dac7560208c8bd48c504235
 +}
 +
 +}
-diff --git a/native_client/pnacl/support/bitcode/unwind_stubs.c b/native_client/pnacl/support/bitcode/unwind_stubs.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..b02e8c9650c2b246723e2e62ace4c89d8f24cdd7
---- /dev/null
-+++ b/native_client/pnacl/support/bitcode/unwind_stubs.c
-@@ -0,0 +1,100 @@
-+/*
-+ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This file is for linking into pexes when C++ exception handling is
-+ * disabled.  libstdc++ expects to be able to call _Unwind_*()
-+ * functions, which are normally provided by libgcc_eh, which is not
-+ * accessible in PNaCl's stable ABI.  This file provides stubs for the
-+ * _Unwind_*() functions which just abort().
-+ */
-+
-+#include <stdlib.h>
-+#include <unistd.h>
-+
-+/*
-+ * unwind.h will generate static definitions of some of the functions when
-+ * the __arm__ macro is defined but we want to provide our own, exported
-+ * stubs because this will be used as portable bitcode.
-+ */
-+#undef __arm__
-+#include <unwind.h>
-+
-+#define STUB                                                      \
-+  char msg1[] = "Aborting: ";                                     \
-+  char msg2[] = " called (C++ exception handling is disabled)\n"; \
-+  write(2, msg1, sizeof(msg1) - 1);                               \
-+  write(2, __func__, sizeof(__func__) - 1);                       \
-+  write(2, msg2, sizeof(msg2) - 1);                               \
-+  abort();
-+
-+void _Unwind_DeleteException(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetRegionStart(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetDataRelBase(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Word _Unwind_GetGR(struct _Unwind_Context *c, int i) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetIP(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetIPInfo(struct _Unwind_Context *c, int *i) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetTextRelBase(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+void *_Unwind_GetLanguageSpecificData(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+void _Unwind_SetGR(struct _Unwind_Context *c, int i, _Unwind_Word w) {
-+  STUB
-+}
-+
-+void _Unwind_SetIP(struct _Unwind_Context *c, _Unwind_Ptr p) {
-+  STUB
-+}
-+
-+void _Unwind_PNaClSetResult0(struct _Unwind_Context *c, _Unwind_Word w) {
-+  STUB
-+}
-+
-+void _Unwind_PNaClSetResult1(struct _Unwind_Context *c, _Unwind_Word w) {
-+  STUB
-+}
-+
-+_Unwind_Reason_Code _Unwind_RaiseException(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+_Unwind_Reason_Code _Unwind_Resume_or_Rethrow(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+void _Unwind_Resume(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+_Unwind_Word _Unwind_GetCFA(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Reason_Code _Unwind_Backtrace(_Unwind_Trace_Fn fn, void *p) {
-+  STUB
-+}
-diff --git a/native_client/pnacl/support/clang_direct/crtbegin.c b/native_client/pnacl/support/clang_direct/crtbegin.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..1195564ec166a49f3d091f4fb5815c7107686cdf
---- /dev/null
-+++ b/native_client/pnacl/support/clang_direct/crtbegin.c
-@@ -0,0 +1,74 @@
-+/*
-+ * Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This is nacl-clang's crtbegin file (crtbegin.o, crtbeginS.o, crtbeginT.o).
-+ * Currently we only support static linking and it only supports being used
-+ * as crtbeginT.o (see __dso_handle below).
-+ */
-+
-+/*
-+ * HACK:
-+ * The real structure is defined in unwind-dw2-fde.h
-+ * this is something that is at least twice as big.
-+ */
-+struct object {
-+  void *p[16] __attribute__((aligned(8)));
-+};
-+
-+extern void __register_frame_info(void *begin, struct object *ob);
-+extern void __deregister_frame_info(const void *begin);
-+
-+typedef void (*initfini_func_ptr) (void);
-+
-+/*
-+ * Exception handling frames are aggregated into a single section called
-+ * .eh_frame.  The runtime system needs to (1) have a symbol for the beginning
-+ * of this section, and needs to (2) mark the end of the section by a NULL.
-+ */
-+
-+static char __EH_FRAME_BEGIN__[]
-+    __attribute__((section(".eh_frame"), aligned(4)))
-+    = { };
-+
-+static void __do_eh_ctor(void) {
-+  static struct object object;
-+  __register_frame_info (__EH_FRAME_BEGIN__, &object);
-+}
-+
-+static initfini_func_ptr __do_eh_ctor_init_array_entry[]
-+    __attribute__ ((__used__, section(".init_array")))
-+    = { __do_eh_ctor };
-+
-+static void __do_eh_dtor(void) {
-+  __deregister_frame_info(__EH_FRAME_BEGIN__);
-+}
-+
-+static initfini_func_ptr __do_eh_dtor_fini_array_entry[]
-+    __attribute__ ((__used__, section(".fini_array")))
-+    = { __do_eh_dtor };
-+
-+/*
-+ * References to __dso_handle are generated by the compiler front end,
-+ * which uses it when registering destructors for C++ global
-+ * variables.  The compiler will generate a function call like the
-+ * following in an initializer:
-+ *
-+ *   __cxa_atexit(destructor_func, &global_obj, &__dso_handle);
-+ *
-+ * __cxa_atexit() arranges for destructor_func(&global_obj) to be
-+ * called on exit() or when the DSO uniquely identified by
-+ * &__dso_handle is dlclose()'d.  See:
-+ * http://gcc.gnu.org/ml/gcc-patches/1999-12n/msg00664.html
-+ *
-+ * (Note that __cxa_* functions are usually provided by libsupc++ or
-+ * its equivalent, but __cxa_atexit() happens to be provided by libc.)
-+ *
-+ * __dso_handle is zero for the main executable, which is the only
-+ * case currently supported by this crtbegin.
-+ */
-+
-+void *__dso_handle = 0;
