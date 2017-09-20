@@ -29,7 +29,7 @@ index f2022266085c371f1dd098f0ab518aaf4450088e..132fd405339d2ddc6818b87c1cf2254f
  
  #endif  // GPU_CONFIG_GPU_SWITCHES_H_
 diff --git a/gpu/ipc/client/gpu_channel_host.h b/gpu/ipc/client/gpu_channel_host.h
-index 88733e799919a9d2875f86530b20b8345adb3396..c531f2833db0c854eb1885d1f5a8e34cd6d75efa 100644
+index d71144e5fbf13cc70c261de7086e7fd15aaa3fc0..43a0e1fda41a1a51d01e58474af5889ef4dfb14a 100644
 --- a/gpu/ipc/client/gpu_channel_host.h
 +++ b/gpu/ipc/client/gpu_channel_host.h
 @@ -52,7 +52,7 @@ class GPU_EXPORT GpuChannelEstablishFactory {
@@ -41,23 +41,40 @@ index 88733e799919a9d2875f86530b20b8345adb3396..c531f2833db0c854eb1885d1f5a8e34c
    virtual GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
  };
  
+diff --git a/gpu/ipc/service/gpu_channel.cc b/gpu/ipc/service/gpu_channel.cc
+index 1e7d7c0ba96d8a51372198f903d7cf21f89c0743..9c5ea21763f426273f1cedad6ffa8c2e860a433c 100644
+--- a/gpu/ipc/service/gpu_channel.cc
++++ b/gpu/ipc/service/gpu_channel.cc
+@@ -921,6 +921,10 @@ bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
+   return handled;
+ }
+ 
++SequenceId GpuChannel::GetSequenceId() {
++    return message_queue_->sequence_id();
++}
++
+ void GpuChannel::HandleMessage(const IPC::Message& msg) {
+   int32_t routing_id = msg.routing_id();
+   GpuCommandBufferStub* stub = LookupCommandBuffer(routing_id);
 diff --git a/gpu/ipc/service/gpu_channel.h b/gpu/ipc/service/gpu_channel.h
-index bd583b2674eee5e835c66d2ab208dc059bd77cf3..9098e37a8199336319ad25fa0bc34b78adcf225f 100644
+index 0c47dd180899da34ced39e85138306987c709987..6f08260bf2fb29630cd370191e39c649fcddbcf0 100644
 --- a/gpu/ipc/service/gpu_channel.h
 +++ b/gpu/ipc/service/gpu_channel.h
-@@ -192,8 +192,10 @@ class GPU_EXPORT GpuChannel : public IPC::Listener, public FilteredSender {
+@@ -200,8 +200,12 @@ class GPU_EXPORT GpuChannel : public IPC::Listener, public FilteredSender {
    const GpuCommandBufferStub* GetOneStub() const;
  #endif
  
 + protected:
 +  virtual bool OnControlMessageReceived(const IPC::Message& msg);
 +
++  SequenceId GetSequenceId();
++
   private:
 -  bool OnControlMessageReceived(const IPC::Message& msg);
  
    void HandleMessageHelper(const IPC::Message& msg);
  
-@@ -216,8 +218,10 @@ class GPU_EXPORT GpuChannel : public IPC::Listener, public FilteredSender {
+@@ -224,8 +228,10 @@ class GPU_EXPORT GpuChannel : public IPC::Listener, public FilteredSender {
  
    base::ProcessId peer_pid_ = base::kNullProcessId;
  
@@ -68,20 +85,11 @@ index bd583b2674eee5e835c66d2ab208dc059bd77cf3..9098e37a8199336319ad25fa0bc34b78
    // The message filter on the io thread.
    scoped_refptr<GpuChannelMessageFilter> filter_;
  
-@@ -339,7 +343,7 @@ struct GpuChannelMessage {
-   DISALLOW_COPY_AND_ASSIGN(GpuChannelMessage);
- };
- 
--class GpuChannelMessageQueue
-+class GPU_EXPORT GpuChannelMessageQueue
-     : public base::RefCountedThreadSafe<GpuChannelMessageQueue> {
-  public:
-   GpuChannelMessageQueue(
 diff --git a/gpu/ipc/service/gpu_channel_manager.h b/gpu/ipc/service/gpu_channel_manager.h
-index b0a183acdecf95737c3118ebb08cdec3d07f54e1..79b770a872f9b437c11345fabe77e0a38fc1c28b 100644
+index 1aebaed26ed111ccf369bb893a17b0420b2b2e3e..0a79e5323035a1ab32acd6f8d06d59ab19be0464 100644
 --- a/gpu/ipc/service/gpu_channel_manager.h
 +++ b/gpu/ipc/service/gpu_channel_manager.h
-@@ -68,11 +68,11 @@ class GPU_EXPORT GpuChannelManager {
+@@ -72,11 +72,11 @@ class GPU_EXPORT GpuChannelManager {
                      GpuMemoryBufferFactory* gpu_memory_buffer_factory,
                      const GpuFeatureInfo& gpu_feature_info,
                      GpuProcessActivityFlags activity_flags);
@@ -95,20 +103,7 @@ index b0a183acdecf95737c3118ebb08cdec3d07f54e1..79b770a872f9b437c11345fabe77e0a3
                                 uint64_t client_tracing_id,
                                 bool is_gpu_host);
  
-@@ -122,7 +122,11 @@ class GPU_EXPORT GpuChannelManager {
- 
-   gl::GLShareGroup* share_group() const { return share_group_.get(); }
- 
-- private:
-+  gpu::GpuWatchdogThread* watchdog() { return watchdog_; }
-+  SyncPointManager* sync_point_manager() { return sync_point_manager_; }
-+  PreemptionFlag* preemption_flag() const { return preemption_flag_.get(); }
-+
-+private:
-   void InternalDestroyGpuMemoryBuffer(gfx::GpuMemoryBufferId id, int client_id);
-   void InternalDestroyGpuMemoryBufferOnIO(gfx::GpuMemoryBufferId id,
-                                           int client_id);
-@@ -131,6 +135,7 @@ class GPU_EXPORT GpuChannelManager {
+@@ -137,6 +137,7 @@ class GPU_EXPORT GpuChannelManager {
    void DoWakeUpGpu();
  #endif
  
@@ -116,16 +111,16 @@ index b0a183acdecf95737c3118ebb08cdec3d07f54e1..79b770a872f9b437c11345fabe77e0a3
    // These objects manage channels to individual renderer processes. There is
    // one channel for each renderer process that has connected to this GPU
    // process.
-@@ -139,6 +144,7 @@ class GPU_EXPORT GpuChannelManager {
+@@ -145,6 +146,7 @@ class GPU_EXPORT GpuChannelManager {
    scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
  
-+private:
++//private:
    const GpuPreferences gpu_preferences_;
    GpuDriverBugWorkarounds gpu_driver_bug_workarounds_;
  
 diff --git a/media/BUILD.gn b/media/BUILD.gn
-index 8d97ec513ba2e43f871c4a10b1db5d90b40fb9c7..1aa2b5c4e0bbd75651932c138b189cbcc95d14d2 100644
+index aae61e0649f49989a66965baaf0765170291d571..8ba7f1ecca89adb6b8425c62b49f5f6ea394ea44 100644
 --- a/media/BUILD.gn
 +++ b/media/BUILD.gn
 @@ -33,7 +33,7 @@ buildflag_header("media_features") {
@@ -167,11 +162,11 @@ index 225f19a7f796c34c42c31e2dfcf78dd11f8181d5..8f985df4b2f20813f50f1e31599d698a
           seek_preroll_ >= base::TimeDelta() &&
           codec_delay_ >= 0;
 diff --git a/media/base/audio_decoder_config.h b/media/base/audio_decoder_config.h
-index 675eb87232ceb5cd722550e7fe02fb50b30ca068..82eae462d462820f2fdd869fc573e8841c2779c4 100644
+index 86a8dc1fbb989cff5fae6a701566f2d648f6df50..590d43a9567bd4d06066420d62b0630d3652cc00 100644
 --- a/media/base/audio_decoder_config.h
 +++ b/media/base/audio_decoder_config.h
-@@ -93,12 +93,25 @@ class MEDIA_EXPORT AudioDecoderConfig {
-   // of clear decoders.
+@@ -91,12 +91,25 @@ class MEDIA_EXPORT AudioDecoderConfig {
+   // useful for decryptors that decrypts an encrypted stream to a clear stream.
    void SetIsEncrypted(bool is_encrypted);
  
 +  // The sampling rate on decoder input.  Note that |samples_per_second| refers
@@ -197,7 +192,7 @@ index 675eb87232ceb5cd722550e7fe02fb50b30ca068..82eae462d462820f2fdd869fc573e884
    std::vector<uint8_t> extra_data_;
    EncryptionScheme encryption_scheme_;
 diff --git a/media/base/container_names.cc b/media/base/container_names.cc
-index 34875b51f0f2b4b9859b8e561e5416da179728ab..420e7a3929c5d3388a5d7023d9c20286bc996f57 100644
+index afa71cad34eee53046b60d482b2b5242ccfdc26e..d64e84fd7b22201b0adf6e04dd4111fbff33aa33 100644
 --- a/media/base/container_names.cc
 +++ b/media/base/container_names.cc
 @@ -1085,8 +1085,11 @@ static bool ValidMpegAudioFrameHeader(const uint8_t* header,
@@ -262,10 +257,10 @@ index 34875b51f0f2b4b9859b8e561e5416da179728ab..420e7a3929c5d3388a5d7023d9c20286
  
  }  // namespace media
 diff --git a/media/base/container_names.h b/media/base/container_names.h
-index e3885ae4dbe263db54f21229c82786be78fb5deb..c099ba947a25a7d29b8cb1bd0c62f9fb2f1cab14 100644
+index f65b3794395dcd44c7c1f48b7a6c4fb02b64f7a7..d1fc1f32f37cde45a1c1647495dc64de27f751db 100644
 --- a/media/base/container_names.h
 +++ b/media/base/container_names.h
-@@ -66,6 +66,13 @@ enum MediaContainerName {
+@@ -69,6 +69,13 @@ enum { kMinimumContainerSize = 12 };
  MEDIA_EXPORT MediaContainerName DetermineContainer(const uint8_t* buffer,
                                                     int buffer_size);
  
@@ -395,7 +390,7 @@ index 0341e5784f725a32fcc7d062e757f5096cf693ae..2e940f54c9e38289c7338010bfcbbeac
    void Initialize();
  
 diff --git a/media/base/mime_util.cc b/media/base/mime_util.cc
-index b21b045d4d408c95610659c784dc7e0174364993..06bb2e5cf3da6fb6824c3aad01194d3aa5016ce1 100644
+index 1bd72ff9236e9f330501c4234ae968ed5635aa87..713aacd9e10de48357236feb1654a3e9c7a5fc8e 100644
 --- a/media/base/mime_util.cc
 +++ b/media/base/mime_util.cc
 @@ -6,6 +6,10 @@
@@ -427,10 +422,10 @@ index b21b045d4d408c95610659c784dc7e0174364993..06bb2e5cf3da6fb6824c3aad01194d3a
                           std::vector<std::string>* codecs_out,
                           bool strip) {
 diff --git a/media/base/mime_util.h b/media/base/mime_util.h
-index d7a39f41a959dc2045d2addab12cbb2045b53be2..3b9483244b8fec3c25647170079858350d64a896 100644
+index 0ff67036d80d8837fd5d966adc10345f009505b6..b94841ed5d7195be8ef76ecd7fed213f81e07502 100644
 --- a/media/base/mime_util.h
 +++ b/media/base/mime_util.h
-@@ -16,6 +16,13 @@ namespace media {
+@@ -18,6 +18,13 @@ namespace media {
  // supported/recognized MIME types.
  MEDIA_EXPORT bool IsSupportedMediaMimeType(const std::string& mime_type);
  
@@ -445,7 +440,7 @@ index d7a39f41a959dc2045d2addab12cbb2045b53be2..3b9483244b8fec3c2564717007985835
  // and level info when |strip| == true. For example, passed "aaa.b.c,dd.eee", if
  // |strip| == true |codecs_out| will contain {"aaa", "dd"}, if |strip| == false
 diff --git a/media/base/mime_util_internal.cc b/media/base/mime_util_internal.cc
-index affb8cc36aeb6869efed4cf3b17f03f8c646f309..5431452db81bf8ef612eea0c05c2f22799036010 100644
+index 14d4486bb9d10542cd99eab640fb00aa6b8b0725..67105eb608988fe0dab3834c4bffd83dcd876388 100644
 --- a/media/base/mime_util_internal.cc
 +++ b/media/base/mime_util_internal.cc
 @@ -18,6 +18,9 @@
@@ -458,7 +453,7 @@ index affb8cc36aeb6869efed4cf3b17f03f8c646f309..5431452db81bf8ef612eea0c05c2f227
  #if defined(OS_ANDROID)
  #include "base/android/build_info.h"
  #include "media/base/android/media_codec_util.h"
-@@ -250,8 +253,15 @@ SupportsType MimeUtil::AreSupportedCodecs(
+@@ -242,8 +245,15 @@ SupportsType MimeUtil::AreSupportedCodecs(
  }
  
  void MimeUtil::InitializeMimeTypeMaps() {
@@ -476,10 +471,10 @@ index affb8cc36aeb6869efed4cf3b17f03f8c646f309..5431452db81bf8ef612eea0c05c2f227
  
    AddSupportedMediaFormats();
 diff --git a/media/base/mime_util_unittest.cc b/media/base/mime_util_unittest.cc
-index a23d9da6fea0b91d61254eef75628d50e4366764..80642feced17bec92b292e880db84bb5425fea90 100644
+index 9d0221b690a9b5b88446d891373372cd9b24cf48..6b1fe6871599f22e747ecfeb1bcb74af7bfd16db 100644
 --- a/media/base/mime_util_unittest.cc
 +++ b/media/base/mime_util_unittest.cc
-@@ -20,6 +20,14 @@
+@@ -23,6 +23,14 @@
  #include "base/android/build_info.h"
  #endif
  
@@ -494,7 +489,7 @@ index a23d9da6fea0b91d61254eef75628d50e4366764..80642feced17bec92b292e880db84bb5
  namespace media {
  namespace internal {
  
-@@ -156,6 +164,7 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
+@@ -173,6 +181,7 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
    EXPECT_EQ(kHlsSupported, IsSupportedMediaMimeType("audio/mpegurl"));
    EXPECT_EQ(kHlsSupported, IsSupportedMediaMimeType("audio/x-mpegurl"));
  
@@ -502,7 +497,7 @@ index a23d9da6fea0b91d61254eef75628d50e4366764..80642feced17bec92b292e880db84bb5
  #if BUILDFLAG(USE_PROPRIETARY_CODECS)
    EXPECT_TRUE(IsSupportedMediaMimeType("audio/mp4"));
    EXPECT_TRUE(IsSupportedMediaMimeType("audio/x-m4a"));
-@@ -183,6 +192,7 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
+@@ -200,6 +209,7 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
    EXPECT_FALSE(IsSupportedMediaMimeType("audio/mpeg"));
    EXPECT_FALSE(IsSupportedMediaMimeType("audio/aac"));
  #endif  // USE_PROPRIETARY_CODECS
@@ -510,7 +505,7 @@ index a23d9da6fea0b91d61254eef75628d50e4366764..80642feced17bec92b292e880db84bb5
    EXPECT_FALSE(IsSupportedMediaMimeType("video/mp3"));
  
    EXPECT_FALSE(IsSupportedMediaMimeType("video/unknown"));
-@@ -190,6 +200,38 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
+@@ -207,6 +217,38 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
    EXPECT_FALSE(IsSupportedMediaMimeType("unknown/unknown"));
  }
  
@@ -549,359 +544,34 @@ index a23d9da6fea0b91d61254eef75628d50e4366764..80642feced17bec92b292e880db84bb5
  // Note: codecs should only be a list of 2 or fewer; hence the restriction of
  // results' length to 2.
  TEST(MimeUtilTest, SplitCodecsToVector) {
-diff --git a/media/base/mock_filters.cc b/media/base/mock_filters.cc
-index c088b57bf3e4c9e33710cee5f37bffa957bde9d1..19ace24e3953090427e6cd63f0bc1111decc7c61 100644
---- a/media/base/mock_filters.cc
-+++ b/media/base/mock_filters.cc
-@@ -7,13 +7,9 @@
- #include "base/logging.h"
- 
- using ::testing::_;
-+using ::testing::Invoke;
-+using ::testing::NotNull;
- using ::testing::Return;
--using ::testing::SaveArg;
--using ::testing::StrictMock;
--
--MATCHER(NotEmpty, "") {
--  return !arg.empty();
--}
- 
- namespace media {
- 
-@@ -150,149 +146,6 @@ void MockCdmContext::set_cdm_id(int cdm_id) {
-   cdm_id_ = cdm_id;
- }
- 
--MockCdmPromise::MockCdmPromise(bool expect_success) {
--  if (expect_success) {
--    EXPECT_CALL(*this, resolve());
--    EXPECT_CALL(*this, reject(_, _, _)).Times(0);
--  } else {
--    EXPECT_CALL(*this, resolve()).Times(0);
--    EXPECT_CALL(*this, reject(_, _, NotEmpty()));
--  }
--}
--
--MockCdmPromise::~MockCdmPromise() {
--  // The EXPECT calls will verify that the promise is in fact fulfilled.
--  MarkPromiseSettled();
--}
--
--MockCdmSessionPromise::MockCdmSessionPromise(bool expect_success,
--                                             std::string* new_session_id) {
--  if (expect_success) {
--    EXPECT_CALL(*this, resolve(_)).WillOnce(SaveArg<0>(new_session_id));
--    EXPECT_CALL(*this, reject(_, _, _)).Times(0);
--  } else {
--    EXPECT_CALL(*this, resolve(_)).Times(0);
--    EXPECT_CALL(*this, reject(_, _, NotEmpty()));
--  }
--}
--
--MockCdmSessionPromise::~MockCdmSessionPromise() {
--  // The EXPECT calls will verify that the promise is in fact fulfilled.
--  MarkPromiseSettled();
--}
--
--MockCdm::MockCdm(const SessionMessageCB& session_message_cb,
--                 const SessionClosedCB& session_closed_cb,
--                 const SessionKeysChangeCB& session_keys_change_cb,
--                 const SessionExpirationUpdateCB& session_expiration_update_cb)
--    : session_message_cb_(session_message_cb),
--      session_closed_cb_(session_closed_cb),
--      session_keys_change_cb_(session_keys_change_cb),
--      session_expiration_update_cb_(session_expiration_update_cb) {}
--
--MockCdm::~MockCdm() {}
--
--void MockCdm::SetServerCertificate(const std::vector<uint8_t>& certificate,
--                                   std::unique_ptr<SimpleCdmPromise> promise) {
--  OnSetServerCertificate(certificate, promise);
--}
--
--void MockCdm::CreateSessionAndGenerateRequest(
--    CdmSessionType session_type,
--    EmeInitDataType init_data_type,
--    const std::vector<uint8_t>& init_data,
--    std::unique_ptr<NewSessionCdmPromise> promise) {
--  OnCreateSessionAndGenerateRequest(session_type, init_data_type, init_data,
--                                    promise);
--}
--
--void MockCdm::LoadSession(CdmSessionType session_type,
--                          const std::string& session_id,
--                          std::unique_ptr<NewSessionCdmPromise> promise) {
--  OnLoadSession(session_type, session_id, promise);
--}
--
--void MockCdm::UpdateSession(const std::string& session_id,
--                            const std::vector<uint8_t>& response,
--                            std::unique_ptr<SimpleCdmPromise> promise) {
--  OnUpdateSession(session_id, response, promise);
--}
--
--void MockCdm::CloseSession(const std::string& session_id,
--                           std::unique_ptr<SimpleCdmPromise> promise) {
--  OnCloseSession(session_id, promise);
--}
--
--void MockCdm::RemoveSession(const std::string& session_id,
--                            std::unique_ptr<SimpleCdmPromise> promise) {
--  OnRemoveSession(session_id, promise);
--}
--
--void MockCdm::CallSessionMessageCB(
--    const std::string& session_id,
--    ContentDecryptionModule::MessageType message_type,
--    const std::vector<uint8_t>& message) {
--  session_message_cb_.Run(session_id, message_type, message);
--}
--
--void MockCdm::CallSessionClosedCB(const std::string& session_id) {
--  session_closed_cb_.Run(session_id);
--}
--
--void MockCdm::CallSessionKeysChangeCB(const std::string& session_id,
--                                      bool has_additional_usable_key,
--                                      CdmKeysInfo keys_info) {
--  session_keys_change_cb_.Run(session_id, has_additional_usable_key,
--                              std::move(keys_info));
--}
--
--void MockCdm::CallSessionExpirationUpdateCB(const std::string& session_id,
--                                            base::Time new_expiry_time) {
--  session_expiration_update_cb_.Run(session_id, new_expiry_time);
--}
--
--MockCdmFactory::MockCdmFactory() {}
--
--MockCdmFactory::~MockCdmFactory() {}
--
--void MockCdmFactory::Create(
--    const std::string& key_system,
--    const GURL& security_origin,
--    const CdmConfig& cdm_config,
--    const SessionMessageCB& session_message_cb,
--    const SessionClosedCB& session_closed_cb,
--    const SessionKeysChangeCB& session_keys_change_cb,
--    const SessionExpirationUpdateCB& session_expiration_update_cb,
--    const CdmCreatedCB& cdm_created_cb) {
--  // If no key system specified, notify that Create() failed.
--  if (key_system.empty()) {
--    cdm_created_cb.Run(nullptr, "CDM creation failed");
--    return;
--  }
--
--  // Since there is a CDM, call |before_creation_cb_| first.
--  if (!before_creation_cb_.is_null())
--    before_creation_cb_.Run();
--
--  // Create and return a new MockCdm. Keep a pointer to the created CDM so
--  // that tests can access it. Calls to GetCdmContext() can be ignored.
--  scoped_refptr<MockCdm> cdm = new StrictMock<MockCdm>(
--      session_message_cb, session_closed_cb, session_keys_change_cb,
--      session_expiration_update_cb);
--  created_cdm_ = cdm.get();
--  EXPECT_CALL(*created_cdm_.get(), GetCdmContext());
--  cdm_created_cb.Run(std::move(cdm), "");
--}
--
--MockCdm* MockCdmFactory::GetCreatedCdm() {
--  return created_cdm_.get();
--}
--
--void MockCdmFactory::SetBeforeCreationCB(
--    const base::Closure& before_creation_cb) {
--  before_creation_cb_ = before_creation_cb;
--}
--
- MockStreamParser::MockStreamParser() {}
- 
- MockStreamParser::~MockStreamParser() {}
-diff --git a/media/base/mock_filters.h b/media/base/mock_filters.h
-index 841ca0b9f3d65a9d80fd4f68ad0f2a6d086835dd..f2f5339fbec819b1f2a9a6e52d002d856c3fb63d 100644
---- a/media/base/mock_filters.h
-+++ b/media/base/mock_filters.h
-@@ -15,12 +15,8 @@
- #include "media/base/audio_decoder.h"
- #include "media/base/audio_decoder_config.h"
- #include "media/base/audio_renderer.h"
--#include "media/base/cdm_config.h"
- #include "media/base/cdm_context.h"
--#include "media/base/cdm_factory.h"
- #include "media/base/cdm_key_information.h"
--#include "media/base/cdm_promise.h"
--#include "media/base/cdm_promise_adapter.h"
- #include "media/base/content_decryption_module.h"
- #include "media/base/decoder_buffer.h"
- #include "media/base/decryptor.h"
-@@ -418,151 +414,6 @@ class MockCdmContext : public CdmContext {
-   DISALLOW_COPY_AND_ASSIGN(MockCdmContext);
- };
- 
--class MockCdmPromise : public SimpleCdmPromise {
-- public:
--  // |expect_success| is true if resolve() should be called, false if reject()
--  // is expected.
--  explicit MockCdmPromise(bool expect_success);
--  ~MockCdmPromise() override;
--
--  MOCK_METHOD0(resolve, void());
--  MOCK_METHOD3(reject,
--               void(CdmPromise::Exception, uint32_t, const std::string&));
--
-- private:
--  DISALLOW_COPY_AND_ASSIGN(MockCdmPromise);
--};
--
--class MockCdmSessionPromise : public NewSessionCdmPromise {
-- public:
--  // |expect_success| is true if resolve() should be called, false if reject()
--  // is expected. |new_session_id| is updated with the new session's ID on
--  // resolve().
--  MockCdmSessionPromise(bool expect_success, std::string* new_session_id);
--  ~MockCdmSessionPromise() override;
--
--  MOCK_METHOD1(resolve, void(const std::string&));
--  MOCK_METHOD3(reject,
--               void(CdmPromise::Exception, uint32_t, const std::string&));
--
-- private:
--  DISALLOW_COPY_AND_ASSIGN(MockCdmSessionPromise);
--};
--
--class MockCdm : public ContentDecryptionModule {
-- public:
--  MockCdm(const SessionMessageCB& session_message_cb,
--          const SessionClosedCB& session_closed_cb,
--          const SessionKeysChangeCB& session_keys_change_cb,
--          const SessionExpirationUpdateCB& session_expiration_update_cb);
--
--  // ContentDecryptionModule implementation.
--  // As move-only parameters aren't supported by mock methods, convert promises
--  // into IDs and pass them to On... methods.
--  void SetServerCertificate(const std::vector<uint8_t>& certificate,
--                            std::unique_ptr<SimpleCdmPromise> promise) override;
--  MOCK_METHOD2(OnSetServerCertificate,
--               void(const std::vector<uint8_t>& certificate,
--                    std::unique_ptr<SimpleCdmPromise>& promise));
--
--  void CreateSessionAndGenerateRequest(
--      CdmSessionType session_type,
--      EmeInitDataType init_data_type,
--      const std::vector<uint8_t>& init_data,
--      std::unique_ptr<NewSessionCdmPromise> promise) override;
--  MOCK_METHOD4(OnCreateSessionAndGenerateRequest,
--               void(CdmSessionType session_type,
--                    EmeInitDataType init_data_type,
--                    const std::vector<uint8_t>& init_data,
--                    std::unique_ptr<NewSessionCdmPromise>& promise));
--
--  void LoadSession(CdmSessionType session_type,
--                   const std::string& session_id,
--                   std::unique_ptr<NewSessionCdmPromise> promise) override;
--  MOCK_METHOD3(OnLoadSession,
--               void(CdmSessionType session_type,
--                    const std::string& session_id,
--                    std::unique_ptr<NewSessionCdmPromise>& promise));
--
--  void UpdateSession(const std::string& session_id,
--                     const std::vector<uint8_t>& response,
--                     std::unique_ptr<SimpleCdmPromise> promise) override;
--  MOCK_METHOD3(OnUpdateSession,
--               void(const std::string& session_id,
--                    const std::vector<uint8_t>& response,
--                    std::unique_ptr<SimpleCdmPromise>& promise));
--
--  void CloseSession(const std::string& session_id,
--                    std::unique_ptr<SimpleCdmPromise> promise) override;
--  MOCK_METHOD2(OnCloseSession,
--               void(const std::string& session_id,
--                    std::unique_ptr<SimpleCdmPromise>& promise));
--
--  void RemoveSession(const std::string& session_id,
--                     std::unique_ptr<SimpleCdmPromise> promise) override;
--  MOCK_METHOD2(OnRemoveSession,
--               void(const std::string& session_id,
--                    std::unique_ptr<SimpleCdmPromise>& promise));
--
--  MOCK_METHOD0(GetCdmContext, CdmContext*());
--
--  void CallSessionMessageCB(const std::string& session_id,
--                            ContentDecryptionModule::MessageType message_type,
--                            const std::vector<uint8_t>& message);
--  void CallSessionClosedCB(const std::string& session_id);
--  void CallSessionKeysChangeCB(const std::string& session_id,
--                               bool has_additional_usable_key,
--                               CdmKeysInfo keys_info);
--  void CallSessionExpirationUpdateCB(const std::string& session_id,
--                                     base::Time new_expiry_time);
--
-- protected:
--  ~MockCdm() override;
--
-- private:
--  // Callbacks.
--  SessionMessageCB session_message_cb_;
--  SessionClosedCB session_closed_cb_;
--  SessionKeysChangeCB session_keys_change_cb_;
--  SessionExpirationUpdateCB session_expiration_update_cb_;
--
--  DISALLOW_COPY_AND_ASSIGN(MockCdm);
--};
--
--class MockCdmFactory : public CdmFactory {
-- public:
--  MockCdmFactory();
--  ~MockCdmFactory() override;
--
--  // CdmFactory implementation.
--  // This creates a StrictMock<MockCdm> when called. Although ownership of the
--  // created CDM is passed to |cdm_created_cb|, a copy is kept (and available
--  // using Cdm()). If |key_system| is empty, no CDM will be created.
--  void Create(const std::string& key_system,
--              const GURL& security_origin,
--              const CdmConfig& cdm_config,
--              const SessionMessageCB& session_message_cb,
--              const SessionClosedCB& session_closed_cb,
--              const SessionKeysChangeCB& session_keys_change_cb,
--              const SessionExpirationUpdateCB& session_expiration_update_cb,
--              const CdmCreatedCB& cdm_created_cb) override;
--
--  // Return a pointer to the created CDM.
--  MockCdm* GetCreatedCdm();
--
--  // Provide a callback to be called before the CDM is created and returned.
--  void SetBeforeCreationCB(const base::Closure& before_creation_cb);
--
-- private:
--  // Reference to the created CDM.
--  scoped_refptr<MockCdm> created_cdm_;
--
--  // Callback to be used before Create() successfully calls |cdm_created_cb|.
--  base::Closure before_creation_cb_;
--
--  DISALLOW_COPY_AND_ASSIGN(MockCdmFactory);
--};
--
- class MockStreamParser : public StreamParser {
-  public:
-   MockStreamParser();
 diff --git a/media/base/renderer_factory.h b/media/base/renderer_factory.h
-index f0a375fc35f478c0412583eb95f3ab38f7ea3c75..eeca7ed68411f959986f105f069812e3ee78bd06 100644
+index f7475e27f9542d9135a36c456f4019a093748aa7..95e9fca66bf8652d34ca515268dc07adbd0ed328 100644
 --- a/media/base/renderer_factory.h
 +++ b/media/base/renderer_factory.h
-@@ -39,7 +39,8 @@ class MEDIA_EXPORT RendererFactory {
+@@ -40,7 +40,8 @@ class MEDIA_EXPORT RendererFactory {
        const scoped_refptr<base::TaskRunner>& worker_task_runner,
        AudioRendererSink* audio_renderer_sink,
        VideoRendererSink* video_renderer_sink,
--      const RequestSurfaceCB& request_surface_cb) = 0;
-+      const RequestSurfaceCB& request_surface_cb,
+-      const RequestOverlayInfoCB& request_overlay_info_cb) = 0;
++      const RequestOverlayInfoCB& request_overlay_info_cb,
 +      bool use_platform_media_pipeline = false) = 0;
  
-  private:
-   DISALLOW_COPY_AND_ASSIGN(RendererFactory);
+   // Returns the MediaResource::Type that should be used with the renderers
+   // created by this factory.
+diff --git a/media/base/renderer_factory_selector_unittest.cc b/media/base/renderer_factory_selector_unittest.cc
+index e435fa0ec1bccbb514b4025c5b77919fbfd084b3..a57b7fd69de621bcd86443586f94c19bde824a7c 100644
+--- a/media/base/renderer_factory_selector_unittest.cc
++++ b/media/base/renderer_factory_selector_unittest.cc
+@@ -26,7 +26,8 @@ class RendererFactorySelectorTest : public testing::Test {
+         const scoped_refptr<base::TaskRunner>& worker_task_runner,
+         AudioRendererSink* audio_renderer_sink,
+         VideoRendererSink* video_renderer_sink,
+-        const RequestOverlayInfoCB& request_overlay_info_cb) override {
++        const RequestOverlayInfoCB& request_overlay_info_cb,
++        bool use_platform_media_pipeline = false) override {
+       return std::unique_ptr<Renderer>();
+     }
+ 
 diff --git a/media/base/win/mf_initializer.cc b/media/base/win/mf_initializer.cc
 index 47d78225c915109c4a0bb7a1c90d5b4260434cbf..ad2373fe6c9b7e394a7708256eab24ac88157c89 100644
 --- a/media/base/win/mf_initializer.cc
@@ -931,7 +601,7 @@ index 47d78225c915109c4a0bb7a1c90d5b4260434cbf..ad2373fe6c9b7e394a7708256eab24ac
 -
  }  // namespace media
 diff --git a/media/blink/multibuffer_data_source.cc b/media/blink/multibuffer_data_source.cc
-index c882fae9e32c6075f55ec8188086a1398b34377f..eb82b9d4f0efd0f0ad485d3ec3fa19172a2eb025 100644
+index 4d8d045ab05e4ea40eb368ff577c37ab6daeba0a..58a6442e40d9345315047db0b41d89021856f5f7 100644
 --- a/media/blink/multibuffer_data_source.cc
 +++ b/media/blink/multibuffer_data_source.cc
 @@ -468,6 +468,7 @@ void MultibufferDataSource::StartCallback() {
@@ -943,7 +613,7 @@ index c882fae9e32c6075f55ec8188086a1398b34377f..eb82b9d4f0efd0f0ad485d3ec3fa1917
      streaming_ =
          !assume_fully_buffered() && (total_bytes_ == kPositionNotSpecified ||
 diff --git a/media/blink/multibuffer_data_source.h b/media/blink/multibuffer_data_source.h
-index bf4c5eac69be0ed981a58737c5926db9d789a463..89c852cad0069da7188e64f497e8ce6e6cc917a4 100644
+index d46264f82ca8d626a891b958d723d26b8a34fe88..5d28235f1a10a74b7a707e1433d0e88d2cdefff6 100644
 --- a/media/blink/multibuffer_data_source.h
 +++ b/media/blink/multibuffer_data_source.h
 @@ -118,6 +118,8 @@ class MEDIA_BLINK_EXPORT MultibufferDataSource : public DataSource {
@@ -965,10 +635,10 @@ index bf4c5eac69be0ed981a58737c5926db9d789a463..89c852cad0069da7188e64f497e8ce6e
    // i.e. range request is not supported.
    bool streaming_;
 diff --git a/media/blink/resource_multibuffer_data_provider.cc b/media/blink/resource_multibuffer_data_provider.cc
-index a1e1878bb5cb968ffe677eb1f2d8374f4c45e98d..957861cb0430ad7d707afc391097231d9e50a2d5 100644
+index 18a8847fda2ec2cf63f94eac7bc763ea12af1d7e..cae0ed95aac1b9fbb58181f41d265a37b47627c4 100644
 --- a/media/blink/resource_multibuffer_data_provider.cc
 +++ b/media/blink/resource_multibuffer_data_provider.cc
-@@ -277,6 +277,7 @@ void ResourceMultiBufferDataProvider::DidReceiveResponse(
+@@ -286,6 +286,7 @@ void ResourceMultiBufferDataProvider::DidReceiveResponse(
    // Expected content length can be |kPositionNotSpecified|, in that case
    // |content_length_| is not specified and this is a streaming response.
    int64_t content_length = response.ExpectedContentLength();
@@ -977,10 +647,10 @@ index a1e1878bb5cb968ffe677eb1f2d8374f4c45e98d..957861cb0430ad7d707afc391097231d
    bool do_fail = false;
  
 diff --git a/media/blink/url_index.cc b/media/blink/url_index.cc
-index c0f1428ce8397ba632c2cac2f25b0dc1fcf1f001..5e4b25242ef09fe5f0a62dc69a1db139eb873877 100644
+index f255cb19f686e21499392dfa6e5d6528e74c83fa..0392e09b95e56ca2d84c821523b42c81c8dd846d 100644
 --- a/media/blink/url_index.cc
 +++ b/media/blink/url_index.cc
-@@ -172,6 +172,11 @@ void UrlData::set_etag(const std::string& etag) {
+@@ -173,6 +173,11 @@ void UrlData::set_etag(const std::string& etag) {
    etag_ = etag;
  }
  
@@ -993,7 +663,7 @@ index c0f1428ce8397ba632c2cac2f25b0dc1fcf1f001..5e4b25242ef09fe5f0a62dc69a1db139
    DCHECK(thread_checker_.CalledOnValidThread());
    range_supported_ = true;
 diff --git a/media/blink/url_index.h b/media/blink/url_index.h
-index bce8727f80a6341e4918e72a28a7967c74779f99..12a1b044fa7c02ab244ccefe297f839ffe2ed3f1 100644
+index f18d358d8e818fbf4aa6168fe9bbe99045256cc3..415c4e392dd4b00248cad0468e85fe519d8a0cf7 100644
 --- a/media/blink/url_index.h
 +++ b/media/blink/url_index.h
 @@ -64,6 +64,8 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
@@ -1013,9 +683,9 @@ index bce8727f80a6341e4918e72a28a7967c74779f99..12a1b044fa7c02ab244ccefe297f839f
    void set_range_supported();
    void set_last_modified(base::Time last_modified);
    void set_etag(const std::string& etag);
-@@ -170,6 +173,8 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
-   // Length of resource this url points to. (in bytes)
-   int64_t length_;
+@@ -176,6 +179,8 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
+   // Number of bytes read from this resource.
+   int64_t bytes_read_from_cache_ = 0;
  
 +  std::string mime_type_;
 +
@@ -1023,10 +693,10 @@ index bce8727f80a6341e4918e72a28a7967c74779f99..12a1b044fa7c02ab244ccefe297f839f
    bool range_supported_;
  
 diff --git a/media/blink/webmediaplayer_impl.cc b/media/blink/webmediaplayer_impl.cc
-index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad655580a93c 100644
+index d4c16dacec148c4cfca0b38e0f5259c1ca4c610a..33d52c5097a9dbd4fe5ff4a384601f400700e552 100644
 --- a/media/blink/webmediaplayer_impl.cc
 +++ b/media/blink/webmediaplayer_impl.cc
-@@ -66,6 +66,17 @@
+@@ -67,6 +67,17 @@
  #include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
  #include "third_party/WebKit/public/web/WebView.h"
  
@@ -1044,24 +714,19 @@ index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad65
  #if defined(OS_ANDROID)
  #include "media/base/android/media_codec_util.h"
  #endif
-@@ -217,8 +228,16 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
-       context_3d_cb_(params.context_3d_cb()),
-       adjust_allocated_memory_cb_(params.adjust_allocated_memory_cb()),
+@@ -218,6 +229,11 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
+       context_3d_cb_(params->context_3d_cb()),
+       adjust_allocated_memory_cb_(params->adjust_allocated_memory_cb()),
        last_reported_memory_usage_(0),
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +      ipc_media_pipeline_host_creator_(
-+          params.ipc_media_pipeline_host_creator()),
++          params->ipc_media_pipeline_host_creator()),
 +      ipc_demuxer_(NULL),
 +#endif
        supports_save_(true),
        chunk_demuxer_(NULL),
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(USE_BUFFERED_DATA_SOURCE)
-+      data_source2_(NULL),
-+#endif
        url_index_(url_index),
-       // Threaded compositing isn't enabled universally yet.
-       compositor_task_runner_(params.compositor_task_runner()
-@@ -320,7 +339,7 @@ void WebMediaPlayerImpl::Load(LoadType load_type,
+@@ -328,7 +344,7 @@ void WebMediaPlayerImpl::Load(LoadType load_type,
    // Only URL or MSE blob URL is supported.
    DCHECK(source.IsURL());
    blink::WebURL url = source.GetAsURL();
@@ -1070,19 +735,7 @@ index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad65
             << ")";
    if (!defer_load_cb_.is_null()) {
      defer_load_cb_.Run(base::Bind(&WebMediaPlayerImpl::DoLoad, AsWeakPtr(),
-@@ -419,7 +438,11 @@ void WebMediaPlayerImpl::DoLoad(LoadType load_type,
-     supports_save_ = false;
-     StartPipeline();
-   } else {
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(USE_BUFFERED_DATA_SOURCE)
-+    data_source_.reset(data_source2_ = new BufferedDataSource(
-+#else
-     data_source_.reset(new MultibufferDataSource(
-+#endif
-         url, static_cast<UrlData::CORSMode>(cors_mode), main_task_runner_,
-         url_index_, frame_, media_log_.get(), &buffered_data_source_host_,
-         base::Bind(&WebMediaPlayerImpl::NotifyDownloading, AsWeakPtr())));
-@@ -573,6 +596,11 @@ void WebMediaPlayerImpl::DoSeek(base::TimeDelta time, bool time_updated) {
+@@ -613,6 +629,11 @@ void WebMediaPlayerImpl::DoSeek(base::TimeDelta time, bool time_updated) {
      paused_time_ = time;
    pipeline_controller_.Seek(time, time_updated);
  
@@ -1094,7 +747,7 @@ index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad65
    // This needs to be called after Seek() so that if a resume is triggered, it
    // is to the correct time.
    UpdatePlayState();
-@@ -1656,7 +1684,18 @@ void WebMediaPlayerImpl::DataSourceInitialized(bool success) {
+@@ -1693,7 +1714,18 @@ void WebMediaPlayerImpl::DataSourceInitialized(bool success) {
      return;
    }
  
@@ -1114,11 +767,11 @@ index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad65
  }
  
  void WebMediaPlayerImpl::NotifyDownloading(bool is_downloading) {
-@@ -1724,10 +1763,21 @@ std::unique_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer() {
- #if defined(OS_ANDROID)
-   request_surface_cb = BindToCurrentLoop(
-       base::Bind(&WebMediaPlayerImpl::OnSurfaceRequested, AsWeakPtr()));
-+#endif
+@@ -1814,9 +1846,21 @@ std::unique_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer() {
+   request_overlay_info_cb = BindToCurrentLoop(
+       base::Bind(&WebMediaPlayerImpl::OnOverlayInfoRequested, AsWeakPtr()));
+ #endif
++
 +  bool use_platform_media_pipeline = false;
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  use_platform_media_pipeline = media::IPCDemuxer::CanPlayType(
@@ -1128,16 +781,16 @@ index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad65
 +      !IsPlatformMediaPipelineAvailable(PlatformMediaCheckType::BASIC)) {
 +    use_platform_media_pipeline = false;
 +  }
- #endif
-   return renderer_factory_->CreateRenderer(
++#endif
+   return renderer_factory_selector_->GetCurrentFactory()->CreateRenderer(
        media_task_runner_, worker_task_runner_, audio_source_provider_.get(),
--      compositor_, request_surface_cb);
-+      compositor_, request_surface_cb,
+-      compositor_, request_overlay_info_cb);
++      compositor_, request_overlay_info_cb,
 +      use_platform_media_pipeline);
  }
  
  void WebMediaPlayerImpl::StartPipeline() {
-@@ -1750,6 +1800,55 @@ void WebMediaPlayerImpl::StartPipeline() {
+@@ -1850,6 +1894,48 @@ void WebMediaPlayerImpl::StartPipeline() {
      DCHECK(!chunk_demuxer_);
      DCHECK(data_source_);
  
@@ -1170,18 +823,11 @@ index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad65
 +    }
 +
 +    if (use_platform_media_pipeline) {
-+#if defined(USE_BUFFERED_DATA_SOURCE) && defined(OS_MACOSX)
-+      // AV Foundation is known to make requests for "past" data quite often.  We
-+      // use a large "behind buffer" to prevent cache misses.
-+      if (data_source_)
-+        data_source2_->SetTargetBufferDuration(
-+          base::TimeDelta::FromSeconds(20),
-+          base::TimeDelta());
-+#endif
 +      ipc_demuxer_ = new media::IPCDemuxer(
 +          media_task_runner_, data_source_.get(),
 +          std::move(ipc_media_pipeline_host), content_type_,
-+          data_source_ ? data_source_->GetUrlAfterRedirects() : GURL(), media_log_);
++          data_source_ ? data_source_->GetUrlAfterRedirects() : GURL(),
++          media_log_.get());
 +      demuxer_.reset(ipc_demuxer_);
 +#if defined(OS_MACOSX)
 +    } else if (media::CoreAudioDemuxer::IsSupported(content_type_,
@@ -1193,7 +839,7 @@ index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad65
  #if !defined(MEDIA_DISABLE_FFMPEG)
      Demuxer::MediaTracksUpdatedCB media_tracks_updated_cb =
          BindToCurrentLoop(base::Bind(
-@@ -1762,6 +1861,10 @@ void WebMediaPlayerImpl::StartPipeline() {
+@@ -1862,6 +1948,10 @@ void WebMediaPlayerImpl::StartPipeline() {
      OnError(PipelineStatus::DEMUXER_ERROR_COULD_NOT_OPEN);
      return;
  #endif
@@ -1204,7 +850,7 @@ index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad65
    } else {
      DCHECK(!chunk_demuxer_);
      DCHECK(!data_source_);
-@@ -1820,6 +1923,22 @@ blink::WebAudioSourceProvider* WebMediaPlayerImpl::GetAudioSourceProvider() {
+@@ -1920,6 +2010,22 @@ blink::WebAudioSourceProvider* WebMediaPlayerImpl::GetAudioSourceProvider() {
    return audio_source_provider_.get();
  }
  
@@ -1228,19 +874,13 @@ index 00c5d1d370877260edbd931e7022eaeb41fcba72..703fcb7c1c49cd17c07204b9dcc2ad65
                                       scoped_refptr<VideoFrame>* video_frame_out,
                                       base::WaitableEvent* event) {
 diff --git a/media/blink/webmediaplayer_impl.h b/media/blink/webmediaplayer_impl.h
-index 57189de7698c50c2e8f44e4ed953497fd404cd34..189b43c9472559a5222971f36e63a4f46d55b7ea 100644
+index c98a50eb2afd43115dac1f6e26008cd620197342..5b844fec773cde4dce3ca9e72d398c9b316bef28 100644
 --- a/media/blink/webmediaplayer_impl.h
 +++ b/media/blink/webmediaplayer_impl.h
-@@ -50,6 +50,17 @@
+@@ -51,6 +51,11 @@
  #include "media/blink/webmediaplayer_cast_android.h"
  #endif
  
-+//#define USE_BUFFERED_DATA_SOURCE
-+
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(USE_BUFFERED_DATA_SOURCE)
-+#include "platform_media/renderer/data_source/buffered_data_source.h"
-+#endif
-+
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +#include "platform_media/renderer/pipeline/ipc_media_pipeline_host.h"
 +#include "platform_media/renderer/pipeline/protocol_sniffer.h"
@@ -1249,7 +889,7 @@ index 57189de7698c50c2e8f44e4ed953497fd404cd34..189b43c9472559a5222971f36e63a4f4
  namespace blink {
  class WebLocalFrame;
  class WebMediaPlayerClient;
-@@ -74,6 +85,9 @@ class GLES2Interface;
+@@ -75,6 +80,9 @@ class GLES2Interface;
  namespace media {
  class ChunkDemuxer;
  class ContentDecryptionModule;
@@ -1259,7 +899,7 @@ index 57189de7698c50c2e8f44e4ed953497fd404cd34..189b43c9472559a5222971f36e63a4f4
  class MediaLog;
  class UrlIndex;
  class VideoFrameCompositor;
-@@ -310,6 +324,11 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -326,6 +334,11 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    void SetNetworkState(blink::WebMediaPlayer::NetworkState state);
    void SetReadyState(blink::WebMediaPlayer::ReadyState state);
  
@@ -1271,7 +911,7 @@ index 57189de7698c50c2e8f44e4ed953497fd404cd34..189b43c9472559a5222971f36e63a4f4
    // Returns the current video frame from |compositor_|. Blocks until the
    // compositor can return the frame.
    scoped_refptr<VideoFrame> GetCurrentFrameFromCompositor();
-@@ -567,6 +586,16 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -583,6 +596,16 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    WebMediaPlayerParams::AdjustAllocatedMemoryCB adjust_allocated_memory_cb_;
    int64_t last_reported_memory_usage_;
  
@@ -1288,24 +928,7 @@ index 57189de7698c50c2e8f44e4ed953497fd404cd34..189b43c9472559a5222971f36e63a4f4
    // Routes audio playback to either AudioRendererSink or WebAudio.
    scoped_refptr<WebAudioSourceProviderImpl> audio_source_provider_;
  
-@@ -578,9 +607,16 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
-   //
-   // |demuxer_| will contain the appropriate demuxer based on which resource
-   // load strategy we're using.
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(USE_BUFFERED_DATA_SOURCE)
-+  std::unique_ptr<BufferedDataSourceInterface> data_source_;
-+#else
-   std::unique_ptr<MultibufferDataSource> data_source_;
-+#endif
-   std::unique_ptr<Demuxer> demuxer_;
-   ChunkDemuxer* chunk_demuxer_;
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(USE_BUFFERED_DATA_SOURCE)
-+  BufferedDataSource* data_source2_;
-+#endif
- 
-   std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
- 
-@@ -605,6 +641,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -621,6 +644,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    // Keep track of the CDM while it is in the process of attaching to the
    // pipeline.
    scoped_refptr<ContentDecryptionModule> pending_cdm_;
@@ -1314,13 +937,13 @@ index 57189de7698c50c2e8f44e4ed953497fd404cd34..189b43c9472559a5222971f36e63a4f4
  #if defined(OS_ANDROID)  // WMPI_CAST
    WebMediaPlayerCast cast_impl_;
 diff --git a/media/blink/webmediaplayer_params.cc b/media/blink/webmediaplayer_params.cc
-index ce635b6cc34c8ff937ba8dfd154afa2e3ba21e6b..40c03e050a4e28f473b7b43f3bf58ee500fa0d25 100644
+index 98a7b5eb5229dd8180a1eeebdf8ca62ba1fbdc9c..0f5a28abbc60deba8cdfa43fc1ccc8a4e2770305 100644
 --- a/media/blink/webmediaplayer_params.cc
 +++ b/media/blink/webmediaplayer_params.cc
-@@ -15,6 +15,9 @@ WebMediaPlayerParams::WebMediaPlayerParams(
+@@ -14,6 +14,9 @@ WebMediaPlayerParams::WebMediaPlayerParams(
+     std::unique_ptr<MediaLog> media_log,
      const DeferLoadCB& defer_load_cb,
      const scoped_refptr<SwitchableAudioRendererSink>& audio_renderer_sink,
-     const scoped_refptr<MediaLog>& media_log,
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +    const IPCMediaPipelineHost::Creator& ipc_media_pipeline_host_creator,
 +#endif
@@ -1330,7 +953,7 @@ index ce635b6cc34c8ff937ba8dfd154afa2e3ba21e6b..40c03e050a4e28f473b7b43f3bf58ee5
 @@ -31,6 +34,9 @@ WebMediaPlayerParams::WebMediaPlayerParams(
      : defer_load_cb_(defer_load_cb),
        audio_renderer_sink_(audio_renderer_sink),
-       media_log_(media_log),
+       media_log_(std::move(media_log)),
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +      ipc_media_pipeline_host_creator_(ipc_media_pipeline_host_creator),
 +#endif
@@ -1338,10 +961,10 @@ index ce635b6cc34c8ff937ba8dfd154afa2e3ba21e6b..40c03e050a4e28f473b7b43f3bf58ee5
        worker_task_runner_(worker_task_runner),
        compositor_task_runner_(compositor_task_runner),
 diff --git a/media/blink/webmediaplayer_params.h b/media/blink/webmediaplayer_params.h
-index 2da0d23cb9fb745bb958aab3f334d7d64b9aab16..84d2d54dc22fe67cbca004aa16065a535aa893b1 100644
+index ef3f174484695fb2d142036a3e80df408e34b9d7..1c95e29d1fdcb4be53b423f20f48ce6c9a4164c3 100644
 --- a/media/blink/webmediaplayer_params.h
 +++ b/media/blink/webmediaplayer_params.h
-@@ -16,6 +16,10 @@
+@@ -18,6 +18,10 @@
  #include "media/blink/media_blink_export.h"
  #include "media/filters/context_3d.h"
  
@@ -1352,10 +975,10 @@ index 2da0d23cb9fb745bb958aab3f334d7d64b9aab16..84d2d54dc22fe67cbca004aa16065a53
  namespace base {
  class SingleThreadTaskRunner;
  class TaskRunner;
-@@ -51,6 +55,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
+@@ -52,6 +56,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
+       std::unique_ptr<MediaLog> media_log,
        const DeferLoadCB& defer_load_cb,
        const scoped_refptr<SwitchableAudioRendererSink>& audio_renderer_sink,
-       const scoped_refptr<MediaLog>& media_log,
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +      const IPCMediaPipelineHost::Creator& ipc_media_pipeline_host_creator,
 +#endif
@@ -1363,8 +986,8 @@ index 2da0d23cb9fb745bb958aab3f334d7d64b9aab16..84d2d54dc22fe67cbca004aa16065a53
        const scoped_refptr<base::TaskRunner>& worker_task_runner,
        const scoped_refptr<base::SingleThreadTaskRunner>& compositor_task_runner,
 @@ -78,6 +85,12 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
-     return media_log_;
-   }
+ 
+   std::unique_ptr<MediaLog> take_media_log() { return std::move(media_log_); }
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  media::IPCMediaPipelineHost::Creator ipc_media_pipeline_host_creator() const {
@@ -1375,10 +998,10 @@ index 2da0d23cb9fb745bb958aab3f334d7d64b9aab16..84d2d54dc22fe67cbca004aa16065a53
    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner() const {
      return media_task_runner_;
    }
-@@ -130,6 +143,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
+@@ -134,6 +147,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
    DeferLoadCB defer_load_cb_;
    scoped_refptr<SwitchableAudioRendererSink> audio_renderer_sink_;
-   scoped_refptr<MediaLog> media_log_;
+   std::unique_ptr<MediaLog> media_log_;
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  IPCMediaPipelineHost::Creator ipc_media_pipeline_host_creator_;
 +#endif
@@ -2407,7 +2030,7 @@ index 0000000000000000000000000000000000000000..c5ff0524c431f5f47422329e637717fc
 +
 +#endif  // CDM_CONTENT_DECRYPTION_MODULE_EXT_H_
 diff --git a/media/filters/audio_file_reader.cc b/media/filters/audio_file_reader.cc
-index 3878f436d7b495e238d5541117093d4183eaefcb..c90c0db1b960d96b52c2657cbac5811fe53ef94d 100644
+index 4cd5cd36e96854a0fde4d01a69d65a6047aa9223..6bf77823c7ca0eaa12c52de80b35b669a52bbf4c 100644
 --- a/media/filters/audio_file_reader.cc
 +++ b/media/filters/audio_file_reader.cc
 @@ -16,6 +16,10 @@
@@ -2463,7 +2086,7 @@ index 3878f436d7b495e238d5541117093d4183eaefcb..c90c0db1b960d96b52c2657cbac5811f
    DCHECK(glue_.get() && codec_context_)
        << "AudioFileReader::Read() : reader is not opened!";
    size_t bytes_per_sample = av_get_bytes_per_sample(codec_context_->sample_fmt);
-@@ -258,6 +288,10 @@ base::TimeDelta AudioFileReader::GetDuration() const {
+@@ -253,6 +283,10 @@ base::TimeDelta AudioFileReader::GetDuration() const {
  }
  
  int AudioFileReader::GetNumberOfFrames() const {
@@ -2525,7 +2148,7 @@ index f68dc74bb19fd3f36d7fe6460f48df42a1a3428c..0d64eccba74f9ab662f3ad8bf9ef55de
    std::unique_ptr<InMemoryUrlProtocol> protocol_;
    std::unique_ptr<AudioFileReader> reader_;
 diff --git a/media/filters/decoder_stream.cc b/media/filters/decoder_stream.cc
-index 5247734d29fb5b12083edd4d867799e1fece4cd0..488678834d9ea75f9667b13e5ab5d2404ac3ff00 100644
+index 8ed492a06fa9777b70e28b000f9a71d5a65a4c7a..c9e0465af11c1a1c2e6ef8b9dc4bc22f2ba69553 100644
 --- a/media/filters/decoder_stream.cc
 +++ b/media/filters/decoder_stream.cc
 @@ -22,6 +22,10 @@
@@ -2539,7 +2162,7 @@ index 5247734d29fb5b12083edd4d867799e1fece4cd0..488678834d9ea75f9667b13e5ab5d240
  namespace media {
  
  // TODO(rileya): Devise a better way of specifying trace/UMA/etc strings for
-@@ -72,6 +76,12 @@ DecoderStream<StreamType>::~DecoderStream() {
+@@ -71,6 +75,12 @@ DecoderStream<StreamType>::~DecoderStream() {
    FUNCTION_DVLOG(1);
    DCHECK(task_runner_->BelongsToCurrentThread());
  
@@ -2552,7 +2175,7 @@ index 5247734d29fb5b12083edd4d867799e1fece4cd0..488678834d9ea75f9667b13e5ab5d240
    decoder_selector_.reset();
  
    if (!init_cb_.is_null()) {
-@@ -284,6 +294,13 @@ void DecoderStream<StreamType>::OnDecoderSelected(
+@@ -290,6 +300,13 @@ void DecoderStream<StreamType>::OnDecoderSelected(
      DCHECK(decoder_);
    }
  
@@ -2563,10 +2186,10 @@ index 5247734d29fb5b12083edd4d867799e1fece4cd0..488678834d9ea75f9667b13e5ab5d240
 +  }
 +#endif
 +
-   previous_decoder_ = std::move(decoder_);
-   decoded_frames_since_fallback_ = 0;
    decoder_ = std::move(selected_decoder);
-@@ -302,6 +319,13 @@ void DecoderStream<StreamType>::OnDecoderSelected(
+   if (decrypting_demuxer_stream) {
+     decrypting_demuxer_stream_ = std::move(decrypting_demuxer_stream);
+@@ -308,6 +325,13 @@ void DecoderStream<StreamType>::OnDecoderSelected(
    // never successfully outputed a frame).
    fallback_buffers_ = pending_buffers_;
  
@@ -2581,7 +2204,7 @@ index 5247734d29fb5b12083edd4d867799e1fece4cd0..488678834d9ea75f9667b13e5ab5d240
      if (state_ == STATE_INITIALIZING) {
        state_ = STATE_UNINITIALIZED;
 diff --git a/media/filters/gpu_video_decoder.cc b/media/filters/gpu_video_decoder.cc
-index 953a41479346873d3f062749af38005d00e13c74..0a598a774bc067f126ad3ba65e0e604fd204b9c7 100644
+index 627088096158f9c0a2764ba2225a92c00b1b6385..88e044aedbf0237fc2521e802918e3c6a95b92f7 100644
 --- a/media/filters/gpu_video_decoder.cc
 +++ b/media/filters/gpu_video_decoder.cc
 @@ -37,6 +37,10 @@
@@ -2595,7 +2218,7 @@ index 953a41479346873d3f062749af38005d00e13c74..0a598a774bc067f126ad3ba65e0e604f
  namespace media {
  namespace {
  
-@@ -197,6 +201,10 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
+@@ -194,6 +198,10 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
    DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
    DCHECK(config.IsValidConfig());
  
@@ -2606,7 +2229,7 @@ index 953a41479346873d3f062749af38005d00e13c74..0a598a774bc067f126ad3ba65e0e604f
    InitCB bound_init_cb =
        base::Bind(&ReportGpuVideoDecoderInitializeStatusToUMAAndRunCB,
                   BindToCurrentLoop(init_cb), media_log_);
-@@ -273,6 +281,9 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
+@@ -270,6 +278,9 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
    vda_ = factories_->CreateVideoDecodeAccelerator();
    if (!vda_) {
      DVLOG(1) << "Failed to create a VDA.";
@@ -2616,18 +2239,19 @@ index 953a41479346873d3f062749af38005d00e13c74..0a598a774bc067f126ad3ba65e0e604f
      bound_init_cb.Run(false);
      return;
    }
-@@ -309,6 +320,9 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
- 
+@@ -307,6 +318,10 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
    // If external surfaces are not supported we can complete initialization now.
-   CompleteInitialization(SurfaceManager::kNoSurfaceID);
+   CompleteInitialization(SurfaceManager::kNoSurfaceID,
+                          base::UnguessableToken());
++
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(OS_MACOSX)
 +  pipeline_stats::ReportVideoDecoderInitResult(true);
 +#endif
  }
  
- // OnSurfaceAvailable() might be called at any time between Initialize() and
+ // OnOverlayInfoAvailable() might be called at any time between Initialize() and
 diff --git a/media/filters/stream_parser_factory.cc b/media/filters/stream_parser_factory.cc
-index 26325f3d822b1ac198b414e3010de517d082c787..dc515fa0df79d7ce9003e7f27f520a48fb967fcd 100644
+index d76885be0c29828ea1e691472a012cd8a0a4d84d..2b7d74f9e9bf6355efa4086adb4966fbdc8217e9 100644
 --- a/media/filters/stream_parser_factory.cc
 +++ b/media/filters/stream_parser_factory.cc
 @@ -26,6 +26,9 @@
@@ -2640,7 +2264,7 @@ index 26325f3d822b1ac198b414e3010de517d082c787..dc515fa0df79d7ce9003e7f27f520a48
  #if BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
  #include "media/formats/mp2t/mp2t_stream_parser.h"
  #endif
-@@ -364,6 +367,17 @@ static bool VerifyCodec(
+@@ -356,6 +359,17 @@ static bool VerifyCodec(
      std::vector<CodecInfo::HistogramTag>* video_codecs) {
    switch (codec_info->type) {
      case CodecInfo::AUDIO:
@@ -2658,7 +2282,7 @@ index 26325f3d822b1ac198b414e3010de517d082c787..dc515fa0df79d7ce9003e7f27f520a48
        if (audio_codecs)
          audio_codecs->push_back(codec_info->tag);
        return true;
-@@ -375,6 +389,12 @@ static bool VerifyCodec(
+@@ -367,6 +381,12 @@ static bool VerifyCodec(
            !media::HasPlatformDecoderSupport()) {
          return false;
        }
@@ -2671,7 +2295,7 @@ index 26325f3d822b1ac198b414e3010de517d082c787..dc515fa0df79d7ce9003e7f27f520a48
  #endif
        if (video_codecs)
          video_codecs->push_back(codec_info->tag);
-@@ -408,9 +428,16 @@ static bool CheckTypeAndCodecs(
+@@ -400,9 +420,16 @@ static bool CheckTypeAndCodecs(
      ParserFactoryFunction* factory_function,
      std::vector<CodecInfo::HistogramTag>* audio_codecs,
      std::vector<CodecInfo::HistogramTag>* video_codecs) {
@@ -2689,19 +2313,19 @@ index 26325f3d822b1ac198b414e3010de517d082c787..dc515fa0df79d7ce9003e7f27f520a48
        if (codecs.empty()) {
          const CodecInfo* codec_info = type_info.codecs[0];
 diff --git a/media/formats/mp4/aac.cc b/media/formats/mp4/aac.cc
-index cbabddb092fff9a0f9762168ad5bed2de5c3da3f..9c25ab1995f96b8d7a08d02c1048418a1826c365 100644
+index 9ab7cbbbd3fe4691b006b133668f285acf0a1d7e..d21e5ed61a304b308017d98451968588bf9149d5 100644
 --- a/media/formats/mp4/aac.cc
 +++ b/media/formats/mp4/aac.cc
-@@ -29,7 +29,7 @@ AAC::~AAC() {
+@@ -28,7 +28,7 @@ AAC::~AAC() {
+ }
  
- bool AAC::Parse(const std::vector<uint8_t>& data,
-                 const scoped_refptr<MediaLog>& media_log) {
+ bool AAC::Parse(const std::vector<uint8_t>& data, MediaLog* media_log) {
 -#if defined(OS_ANDROID)
 +#if defined(OS_ANDROID) || defined(USE_SYSTEM_PROPRIETARY_CODECS)
    codec_specific_data_ = data;
  #endif
    if (data.empty())
-@@ -152,6 +152,12 @@ bool AAC::Parse(const std::vector<uint8_t>& data,
+@@ -151,6 +151,12 @@ bool AAC::Parse(const std::vector<uint8_t>& data, MediaLog* media_log) {
    return true;
  }
  
@@ -2715,12 +2339,12 @@ index cbabddb092fff9a0f9762168ad5bed2de5c3da3f..9c25ab1995f96b8d7a08d02c1048418a
    if (extension_frequency_ > 0)
      return extension_frequency_;
 diff --git a/media/formats/mp4/aac.h b/media/formats/mp4/aac.h
-index ac694cd99bac40d40ad4db5860066831005f728a..5a97098dec7d1c05546c8a880dbe19e9da5409ac 100644
+index b6244ab4a96277b1521095c6113d7c569bc36b0e..af7da6c6cdb3dc94618e90dd69056562bb5a892e 100644
 --- a/media/formats/mp4/aac.h
 +++ b/media/formats/mp4/aac.h
-@@ -37,6 +37,13 @@ class MEDIA_EXPORT AAC {
-   bool Parse(const std::vector<uint8_t>& data,
-              const scoped_refptr<MediaLog>& media_log);
+@@ -36,6 +36,13 @@ class MEDIA_EXPORT AAC {
+   // configurations.
+   bool Parse(const std::vector<uint8_t>& data, MediaLog* media_log);
  
 +  // Gets the actual sample rate of the AAC stream.  Returns the
 +  // input_samples_per_second value that should be used in an
@@ -2732,7 +2356,7 @@ index ac694cd99bac40d40ad4db5860066831005f728a..5a97098dec7d1c05546c8a880dbe19e9
    // Gets the output sample rate for the AAC stream.
    // |sbr_in_mimetype| should be set to true if the SBR mode is
    // signalled in the mimetype. (ie mp4a.40.5 in the codecs parameter).
-@@ -57,7 +64,7 @@ class MEDIA_EXPORT AAC {
+@@ -56,7 +63,7 @@ class MEDIA_EXPORT AAC {
    // unchanged.
    bool ConvertEsdsToADTS(std::vector<uint8_t>* buffer) const;
  
@@ -2741,7 +2365,7 @@ index ac694cd99bac40d40ad4db5860066831005f728a..5a97098dec7d1c05546c8a880dbe19e9
    // Returns the codec specific data needed by android MediaCodec.
    std::vector<uint8_t> codec_specific_data() const {
      return codec_specific_data_;
-@@ -75,7 +82,7 @@ class MEDIA_EXPORT AAC {
+@@ -74,7 +81,7 @@ class MEDIA_EXPORT AAC {
    uint8_t frequency_index_;
    uint8_t channel_config_;
  
@@ -2751,10 +2375,10 @@ index ac694cd99bac40d40ad4db5860066831005f728a..5a97098dec7d1c05546c8a880dbe19e9
    std::vector<uint8_t> codec_specific_data_;
  #endif
 diff --git a/media/formats/mp4/box_definitions.cc b/media/formats/mp4/box_definitions.cc
-index c1c9934ccc415d2af348fcdcd07aa03492af3a76..f8d46155cdd44ca6cb518e005af1bb82e0420f78 100644
+index 7e581bc6e2ca460454753a9b28563ef22bfe06e6..4be71bef7fe5f1443398f2e7030de81158a5a46e 100644
 --- a/media/formats/mp4/box_definitions.cc
 +++ b/media/formats/mp4/box_definitions.cc
-@@ -869,7 +869,6 @@ FourCC ElementaryStreamDescriptor::BoxType() const {
+@@ -863,7 +863,6 @@ FourCC ElementaryStreamDescriptor::BoxType() const {
  }
  
  bool ElementaryStreamDescriptor::Parse(BoxReader* reader) {
@@ -2763,10 +2387,10 @@ index c1c9934ccc415d2af348fcdcd07aa03492af3a76..f8d46155cdd44ca6cb518e005af1bb82
  
    RCHECK(reader->ReadFullBoxHeader());
 diff --git a/media/formats/mp4/box_definitions.h b/media/formats/mp4/box_definitions.h
-index 311e7829ba2cdbc54c85ef0c8d3c976c9e74bf6e..8a3dca462acb31ef8a393d6f008b4f226bb9e55b 100644
+index cd0caec15a3d305e5f90452ddc97d245029b7792..a581ce067f3f3cceb9bb25801c1c8e0635dc3ec8 100644
 --- a/media/formats/mp4/box_definitions.h
 +++ b/media/formats/mp4/box_definitions.h
-@@ -274,6 +274,7 @@ struct MEDIA_EXPORT ElementaryStreamDescriptor : Box {
+@@ -273,6 +273,7 @@ struct MEDIA_EXPORT ElementaryStreamDescriptor : Box {
  
    uint8_t object_type;
    AAC aac;
@@ -2775,7 +2399,7 @@ index 311e7829ba2cdbc54c85ef0c8d3c976c9e74bf6e..8a3dca462acb31ef8a393d6f008b4f22
  
  struct MEDIA_EXPORT AudioSampleEntry : Box {
 diff --git a/media/formats/mp4/mp4_stream_parser.cc b/media/formats/mp4/mp4_stream_parser.cc
-index 1f914bf42b2b63e6e16b877bad97f59d388e8ac3..538521ad55e3503dfec6a6b7df6ee50ee98125a0 100644
+index 2079b981b275ae670889c5fb7a5392df512792ff..bb30fdee443b4bf21f9cdf6adcd6f2e426eb9a2b 100644
 --- a/media/formats/mp4/mp4_stream_parser.cc
 +++ b/media/formats/mp4/mp4_stream_parser.cc
 @@ -305,6 +305,7 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
@@ -2818,882 +2442,36 @@ index a8653d47d7f263c57f85a1c2b8d82a5c699ebb30..b7d8d8a904f0a89067f2a14961cc0b2a
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +#include "platform_media/common/media_pipeline_messages.h"
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
-diff --git a/media/mojo/clients/mojo_cdm.cc b/media/mojo/clients/mojo_cdm.cc
-index 657659d8afabacf32810c73e2c3cb2d0fb390344..6433ff043f1a00a005bebda3652418a7402e475a 100644
---- a/media/mojo/clients/mojo_cdm.cc
-+++ b/media/mojo/clients/mojo_cdm.cc
-@@ -25,6 +25,13 @@
+diff --git a/media/mojo/clients/mojo_renderer_factory.cc b/media/mojo/clients/mojo_renderer_factory.cc
+index a63947cac57fadcbbd8ca821206666ce208e50b5..fb61ddf48f01c4741f0c2c21787f60edaee39080 100644
+--- a/media/mojo/clients/mojo_renderer_factory.cc
++++ b/media/mojo/clients/mojo_renderer_factory.cc
+@@ -28,7 +28,8 @@ std::unique_ptr<Renderer> MojoRendererFactory::CreateRenderer(
+     const scoped_refptr<base::TaskRunner>& /* worker_task_runner */,
+     AudioRendererSink* /* audio_renderer_sink */,
+     VideoRendererSink* video_renderer_sink,
+-    const RequestOverlayInfoCB& /* request_overlay_info_cb */) {
++    const RequestOverlayInfoCB& /* request_overlay_info_cb */,
++    bool /* use_platform_media_pipeline */) {
+   std::unique_ptr<VideoOverlayFactory> overlay_factory;
  
- namespace media {
+   // |get_gpu_factories_cb_| can be null in the HLS/MediaPlayerRenderer case,
+diff --git a/media/mojo/clients/mojo_renderer_factory.h b/media/mojo/clients/mojo_renderer_factory.h
+index 4990dcb1678b8f71942ccf0b2f2bbc8bd4e2b424..041697d86a03f91d0215a8896d687f7511045feb 100644
+--- a/media/mojo/clients/mojo_renderer_factory.h
++++ b/media/mojo/clients/mojo_renderer_factory.h
+@@ -36,7 +36,8 @@ class MojoRendererFactory : public RendererFactory {
+       const scoped_refptr<base::TaskRunner>& worker_task_runner,
+       AudioRendererSink* audio_renderer_sink,
+       VideoRendererSink* video_renderer_sink,
+-      const RequestOverlayInfoCB& request_overlay_info_cb) final;
++      const RequestOverlayInfoCB& request_overlay_info_cb,
++      bool use_platform_media_pipeline = false) final;
  
-+template <typename PromiseType>
-+static void RejectPromise(std::unique_ptr<PromiseType> promise,
-+                          mojom::CdmPromiseResultPtr result) {
-+  promise->reject(result->exception, result->system_code,
-+                  result->error_message);
-+}
-+
- // static
- void MojoCdm::Create(
-     const std::string& key_system,
-@@ -119,14 +126,14 @@ void MojoCdm::InitializeCdm(const std::string& key_system,
-       base::Bind(&MojoCdm::OnCdmInitialized, base::Unretained(this)));
- }
- 
-+// TODO(xhwang): Properly handle CDM calls after connection error.
-+// See http://crbug.com/671362
- void MojoCdm::OnConnectionError(uint32_t custom_reason,
-                                 const std::string& description) {
-   LOG(ERROR) << "Remote CDM connection error: custom_reason=" << custom_reason
-              << ", description=\"" << description << "\"";
-   DCHECK(thread_checker_.CalledOnValidThread());
- 
--  remote_cdm_.reset();
--
-   // Handle initial connection error.
-   if (pending_init_promise_) {
-     DCHECK(!cdm_session_tracker_.HasRemainingSessions());
-@@ -137,9 +144,6 @@ void MojoCdm::OnConnectionError(uint32_t custom_reason,
-     return;
-   }
- 
--  // As communication with the remote CDM is broken, reject any outstanding
--  // promises and close all the existing sessions.
--  cdm_promise_adapter_.Clear();
-   cdm_session_tracker_.CloseRemainingSessions(session_closed_cb_);
- }
- 
-@@ -148,16 +152,9 @@ void MojoCdm::SetServerCertificate(const std::vector<uint8_t>& certificate,
-   DVLOG(2) << __func__;
-   DCHECK(thread_checker_.CalledOnValidThread());
- 
--  if (!remote_cdm_) {
--    promise->reject(media::CdmPromise::INVALID_STATE_ERROR, 0,
--                    "CDM connection lost.");
--    return;
--  }
--
--  uint32_t promise_id = cdm_promise_adapter_.SavePromise(std::move(promise));
-   remote_cdm_->SetServerCertificate(
-       certificate, base::Bind(&MojoCdm::OnSimpleCdmPromiseResult,
--                              base::Unretained(this), promise_id));
-+                              base::Unretained(this), base::Passed(&promise)));
- }
- 
- void MojoCdm::CreateSessionAndGenerateRequest(
-@@ -168,17 +165,10 @@ void MojoCdm::CreateSessionAndGenerateRequest(
-   DVLOG(2) << __func__;
-   DCHECK(thread_checker_.CalledOnValidThread());
- 
--  if (!remote_cdm_) {
--    promise->reject(media::CdmPromise::INVALID_STATE_ERROR, 0,
--                    "CDM connection lost.");
--    return;
--  }
--
--  uint32_t promise_id = cdm_promise_adapter_.SavePromise(std::move(promise));
-   remote_cdm_->CreateSessionAndGenerateRequest(
-       session_type, init_data_type, init_data,
-       base::Bind(&MojoCdm::OnNewSessionCdmPromiseResult, base::Unretained(this),
--                 promise_id));
-+                 base::Passed(&promise)));
- }
- 
- void MojoCdm::LoadSession(CdmSessionType session_type,
-@@ -187,16 +177,10 @@ void MojoCdm::LoadSession(CdmSessionType session_type,
-   DVLOG(2) << __func__;
-   DCHECK(thread_checker_.CalledOnValidThread());
- 
--  if (!remote_cdm_) {
--    promise->reject(media::CdmPromise::INVALID_STATE_ERROR, 0,
--                    "CDM connection lost.");
--    return;
--  }
--
--  uint32_t promise_id = cdm_promise_adapter_.SavePromise(std::move(promise));
--  remote_cdm_->LoadSession(session_type, session_id,
--                           base::Bind(&MojoCdm::OnNewSessionCdmPromiseResult,
--                                      base::Unretained(this), promise_id));
-+  remote_cdm_->LoadSession(
-+      session_type, session_id,
-+      base::Bind(&MojoCdm::OnNewSessionCdmPromiseResult, base::Unretained(this),
-+                 base::Passed(&promise)));
- }
- 
- void MojoCdm::UpdateSession(const std::string& session_id,
-@@ -205,16 +189,10 @@ void MojoCdm::UpdateSession(const std::string& session_id,
-   DVLOG(2) << __func__;
-   DCHECK(thread_checker_.CalledOnValidThread());
- 
--  if (!remote_cdm_) {
--    promise->reject(media::CdmPromise::INVALID_STATE_ERROR, 0,
--                    "CDM connection lost.");
--    return;
--  }
--
--  uint32_t promise_id = cdm_promise_adapter_.SavePromise(std::move(promise));
--  remote_cdm_->UpdateSession(session_id, response,
--                             base::Bind(&MojoCdm::OnSimpleCdmPromiseResult,
--                                        base::Unretained(this), promise_id));
-+  remote_cdm_->UpdateSession(
-+      session_id, response,
-+      base::Bind(&MojoCdm::OnSimpleCdmPromiseResult, base::Unretained(this),
-+                 base::Passed(&promise)));
- }
- 
- void MojoCdm::CloseSession(const std::string& session_id,
-@@ -222,16 +200,9 @@ void MojoCdm::CloseSession(const std::string& session_id,
-   DVLOG(2) << __func__;
-   DCHECK(thread_checker_.CalledOnValidThread());
- 
--  if (!remote_cdm_) {
--    promise->reject(media::CdmPromise::INVALID_STATE_ERROR, 0,
--                    "CDM connection lost.");
--    return;
--  }
--
--  uint32_t promise_id = cdm_promise_adapter_.SavePromise(std::move(promise));
--  remote_cdm_->CloseSession(session_id,
--                            base::Bind(&MojoCdm::OnSimpleCdmPromiseResult,
--                                       base::Unretained(this), promise_id));
-+  remote_cdm_->CloseSession(
-+      session_id, base::Bind(&MojoCdm::OnSimpleCdmPromiseResult,
-+                             base::Unretained(this), base::Passed(&promise)));
- }
- 
- void MojoCdm::RemoveSession(const std::string& session_id,
-@@ -239,16 +210,9 @@ void MojoCdm::RemoveSession(const std::string& session_id,
-   DVLOG(2) << __func__;
-   DCHECK(thread_checker_.CalledOnValidThread());
- 
--  if (!remote_cdm_) {
--    promise->reject(media::CdmPromise::INVALID_STATE_ERROR, 0,
--                    "CDM connection lost.");
--    return;
--  }
--
--  uint32_t promise_id = cdm_promise_adapter_.SavePromise(std::move(promise));
--  remote_cdm_->RemoveSession(session_id,
--                             base::Bind(&MojoCdm::OnSimpleCdmPromiseResult,
--                                        base::Unretained(this), promise_id));
-+  remote_cdm_->RemoveSession(
-+      session_id, base::Bind(&MojoCdm::OnSimpleCdmPromiseResult,
-+                             base::Unretained(this), base::Passed(&promise)));
- }
- 
- CdmContext* MojoCdm::GetCdmContext() {
-@@ -345,9 +309,7 @@ void MojoCdm::OnCdmInitialized(mojom::CdmPromiseResultPtr result,
-   DCHECK(pending_init_promise_);
- 
-   if (!result->success) {
--    pending_init_promise_->reject(result->exception, result->system_code,
--                                  result->error_message);
--    pending_init_promise_.reset();
-+    RejectPromise(std::move(pending_init_promise_), std::move(result));
-     return;
-   }
- 
-@@ -372,28 +334,24 @@ void MojoCdm::OnKeyAdded() {
-   decryptor_->OnKeyAdded();
- }
- 
--void MojoCdm::OnSimpleCdmPromiseResult(uint32_t promise_id,
--                                       mojom::CdmPromiseResultPtr result) {
-+void MojoCdm::OnSimpleCdmPromiseResult(
-+    std::unique_ptr<SimpleCdmPromise> promise,
-+    mojom::CdmPromiseResultPtr result) {
-   if (result->success)
--    cdm_promise_adapter_.ResolvePromise(promise_id);
--  else {
--    cdm_promise_adapter_.RejectPromise(promise_id, result->exception,
--                                       result->system_code,
--                                       result->error_message);
--  }
-+    promise->resolve();
-+  else
-+    RejectPromise(std::move(promise), std::move(result));
- }
- 
--void MojoCdm::OnNewSessionCdmPromiseResult(uint32_t promise_id,
--                                           mojom::CdmPromiseResultPtr result,
--                                           const std::string& session_id) {
-+void MojoCdm::OnNewSessionCdmPromiseResult(
-+    std::unique_ptr<NewSessionCdmPromise> promise,
-+    mojom::CdmPromiseResultPtr result,
-+    const std::string& session_id) {
-   if (result->success) {
-     cdm_session_tracker_.AddSession(session_id);
--    cdm_promise_adapter_.ResolvePromise(promise_id, session_id);
--  } else {
--    cdm_promise_adapter_.RejectPromise(promise_id, result->exception,
--                                       result->system_code,
--                                       result->error_message);
--  }
-+    promise->resolve(session_id);
-+  } else
-+    RejectPromise(std::move(promise), std::move(result));
- }
- 
- }  // namespace media
-diff --git a/media/mojo/clients/mojo_cdm.h b/media/mojo/clients/mojo_cdm.h
-index 425e90183b27a50856e128923140603b0922b8d1..e72b5352d9d945c528ff9a839ce97c9c3349a3d9 100644
---- a/media/mojo/clients/mojo_cdm.h
-+++ b/media/mojo/clients/mojo_cdm.h
-@@ -17,7 +17,6 @@
- #include "base/threading/thread_checker.h"
- #include "media/base/cdm_context.h"
- #include "media/base/cdm_initialized_promise.h"
--#include "media/base/cdm_promise_adapter.h"
- #include "media/base/cdm_session_tracker.h"
- #include "media/base/content_decryption_module.h"
- #include "media/mojo/interfaces/content_decryption_module.mojom.h"
-@@ -114,11 +113,12 @@ class MojoCdm : public ContentDecryptionModule,
-   void OnKeyAdded();
- 
-   // Callbacks to handle CDM promises.
--  void OnSimpleCdmPromiseResult(uint32_t promise_id,
-+  void OnSimpleCdmPromiseResult(std::unique_ptr<SimpleCdmPromise> promise,
-                                 mojom::CdmPromiseResultPtr result);
--  void OnNewSessionCdmPromiseResult(uint32_t promise_id,
--                                    mojom::CdmPromiseResultPtr result,
--                                    const std::string& session_id);
-+  void OnNewSessionCdmPromiseResult(
-+      std::unique_ptr<NewSessionCdmPromise> promise,
-+      mojom::CdmPromiseResultPtr result,
-+      const std::string& session_id);
- 
-   base::ThreadChecker thread_checker_;
- 
-@@ -157,9 +157,6 @@ class MojoCdm : public ContentDecryptionModule,
-   // Keep track of current sessions.
-   CdmSessionTracker cdm_session_tracker_;
- 
--  // Keep track of outstanding promises.
--  CdmPromiseAdapter cdm_promise_adapter_;
--
-   // This must be the last member.
-   base::WeakPtrFactory<MojoCdm> weak_factory_;
- 
-diff --git a/media/mojo/clients/mojo_cdm_unittest.cc b/media/mojo/clients/mojo_cdm_unittest.cc
-index 872e5c9e10cb1fd8115bd5b6ac41d36387648177..719a4f9ded64d6dec1772d4403bf74f5ecea19d6 100644
---- a/media/mojo/clients/mojo_cdm_unittest.cc
-+++ b/media/mojo/clients/mojo_cdm_unittest.cc
-@@ -7,10 +7,8 @@
- #include "base/bind.h"
- #include "base/macros.h"
- #include "base/memory/ptr_util.h"
--#include "base/memory/ref_counted.h"
- #include "base/run_loop.h"
- #include "base/test/test_message_loop.h"
--#include "base/time/time.h"
- #include "media/base/cdm_config.h"
- #include "media/base/content_decryption_module.h"
- #include "media/base/mock_filters.h"
-@@ -22,30 +20,7 @@
- #include "mojo/public/cpp/bindings/interface_request.h"
- #include "testing/gtest/include/gtest/gtest.h"
- 
--using ::testing::_;
--using ::testing::DoAll;
--using ::testing::Invoke;
--using ::testing::ReturnNull;
- using ::testing::StrictMock;
--using ::testing::WithArg;
--using ::testing::WithArgs;
--using ::testing::WithoutArgs;
--
--MATCHER(NotEmpty, "") {
--  return !arg.empty();
--}
--
--ACTION_P2(CdmCreated, cdm, error_message) {
--  arg0.Run(cdm, error_message);
--}
--
--ACTION_P3(InvokeFunction, classPointer, memberFunc, p1) {
--  (classPointer->*memberFunc)(arg0, p1);
--}
--
--ACTION_P4(InvokeFunction2, classPointer, memberFunc, p1, p2) {
--  (classPointer->*memberFunc)(arg0, p1, p2);
--}
- 
- namespace media {
- 
-@@ -54,24 +29,11 @@ namespace {
- const char kClearKeyKeySystem[] = "org.w3.clearkey";
- const char kTestSecurityOrigin[] = "https://www.test.com";
- 
--// Random key ID used to create a session.
--const uint8_t kKeyId[] = {
--    // base64 equivalent is AQIDBAUGBwgJCgsMDQ4PEA
--    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
--    0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
--};
--
- }  // namespace
- 
- class MojoCdmTest : public ::testing::Test {
-  public:
--  enum ExpectedResult {
--    SUCCESS,
--    FAILURE,                  // Operation fails immediately.
--    PENDING,                  // Operation never completes.
--    CONNECTION_ERROR_BEFORE,  // Connection error happened before operation.
--    CONNECTION_ERROR_DURING,  // Connection error happens during operation.
--  };
-+  enum ExpectedResult { SUCCESS, CONNECTION_ERROR };
- 
-   MojoCdmTest()
-       : mojo_cdm_service_(base::MakeUnique<MojoCdmService>(
-@@ -82,31 +44,19 @@ class MojoCdmTest : public ::testing::Test {
-   virtual ~MojoCdmTest() {}
- 
-   void Initialize(ExpectedResult expected_result) {
--    // TODO(xhwang): Add pending init support.
--    DCHECK_NE(PENDING, expected_result);
--
-     mojom::ContentDecryptionModulePtr remote_cdm;
-     auto cdm_request = mojo::MakeRequest(&remote_cdm);
- 
--    cdm_binding_.Bind(std::move(cdm_request));
--
--    std::string key_system;
--    if (expected_result == CONNECTION_ERROR_BEFORE) {
--      // Break the connection before the call.
--      ForceConnectionError();
--    } else if (expected_result != FAILURE) {
--      // In the remaining cases, CDM is expected, so provide a key system.
--      key_system = kClearKeyKeySystem;
--
--      if (expected_result == CONNECTION_ERROR_DURING) {
--        // Create() will be successful, so provide a callback that will break
--        // the connection before returning the CDM.
--        cdm_factory_.SetBeforeCreationCB(base::Bind(
--            &MojoCdmTest::ForceConnectionError, base::Unretained(this)));
--      }
-+    switch (expected_result) {
-+      case SUCCESS:
-+        cdm_binding_.Bind(std::move(cdm_request));
-+        break;
-+      case CONNECTION_ERROR:
-+        cdm_request.ResetWithReason(0, "Request dropped for testing.");
-+        break;
-     }
- 
--    MojoCdm::Create(key_system, GURL(kTestSecurityOrigin), CdmConfig(),
-+    MojoCdm::Create(kClearKeyKeySystem, GURL(kTestSecurityOrigin), CdmConfig(),
-                     std::move(remote_cdm),
-                     base::Bind(&MockCdmClient::OnSessionMessage,
-                                base::Unretained(&cdm_client_)),
-@@ -118,257 +68,37 @@ class MojoCdmTest : public ::testing::Test {
-                                base::Unretained(&cdm_client_)),
-                     base::Bind(&MojoCdmTest::OnCdmCreated,
-                                base::Unretained(this), expected_result));
-+
-     base::RunLoop().RunUntilIdle();
-+
-+    if (expected_result == SUCCESS) {
-+      EXPECT_TRUE(mojo_cdm_);
-+    } else {
-+      EXPECT_FALSE(mojo_cdm_);
-+    }
-   }
- 
-   void OnCdmCreated(ExpectedResult expected_result,
-                     const scoped_refptr<ContentDecryptionModule>& cdm,
-                     const std::string& error_message) {
-     if (!cdm) {
--      EXPECT_NE(SUCCESS, expected_result);
-       DVLOG(1) << error_message;
-       return;
-     }
- 
-     EXPECT_EQ(SUCCESS, expected_result);
-     mojo_cdm_ = cdm;
--    remote_cdm_ = cdm_factory_.GetCreatedCdm();
--  }
--
--  void ForceConnectionError() {
--    cdm_binding_.CloseWithReason(2, "Test closed connection.");
--    base::RunLoop().RunUntilIdle();
--  }
--
--  void SetServerCertificateAndExpect(const std::vector<uint8_t>& certificate,
--                                     ExpectedResult expected_result) {
--    if (expected_result == CONNECTION_ERROR_BEFORE) {
--      // Break the connection before the call, so SetServerCertificate() is
--      // never called.
--      ForceConnectionError();
--    } else {
--      EXPECT_CALL(*remote_cdm_, OnSetServerCertificate(certificate, _))
--          .WillOnce(WithArg<1>(InvokeFunction(this, &MojoCdmTest::HandlePromise,
--                                              expected_result)));
--    }
--
--    mojo_cdm_->SetServerCertificate(
--        certificate,
--        base::MakeUnique<MockCdmPromise>(expected_result == SUCCESS));
--    base::RunLoop().RunUntilIdle();
--  }
--
--  void CreateSessionAndExpect(const std::string& session_id,
--                              ExpectedResult expected_result) {
--    // Specify parameters needed to call CreateSessionAndGenerateRequest() in
--    // order to verify that the data is passed properly.
--    const CdmSessionType session_type = CdmSessionType::TEMPORARY_SESSION;
--    const EmeInitDataType data_type = EmeInitDataType::WEBM;
--    const std::vector<uint8_t> key_id(kKeyId, kKeyId + arraysize(kKeyId));
--    std::string created_session_id;
--
--    if (expected_result == CONNECTION_ERROR_BEFORE) {
--      // Break the connection before the call, so
--      // CreateSessionAndGenerateRequest() is never called.
--      ForceConnectionError();
--    } else {
--      EXPECT_CALL(*remote_cdm_, OnCreateSessionAndGenerateRequest(
--                                    session_type, data_type, key_id, _))
--          .WillOnce(WithArg<3>(
--              InvokeFunction2(this, &MojoCdmTest::HandleSessionPromise,
--                              session_id, expected_result)));
--    }
--
--    // Note that although it's called CreateSessionAndGenerateRequest, no
--    // request is generated.
--    mojo_cdm_->CreateSessionAndGenerateRequest(
--        session_type, data_type, key_id,
--        base::MakeUnique<MockCdmSessionPromise>(expected_result == SUCCESS,
--                                                &created_session_id));
--    base::RunLoop().RunUntilIdle();
--
--    // If the session was "created" ...
--    if (expected_result == SUCCESS) {
--      // Returned session ID must match the session ID provided.
--      EXPECT_EQ(session_id, created_session_id);
--      base::RunLoop().RunUntilIdle();
--    }
--  }
--
--  void LoadSessionAndExpect(const std::string& session_id,
--                            ExpectedResult expected_result) {
--    const CdmSessionType session_type =
--        CdmSessionType::PERSISTENT_LICENSE_SESSION;
--    std::string loaded_session_id;
--
--    if (expected_result == CONNECTION_ERROR_BEFORE) {
--      // Break the connection before the call, so LoadSession() is never called.
--      ForceConnectionError();
--    } else {
--      EXPECT_CALL(*remote_cdm_, OnLoadSession(session_type, session_id, _))
--          .WillOnce(WithArg<2>(
--              InvokeFunction2(this, &MojoCdmTest::HandleSessionPromise,
--                              session_id, expected_result)));
--    }
--
--    mojo_cdm_->LoadSession(session_type, session_id,
--                           base::MakeUnique<MockCdmSessionPromise>(
--                               expected_result == SUCCESS, &loaded_session_id));
--    base::RunLoop().RunUntilIdle();
--
--    // If the session was "loaded" ...
--    if (expected_result == SUCCESS) {
--      // Returned session ID must match the session ID provided.
--      EXPECT_EQ(session_id, loaded_session_id);
--
--      // MojoCdm expects the session to be closed, so invoke SessionClosedCB
--      // to "close" it.
--      EXPECT_CALL(cdm_client_, OnSessionClosed(session_id));
--      remote_cdm_->CallSessionClosedCB(session_id);
--      base::RunLoop().RunUntilIdle();
--    }
--  }
--
--  void UpdateSessionAndExpect(const std::string& session_id,
--                              ExpectedResult expected_result) {
--    // Specify parameters to UpdateSession() in order to verify that
--    // the data is passed properly.
--    const std::vector<uint8_t> response = {1, 2, 3, 4, 5, 6};
--
--    if (expected_result == CONNECTION_ERROR_BEFORE) {
--      // Break the connection before the call, so UpdateSession() is never
--      // called.
--      ForceConnectionError();
--    } else {
--      EXPECT_CALL(*remote_cdm_, OnUpdateSession(session_id, response, _))
--          .WillOnce(WithArg<2>(InvokeFunction(this, &MojoCdmTest::HandlePromise,
--                                              expected_result)));
--    }
--
--    mojo_cdm_->UpdateSession(
--        session_id, response,
--        base::MakeUnique<MockCdmPromise>(expected_result == SUCCESS));
--    base::RunLoop().RunUntilIdle();
--  }
--
--  void CloseSessionAndExpect(const std::string& session_id,
--                             ExpectedResult expected_result) {
--    if (expected_result == CONNECTION_ERROR_BEFORE) {
--      // Break the connection before the call, so CloseSession() is never
--      // called.
--      ForceConnectionError();
--    } else {
--      EXPECT_CALL(*remote_cdm_, OnCloseSession(session_id, _))
--          .WillOnce(WithArg<1>(InvokeFunction(this, &MojoCdmTest::HandlePromise,
--                                              expected_result)));
--    }
--
--    mojo_cdm_->CloseSession(session_id, base::MakeUnique<MockCdmPromise>(
--                                            expected_result == SUCCESS));
--    base::RunLoop().RunUntilIdle();
--  }
--
--  void RemoveSessionAndExpect(const std::string& session_id,
--                              ExpectedResult expected_result) {
--    if (expected_result == CONNECTION_ERROR_BEFORE) {
--      // Break the connection before the call, so RemoveSession() is never
--      // called.
--      ForceConnectionError();
--    } else {
--      EXPECT_CALL(*remote_cdm_, OnRemoveSession(session_id, _))
--          .WillOnce(WithArg<1>(InvokeFunction(this, &MojoCdmTest::HandlePromise,
--                                              expected_result)));
--    }
--
--    mojo_cdm_->RemoveSession(session_id, base::MakeUnique<MockCdmPromise>(
--                                             expected_result == SUCCESS));
--    base::RunLoop().RunUntilIdle();
--  }
--
--  void HandlePromise(std::unique_ptr<SimpleCdmPromise>& promise,
--                     ExpectedResult expected_result) {
--    switch (expected_result) {
--      case SUCCESS:
--        promise->resolve();
--        break;
--
--      case FAILURE:
--        promise->reject(media::CdmPromise::UNKNOWN_ERROR, 0,
--                        "Promise rejected");
--        break;
--
--      case PENDING:
--        // Store the promise and never fulfill it.
--        pending_simple_cdm_promise_ = std::move(promise);
--        break;
--
--      case CONNECTION_ERROR_BEFORE:
--        // Connection should be broken before this is called.
--        NOTREACHED();
--        break;
--
--      case CONNECTION_ERROR_DURING:
--        ForceConnectionError();
--
--        // Now that the connection is broken the promise result won't be passed
--        // back. However, since we check that every promise is fulfilled, we
--        // need to do something with this promise. Resolve the promise to
--        // fulfill it, but note that the original caller will get back a
--        // failed promise due to the connection being broken.
--        promise->resolve();
--        break;
--    }
--  }
--
--  void HandleSessionPromise(std::unique_ptr<NewSessionCdmPromise>& promise,
--                            const std::string& session_id,
--                            ExpectedResult expected_result) {
--    switch (expected_result) {
--      case SUCCESS:
--        promise->resolve(session_id);
--        break;
--
--      case FAILURE:
--        promise->reject(media::CdmPromise::UNKNOWN_ERROR, 0,
--                        "Promise rejected");
--        break;
--
--      case PENDING:
--        // Store the promise and never fulfill it.
--        pending_new_session_cdm_promise_ = std::move(promise);
--        break;
--
--      case CONNECTION_ERROR_BEFORE:
--        // Connection should be broken before this is called.
--        NOTREACHED();
--        break;
--
--      case CONNECTION_ERROR_DURING:
--        ForceConnectionError();
--
--        // Now that the connection is broken the promise result won't be passed
--        // back. However, since we check that every promise is fulfilled, we
--        // need to do something with this promise. Resolve the promise to
--        // fulfill it, but note that the original caller will get back a
--        // failed promise due to the connection being broken.
--        promise->resolve(session_id);
--        break;
--    }
-   }
- 
-   // Fixture members.
-   base::TestMessageLoop message_loop_;
- 
--  // |remote_cdm_| represents the CDM at the end of the mojo message pipe.
--  MockCdm* remote_cdm_;
--  MockCdmFactory cdm_factory_;
--
-   MojoCdmServiceContext mojo_cdm_service_context_;
-   StrictMock<MockCdmClient> cdm_client_;
- 
--  // Declared before |mojo_cdm_| so they are destroyed after it.
--  std::unique_ptr<SimpleCdmPromise> pending_simple_cdm_promise_;
--  std::unique_ptr<NewSessionCdmPromise> pending_new_session_cdm_promise_;
-+  // TODO(jrummell): Use a MockCdmFactory to create a MockCdm here for more test
-+  // coverage.
-+  DefaultCdmFactory cdm_factory_;
- 
-   std::unique_ptr<MojoCdmService> mojo_cdm_service_;
-   mojo::Binding<mojom::ContentDecryptionModule> cdm_binding_;
-@@ -382,234 +112,10 @@ TEST_F(MojoCdmTest, Create_Success) {
-   Initialize(SUCCESS);
- }
- 
--TEST_F(MojoCdmTest, Create_Failure) {
--  Initialize(FAILURE);
--}
--
--TEST_F(MojoCdmTest, Create_ConnectionErrorBefore) {
--  Initialize(CONNECTION_ERROR_BEFORE);
--}
--
--TEST_F(MojoCdmTest, Create_ConnectionErrorDuring) {
--  Initialize(CONNECTION_ERROR_DURING);
--}
--
--TEST_F(MojoCdmTest, SetServerCertificate_Success) {
--  const std::vector<uint8_t> certificate = {0, 1, 2};
--  Initialize(SUCCESS);
--  SetServerCertificateAndExpect(certificate, SUCCESS);
--}
--
--TEST_F(MojoCdmTest, SetServerCertificate_Failure) {
--  const std::vector<uint8_t> certificate = {1, 2, 3, 4, 5};
--  Initialize(SUCCESS);
--  SetServerCertificateAndExpect(certificate, FAILURE);
--}
--
--TEST_F(MojoCdmTest, SetServerCertificate_Pending) {
--  const std::vector<uint8_t> certificate = {1, 2, 3, 4, 5};
--  Initialize(SUCCESS);
--  SetServerCertificateAndExpect(certificate, PENDING);
--}
--
--TEST_F(MojoCdmTest, SetServerCertificate_ConnectionErrorBefore) {
--  const std::vector<uint8_t> certificate = {3, 4};
--  Initialize(SUCCESS);
--  SetServerCertificateAndExpect(certificate, CONNECTION_ERROR_BEFORE);
--}
--
--TEST_F(MojoCdmTest, SetServerCertificate_ConnectionErrorDuring) {
--  const std::vector<uint8_t> certificate = {10, 11, 12};
--  Initialize(SUCCESS);
--  SetServerCertificateAndExpect(certificate, CONNECTION_ERROR_DURING);
--}
--
--TEST_F(MojoCdmTest, CreateSession_Success) {
--  const std::string session_id = "create1";
--  Initialize(SUCCESS);
--  CreateSessionAndExpect(session_id, SUCCESS);
--
--  // Created session should always be closed!
--  EXPECT_CALL(cdm_client_, OnSessionClosed(session_id));
--}
--
--TEST_F(MojoCdmTest, CreateSession_Failure) {
--  const std::string session_id = "create2";
--  Initialize(SUCCESS);
--  CreateSessionAndExpect(session_id, FAILURE);
--}
--
--TEST_F(MojoCdmTest, CreateSession_Pending) {
--  const std::string session_id = "create2";
--  Initialize(SUCCESS);
--  CreateSessionAndExpect(session_id, PENDING);
--}
--
--TEST_F(MojoCdmTest, CreateSession_ConnectionErrorBefore) {
--  const std::string session_id = "create3";
--  Initialize(SUCCESS);
--  CreateSessionAndExpect(session_id, CONNECTION_ERROR_BEFORE);
--}
--
--TEST_F(MojoCdmTest, CreateSession_ConnectionErrorDuring) {
--  const std::string session_id = "create4";
--  Initialize(SUCCESS);
--  CreateSessionAndExpect(session_id, CONNECTION_ERROR_DURING);
--}
--
--TEST_F(MojoCdmTest, LoadSession_Success) {
--  const std::string session_id = "load1";
--  Initialize(SUCCESS);
--  LoadSessionAndExpect(session_id, SUCCESS);
--}
--
--TEST_F(MojoCdmTest, LoadSession_Failure) {
--  const std::string session_id = "load2";
--  Initialize(SUCCESS);
--  LoadSessionAndExpect(session_id, FAILURE);
--}
--
--TEST_F(MojoCdmTest, LoadSession_Pending) {
--  const std::string session_id = "load2";
--  Initialize(SUCCESS);
--  LoadSessionAndExpect(session_id, PENDING);
--}
--
--TEST_F(MojoCdmTest, LoadSession_ConnectionErrorBefore) {
--  const std::string session_id = "load3";
--  Initialize(SUCCESS);
--  LoadSessionAndExpect(session_id, CONNECTION_ERROR_BEFORE);
--}
--
--TEST_F(MojoCdmTest, LoadSession_ConnectionErrorDuring) {
--  const std::string session_id = "load4";
--  Initialize(SUCCESS);
--  LoadSessionAndExpect(session_id, CONNECTION_ERROR_DURING);
--}
--
--TEST_F(MojoCdmTest, UpdateSession_Success) {
--  const std::string session_id = "update1";
--  Initialize(SUCCESS);
--  UpdateSessionAndExpect(session_id, SUCCESS);
-+TEST_F(MojoCdmTest, Create_ConnectionError) {
-+  Initialize(CONNECTION_ERROR);
- }
- 
--TEST_F(MojoCdmTest, UpdateSession_Failure) {
--  const std::string session_id = "update2";
--  Initialize(SUCCESS);
--  UpdateSessionAndExpect(session_id, FAILURE);
--}
--
--TEST_F(MojoCdmTest, UpdateSession_Pending) {
--  const std::string session_id = "update2";
--  Initialize(SUCCESS);
--  UpdateSessionAndExpect(session_id, PENDING);
--}
--
--TEST_F(MojoCdmTest, UpdateSession_ConnectionErrorBefore) {
--  const std::string session_id = "update3";
--  Initialize(SUCCESS);
--  UpdateSessionAndExpect(session_id, CONNECTION_ERROR_BEFORE);
--}
--
--TEST_F(MojoCdmTest, UpdateSession_ConnectionErrorDuring) {
--  const std::string session_id = "update4";
--  Initialize(SUCCESS);
--  UpdateSessionAndExpect(session_id, CONNECTION_ERROR_DURING);
--}
--
--TEST_F(MojoCdmTest, CloseSession_Success) {
--  const std::string session_id = "close1";
--  Initialize(SUCCESS);
--  CloseSessionAndExpect(session_id, SUCCESS);
--}
--
--TEST_F(MojoCdmTest, CloseSession_Failure) {
--  const std::string session_id = "close2";
--  Initialize(SUCCESS);
--  CloseSessionAndExpect(session_id, FAILURE);
--}
--
--TEST_F(MojoCdmTest, CloseSession_Pending) {
--  const std::string session_id = "close2";
--  Initialize(SUCCESS);
--  CloseSessionAndExpect(session_id, PENDING);
--}
--
--TEST_F(MojoCdmTest, CloseSession_ConnectionErrorBefore) {
--  const std::string session_id = "close3";
--  Initialize(SUCCESS);
--  CloseSessionAndExpect(session_id, CONNECTION_ERROR_BEFORE);
--}
--
--TEST_F(MojoCdmTest, CloseSession_ConnectionErrorDuring) {
--  const std::string session_id = "close4";
--  Initialize(SUCCESS);
--  CloseSessionAndExpect(session_id, CONNECTION_ERROR_DURING);
--}
--
--TEST_F(MojoCdmTest, RemoveSession_Success) {
--  const std::string session_id = "remove1";
--  Initialize(SUCCESS);
--  RemoveSessionAndExpect(session_id, SUCCESS);
--}
--
--TEST_F(MojoCdmTest, RemoveSession_Failure) {
--  const std::string session_id = "remove2";
--  Initialize(SUCCESS);
--  RemoveSessionAndExpect(session_id, FAILURE);
--}
--
--TEST_F(MojoCdmTest, RemoveSession_Pending) {
--  const std::string session_id = "remove2";
--  Initialize(SUCCESS);
--  RemoveSessionAndExpect(session_id, PENDING);
--}
--
--TEST_F(MojoCdmTest, RemoveSession_ConnectionErrorBefore) {
--  const std::string session_id = "remove3";
--  Initialize(SUCCESS);
--  RemoveSessionAndExpect(session_id, CONNECTION_ERROR_BEFORE);
--}
--
--TEST_F(MojoCdmTest, RemoveSession_ConnectionErrorDuring) {
--  const std::string session_id = "remove4";
--  Initialize(SUCCESS);
--  RemoveSessionAndExpect(session_id, CONNECTION_ERROR_DURING);
--}
--
--// Note that MojoCdm requires a session to exist when SessionClosedCB is called,
--// so it is currently tested in the success cases for CreateSession/LoadSession.
--
--TEST_F(MojoCdmTest, SessionMessageCB_Success) {
--  const std::string session_id = "message";
--  const ContentDecryptionModule::MessageType message_type =
--      ContentDecryptionModule::LICENSE_REQUEST;
--  const std::vector<uint8_t> message = {0, 1, 2};
--  Initialize(SUCCESS);
--  EXPECT_CALL(cdm_client_, OnSessionMessage(session_id, message_type, message));
--  remote_cdm_->CallSessionMessageCB(session_id, message_type, message);
--  base::RunLoop().RunUntilIdle();
--}
--
--TEST_F(MojoCdmTest, SessionExpirationChangeCB_Success) {
--  const std::string session_id = "expiration";
--  const base::Time time = base::Time::Now();
--  Initialize(SUCCESS);
--  EXPECT_CALL(cdm_client_, OnSessionExpirationUpdate(session_id, time));
--  remote_cdm_->CallSessionExpirationUpdateCB(session_id, time);
--  base::RunLoop().RunUntilIdle();
--}
--
--TEST_F(MojoCdmTest, SessionKeysChangeCB_Success) {
--  const std::string session_id = "change";
--  bool has_additional_usable_key = true;
--  CdmKeysInfo keys_info;
--  Initialize(SUCCESS);
--  EXPECT_CALL(cdm_client_,
--              OnSessionKeysChangeCalled(session_id, has_additional_usable_key));
--  remote_cdm_->CallSessionKeysChangeCB(session_id, has_additional_usable_key,
--                                       std::move(keys_info));
--  base::RunLoop().RunUntilIdle();
--}
-+// TODO(xhwang): Add more test cases!
- 
- }  // namespace media
+  private:
+   GetGpuFactoriesCB get_gpu_factories_cb_;
 diff --git a/media/renderers/default_renderer_factory.cc b/media/renderers/default_renderer_factory.cc
-index 9bf6b6ee6a13dbb4e32afdad7c3caab429f39e49..f74d44c5917a1940d09a8b6ba39e8e98955e20f7 100644
+index 2410d1b335480967e0b87fed193be9c76edbc360..e7de591dd36c5dc1ef0c79c29e31fa10281fbdde 100644
 --- a/media/renderers/default_renderer_factory.cc
 +++ b/media/renderers/default_renderer_factory.cc
 @@ -29,6 +29,20 @@
@@ -3717,30 +2495,33 @@ index 9bf6b6ee6a13dbb4e32afdad7c3caab429f39e49..f74d44c5917a1940d09a8b6ba39e8e98
  namespace media {
  
  DefaultRendererFactory::DefaultRendererFactory(
-@@ -43,15 +57,31 @@ DefaultRendererFactory::~DefaultRendererFactory() {
- }
+@@ -44,15 +58,34 @@ DefaultRendererFactory::~DefaultRendererFactory() {
  
- ScopedVector<AudioDecoder> DefaultRendererFactory::CreateAudioDecoders(
+ std::vector<std::unique_ptr<AudioDecoder>>
+ DefaultRendererFactory::CreateAudioDecoders(
 -    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner) {
 +    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
 +    bool use_platform_media_pipeline) {
    // Create our audio decoders and renderer.
-   ScopedVector<AudioDecoder> audio_decoders;
+   std::vector<std::unique_ptr<AudioDecoder>> audio_decoders;
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  if (use_platform_media_pipeline) {
-+    audio_decoders.push_back(new PassThroughAudioDecoder(media_task_runner));
++    audio_decoders.push_back(
++        base::MakeUnique<PassThroughAudioDecoder>(media_task_runner));
 +  } else {
 +#if defined(OS_MACOSX)
-+    audio_decoders.push_back(new ATAudioDecoder(media_task_runner));
++    audio_decoders.push_back(
++        base::MakeUnique<ATAudioDecoder>(media_task_runner));
 +#elif defined(OS_WIN)
-+    audio_decoders.push_back(new WMFAudioDecoder(media_task_runner));
++    audio_decoders.push_back(
++        base::MakeUnique<WMFAudioDecoder>(media_task_runner));
 +#endif
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +
  #if !defined(MEDIA_DISABLE_FFMPEG)
    audio_decoders.push_back(
-       new FFmpegAudioDecoder(media_task_runner, media_log_));
+       base::MakeUnique<FFmpegAudioDecoder>(media_task_runner, media_log_));
  #endif
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
@@ -3750,17 +2531,17 @@ index 9bf6b6ee6a13dbb4e32afdad7c3caab429f39e49..f74d44c5917a1940d09a8b6ba39e8e98
    // Use an external decoder only if we cannot otherwise decode in the
    // renderer.
    if (decoder_factory_)
-@@ -63,7 +93,8 @@ ScopedVector<AudioDecoder> DefaultRendererFactory::CreateAudioDecoders(
- ScopedVector<VideoDecoder> DefaultRendererFactory::CreateVideoDecoders(
+@@ -65,7 +98,8 @@ std::vector<std::unique_ptr<VideoDecoder>>
+ DefaultRendererFactory::CreateVideoDecoders(
      const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
-     const RequestSurfaceCB& request_surface_cb,
+     const RequestOverlayInfoCB& request_overlay_info_cb,
 -    GpuVideoAcceleratorFactories* gpu_factories) {
 +    GpuVideoAcceleratorFactories* gpu_factories,
 +    bool use_platform_media_pipeline) {
    // Create our video decoders and renderer.
-   ScopedVector<VideoDecoder> video_decoders;
+   std::vector<std::unique_ptr<VideoDecoder>> video_decoders;
  
-@@ -74,14 +105,38 @@ ScopedVector<VideoDecoder> DefaultRendererFactory::CreateVideoDecoders(
+@@ -76,14 +110,39 @@ DefaultRendererFactory::CreateVideoDecoders(
      // |GetTaskRunner()|.  Since |pipeline_| will own decoders created from the
      // factories, require that their message loops are identical.
      DCHECK(gpu_factories->GetTaskRunner() == media_task_runner.get());
@@ -3768,7 +2549,8 @@ index 9bf6b6ee6a13dbb4e32afdad7c3caab429f39e49..f74d44c5917a1940d09a8b6ba39e8e98
 +
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  if (use_platform_media_pipeline) {
-+    video_decoders.push_back(new PassThroughVideoDecoder(media_task_runner));
++    video_decoders.push_back(
++        base::MakeUnique<PassThroughVideoDecoder>(media_task_runner));
 +  } else {
 +#endif
  
@@ -3780,18 +2562,19 @@ index 9bf6b6ee6a13dbb4e32afdad7c3caab429f39e49..f74d44c5917a1940d09a8b6ba39e8e98
        decoder_factory_->CreateVideoDecoders(media_task_runner, gpu_factories,
                                              &video_decoders);
      }
--    video_decoders.push_back(
-+    if (gpu_factories) {
-+      video_decoders.push_back(
-         new GpuVideoDecoder(gpu_factories, request_surface_cb, media_log_));
-+    }
+-    video_decoders.push_back(base::MakeUnique<GpuVideoDecoder>(
+-        gpu_factories, request_overlay_info_cb, media_log_));
++    if (gpu_factories)
++      video_decoders.push_back(base::MakeUnique<GpuVideoDecoder>(
++          gpu_factories, request_overlay_info_cb, media_log_));
++
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
    }
 +#endif
 +
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +#if defined(OS_WIN)
-+    video_decoders.push_back(new WMFVideoDecoder(media_task_runner));
++    video_decoders.push_back(base::MakeUnique<WMFVideoDecoder>(media_task_runner));
 +#elif defined(OS_MACOSX)
 +    if (!gpu_factories)
 +      pipeline_stats::ReportNoGpuProcessForDecoder();
@@ -3799,18 +2582,18 @@ index 9bf6b6ee6a13dbb4e32afdad7c3caab429f39e49..f74d44c5917a1940d09a8b6ba39e8e98
 +#endif
  
  #if !defined(MEDIA_DISABLE_LIBVPX)
-   video_decoders.push_back(new VpxVideoDecoder());
-@@ -99,7 +154,8 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
+   video_decoders.push_back(base::MakeUnique<VpxVideoDecoder>());
+@@ -101,7 +160,8 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
      const scoped_refptr<base::TaskRunner>& worker_task_runner,
      AudioRendererSink* audio_renderer_sink,
      VideoRendererSink* video_renderer_sink,
--    const RequestSurfaceCB& request_surface_cb) {
-+    const RequestSurfaceCB& request_surface_cb,
+-    const RequestOverlayInfoCB& request_overlay_info_cb) {
++    const RequestOverlayInfoCB& request_overlay_info_cb,
 +    bool use_platform_media_pipeline) {
    DCHECK(audio_renderer_sink);
  
    std::unique_ptr<AudioRenderer> audio_renderer(new AudioRendererImpl(
-@@ -111,7 +167,7 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
+@@ -113,7 +173,7 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
        // RendererFactory is owned by WMPI and gets called after WMPI destructor
        // finishes.
        base::Bind(&DefaultRendererFactory::CreateAudioDecoders,
@@ -3819,40 +2602,40 @@ index 9bf6b6ee6a13dbb4e32afdad7c3caab429f39e49..f74d44c5917a1940d09a8b6ba39e8e98
        media_log_));
  
    GpuVideoAcceleratorFactories* gpu_factories = nullptr;
-@@ -128,7 +184,7 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
+@@ -130,7 +190,7 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
        // finishes.
        base::Bind(&DefaultRendererFactory::CreateVideoDecoders,
-                  base::Unretained(this), media_task_runner, request_surface_cb,
--                 gpu_factories),
-+                 gpu_factories, use_platform_media_pipeline),
+                  base::Unretained(this), media_task_runner,
+-                 request_overlay_info_cb, gpu_factories),
++                 request_overlay_info_cb, gpu_factories, use_platform_media_pipeline),
        true, gpu_factories, media_log_));
  
    return base::MakeUnique<RendererImpl>(
 diff --git a/media/renderers/default_renderer_factory.h b/media/renderers/default_renderer_factory.h
-index 3cef53ae914f63fcb8e193bd677033fe13d0dd03..5e91323b331755b0a176ff5aa34a58ff4b13329b 100644
+index f146beb917bce9b2805288709c1bcccc17c9d406..b468be9051a211b39fc4ff7598128e28b2a5525b 100644
 --- a/media/renderers/default_renderer_factory.h
 +++ b/media/renderers/default_renderer_factory.h
 @@ -43,15 +43,18 @@ class MEDIA_EXPORT DefaultRendererFactory : public RendererFactory {
        const scoped_refptr<base::TaskRunner>& worker_task_runner,
        AudioRendererSink* audio_renderer_sink,
        VideoRendererSink* video_renderer_sink,
--      const RequestSurfaceCB& request_surface_cb) final;
-+      const RequestSurfaceCB& request_surface_cb,
+-      const RequestOverlayInfoCB& request_overlay_info_cb) final;
++      const RequestOverlayInfoCB& request_overlay_info_cb,
 +      bool use_platform_media_pipeline = false) final;
  
   private:
-   ScopedVector<AudioDecoder> CreateAudioDecoders(
+   std::vector<std::unique_ptr<AudioDecoder>> CreateAudioDecoders(
 -      const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner);
 +      const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
 +      bool use_platform_media_pipeline);
-   ScopedVector<VideoDecoder> CreateVideoDecoders(
+   std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecoders(
        const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
-       const RequestSurfaceCB& request_surface_cb,
+       const RequestOverlayInfoCB& request_overlay_info_cb,
 -      GpuVideoAcceleratorFactories* gpu_factories);
 +      GpuVideoAcceleratorFactories* gpu_factories,
 +      bool use_platform_media_pipeline);
  
-   scoped_refptr<MediaLog> media_log_;
+   MediaLog* media_log_;
  
 diff --git a/media/renderers/gpu_video_accelerator_factories.h b/media/renderers/gpu_video_accelerator_factories.h
 index ad27adaa33fab8186745b5b81be19e537ca02bdf..cbaeecc5c286b9addb7bae0053935024ba43e844 100644
@@ -3887,7 +2670,7 @@ index ef4c799d267e888d78a3a9d40a7b6c20ce350f32..7120b3f42162c4ecafb15b734233eb89
        override;
  
 diff --git a/media/renderers/renderer_impl.cc b/media/renderers/renderer_impl.cc
-index eb5710d2eea5f40c4f634d063a62e29f9547c162..58116cd98514d38e1f224634e428a30213a2a1fc 100644
+index d2386f6c8839c7704aae822a5b1b9b5cb46a5ac5..a36c188eafea0d6c346c36c1584c201553a4f2df 100644
 --- a/media/renderers/renderer_impl.cc
 +++ b/media/renderers/renderer_impl.cc
 @@ -26,6 +26,10 @@
@@ -3901,7 +2684,7 @@ index eb5710d2eea5f40c4f634d063a62e29f9547c162..58116cd98514d38e1f224634e428a302
  namespace media {
  
  // See |video_underflow_threshold_|.
-@@ -376,6 +380,13 @@ void RendererImpl::OnAudioRendererInitializeDone(PipelineStatus status) {
+@@ -383,6 +387,13 @@ void RendererImpl::OnAudioRendererInitializeDone(PipelineStatus status) {
    }
  
    if (status != PIPELINE_OK) {
@@ -3915,7 +2698,7 @@ index eb5710d2eea5f40c4f634d063a62e29f9547c162..58116cd98514d38e1f224634e428a302
      FinishInitialization(status);
      return;
    }
-@@ -429,6 +440,13 @@ void RendererImpl::OnVideoRendererInitializeDone(PipelineStatus status) {
+@@ -436,6 +447,13 @@ void RendererImpl::OnVideoRendererInitializeDone(PipelineStatus status) {
    DCHECK(!init_cb_.is_null());
  
    if (status != PIPELINE_OK) {
@@ -12752,11 +11535,50 @@ zX&M~9PKFK+u-WwA6SL(X=LOmVXM1~)OJ-vD>tI-e0R=->Gj1Lhc5W7SHjaM-*^@py
 literal 0
 HcmV?d00001
 
+diff --git a/media/test/mock_media_source.cc b/media/test/mock_media_source.cc
+index b7d904b58d42f3f84ca0a5d3e72b14736e4e9d02..bbd41d8f26e691e1a6d7d1d04a27d7fa9aee9fc3 100644
+--- a/media/test/mock_media_source.cc
++++ b/media/test/mock_media_source.cc
+@@ -18,6 +18,7 @@ MockMediaSource::MockMediaSource(const std::string& filename,
+                                  size_t initial_append_size)
+     : current_position_(0),
+       initial_append_size_(initial_append_size),
++      file_path_(GetTestDataFilePath(filename)),
+       mimetype_(mimetype),
+       chunk_demuxer_(new ChunkDemuxer(
+           base::Bind(&MockMediaSource::DemuxerOpened, base::Unretained(this)),
+diff --git a/media/test/mock_media_source.h b/media/test/mock_media_source.h
+index 286f6fd7182a38c57eca4f126c6216587a631db0..6b1e296c4f17c7fe868a7ff67b8e59ed8c70fe44 100644
+--- a/media/test/mock_media_source.h
++++ b/media/test/mock_media_source.h
+@@ -5,6 +5,7 @@
+ #ifndef MEDIA_TEST_MOCK_MEDIA_SOURCE_H_
+ #define MEDIA_TEST_MOCK_MEDIA_SOURCE_H_
+ 
++#include "base/files/file_path.h"
+ #include "base/time/time.h"
+ #include "media/base/demuxer.h"
+ #include "media/base/pipeline_status.h"
+@@ -67,11 +68,14 @@ class MockMediaSource {
+   void InitSegmentReceived(std::unique_ptr<MediaTracks> tracks);
+   MOCK_METHOD1(InitSegmentReceivedMock, void(std::unique_ptr<MediaTracks>&));
+ 
++  const base::FilePath file_path() { return file_path_; }
++
+  private:
+   MediaLog media_log_;
+   scoped_refptr<DecoderBuffer> file_data_;
+   size_t current_position_;
+   size_t initial_append_size_;
++  base::FilePath file_path_;
+   std::string mimetype_;
+   ChunkDemuxer* chunk_demuxer_;
+   std::unique_ptr<Demuxer> owned_chunk_demuxer_;
 diff --git a/media/test/pipeline_integration_test.cc b/media/test/pipeline_integration_test.cc
-index 3b57543f1de7b0e74a2b8dc787bd1a051cad3310..d248585cab083287fd0910e82ba3636a342b9558 100644
+index caec2c43f69810b52e6615955cdde5b70ed4bd3c..2915507e68ddc4b23be4e9ba4e707aaaea8941a6 100644
 --- a/media/test/pipeline_integration_test.cc
 +++ b/media/test/pipeline_integration_test.cc
-@@ -86,6 +86,10 @@
+@@ -85,6 +85,10 @@
  #define MAYBE_CLOCKLESS(test) test
  #endif
  
@@ -12767,56 +11589,7 @@ index 3b57543f1de7b0e74a2b8dc787bd1a051cad3310..d248585cab083287fd0910e82ba3636a
  using testing::_;
  using testing::AnyNumber;
  using testing::AtLeast;
-@@ -449,7 +453,8 @@ class MockMediaSource {
-   MockMediaSource(const std::string& filename,
-                   const std::string& mimetype,
-                   size_t initial_append_size)
--      : current_position_(0),
-+      : file_path_(GetTestDataFilePath(filename)),
-+        current_position_(0),
-         initial_append_size_(initial_append_size),
-         mimetype_(mimetype),
-         chunk_demuxer_(new ChunkDemuxer(
-@@ -473,6 +478,8 @@ class MockMediaSource {
-     return std::move(owned_chunk_demuxer_);
-   }
- 
-+  const base::FilePath file_path() { return file_path_; }
-+
-   void set_encrypted_media_init_data_cb(
-       const Demuxer::EncryptedMediaInitDataCB& encrypted_media_init_data_cb) {
-     encrypted_media_init_data_cb_ = encrypted_media_init_data_cb;
-@@ -635,6 +642,7 @@ class MockMediaSource {
- 
-  private:
-   scoped_refptr<DecoderBuffer> file_data_;
-+  base::FilePath file_path_;
-   size_t current_position_;
-   size_t initial_append_size_;
-   std::string mimetype_;
-@@ -715,6 +723,9 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
-   PipelineStatus StartPipelineWithEncryptedMedia(
-       MockMediaSource* source,
-       FakeEncryptedMedia* encrypted_media) {
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+    EnableMockVDA();
-+#endif
-     return StartPipelineWithMediaSource(source, kNormal, encrypted_media);
-   }
- 
-@@ -725,6 +736,11 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
-     hashing_enabled_ = test_type & kHashed;
-     clockless_playback_ = test_type & kClockless;
- 
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+    filepath_ = source->file_path();
-+    EnableMockVDA();
-+#endif
-+
-     if (!(test_type & kExpectDemuxerFailure))
-       EXPECT_CALL(*source, InitSegmentReceivedMock(_)).Times(AtLeast(1));
- 
-@@ -1419,6 +1435,25 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource_VP9_BlockGroup_WebM) {
+@@ -1075,6 +1079,25 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource_VP9_BlockGroup_WebM) {
    Stop();
  }
  
@@ -12842,7 +11615,7 @@ index 3b57543f1de7b0e74a2b8dc787bd1a051cad3310..d248585cab083287fd0910e82ba3636a
  TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource_VP8A_WebM) {
    MockMediaSource source("bear-vp8a.webm", kVideoOnlyWebM, kAppendWholeFile);
    EXPECT_EQ(PIPELINE_OK, StartPipelineWithMediaSource(&source));
-@@ -1769,8 +1804,15 @@ TEST_F(PipelineIntegrationTest, MediaSource_ADTS_TimestampOffset) {
+@@ -1425,8 +1448,15 @@ TEST_F(PipelineIntegrationTest, MediaSource_ADTS_TimestampOffset) {
    EXPECT_EQ(0, pipeline_->GetBufferedTimeRanges().start(0).InMilliseconds());
    EXPECT_EQ(592, pipeline_->GetBufferedTimeRanges().end(0).InMilliseconds());
  
@@ -12858,7 +11631,7 @@ index 3b57543f1de7b0e74a2b8dc787bd1a051cad3310..d248585cab083287fd0910e82ba3636a
  }
  
  TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_MP3) {
-@@ -1868,9 +1910,60 @@ TEST_F(PipelineIntegrationTest, MediaSource_MP3) {
+@@ -1524,8 +1554,59 @@ TEST_F(PipelineIntegrationTest, MediaSource_MP3) {
    EXPECT_TRUE(WaitUntilOnEnded());
  
    // Verify that codec delay was stripped.
@@ -12897,8 +11670,8 @@ index 3b57543f1de7b0e74a2b8dc787bd1a051cad3310..d248585cab083287fd0910e82ba3636a
 +#elif defined(OS_WIN)
 +  EXPECT_HASH_EQ("-0.67,-0.72,0.06,1.11,1.64,0.96,", GetAudioHash());
 +#endif
- }
- 
++}
++
 +TEST_F(PipelineIntegrationTest, MediaSource_MP3_Seek) {
 +  MockMediaSource source("sfx.mp3", kMP3, kAppendWholeFile);
 +  StartPipelineWithMediaSource(&source, kHashed, nullptr);
@@ -12913,13 +11686,12 @@ index 3b57543f1de7b0e74a2b8dc787bd1a051cad3310..d248585cab083287fd0910e82ba3636a
 +  Seek(seek_time);
 +
 +  EXPECT_TRUE(WaitUntilOnEnded());
-+}
+ }
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+
+ 
  TEST_F(PipelineIntegrationTest, MediaSource_MP3_TimestampOffset) {
    MockMediaSource source("sfx.mp3", kMP3, kAppendWholeFile);
-   EXPECT_EQ(PIPELINE_OK, StartPipelineWithMediaSource(&source));
-@@ -1932,6 +2025,38 @@ TEST_F(PipelineIntegrationTest, MediaSource_ConfigChange_MP4) {
+@@ -1588,6 +1669,38 @@ TEST_F(PipelineIntegrationTest, MediaSource_ConfigChange_MP4) {
    Stop();
  }
  
@@ -12959,69 +11731,45 @@ index 3b57543f1de7b0e74a2b8dc787bd1a051cad3310..d248585cab083287fd0910e82ba3636a
         MAYBE_EME(MediaSource_ConfigChange_Encrypted_MP4_CENC_VideoOnly)) {
    MockMediaSource source("bear-640x360-v_frag-cenc.mp4", kMP4Video,
 diff --git a/media/test/pipeline_integration_test_base.cc b/media/test/pipeline_integration_test_base.cc
-index dc5f0858e780ef27062484f58b7718581e99676c..ce93a725943a45961d6384a72a4b4cac85bf7c1e 100644
+index 1629a0b91a72be4a6999fe7de52d6fd8a7ac1fc0..3c44c08d0cccb2c313e1190e997bfd2e1a1a7d4c 100644
 --- a/media/test/pipeline_integration_test_base.cc
 +++ b/media/test/pipeline_integration_test_base.cc
-@@ -198,6 +198,9 @@ PipelineStatus PipelineIntegrationTestBase::StartWithFile(
-   base::FilePath file_path(GetTestDataFilePath(filename));
-   CHECK(file_data_source->Initialize(file_path)) << "Is " << file_path.value()
-                                                  << " missing?";
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+  filepath_ = file_path;
-+#endif
-   return StartInternal(std::move(file_data_source), cdm_context, test_type,
-                        prepend_video_decoders_cb, prepend_audio_decoders_cb);
- }
-@@ -257,6 +260,10 @@ bool PipelineIntegrationTestBase::Suspend() {
- bool PipelineIntegrationTestBase::Resume(base::TimeDelta seek_time) {
-   ended_ = false;
+@@ -40,7 +40,8 @@ using ::testing::SaveArg;
  
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+  ResumeMockVDA();
-+#endif
-+
-   EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
-       .WillOnce(InvokeWithoutArgs(&message_loop_, &base::MessageLoop::QuitNow));
-   pipeline_->Resume(CreateRenderer(), seek_time,
-@@ -321,9 +328,16 @@ void PipelineIntegrationTestBase::CreateDemuxer(
-                  base::Unretained(this)),
-       new MediaLog()));
- #endif
-+
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+  Demuxer * platformDemuxer = CreatePlatformDemuxer(data_source_, message_loop_);
-+  if(platformDemuxer)
-+      demuxer_.reset(platformDemuxer);
-+#endif
- }
+ namespace media {
  
--ScopedVector<VideoDecoder> CreateVideoDecodersForTest(
-+ScopedVector<VideoDecoder> PipelineIntegrationTestBase::CreateVideoDecodersForTest(
+-static std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecodersForTest(
++std::vector<std::unique_ptr<VideoDecoder>> PipelineIntegrationTestBase::CreateVideoDecodersForTest(
 +    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
+     MediaLog* media_log,
      CreateVideoDecodersCB prepend_video_decoders_cb) {
-   ScopedVector<VideoDecoder> video_decoders;
- 
-@@ -332,6 +346,10 @@ ScopedVector<VideoDecoder> CreateVideoDecodersForTest(
+   std::vector<std::unique_ptr<VideoDecoder>> video_decoders;
+@@ -50,6 +51,10 @@ static std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecodersForTest(
      DCHECK(!video_decoders.empty());
    }
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+  AppendPlatformVideoDecoders(video_decoders, media_task_runner);
++  AppendPlatformVideoDecoders(video_decoders, media_task_runner, media_log);
 +#endif
 +
  #if !defined(MEDIA_DISABLE_LIBVPX)
-   video_decoders.push_back(new VpxVideoDecoder());
+   video_decoders.push_back(base::MakeUnique<VpxVideoDecoder>());
  #endif  // !defined(MEDIA_DISABLE_LIBVPX)
-@@ -344,7 +362,7 @@ ScopedVector<VideoDecoder> CreateVideoDecodersForTest(
+@@ -61,10 +66,10 @@ static std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecodersForTest(
+ #endif
    return video_decoders;
  }
- 
--ScopedVector<AudioDecoder> CreateAudioDecodersForTest(
-+ScopedVector<AudioDecoder> PipelineIntegrationTestBase::CreateAudioDecodersForTest(
+-
+-static std::vector<std::unique_ptr<AudioDecoder>> CreateAudioDecodersForTest(
+-    MediaLog* media_log,
++  
++std::vector<std::unique_ptr<AudioDecoder>> PipelineIntegrationTestBase::CreateAudioDecodersForTest(
      const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
++    MediaLog* media_log,
      CreateAudioDecodersCB prepend_audio_decoders_cb) {
-   ScopedVector<AudioDecoder> audio_decoders;
-@@ -354,6 +372,10 @@ ScopedVector<AudioDecoder> CreateAudioDecodersForTest(
+   std::vector<std::unique_ptr<AudioDecoder>> audio_decoders;
+ 
+@@ -73,6 +78,10 @@ static std::vector<std::unique_ptr<AudioDecoder>> CreateAudioDecodersForTest(
      DCHECK(!audio_decoders.empty());
    }
  
@@ -13031,36 +11779,96 @@ index dc5f0858e780ef27062484f58b7718581e99676c..ce93a725943a45961d6384a72a4b4cac
 +
  #if !defined(MEDIA_DISABLE_FFMPEG)
    audio_decoders.push_back(
-       new FFmpegAudioDecoder(media_task_runner, new MediaLog()));
-@@ -364,6 +386,7 @@ ScopedVector<AudioDecoder> CreateAudioDecodersForTest(
- std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
-     CreateVideoDecodersCB prepend_video_decoders_cb,
-     CreateAudioDecodersCB prepend_audio_decoders_cb) {
+       base::MakeUnique<FFmpegAudioDecoder>(media_task_runner, media_log));
+@@ -102,7 +111,7 @@ class RendererFactoryImpl final : public PipelineTestRendererFactory {
+ 
+   DISALLOW_COPY_AND_ASSIGN(RendererFactoryImpl);
+ };
+-
++  
+ PipelineIntegrationTestBase::PipelineIntegrationTestBase()
+     : hashing_enabled_(false),
+       clockless_playback_(false),
+@@ -258,6 +267,9 @@ PipelineStatus PipelineIntegrationTestBase::StartWithFile(
+   base::FilePath file_path(GetTestDataFilePath(filename));
+   CHECK(file_data_source->Initialize(file_path)) << "Is " << file_path.value()
+                                                  << " missing?";
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++  filepath_ = file_path;
++#endif
+   return StartInternal(std::move(file_data_source), cdm_context, test_type,
+                        prepend_video_decoders_cb, prepend_audio_decoders_cb);
+ }
+@@ -317,6 +329,10 @@ bool PipelineIntegrationTestBase::Suspend() {
+ bool PipelineIntegrationTestBase::Resume(base::TimeDelta seek_time) {
+   ended_ = false;
+ 
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++  ResumeMockVDA();
++#endif
 +
-   // Simulate a 60Hz rendering sink.
-   video_sink_.reset(new NullVideoSink(
-       clockless_playback_, base::TimeDelta::FromSecondsD(1.0 / 60),
-@@ -375,7 +398,8 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
+   EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
+       .WillOnce(InvokeWithoutArgs(&message_loop_, &base::MessageLoop::QuitNow));
+   pipeline_->Resume(renderer_factory_->CreateRenderer(CreateVideoDecodersCB(),
+@@ -383,6 +399,12 @@ void PipelineIntegrationTestBase::CreateDemuxer(
+                  base::Unretained(this)),
+       &media_log_));
+ #endif
++
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++  Demuxer * platformDemuxer = CreatePlatformDemuxer(data_source_, message_loop_, &media_log_);
++  if(platformDemuxer)
++      demuxer_.reset(platformDemuxer);
++#endif
+ }
+ 
+ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
+@@ -399,7 +421,8 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
    std::unique_ptr<VideoRenderer> video_renderer(new VideoRendererImpl(
        message_loop_.task_runner(), message_loop_.task_runner().get(),
        video_sink_.get(),
--      base::Bind(&CreateVideoDecodersForTest, prepend_video_decoders_cb), false,
+-      base::Bind(&CreateVideoDecodersForTest, &media_log_,
 +      base::Bind(&PipelineIntegrationTestBase::CreateVideoDecodersForTest, base::Unretained(this), message_loop_.task_runner(),
-+                 prepend_video_decoders_cb), false,
-       nullptr, new MediaLog()));
++		 &media_log_,
+                  prepend_video_decoders_cb),
+       false, nullptr, &media_log_));
  
-   if (!clockless_playback_) {
-@@ -396,7 +420,7 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
+@@ -421,8 +444,9 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
        (clockless_playback_)
            ? static_cast<AudioRendererSink*>(clockless_audio_sink_.get())
            : audio_sink_.get(),
--      base::Bind(&CreateAudioDecodersForTest, message_loop_.task_runner(),
+-      base::Bind(&CreateAudioDecodersForTest, &media_log_,
+-                 message_loop_.task_runner(), prepend_audio_decoders_cb),
 +      base::Bind(&PipelineIntegrationTestBase::CreateAudioDecodersForTest, base::Unretained(this), message_loop_.task_runner(),
-                  prepend_audio_decoders_cb),
-       new MediaLog()));
++		 &media_log_,
++                 prepend_audio_decoders_cb),
+       &media_log_));
    if (hashing_enabled_) {
+     if (clockless_playback_)
+@@ -503,6 +527,9 @@ PipelineStatus PipelineIntegrationTestBase::StartPipelineWithMediaSource(
+ PipelineStatus PipelineIntegrationTestBase::StartPipelineWithEncryptedMedia(
+     MockMediaSource* source,
+     FakeEncryptedMedia* encrypted_media) {
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++    EnableMockVDA();
++#endif
+   return StartPipelineWithMediaSource(source, kNormal, encrypted_media);
+ }
+ 
+@@ -513,6 +540,11 @@ PipelineStatus PipelineIntegrationTestBase::StartPipelineWithMediaSource(
+   hashing_enabled_ = test_type & kHashed;
+   clockless_playback_ = test_type & kClockless;
+ 
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++    filepath_ = source->file_path();
++    EnableMockVDA();
++#endif
++
+   if (!(test_type & kExpectDemuxerFailure))
+     EXPECT_CALL(*source, InitSegmentReceivedMock(_)).Times(AtLeast(1));
+ 
 diff --git a/media/test/pipeline_integration_test_base.h b/media/test/pipeline_integration_test_base.h
-index 32f72ec63a0589340e32bd3482bbc0e7a0973bca..ae91d4c5f62e266706e51ebff93b48d22907a296 100644
+index 87f3c277770d899453fa42e6f588b42f1e2eea91..ea5db1d32558a5b363c0e7c73f81dc354946e070 100644
 --- a/media/test/pipeline_integration_test_base.h
 +++ b/media/test/pipeline_integration_test_base.h
 @@ -23,6 +23,10 @@
@@ -13073,8 +11881,8 @@ index 32f72ec63a0589340e32bd3482bbc0e7a0973bca..ae91d4c5f62e266706e51ebff93b48d2
 +
  namespace media {
  
- class CdmContext;
-@@ -54,7 +58,11 @@ class DummyTickClock : public base::TickClock {
+ class FakeEncryptedMedia;
+@@ -64,7 +68,11 @@ class PipelineTestRendererFactory {
  // display or audio device. Both of these devices are simulated since they have
  // little effect on verifying pipeline behavior and allow tests to run faster
  // than real-time.
@@ -13087,15 +11895,17 @@ index 32f72ec63a0589340e32bd3482bbc0e7a0973bca..ae91d4c5f62e266706e51ebff93b48d2
   public:
    PipelineIntegrationTestBase();
    virtual ~PipelineIntegrationTestBase();
-@@ -191,6 +199,13 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
+@@ -210,6 +218,15 @@ class PipelineIntegrationTestBase : public Pipeline::Client {
    // Return the media start time from |demuxer_|.
    base::TimeDelta GetStartTime();
  
-+  ScopedVector<VideoDecoder> CreateVideoDecodersForTest(
++  std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecodersForTest(
 +          const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
++          MediaLog* media_log,
 +          CreateVideoDecodersCB prepend_video_decoders_cb);
-+  ScopedVector<AudioDecoder> CreateAudioDecodersForTest(
++  std::vector<std::unique_ptr<AudioDecoder>> CreateAudioDecodersForTest(
 +          const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
++          MediaLog* media_log,
 +          CreateAudioDecodersCB prepend_audio_decoders_cb);
 +
    MOCK_METHOD1(DecryptorAttached, void(bool));
