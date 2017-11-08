@@ -1,18 +1,129 @@
-diff --git a/ui/app_list/test/run_all_unittests.cc b/ui/app_list/test/run_all_unittests.cc
-index 128518c1fb7a8f0bd497c0b2baf000340e08d568..b79875e0f57ab9789d7979c6af42943f78ecb57d 100644
---- a/ui/app_list/test/run_all_unittests.cc
-+++ b/ui/app_list/test/run_all_unittests.cc
-@@ -31,8 +31,9 @@ class AppListTestSuite : public base::TestSuite {
-     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-     command_line->AppendSwitchASCII(kTestType, "applist");
+diff --git a/ui/app_list/app_list_features.cc b/ui/app_list/app_list_features.cc
+index d941310d25fb1552f62018e2056063979242b444..2607122230ddb8876ff84e517278a64c10e1f443 100644
+--- a/ui/app_list/app_list_features.cc
++++ b/ui/app_list/app_list_features.cc
+@@ -6,23 +6,50 @@
  
--    gl::GLSurfaceTestSupport::InitializeOneOff();
-+    // Vivaldi: Have to init here, because InitializeOneOff check features early
-     base::TestSuite::Initialize();
-+    gl::GLSurfaceTestSupport::InitializeOneOff();
-     ui::RegisterPathProvider();
+ #include "base/feature_list.h"
+ #include "base/metrics/field_trial_params.h"
++#include "base/sys_info.h"
  
-     base::FilePath ui_test_pak_path;
+ namespace app_list {
+ namespace features {
+ 
+-const base::Feature kEnableAnswerCard{"EnableAnswerCard",
+-                                      base::FEATURE_DISABLED_BY_DEFAULT};
++const base::Feature kEnableAnswerCardDefaultOff{
++    "EnableAnswerCard", base::FEATURE_DISABLED_BY_DEFAULT};
++const base::Feature kEnableAnswerCardDefaultOn{
++    "EnableAnswerCard", base::FEATURE_ENABLED_BY_DEFAULT};
+ const base::Feature kEnableAnswerCardDarkRun{"EnableAnswerCardDarkRun",
+                                              base::FEATURE_DISABLED_BY_DEFAULT};
+ const base::Feature kEnableBackgroundBlur{"EnableBackgroundBlur",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
+ const base::Feature kEnableFullscreenAppList{"EnableFullscreenAppList",
+                                              base::FEATURE_ENABLED_BY_DEFAULT};
+-const base::Feature kEnablePlayStoreAppSearch{
++const base::Feature kEnablePlayStoreAppSearchDefaultOff{
+     "EnablePlayStoreAppSearch", base::FEATURE_DISABLED_BY_DEFAULT};
++const base::Feature kEnablePlayStoreAppSearchDefaultOn{
++    "EnablePlayStoreAppSearch", base::FEATURE_ENABLED_BY_DEFAULT};
++
++namespace {
++
++bool IsDeviceEve() {
++  static size_t position = base::SysInfo::GetLsbReleaseBoard().find("eve");
++  static bool is_device_eve = position != std::string::npos;
++
++  return is_device_eve;
++}
++
++const base::Feature& GetAnswerCardFeature() {
++  return IsDeviceEve() ? kEnableAnswerCardDefaultOn
++                       : kEnableAnswerCardDefaultOff;
++}
++
++const base::Feature& GetPlaystoreAppSearchFeature() {
++  return IsDeviceEve() ? kEnablePlayStoreAppSearchDefaultOn
++                       : kEnablePlayStoreAppSearchDefaultOff;
++}
++
++}  // namespace
+ 
+ bool IsAnswerCardEnabled() {
+-  static const bool enabled = base::FeatureList::IsEnabled(kEnableAnswerCard);
++  static const bool enabled =
++      base::FeatureList::IsEnabled(GetAnswerCardFeature());
+   return enabled;
+ }
+ 
+@@ -50,15 +77,20 @@ bool IsTouchFriendlySearchResultsPageEnabled() {
+ 
+ bool IsPlayStoreAppSearchEnabled() {
+   // Not using local static variable to allow tests to change this value.
+-  return base::FeatureList::IsEnabled(kEnablePlayStoreAppSearch);
++  return base::FeatureList::IsEnabled(GetPlaystoreAppSearchFeature());
+ }
+ 
+ std::string AnswerServerUrl() {
+-  return base::GetFieldTrialParamValueByFeature(kEnableAnswerCard, "ServerUrl");
++  const std::string experiment_url = base::GetFieldTrialParamValueByFeature(
++      GetAnswerCardFeature(), "ServerUrl");
++  if (!experiment_url.empty())
++    return experiment_url;
++
++  return "https://www.google.com/coac";
+ }
+ 
+ std::string AnswerServerQuerySuffix() {
+-  return base::GetFieldTrialParamValueByFeature(kEnableAnswerCard,
++  return base::GetFieldTrialParamValueByFeature(GetAnswerCardFeature(),
+                                                 "QuerySuffix");
+ }
+ 
+diff --git a/ui/app_list/app_list_features.h b/ui/app_list/app_list_features.h
+index 8de0eb089f6f7149ac69ce6c28e30e12344ec4ce..4b7e0153d9553e4711939bf62d649d8ab85a9c94 100644
+--- a/ui/app_list/app_list_features.h
++++ b/ui/app_list/app_list_features.h
+@@ -19,7 +19,8 @@ namespace features {
+ // Please keep these features sorted.
+ 
+ // Enables the answer card in the app list.
+-APP_LIST_EXPORT extern const base::Feature kEnableAnswerCard;
++APP_LIST_EXPORT extern const base::Feature kEnableAnswerCardDefaultOff;
++APP_LIST_EXPORT extern const base::Feature kEnableAnswerCardDefaultOn;
+ 
+ // Enables the dark run answer card in the app list. In this mode, answer cards
+ // may be loaded via mock URLs and are not shown to the user.
+@@ -34,7 +35,8 @@ APP_LIST_EXPORT extern const base::Feature kEnableBackgroundBlur;
+ APP_LIST_EXPORT extern const base::Feature kEnableFullscreenAppList;
+ 
+ // Enables the Play Store app search.
+-APP_LIST_EXPORT extern const base::Feature kEnablePlayStoreAppSearch;
++APP_LIST_EXPORT extern const base::Feature kEnablePlayStoreAppSearchDefaultOff;
++APP_LIST_EXPORT extern const base::Feature kEnablePlayStoreAppSearchDefaultOn;
+ 
+ bool APP_LIST_EXPORT IsAnswerCardEnabled();
+ bool APP_LIST_EXPORT IsAnswerCardDarkRunEnabled();
+diff --git a/ui/app_list/views/search_result_tile_item_list_view_unittest.cc b/ui/app_list/views/search_result_tile_item_list_view_unittest.cc
+index a094f129f1623ad125d01986208447f535f05251..34b1c873b9d070641a95e7c552a0c14102df052a 100644
+--- a/ui/app_list/views/search_result_tile_item_list_view_unittest.cc
++++ b/ui/app_list/views/search_result_tile_item_list_view_unittest.cc
+@@ -45,12 +45,12 @@ class SearchResultTileItemListViewTest
+     if (IsPlayStoreAppSearchEnabled()) {
+       scoped_feature_list_.InitWithFeatures(
+           {features::kEnableFullscreenAppList,
+-           features::kEnablePlayStoreAppSearch},
++           features::kEnablePlayStoreAppSearchDefaultOff},
+           {});
+     } else {
+       scoped_feature_list_.InitWithFeatures(
+           {features::kEnableFullscreenAppList},
+-          {features::kEnablePlayStoreAppSearch});
++          {features::kEnablePlayStoreAppSearchDefaultOff});
+     }
+     ASSERT_EQ(IsPlayStoreAppSearchEnabled(),
+               features::IsPlayStoreAppSearchEnabled());
 diff --git a/ui/aura/client/drag_drop_client.cc b/ui/aura/client/drag_drop_client.cc
 index f7dc619d5907c6f615a79ffc4166d62baf7c31cf..9d7374cc2b54d79be153f31fce95b25fb048e313 100644
 --- a/ui/aura/client/drag_drop_client.cc
@@ -69,10 +180,10 @@ index 4015f0f1a93773f4073f13c433c8d1790fa2982b..5ec5bf35df192afb57f22a4963f0ea3b
    // Called when a drag and drop session is cancelled.
    virtual void DragCancel() = 0;
 diff --git a/ui/base/BUILD.gn b/ui/base/BUILD.gn
-index 05cb33baac5cd928c06cdca8923e9ea1fe4718ca..52e6bb941cc5349eb3c0171689a7632a0ce62322 100644
+index 119d0fab47c98b9d6e7cfd08d254f2beeb0eef76..18c41375590a46306189503a08df52f68f196268 100644
 --- a/ui/base/BUILD.gn
 +++ b/ui/base/BUILD.gn
-@@ -994,7 +994,7 @@ test("ui_base_unittests") {
+@@ -1015,7 +1015,7 @@ test("ui_base_unittests") {
    }
  }
  
@@ -82,7 +193,7 @@ index 05cb33baac5cd928c06cdca8923e9ea1fe4718ca..52e6bb941cc5349eb3c0171689a7632a
      testonly = true
      deps = [
 diff --git a/ui/base/accelerators/accelerator.cc b/ui/base/accelerators/accelerator.cc
-index 8b8d14e1a5fbee1cef1c0cbd95b1d9f6ac8cecbb..f0fffee0989101d64e58590c926e080b8fb70bf4 100644
+index dd756238a056c1e171152333df5be98a4fe54943..abe01ae6cff0b1aa355f52293540e200af814741 100644
 --- a/ui/base/accelerators/accelerator.cc
 +++ b/ui/base/accelerators/accelerator.cc
 @@ -23,6 +23,8 @@
@@ -94,7 +205,7 @@ index 8b8d14e1a5fbee1cef1c0cbd95b1d9f6ac8cecbb..f0fffee0989101d64e58590c926e080b
  namespace ui {
  
  namespace {
-@@ -223,6 +225,15 @@ base::string16 Accelerator::GetShortcutText() const {
+@@ -235,6 +237,15 @@ base::string16 Accelerator::GetShortcutText() const {
      shortcut = l10n_util::GetStringUTF16(string_id);
    }
  
@@ -110,7 +221,7 @@ index 8b8d14e1a5fbee1cef1c0cbd95b1d9f6ac8cecbb..f0fffee0989101d64e58590c926e080b
    // Checking whether the character used for the accelerator is alphanumeric.
    // If it is not, then we need to adjust the string later on if the locale is
    // right-to-left. See below for more information of why such adjustment is
-@@ -235,6 +246,15 @@ base::string16 Accelerator::GetShortcutText() const {
+@@ -247,6 +258,15 @@ base::string16 Accelerator::GetShortcutText() const {
      shortcut_rtl.assign(shortcut);
    }
  
@@ -126,7 +237,7 @@ index 8b8d14e1a5fbee1cef1c0cbd95b1d9f6ac8cecbb..f0fffee0989101d64e58590c926e080b
    if (IsShiftDown())
      shortcut = l10n_util::GetStringFUTF16(IDS_APP_SHIFT_MODIFIER, shortcut);
  
-@@ -245,6 +265,7 @@ base::string16 Accelerator::GetShortcutText() const {
+@@ -257,6 +277,7 @@ base::string16 Accelerator::GetShortcutText() const {
      shortcut = l10n_util::GetStringFUTF16(IDS_APP_CONTROL_MODIFIER, shortcut);
    else if (IsAltDown())
      shortcut = l10n_util::GetStringFUTF16(IDS_APP_ALT_MODIFIER, shortcut);
@@ -149,7 +260,7 @@ index 5ba8480da3979e0b5ad1d36680d7f0c71a3a9458..ef51d7c20a4f69b7312360872cfce32d
  
  }  // namespace ui
 diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
-index b025bf46d5dce581145e396fe43486e6b5dca5a9..7f52c4a097cf3b0e904dee8159e4732ef5bc0bb3 100644
+index 5100c0ced98f8ed8953b6a0496784b69446e986a..ded1cddaad231cb7c96a0843eaa9ac197403c5ed 100644
 --- a/ui/base/l10n/l10n_util.cc
 +++ b/ui/base/l10n/l10n_util.cc
 @@ -33,6 +33,8 @@
@@ -161,7 +272,7 @@ index b025bf46d5dce581145e396fe43486e6b5dca5a9..7f52c4a097cf3b0e904dee8159e4732e
  #if defined(OS_ANDROID)
  #include "base/android/locale_utils.h"
  #include "ui/base/l10n/l10n_util_android.h"
-@@ -416,6 +418,13 @@ bool CheckAndResolveLocale(const std::string& locale,
+@@ -426,6 +428,13 @@ bool CheckAndResolveLocale(const std::string& locale,
  
  std::string GetApplicationLocaleInternal(const std::string& pref_locale) {
  #if defined(OS_MACOSX)
@@ -175,7 +286,7 @@ index b025bf46d5dce581145e396fe43486e6b5dca5a9..7f52c4a097cf3b0e904dee8159e4732e
  
    // Use any override (Cocoa for the browser), otherwise use the preference
    // passed to the function.
-@@ -464,6 +473,10 @@ std::string GetApplicationLocaleInternal(const std::string& pref_locale) {
+@@ -474,6 +483,10 @@ std::string GetApplicationLocaleInternal(const std::string& pref_locale) {
    candidates.push_back(base::android::GetDefaultLocaleString());
  
  #elif defined(USE_GLIB) && !defined(OS_CHROMEOS)
@@ -187,7 +298,7 @@ index b025bf46d5dce581145e396fe43486e6b5dca5a9..7f52c4a097cf3b0e904dee8159e4732e
    // GLib implements correct environment variable parsing with
    // the precedence order: LANGUAGE, LC_ALL, LC_MESSAGES and LANG.
 diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
-index 1a24b13c6108c7b236e0df9640138b06856bab64..2a47c46ab51798fa6994dcf64bbab03c516cd57c 100644
+index 372d3302e133c266429ea49ac449055a8ab4de87..48b6286ea02350f3986da11b100e13472c580cc7 100644
 --- a/ui/base/resource/resource_bundle.cc
 +++ b/ui/base/resource/resource_bundle.cc
 @@ -10,6 +10,7 @@
@@ -198,7 +309,7 @@ index 1a24b13c6108c7b236e0df9640138b06856bab64..2a47c46ab51798fa6994dcf64bbab03c
  #include "base/big_endian.h"
  #include "base/command_line.h"
  #include "base/files/file.h"
-@@ -250,7 +251,11 @@ ResourceBundle& ResourceBundle::GetSharedInstance() {
+@@ -263,7 +264,11 @@ void ResourceBundle::LoadSecondaryLocaleDataWithPakFileRegion(
  
  #if !defined(OS_ANDROID)
  bool ResourceBundle::LocaleDataPakExists(const std::string& locale) {
@@ -211,7 +322,7 @@ index 1a24b13c6108c7b236e0df9640138b06856bab64..2a47c46ab51798fa6994dcf64bbab03c
  }
  #endif  // !defined(OS_ANDROID)
  
-@@ -348,10 +353,17 @@ std::string ResourceBundle::LoadLocaleResources(
+@@ -361,10 +366,17 @@ std::string ResourceBundle::LoadLocaleResources(
    if (locale_file_path.empty())
      locale_file_path = GetLocaleFilePath(app_locale, true);
  
@@ -230,7 +341,7 @@ index 1a24b13c6108c7b236e0df9640138b06856bab64..2a47c46ab51798fa6994dcf64bbab03c
    }
  
    std::unique_ptr<DataPack> data_pack(new DataPack(SCALE_FACTOR_100P));
-@@ -750,12 +762,12 @@ void ResourceBundle::LoadChromeResources() {
+@@ -779,12 +791,12 @@ void ResourceBundle::LoadChromeResources() {
    // scale factor to gfx::ImageSkia::AddRepresentation.
    if (IsScaleFactorSupported(SCALE_FACTOR_100P)) {
      AddDataPackFromPath(GetResourcesPakFilePath(
@@ -245,7 +356,7 @@ index 1a24b13c6108c7b236e0df9640138b06856bab64..2a47c46ab51798fa6994dcf64bbab03c
    }
  }
  
-@@ -778,7 +790,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
+@@ -807,7 +819,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
    std::unique_ptr<DataPack> data_pack(new DataPack(scale_factor));
    if (data_pack->LoadFromPath(pack_path)) {
      AddDataPack(std::move(data_pack));
@@ -290,7 +401,7 @@ index 411b8bd5b4e880c8ac6e5c4c8dd3f00456949254..edf8108987f1017c15bd12c4e8bda502
    if (!filter.empty())
      ofn.GetOPENFILENAME()->lpstrFilter = filter.c_str();
 diff --git a/ui/views/bubble/bubble_dialog_delegate.cc b/ui/views/bubble/bubble_dialog_delegate.cc
-index ca89e25b924d758b87de365e90c10ee76669ecd2..a913e1c361d46fbd933aefba9312b7af16b849d7 100644
+index b335b5bfc5d30afb3468940bb64d092fa9c0cbf1..6d4ff7e024bb70dd70d95e83d56642f54a8e6c7b 100644
 --- a/ui/views/bubble/bubble_dialog_delegate.cc
 +++ b/ui/views/bubble/bubble_dialog_delegate.cc
 @@ -26,6 +26,8 @@
@@ -323,10 +434,10 @@ index ca89e25b924d758b87de365e90c10ee76669ecd2..a913e1c361d46fbd933aefba9312b7af
    bubble_delegate->set_adjust_if_offscreen(false);
  #endif
 diff --git a/ui/views/controls/menu/menu_controller.cc b/ui/views/controls/menu/menu_controller.cc
-index 7c44dd17258fde84b9059d4130ea94d1a111e8f6..866915a0751ad95f29adfbbc5865c84282b9afd5 100644
+index e9125d68fbd0db740b72384230eb0c45cb640005..9a0868585658bff8aeb8b3908d5d93f17e9d216e 100644
 --- a/ui/views/controls/menu/menu_controller.cc
 +++ b/ui/views/controls/menu/menu_controller.cc
-@@ -492,6 +492,10 @@ void MenuController::Run(Widget* parent,
+@@ -493,6 +493,10 @@ void MenuController::Run(Widget* parent,
      ViewsDelegate::GetInstance()->AddRef();
  }
  
@@ -338,10 +449,10 @@ index 7c44dd17258fde84b9059d4130ea94d1a111e8f6..866915a0751ad95f29adfbbc5865c842
    // If the menu has already been destroyed, no further cancellation is
    // needed.  We especially don't want to set the |exit_type_| to a lesser
 diff --git a/ui/views/controls/menu/menu_controller.h b/ui/views/controls/menu/menu_controller.h
-index 16ac2d4bd9c3a746d667f5c2c41e45d186e6fe61..0fb071d62ec071d24f8418deac959e314b9620ac 100644
+index 06fc19b5c90aa46447f088dd29f0249a033976eb..c5335bd41393752b1cdcb1802ba6fd0d8bd72753 100644
 --- a/ui/views/controls/menu/menu_controller.h
 +++ b/ui/views/controls/menu/menu_controller.h
-@@ -186,6 +186,8 @@ class VIEWS_EXPORT MenuController
+@@ -187,6 +187,8 @@ class VIEWS_EXPORT MenuController
    // notifying any menu items.
    void ClearStateForTest();
  
@@ -373,10 +484,10 @@ index 49c34b6ab7a06e8bffc5fe4f7e6853bd4fba564e..d8818cddb5bd6a76067fc217932b032e
    // This is only needed on Windows.
    if (!show_mnemonics)
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
-index 3b288de59b48f99b29916302aef03e5e5d8b6050..38125c9bd377f4cb2b29fbfd3b3f273d71c8df44 100644
+index d53d9c72cc6bb3d3a1df672b1d856c7ee5b11cdd..0c978b48a8414afe59367c260ff7a1d4c7292b61 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
-@@ -797,7 +797,8 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
+@@ -751,7 +751,8 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
      aura::Window* source_window,
      const gfx::Point& screen_location,
      int operation,
@@ -386,7 +497,7 @@ index 3b288de59b48f99b29916302aef03e5e5d8b6050..38125c9bd377f4cb2b29fbfd3b3f273d
    UMA_HISTOGRAM_ENUMERATION("Event.DragDrop.Start", source,
                              ui::DragDropTypes::DRAG_EVENT_SOURCE_COUNT);
  
-@@ -854,9 +855,11 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
+@@ -807,9 +808,11 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
  
    if (alive) {
      if (negotiated_operation_ == ui::DragDropTypes::DRAG_NONE) {
@@ -398,7 +509,7 @@ index 3b288de59b48f99b29916302aef03e5e5d8b6050..38125c9bd377f4cb2b29fbfd3b3f273d
        UMA_HISTOGRAM_ENUMERATION("Event.DragDrop.Drop", source,
                                  ui::DragDropTypes::DRAG_EVENT_SOURCE_COUNT);
      }
-@@ -870,6 +873,7 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
+@@ -823,6 +826,7 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
  
      return negotiated_operation_;
    }
@@ -407,10 +518,10 @@ index 3b288de59b48f99b29916302aef03e5e5d8b6050..38125c9bd377f4cb2b29fbfd3b3f273d
                              ui::DragDropTypes::DRAG_EVENT_SOURCE_COUNT);
    return ui::DragDropTypes::DRAG_NONE;
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h
-index 6d3f312107b84eb911c46d8151717f4b86464968..585948c65b6227ff5aa9fedaf71ec1149a100ace 100644
+index b8792c2d855d06f3b6fdc9ae3ee046b99d8dfc1d..6d0a7b5ae1bcae244fd604701ae8e9e9e00d337e 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h
 +++ b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h
-@@ -87,7 +87,10 @@ class VIEWS_EXPORT DesktopDragDropClientAuraX11
+@@ -86,7 +86,10 @@ class VIEWS_EXPORT DesktopDragDropClientAuraX11
                         aura::Window* source_window,
                         const gfx::Point& screen_location,
                         int operation,
@@ -495,10 +606,10 @@ index f772f64d656e88cd2631e388f92e00a845f84f16..0c63ea93115b6e2e6a3d1af9023a77d6
  }
  
 diff --git a/ui/views/widget/desktop_aura/desktop_screen_x11.cc b/ui/views/widget/desktop_aura/desktop_screen_x11.cc
-index 3432afe40d033984d5c898b9b395a38253eff235..bbc8064b1232ff911b7855db64fbec6107f7a273 100644
+index c31728ca1b4630a6665033a9b31c3cf31ccc316a..d02d559f65931114ef906676200833a29af7be3e 100644
 --- a/ui/views/widget/desktop_aura/desktop_screen_x11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_screen_x11.cc
-@@ -183,6 +183,7 @@ display::Display DesktopScreenX11::GetDisplayNearestWindow(
+@@ -181,6 +181,7 @@ display::Display DesktopScreenX11::GetDisplayNearestWindow(
    // created before we create the aura::WindowEventDispatcher. So we ask what
    // the DRWHX11 believes the window bounds are instead of going through the
    // aura::Window's screen bounds.
@@ -506,7 +617,7 @@ index 3432afe40d033984d5c898b9b395a38253eff235..bbc8064b1232ff911b7855db64fbec61
    aura::WindowTreeHost* host = window->GetHost();
    if (host) {
      DesktopWindowTreeHostX11* rwh = DesktopWindowTreeHostX11::GetHostForXID(
-@@ -190,6 +191,7 @@ display::Display DesktopScreenX11::GetDisplayNearestWindow(
+@@ -188,6 +189,7 @@ display::Display DesktopScreenX11::GetDisplayNearestWindow(
      if (rwh)
        return GetDisplayMatching(rwh->GetX11RootWindowBounds());
    }
@@ -515,10 +626,10 @@ index 3432afe40d033984d5c898b9b395a38253eff235..bbc8064b1232ff911b7855db64fbec61
    return GetPrimaryDisplay();
  }
 diff --git a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
-index a5011125472da8c5ded875c53c4ae6dfb16c1d6c..7b240a413c58b95a0d4a6a2f806974322c54e462 100644
+index e8a7a79c53421cf3b78a1358436e0ad38d1cfab2..9372c6a53870752b3ce74a2569e974d2e0486805 100644
 --- a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
-@@ -64,6 +64,8 @@
+@@ -66,6 +66,8 @@
  #include "ui/wm/core/compound_event_filter.h"
  #include "ui/wm/core/window_util.h"
  
@@ -527,7 +638,7 @@ index a5011125472da8c5ded875c53c4ae6dfb16c1d6c..7b240a413c58b95a0d4a6a2f80697432
  DECLARE_UI_CLASS_PROPERTY_TYPE(views::DesktopWindowTreeHostX11*);
  
  namespace views {
-@@ -1370,6 +1372,15 @@ void DesktopWindowTreeHostX11::InitX11Window(
+@@ -1332,6 +1334,15 @@ void DesktopWindowTreeHostX11::InitX11Window(
    swa.background_pixmap = None;
    swa.bit_gravity = NorthWestGravity;
  
@@ -543,7 +654,7 @@ index a5011125472da8c5ded875c53c4ae6dfb16c1d6c..7b240a413c58b95a0d4a6a2f80697432
    ::Atom window_type;
    switch (params.type) {
      case Widget::InitParams::TYPE_MENU:
-@@ -1798,6 +1809,22 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
+@@ -1747,6 +1758,22 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
    if (event->IsAnyButton() || event->IsMouseWheelEvent())
      FlashFrame(false);
  
@@ -567,10 +678,10 @@ index a5011125472da8c5ded875c53c4ae6dfb16c1d6c..7b240a413c58b95a0d4a6a2f80697432
      SendEventToSink(event);
    } else {
 diff --git a/ui/views/widget/native_widget_aura.cc b/ui/views/widget/native_widget_aura.cc
-index a58a72c6c52474710c88e41560a4465d7390d190..3c29d52a2cd4d536181b06ae2926efc5fe7541da 100644
+index 90cd8ab604d766af28d608259352366cd75e5ec7..6b733b15195abd00a1a3dc2341165614406bafdb 100644
 --- a/ui/views/widget/native_widget_aura.cc
 +++ b/ui/views/widget/native_widget_aura.cc
-@@ -1164,6 +1164,8 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
+@@ -1161,6 +1161,8 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
      // matches our previous behaviour; the global stacking client would almost
      // always reattach the window to the same RootWindow.
      aura::Window* root_window = native_view->GetRootWindow();
@@ -580,10 +691,10 @@ index a58a72c6c52474710c88e41560a4465d7390d190..3c29d52a2cd4d536181b06ae2926efc5
          native_view, root_window, root_window->GetBoundsInScreen());
    }
 diff --git a/ui/views/widget/widget.cc b/ui/views/widget/widget.cc
-index fbce29ee69aa9f0f31d785434e195aa5e5e9b49d..23f910106a23f8e904956ba148769f029e764706 100644
+index 32a50e8860a999193a1f5230de8d55a95377b4cb..6bf6f77418886ac7d0f525331fb5a6185ca4265b 100644
 --- a/ui/views/widget/widget.cc
 +++ b/ui/views/widget/widget.cc
-@@ -136,6 +136,7 @@ Widget::InitParams::InitParams(Type type)
+@@ -135,6 +135,7 @@ Widget::InitParams::InitParams(Type type)
        layer_type(ui::LAYER_TEXTURED),
        context(nullptr),
        force_show_in_taskbar(false),
@@ -656,10 +767,10 @@ index 163e4b54b033c904237190867d81efef01f3c6bc..0f595a7fc23abbab8e925a087b2cd772
      }
      case Widget::InitParams::TYPE_CONTROL:
 diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
-index 3c67457a6421cc56b0e54216f30d30cdc39db1a3..0ec5e68b3303a28b6c2471b0bc1dd6507123cb12 100644
+index d8086d862d59db36e79440cd92e1bc2b86e59c2a..96cf4fade890d34f83821dec65a35e52a08f060b 100644
 --- a/ui/views/win/hwnd_message_handler.cc
 +++ b/ui/views/win/hwnd_message_handler.cc
-@@ -1163,8 +1163,12 @@ bool HWNDMessageHandler::GetClientAreaInsets(gfx::Insets* insets) const {
+@@ -1221,8 +1221,12 @@ bool HWNDMessageHandler::GetClientAreaInsets(gfx::Insets* insets) const {
      // Windows automatically adds a standard width border to all sides when a
      // window is maximized.
      int border_thickness = GetSystemMetrics(SM_CXSIZEFRAME);
@@ -673,10 +784,10 @@ index 3c67457a6421cc56b0e54216f30d30cdc39db1a3..0ec5e68b3303a28b6c2471b0bc1dd650
          border_thickness, border_thickness, border_thickness, border_thickness);
      return true;
 diff --git a/ui/webui/resources/js/util.js b/ui/webui/resources/js/util.js
-index 28a60d2ce1378e6c9609170c4aad62c3d547c856..6b990c35625f8457bf282b6efcccb28023500436 100644
+index 2b8cef58cff02947ac055a90b79eb8a948b367c5..0b3b0c8bf4ce5bfb05d8eda7e43ea90bd79fa29c 100644
 --- a/ui/webui/resources/js/util.js
 +++ b/ui/webui/resources/js/util.js
-@@ -210,6 +210,13 @@ function queryRequiredElement(selectors, opt_context) {
+@@ -200,6 +200,13 @@ function queryRequiredElement(selectors, opt_context) {
        element, HTMLElement, 'Missing required element: ' + selectors);
  }
  
@@ -690,7 +801,7 @@ index 28a60d2ce1378e6c9609170c4aad62c3d547c856..6b990c35625f8457bf282b6efcccb280
  // Handle click on a link. If the link points to a chrome: or file: url, then
  // call into the browser to do the navigation.
  ['click', 'auxclick'].forEach(function(eventName) {
-@@ -245,6 +252,13 @@ function queryRequiredElement(selectors, opt_context) {
+@@ -235,6 +242,13 @@ function queryRequiredElement(selectors, opt_context) {
        return;
  
      anchor = /** @type {!HTMLAnchorElement} */ (anchor);
