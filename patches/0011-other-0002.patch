@@ -1,3 +1,155 @@
+diff --git a/breakpad/src/processor/pathname_stripper.h b/breakpad/src/processor/pathname_stripper.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..423ca0d05abc09d6bf0f8ef09ca8ce688d8ac20e
+--- /dev/null
++++ b/breakpad/src/processor/pathname_stripper.h
+@@ -0,0 +1,53 @@
++// Copyright (c) 2006, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++// pathname_stripper.h: Manipulates pathnames into their component parts.
++//
++// Author: Mark Mentovai
++
++#ifndef PROCESSOR_PATHNAME_STRIPPER_H__
++#define PROCESSOR_PATHNAME_STRIPPER_H__
++
++#include <string>
++
++#include "common/using_std_string.h"
++
++namespace google_breakpad {
++
++class PathnameStripper {
++ public:
++  // Given path, a pathname with components separated by slashes (/) or
++  // backslashes (\), returns the trailing component, without any separator.
++  // If path ends in a separator character, returns an empty string.
++  static string File(const string &path);
++};
++
++}  // namespace google_breakpad
++
++#endif  // PROCESSOR_PATHNAME_STRIPPER_H__
+diff --git a/breakpad/src/processor/pathname_stripper_unittest.cc b/breakpad/src/processor/pathname_stripper_unittest.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..1bff4cb01777524a0a0760d8916131209a114a35
+--- /dev/null
++++ b/breakpad/src/processor/pathname_stripper_unittest.cc
+@@ -0,0 +1,87 @@
++// Copyright (c) 2006, Google Inc.
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//
++//     * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following disclaimer
++// in the documentation and/or other materials provided with the
++// distribution.
++//     * Neither the name of Google Inc. nor the names of its
++// contributors may be used to endorse or promote products derived from
++// this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++#include <stdio.h>
++
++#include "processor/pathname_stripper.h"
++#include "processor/logging.h"
++
++#define ASSERT_TRUE(condition) \
++  if (!(condition)) { \
++    fprintf(stderr, "FAIL: %s @ %s:%d\n", #condition, __FILE__, __LINE__); \
++    return false; \
++  }
++
++#define ASSERT_EQ(e1, e2) ASSERT_TRUE((e1) == (e2))
++
++namespace {
++
++using google_breakpad::PathnameStripper;
++
++static bool RunTests() {
++  ASSERT_EQ(PathnameStripper::File("/dir/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("\\dir\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("/dir\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("\\dir/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir/\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir\\/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir/"), "");
++  ASSERT_EQ(PathnameStripper::File("dir\\"), "");
++  ASSERT_EQ(PathnameStripper::File("dir/dir/"), "");
++  ASSERT_EQ(PathnameStripper::File("dir\\dir\\"), "");
++  ASSERT_EQ(PathnameStripper::File("dir1/dir2/file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir1\\dir2\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir1/dir2\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir1\\dir2/file"), "file");
++  ASSERT_EQ(PathnameStripper::File(""), "");
++  ASSERT_EQ(PathnameStripper::File("1"), "1");
++  ASSERT_EQ(PathnameStripper::File("1/2"), "2");
++  ASSERT_EQ(PathnameStripper::File("1\\2"), "2");
++  ASSERT_EQ(PathnameStripper::File("/1/2"), "2");
++  ASSERT_EQ(PathnameStripper::File("\\1\\2"), "2");
++  ASSERT_EQ(PathnameStripper::File("dir//file"), "file");
++  ASSERT_EQ(PathnameStripper::File("dir\\\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("/dir//file"), "file");
++  ASSERT_EQ(PathnameStripper::File("\\dir\\\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("c:\\dir\\file"), "file");
++  ASSERT_EQ(PathnameStripper::File("c:\\dir\\file.ext"), "file.ext");
++
++  return true;
++}
++
++}  // namespace
++
++int main(int argc, char **argv) {
++  BPLOG_INIT(&argc, &argv);
++
++  return RunTests() ? 0 : 1;
++}
 diff --git a/breakpad/src/processor/postfix_evaluator-inl.h b/breakpad/src/processor/postfix_evaluator-inl.h
 new file mode 100644
 index 0000000000000000000000000000000000000000..d7dbeac205163404a135f2d95017b135017283e7
@@ -5724,10 +5876,10 @@ index 0000000000000000000000000000000000000000..a74f7b6da15f7fd5be3bbf1977e6e59b
 +#endif  // PROCESSOR_STACKWALK_COMMON_H__
 diff --git a/breakpad/src/processor/stackwalker.cc b/breakpad/src/processor/stackwalker.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..c85ce5e899fe6ba7c8898cfffd8e538e9fc22ec3
+index 0000000000000000000000000000000000000000..4988ef1eb8b0ee692c526c238837c786d567f0cc
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker.cc
-@@ -0,0 +1,302 @@
+@@ -0,0 +1,333 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -5790,10 +5942,15 @@ index 0000000000000000000000000000000000000000..c85ce5e899fe6ba7c8898cfffd8e538e
 +
 +const int Stackwalker::kRASearchWords = 40;
 +
-+uint32_t Stackwalker::max_frames_ = 1024;
++// This default is just a sanity check: a large enough value
++// that allow capturing unbounded recursion traces, yet provide a
++// guardrail against stack walking bugs. The stack walking invariants
++// guarantee that the unwinding process is strictly monotonic and
++// practically bounded by the size of the stack memory range.
++uint32_t Stackwalker::max_frames_ = 1 << 20;  // 1M
 +bool Stackwalker::max_frames_set_ = false;
 +
-+uint32_t Stackwalker::max_frames_scanned_ = 1024;
++uint32_t Stackwalker::max_frames_scanned_ = 1 << 14;  // 16k
 +
 +Stackwalker::Stackwalker(const SystemInfo* system_info,
 +                         MemoryRegion* memory,
@@ -5964,7 +6121,7 @@ index 0000000000000000000000000000000000000000..c85ce5e899fe6ba7c8898cfffd8e538e
 +                                             context->GetContextSPARC(),
 +                                             memory, modules, frame_symbolizer);
 +      break;
-+ 
++
 +    case MD_CONTEXT_MIPS:
 +    case MD_CONTEXT_MIPS64:
 +      cpu_stackwalker = new StackwalkerMIPS(system_info,
@@ -5983,7 +6140,7 @@ index 0000000000000000000000000000000000000000..c85ce5e899fe6ba7c8898cfffd8e538e
 +                                           frame_symbolizer);
 +      break;
 +    }
-+    
++
 +    case MD_CONTEXT_ARM64:
 +      cpu_stackwalker = new StackwalkerARM64(system_info,
 +                                             context->GetContextARM64(),
@@ -6001,7 +6158,33 @@ index 0000000000000000000000000000000000000000..c85ce5e899fe6ba7c8898cfffd8e538e
 +  return cpu_stackwalker;
 +}
 +
-+bool Stackwalker::InstructionAddressSeemsValid(uint64_t address) {
++// CONSIDER: check stack alignment?
++bool Stackwalker::TerminateWalk(uint64_t caller_ip,
++                                uint64_t caller_sp,
++                                uint64_t callee_sp,
++                                bool first_unwind) const {
++  // Treat an instruction address less than 4k as end-of-stack.
++  // (using InstructionAddressSeemsValid() here is very tempting,
++  // but we need to handle JITted code)
++  if (caller_ip < (1 << 12)) {
++    return true;
++  }
++
++  // NOTE: The stack address range is implicitly checked
++  //   when the stack memory is accessed.
++
++  // The stack pointer should monotonically increase. For first unwind
++  // we allow caller_sp == callee_sp to account for architectures where
++  // the return address is stored in a register (so it's possible to have
++  // leaf functions which don't move the stack pointer)
++  if (first_unwind ? (caller_sp < callee_sp) : (caller_sp <= callee_sp)) {
++    return true;
++  }
++
++  return false;
++}
++
++bool Stackwalker::InstructionAddressSeemsValid(uint64_t address) const {
 +  StackFrame frame;
 +  frame.instruction = address;
 +  StackFrameSymbolizer::SymbolizerResult symbolizer_result =
@@ -6411,10 +6594,10 @@ index 0000000000000000000000000000000000000000..ab4e9c08807ac49f074202a837876dd3
 +}
 diff --git a/breakpad/src/processor/stackwalker_amd64.cc b/breakpad/src/processor/stackwalker_amd64.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..d133324827399c9a3bf0077caab74f673e589a37
+index 0000000000000000000000000000000000000000..d5ac6c652e34eca2bf68e9f8750314dd8290c439
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_amd64.cc
-@@ -0,0 +1,346 @@
+@@ -0,0 +1,326 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -6564,23 +6747,6 @@ index 0000000000000000000000000000000000000000..d133324827399c9a3bf0077caab74f67
 +  return frame.release();
 +}
 +
-+bool StackwalkerAMD64::IsEndOfStack(uint64_t caller_rip, uint64_t caller_rsp,
-+                                    uint64_t callee_rsp) {
-+  // Treat an instruction address of 0 as end-of-stack.
-+  if (caller_rip == 0) {
-+    return true;
-+  }
-+
-+  // If the new stack pointer is at a lower address than the old, then
-+  // that's clearly incorrect. Treat this as end-of-stack to enforce
-+  // progress and avoid infinite loops.
-+  if (caller_rsp < callee_rsp) {
-+    return true;
-+  }
-+
-+  return false;
-+}
-+
 +// Returns true if `ptr` is not in x86-64 canonical form.
 +// https://en.wikipedia.org/wiki/X86-64#Virtual_address_space_details
 +static bool is_non_canonical(uint64_t ptr) {
@@ -6590,7 +6756,6 @@ index 0000000000000000000000000000000000000000..d133324827399c9a3bf0077caab74f67
 +StackFrameAMD64* StackwalkerAMD64::GetCallerByFramePointerRecovery(
 +    const vector<StackFrame*>& frames) {
 +  StackFrameAMD64* last_frame = static_cast<StackFrameAMD64*>(frames.back());
-+  uint64_t last_rsp = last_frame->context.rsp;
 +  uint64_t last_rbp = last_frame->context.rbp;
 +
 +  // Assume the presence of a frame pointer. This is not mandated by the
@@ -6625,10 +6790,8 @@ index 0000000000000000000000000000000000000000..d133324827399c9a3bf0077caab74f67
 +      return NULL;
 +    }
 +
-+    // Simple sanity check that the stack is growing downwards as expected.
-+    if (IsEndOfStack(caller_rip, caller_rsp, last_rsp) ||
-+        caller_rbp < last_rbp) {
-+      // Reached end-of-stack or stack is not growing downwards.
++    // Check that rbp is within the right frame
++    if (caller_rsp <= last_rbp || caller_rbp < caller_rsp) {
 +      return NULL;
 +    }
 +
@@ -6744,9 +6907,9 @@ index 0000000000000000000000000000000000000000..d133324827399c9a3bf0077caab74f67
 +    new_frame->context.rbp = static_cast<uint32_t>(new_frame->context.rbp);
 +  }
 +
-+  if (IsEndOfStack(new_frame->context.rip, new_frame->context.rsp,
-+                   last_frame->context.rsp)) {
-+    // Reached end-of-stack.
++  // Should we terminate the stack walk? (end-of-stack or broken invariant)
++  if (TerminateWalk(new_frame->context.rip, new_frame->context.rsp,
++                    last_frame->context.rsp, frames.size() == 1)) {
 +    return NULL;
 +  }
 +
@@ -6763,10 +6926,10 @@ index 0000000000000000000000000000000000000000..d133324827399c9a3bf0077caab74f67
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/processor/stackwalker_amd64.h b/breakpad/src/processor/stackwalker_amd64.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..67c455104832d9353d160ed2fea4d3ea671818a4
+index 0000000000000000000000000000000000000000..8f3dbd528024b03e7c91d74548929316d8622810
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_amd64.h
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,108 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -6846,14 +7009,6 @@ index 0000000000000000000000000000000000000000..67c455104832d9353d160ed2fea4d3ea
 +  // of the returned frame. Return NULL on failure.
 +  StackFrameAMD64* GetCallerByCFIFrameInfo(const vector<StackFrame*> &frames,
 +                                           CFIFrameInfo* cfi_frame_info);
-+
-+  // Checks whether end-of-stack is reached.  An instruction address of 0 is an
-+  // end-of-stack marker.  If the stack pointer of the caller is at a lower
-+  // address than the stack pointer of the callee, then that's clearly incorrect
-+  // and it is treated as end-of-stack to enforce progress and avoid infinite
-+  // loops.
-+  bool IsEndOfStack(uint64_t caller_rip, uint64_t caller_rsp,
-+                    uint64_t callee_rsp);
 +
 +  // Assumes a traditional frame layout where the frame pointer has not been
 +  // omitted. The expectation is that caller's %rbp is pushed to the stack
@@ -7824,10 +7979,10 @@ index 0000000000000000000000000000000000000000..70fba11b56cf23ff0875afa69f91d352
 +}
 diff --git a/breakpad/src/processor/stackwalker_arm.cc b/breakpad/src/processor/stackwalker_arm.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..e4fc58697d15162ef8a62f8bdf183c63f98ebe93
+index 0000000000000000000000000000000000000000..dabb4fd2a6e0920637aee24c0388ddf84a2d1dd3
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_arm.cc
-@@ -0,0 +1,296 @@
+@@ -0,0 +1,292 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -8097,17 +8252,13 @@ index 0000000000000000000000000000000000000000..e4fc58697d15162ef8a62f8bdf183c63
 +  if (!frame.get())
 +    return NULL;
 +
-+
-+  // An instruction address of zero marks the end of the stack.
-+  if (frame->context.iregs[MD_CONTEXT_ARM_REG_PC] == 0)
++  // Should we terminate the stack walk? (end-of-stack or broken invariant)
++  if (TerminateWalk(frame->context.iregs[MD_CONTEXT_ARM_REG_PC],
++                    frame->context.iregs[MD_CONTEXT_ARM_REG_SP],
++                    last_frame->context.iregs[MD_CONTEXT_ARM_REG_SP],
++                    frames.size() == 1)) {
 +    return NULL;
-+
-+  // If the new stack pointer is at a lower address than the old, then
-+  // that's clearly incorrect. Treat this as end-of-stack to enforce
-+  // progress and avoid infinite loops.
-+  if (frame->context.iregs[MD_CONTEXT_ARM_REG_SP]
-+      < last_frame->context.iregs[MD_CONTEXT_ARM_REG_SP])
-+    return NULL;
++  }
 +
 +  // The new frame's context's PC is the return address, which is one
 +  // instruction past the instruction that caused us to arrive at the
@@ -8239,10 +8390,10 @@ index 0000000000000000000000000000000000000000..9081a40cd0a6de4dff682bdd20fd8ec3
 +#endif  // PROCESSOR_STACKWALKER_ARM_H__
 diff --git a/breakpad/src/processor/stackwalker_arm64.cc b/breakpad/src/processor/stackwalker_arm64.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..31119a97e1d087aa22453ab5aabfc4053d5f1fb4
+index 0000000000000000000000000000000000000000..f966011240408d2f63d50f32e1010653968b8259
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_arm64.cc
-@@ -0,0 +1,278 @@
+@@ -0,0 +1,275 @@
 +// Copyright (c) 2013 Google Inc.
 +// All rights reserved.
 +//
@@ -8497,16 +8648,13 @@ index 0000000000000000000000000000000000000000..31119a97e1d087aa22453ab5aabfc405
 +  if (!frame.get())
 +    return NULL;
 +
-+  // An instruction address of zero marks the end of the stack.
-+  if (frame->context.iregs[MD_CONTEXT_ARM64_REG_PC] == 0)
++  // Should we terminate the stack walk? (end-of-stack or broken invariant)
++  if (TerminateWalk(frame->context.iregs[MD_CONTEXT_ARM64_REG_PC],
++                    frame->context.iregs[MD_CONTEXT_ARM64_REG_SP],
++                    last_frame->context.iregs[MD_CONTEXT_ARM64_REG_SP],
++                    frames.size() == 1)) {
 +    return NULL;
-+
-+  // If the new stack pointer is at a lower address than the old, then
-+  // that's clearly incorrect. Treat this as end-of-stack to enforce
-+  // progress and avoid infinite loops.
-+  if (frame->context.iregs[MD_CONTEXT_ARM64_REG_SP]
-+      < last_frame->context.iregs[MD_CONTEXT_ARM64_REG_SP])
-+    return NULL;
++  }
 +
 +  // The new frame's context's PC is the return address, which is one
 +  // instruction past the instruction that caused us to arrive at the callee.
@@ -10499,10 +10647,10 @@ index 0000000000000000000000000000000000000000..8a0fd5e95b15d8b4fab3c390fba83107
 +}
 diff --git a/breakpad/src/processor/stackwalker_mips.cc b/breakpad/src/processor/stackwalker_mips.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..9a81b46ef42339658b9cb8554893173ee94bba78
+index 0000000000000000000000000000000000000000..c33ecdbe964cb0e1ca8960ebc7800b790834cd2a
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_mips.cc
-@@ -0,0 +1,447 @@
+@@ -0,0 +1,442 @@
 +// Copyright (c) 2013 Google Inc.
 +// All rights reserved.
 +//
@@ -10777,16 +10925,11 @@ index 0000000000000000000000000000000000000000..9a81b46ef42339658b9cb8554893173e
 +    return NULL;
 +  }
 +
-+  // Treat an instruction address of 0 as end-of-stack.
-+  if (new_frame->context.epc == 0) {
-+    return NULL;
-+  }
-+
-+  // If the new stack pointer is at a lower address than the old, then
-+  // that's clearly incorrect. Treat this as end-of-stack to enforce
-+  // progress and avoid infinite loops.
-+  if (new_frame->context.iregs[MD_CONTEXT_MIPS_REG_SP] <
-+      last_frame->context.iregs[MD_CONTEXT_MIPS_REG_SP]) {
++  // Should we terminate the stack walk? (end-of-stack or broken invariant)
++  if (TerminateWalk(new_frame->context.epc,
++                    new_frame->context.iregs[MD_CONTEXT_MIPS_REG_SP],
++                    last_frame->context.iregs[MD_CONTEXT_MIPS_REG_SP],
++                    frames.size() == 1)) {
 +    return NULL;
 +  }
 +
@@ -12475,10 +12618,10 @@ index 0000000000000000000000000000000000000000..a172f17b9d80408626f6c94973f66778
 +}
 diff --git a/breakpad/src/processor/stackwalker_ppc.cc b/breakpad/src/processor/stackwalker_ppc.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..7e2088440b3bea10f0d1f9efb28b4a43c8c1d566
+index 0000000000000000000000000000000000000000..1e34c38336cab3f5d7d09958bba81f8307ed0c8c
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_ppc.cc
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,155 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -12515,6 +12658,7 @@ index 0000000000000000000000000000000000000000..7e2088440b3bea10f0d1f9efb28b4a43
 +// Author: Mark Mentovai
 +
 +
++#include "common/scoped_ptr.h"
 +#include "processor/stackwalker_ppc.h"
 +#include "google_breakpad/processor/call_stack.h"
 +#include "google_breakpad/processor/memory_region.h"
@@ -12602,7 +12746,7 @@ index 0000000000000000000000000000000000000000..7e2088440b3bea10f0d1f9efb28b4a43
 +    return NULL;
 +  }
 +
-+  StackFramePPC* frame = new StackFramePPC();
++  scoped_ptr<StackFramePPC> frame(new StackFramePPC());
 +
 +  frame->context = last_frame->context;
 +  frame->context.srr0 = instruction;
@@ -12610,6 +12754,14 @@ index 0000000000000000000000000000000000000000..7e2088440b3bea10f0d1f9efb28b4a43
 +  frame->context_validity = StackFramePPC::CONTEXT_VALID_SRR0 |
 +                            StackFramePPC::CONTEXT_VALID_GPR1;
 +  frame->trust = StackFrame::FRAME_TRUST_FP;
++
++  // Should we terminate the stack walk? (end-of-stack or broken invariant)
++  if (TerminateWalk(instruction,
++                    stack_pointer,
++                    last_frame->context.gpr[1],
++                    stack->frames()->size() == 1)) {
++    return NULL;
++  }
 +
 +  // frame->context.srr0 is the return address, which is one instruction
 +  // past the branch that caused us to arrive at the callee.  Set
@@ -12620,7 +12772,7 @@ index 0000000000000000000000000000000000000000..7e2088440b3bea10f0d1f9efb28b4a43
 +  // return address value may access the context.srr0 field of StackFramePPC.
 +  frame->instruction = frame->context.srr0 - 4;
 +
-+  return frame;
++  return frame.release();
 +}
 +
 +
@@ -12712,10 +12864,10 @@ index 0000000000000000000000000000000000000000..012e5c32f91ff9c8b67f655fdbe6ea07
 +#endif  // PROCESSOR_STACKWALKER_PPC_H__
 diff --git a/breakpad/src/processor/stackwalker_ppc64.cc b/breakpad/src/processor/stackwalker_ppc64.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..51c71fe56115fe936a453dedc7d08fd0da209091
+index 0000000000000000000000000000000000000000..4fd9e7400a3b4d90f43c50315971932b57b27f03
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_ppc64.cc
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,145 @@
 +// Copyright (c) 2013 Google Inc.
 +// All rights reserved.
 +//
@@ -12838,6 +12990,14 @@ index 0000000000000000000000000000000000000000..51c71fe56115fe936a453dedc7d08fd0
 +  frame->context_validity = StackFramePPC64::CONTEXT_VALID_SRR0 |
 +                            StackFramePPC64::CONTEXT_VALID_GPR1;
 +  frame->trust = StackFrame::FRAME_TRUST_FP;
++
++  // Should we terminate the stack walk? (end-of-stack or broken invariant)
++  if (TerminateWalk(instruction,
++                    stack_pointer,
++                    last_frame->context.gpr[1],
++                    stack->frames()->size() == 1)) {
++    return NULL;
++  }
 +
 +  // frame->context.srr0 is the return address, which is one instruction
 +  // past the branch that caused us to arrive at the callee.  Set
@@ -13494,10 +13654,10 @@ index 0000000000000000000000000000000000000000..648b0499a1bc74556f93ecb3198162df
 +#endif  // __i386 || __sparc
 diff --git a/breakpad/src/processor/stackwalker_sparc.cc b/breakpad/src/processor/stackwalker_sparc.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..ff2ea75a805e5ac67bbf1fc834b55e9b55172206
+index 0000000000000000000000000000000000000000..4de838afec222de6c8e8f451161d08c5f1c22652
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_sparc.cc
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,147 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -13608,6 +13768,14 @@ index 0000000000000000000000000000000000000000..ff2ea75a805e5ac67bbf1fc834b55e9b
 +  uint32_t stack_base;
 +  if (!memory_->GetMemoryAtAddress(stack_pointer + 56,
 +                     &stack_base) || stack_base <= 1) {
++    return NULL;
++  }
++
++  // Should we terminate the stack walk? (end-of-stack or broken invariant)
++  if (TerminateWalk(instruction,
++                    stack_pointer,
++                    last_frame->context.g_r[14],
++                    stack->frames()->size() == 1)) {
 +    return NULL;
 +  }
 +
@@ -13954,10 +14122,10 @@ index 0000000000000000000000000000000000000000..d7f347550e28633ff9a7ffc6ef53632b
 +#endif // PROCESSOR_STACKWALKER_UNITTEST_UTILS_H_
 diff --git a/breakpad/src/processor/stackwalker_x86.cc b/breakpad/src/processor/stackwalker_x86.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..46e26cf9309e14277bb5da4faf4385ee179284c6
+index 0000000000000000000000000000000000000000..ed2b383d4fbf4a4e2d3891bd539c39c32fec0739
 --- /dev/null
 +++ b/breakpad/src/processor/stackwalker_x86.cc
-@@ -0,0 +1,682 @@
+@@ -0,0 +1,680 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -14619,15 +14787,13 @@ index 0000000000000000000000000000000000000000..46e26cf9309e14277bb5da4faf4385ee
 +  if (!new_frame.get())
 +    return NULL;
 +
-+  // Treat an instruction address of 0 as end-of-stack.
-+  if (new_frame->context.eip == 0)
++  // Should we terminate the stack walk? (end-of-stack or broken invariant)
++  if (TerminateWalk(new_frame->context.eip,
++                    new_frame->context.esp,
++                    last_frame->context.esp,
++                    frames.size() == 1)) {
 +    return NULL;
-+
-+  // If the new stack pointer is at a lower address than the old, then
-+  // that's clearly incorrect. Treat this as end-of-stack to enforce
-+  // progress and avoid infinite loops.
-+  if (new_frame->context.esp <= last_frame->context.esp)
-+    return NULL;
++  }
 +
 +  // new_frame->context.eip is the return address, which is the instruction
 +  // after the CALL that caused us to arrive at the callee. Set
@@ -347983,55 +348149,6 @@ index 0000000000000000000000000000000000000000..cc0da728d5d9cce0e9bf731bbaccee98
 +    },
 +  ],
 +}
-diff --git a/cc/surfaces/surface_manager.cc b/cc/surfaces/surface_manager.cc
-index 8f6975ccc2d95975a4fcd87b8e2b2da9c5d31b4e..9cf17d866194a38503a7510f88b8d59b5dd96c67 100644
---- a/cc/surfaces/surface_manager.cc
-+++ b/cc/surfaces/surface_manager.cc
-@@ -23,6 +23,8 @@
- #include <sstream>
- #endif
- 
-+#include "app/vivaldi_apptools.h"
-+
- namespace cc {
- 
- SurfaceManager::SurfaceReferenceInfo::SurfaceReferenceInfo() = default;
-@@ -79,6 +81,22 @@ Surface* SurfaceManager::CreateSurface(
-   // If no surface with this viz::SurfaceId exists, simply create the surface
-   // and return.
-   auto it = surface_map_.find(surface_info.id());
-+  // NOTE(andre@vivaldi.com) : Since we delete the view, in
-+  // WebContentsViewGuest::CreateViewForWidget we cannot reuse exsisting
-+  // Surfaces pending for destruction. Always clean up and return a new.
-+  // VB-28351.
-+  if (vivaldi::IsVivaldiRunning() && it!= surface_map_.end()) {
-+    // Make sure the surface is no longer referenced.
-+    DestroySurfaceInternal(surface_info.id());
-+    for (auto dead_iter: surfaces_to_destroy_) {
-+      if (dead_iter == surface_info.id()) {
-+        surfaces_to_destroy_.erase(dead_iter);
-+        break;
-+      }
-+    }
-+    // Advance from the one that got destroyed.
-+    it = surface_map_.end();
-+  }
-   if (it == surface_map_.end()) {
-     surface_map_[surface_info.id()] =
-         base::MakeUnique<Surface>(surface_info, this, surface_client,
-diff --git a/chrome_elf/chrome_elf.def b/chrome_elf/chrome_elf.def
-index d1517e2be81f62fbf73abf8c41c12147f7933254..a7c0fb5a2cf7af7bdc2f0322a9c2f9b05066dbbb 100644
---- a/chrome_elf/chrome_elf.def
-+++ b/chrome_elf/chrome_elf.def
-@@ -2,7 +2,7 @@
- ; Use of this source code is governed by a BSD-style license that can be
- ; found in the LICENSE file.
- 
--LIBRARY  "chrome_elf.dll"
-+LIBRARY  "vivaldi_elf.dll"
- 
- EXPORTS
-   AddDllToBlacklist
 diff --git a/chrome_elf/chrome_elf.ver b/chrome_elf/chrome_elf.ver
 index 78f890e7ece7dc50b0ce3bb7784b88bc53bd7792..4c3c51d2be91a116f2df34ac9778c65af9a0b025 100644
 --- a/chrome_elf/chrome_elf.ver
@@ -348040,6 +348157,32 @@ index 78f890e7ece7dc50b0ce3bb7784b88bc53bd7792..4c3c51d2be91a116f2df34ac9778c65a
  INTERNAL_NAME=chrome_elf_dll
 -ORIGINAL_FILENAME=chrome_elf.dll
 +ORIGINAL_FILENAME=vivaldi_elf.dll
+diff --git a/chrome_elf/chrome_elf_x64.def b/chrome_elf/chrome_elf_x64.def
+index 184b7989a29b7a215c011c2d73088fb7cc8061e2..7767a014a8c200d90ac687726dbc274648237163 100644
+--- a/chrome_elf/chrome_elf_x64.def
++++ b/chrome_elf/chrome_elf_x64.def
+@@ -1,7 +1,7 @@
+ ; Copyright 2013 The Chromium Authors. All rights reserved.
+ ; Use of this source code is governed by a BSD-style license that can be
+ ; found in the LICENSE file.
+-LIBRARY  "chrome_elf.dll"
++LIBRARY  "vivaldi_elf.dll"
+ 
+ EXPORTS
+   ; When functions are added to this file, they must also be added to
+diff --git a/chrome_elf/chrome_elf_x86.def b/chrome_elf/chrome_elf_x86.def
+index d49b5e50cca4d4b881e4db6f0fd44b5b981d74c0..18d918b98146f47d0dd5ff791d18611bd770a2e3 100644
+--- a/chrome_elf/chrome_elf_x86.def
++++ b/chrome_elf/chrome_elf_x86.def
+@@ -2,7 +2,7 @@
+ ; Use of this source code is governed by a BSD-style license that can be
+ ; found in the LICENSE file.
+ 
+-LIBRARY  "chrome_elf.dll"
++LIBRARY  "vivaldi_elf.dll"
+ 
+ EXPORTS
+   ; When functions are added to this file, they must also be added to
 diff --git a/chrome_elf/elf_imports_unittest.cc b/chrome_elf/elf_imports_unittest.cc
 index 96e078c96caa02ab11a14efe1440e4577a36d280..250b86c49ab19b3bdff21c697c939709e664adc2 100644
 --- a/chrome_elf/elf_imports_unittest.cc
@@ -348072,7 +348215,7 @@ index 96e078c96caa02ab11a14efe1440e4577a36d280..250b86c49ab19b3bdff21c697c939709
        "target was built, instead of just chrome_elf_unittests.exe)";
  }
 diff --git a/device/geolocation/location_arbitrator.cc b/device/geolocation/location_arbitrator.cc
-index 444262686f0c782fa7b79a5019b56f5a1f7d4463..be917377b2664a512a02c03f50d89d5a13cf60f0 100644
+index 6267e5a54d5cd8ac660454afcf396b4deaf43eeb..8a8191bde8c696334d5228d2e1f301db5a2d6b05 100644
 --- a/device/geolocation/location_arbitrator.cc
 +++ b/device/geolocation/location_arbitrator.cc
 @@ -21,7 +21,7 @@ namespace device {
@@ -348085,7 +348228,7 @@ index 444262686f0c782fa7b79a5019b56f5a1f7d4463..be917377b2664a512a02c03f50d89d5a
  
  // To avoid oscillations, set this to twice the expected update interval of a
 diff --git a/device/geolocation/network_location_request.cc b/device/geolocation/network_location_request.cc
-index 08c157415f47cc0a928227dbbaacc2005efa6283..3ab51c6dca95a7a57eaa4420a53891ef81c0a2c7 100644
+index 9cd3ad2234ff88ffe91bc651889f62386118a30b..5551e1945bec31e6ab9c1be58c3af6e65fbdadb7 100644
 --- a/device/geolocation/network_location_request.cc
 +++ b/device/geolocation/network_location_request.cc
 @@ -212,7 +212,8 @@ struct AccessPointLess {
@@ -348099,7 +348242,7 @@ index 08c157415f47cc0a928227dbbaacc2005efa6283..3ab51c6dca95a7a57eaa4420a53891ef
        std::string query(url.query());
        if (!query.empty())
 diff --git a/google_apis/gaia/gaia_auth_util.cc b/google_apis/gaia/gaia_auth_util.cc
-index 6e1d9369f45bfecde39727ebdd6b3507ece7026a..5b6f057347d0da21e584d31859c88996c5645177 100644
+index 0840cee1ccb90b04120ddb0f158929500da8cb6a..295c214236d196abe70a3e6d96298658d8d8c6d4 100644
 --- a/google_apis/gaia/gaia_auth_util.cc
 +++ b/google_apis/gaia/gaia_auth_util.cc
 @@ -20,6 +20,8 @@
@@ -348111,7 +348254,7 @@ index 6e1d9369f45bfecde39727ebdd6b3507ece7026a..5b6f057347d0da21e584d31859c88996
  namespace gaia {
  
  namespace {
-@@ -32,6 +34,8 @@ const void* kURLRequestUserDataKey =
+@@ -31,6 +33,8 @@ const void* const kURLRequestUserDataKey = &kURLRequestUserDataKey;
  
  std::string CanonicalizeEmailImpl(const std::string& email_address,
                                    bool change_googlemail_to_gmail) {
@@ -348121,7 +348264,7 @@ index 6e1d9369f45bfecde39727ebdd6b3507ece7026a..5b6f057347d0da21e584d31859c88996
        email_address, "@", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
    if (parts.size() != 2U) {
 diff --git a/google_apis/gaia/oauth2_token_service.h b/google_apis/gaia/oauth2_token_service.h
-index 213058aa712d9e79af51e55f1aa297755eb66251..4a08a6d6aff1253d69ac86b8c9296b4c15c7b234 100644
+index 3cc2ebc34ed6807c0218d14503d4ffcb0fde394a..0c2869acb8927e508b8b06c2e1eac9b220169c3a 100644
 --- a/google_apis/gaia/oauth2_token_service.h
 +++ b/google_apis/gaia/oauth2_token_service.h
 @@ -180,11 +180,11 @@ class OAuth2TokenService {
@@ -348136,9 +348279,9 @@ index 213058aa712d9e79af51e55f1aa297755eb66251..4a08a6d6aff1253d69ac86b8c9296b4c
 -  bool RefreshTokenIsAvailable(const std::string& account_id) const;
 +  virtual bool RefreshTokenIsAvailable(const std::string& account_id) const;
  
-   // This method cancels all token requests, revoke all refresh tokens and
-   // cached access tokens.
-@@ -317,10 +317,12 @@ class OAuth2TokenService {
+   // Returns true if a refresh token exists for |account_id| and it is in an
+   // error state.
+@@ -321,10 +321,12 @@ class OAuth2TokenService {
      ScopeSet scopes;
    };
  
@@ -348153,33 +348296,31 @@ index 213058aa712d9e79af51e55f1aa297755eb66251..4a08a6d6aff1253d69ac86b8c9296b4c
    struct CacheEntry {
      std::string access_token;
 diff --git a/ipc/ipc_channel.h b/ipc/ipc_channel.h
-index 25eac166c7e93dd74b81080cbf3c2f958b560ddc..83784d288e89cae5418fac338d0280f7f05f44a2 100644
+index 82f8011c58994612c4e6560c60952becacabc898..4818bc2e4fe243e2764f74fba7afc14c16a5bdd4 100644
 --- a/ipc/ipc_channel.h
 +++ b/ipc/ipc_channel.h
-@@ -140,7 +140,9 @@ class IPC_EXPORT Channel : public Sender {
+@@ -140,7 +140,7 @@ class IPC_EXPORT Channel : public Sender {
  
    // The maximum message size in bytes. Attempting to receive a message of this
    // size or bigger results in a channel error.
--  static const size_t kMaximumMessageSize = 128 * 1024 * 1024;
-+  // NOTE(andre@vivald.com) : This was changed from 128 to 256 because our
-+  // mailer need to send huge messages when the mailbox is big.
-+  static const size_t kMaximumMessageSize = 256 * 1024 * 1024;
+-  static constexpr size_t kMaximumMessageSize = 128 * 1024 * 1024;
++  static constexpr size_t kMaximumMessageSize = 256 * 1024 * 1024;
  
    // Amount of data to read at once from the pipe.
    static const size_t kReadBufferSize = 4 * 1024;
 diff --git a/ipc/ipc_message_start.h b/ipc/ipc_message_start.h
-index dba1acb42021ab13bc17fcf4699d0e03c2a9b057..669ffa3457f177f0062edf23dddf7bba48a5af35 100644
+index 6359b3f6ec7aa5234a9025a427b10f3a374df0e7..f92dad9fac3e87f2918806463f81b79fbcd99ca7 100644
 --- a/ipc/ipc_message_start.h
 +++ b/ipc/ipc_message_start.h
-@@ -70,6 +70,7 @@ enum IPCMessageStart {
-   WebSocketMsgStart,
+@@ -62,6 +62,7 @@ enum IPCMessageStart {
+   WebRtcLoggingMsgStart,
+   TtsMsgStart,
    NaClHostMsgStart,
-   WebRTCIdentityMsgStart,
 +  MediaPipelineMsgStart,
-   PowerMonitorMsgStart,
    EncryptedMediaMsgStart,
    CacheStorageMsgStart,
-@@ -116,6 +117,7 @@ enum IPCMessageStart {
+   ServiceWorkerMsgStart,
+@@ -93,6 +94,7 @@ enum IPCMessageStart {
    SurfaceViewManagerMsgStart,
    ExtensionWorkerMsgStart,
    SubresourceFilterMsgStart,
@@ -348188,7 +348329,7 @@ index dba1acb42021ab13bc17fcf4699d0e03c2a9b057..669ffa3457f177f0062edf23dddf7bba
  };
  
 diff --git a/ipc/ipc_message_utils.cc b/ipc/ipc_message_utils.cc
-index c851d8a599edf3a0c84067fde942402485c62294..14c327b1026d9827996b5398ead0e8637a2d8173 100644
+index dd065fd07f784734f20cd3998ca95764682829d2..b0167dec2f54820105d6a6f807fc0f8f20292931 100644
 --- a/ipc/ipc_message_utils.cc
 +++ b/ipc/ipc_message_utils.cc
 @@ -424,7 +424,8 @@ void ParamTraits<unsigned int>::Log(const param_type& p, std::string* l) {
@@ -409297,189 +409438,3 @@ index 0000000000000000000000000000000000000000..3007c88a7dac7560208c8bd48c504235
 +}
 +
 +}
-diff --git a/native_client/pnacl/support/bitcode/unwind_stubs.c b/native_client/pnacl/support/bitcode/unwind_stubs.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..b02e8c9650c2b246723e2e62ace4c89d8f24cdd7
---- /dev/null
-+++ b/native_client/pnacl/support/bitcode/unwind_stubs.c
-@@ -0,0 +1,100 @@
-+/*
-+ * Copyright (c) 2013 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This file is for linking into pexes when C++ exception handling is
-+ * disabled.  libstdc++ expects to be able to call _Unwind_*()
-+ * functions, which are normally provided by libgcc_eh, which is not
-+ * accessible in PNaCl's stable ABI.  This file provides stubs for the
-+ * _Unwind_*() functions which just abort().
-+ */
-+
-+#include <stdlib.h>
-+#include <unistd.h>
-+
-+/*
-+ * unwind.h will generate static definitions of some of the functions when
-+ * the __arm__ macro is defined but we want to provide our own, exported
-+ * stubs because this will be used as portable bitcode.
-+ */
-+#undef __arm__
-+#include <unwind.h>
-+
-+#define STUB                                                      \
-+  char msg1[] = "Aborting: ";                                     \
-+  char msg2[] = " called (C++ exception handling is disabled)\n"; \
-+  write(2, msg1, sizeof(msg1) - 1);                               \
-+  write(2, __func__, sizeof(__func__) - 1);                       \
-+  write(2, msg2, sizeof(msg2) - 1);                               \
-+  abort();
-+
-+void _Unwind_DeleteException(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetRegionStart(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetDataRelBase(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Word _Unwind_GetGR(struct _Unwind_Context *c, int i) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetIP(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetIPInfo(struct _Unwind_Context *c, int *i) {
-+  STUB
-+}
-+
-+_Unwind_Ptr _Unwind_GetTextRelBase(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+void *_Unwind_GetLanguageSpecificData(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+void _Unwind_SetGR(struct _Unwind_Context *c, int i, _Unwind_Word w) {
-+  STUB
-+}
-+
-+void _Unwind_SetIP(struct _Unwind_Context *c, _Unwind_Ptr p) {
-+  STUB
-+}
-+
-+void _Unwind_PNaClSetResult0(struct _Unwind_Context *c, _Unwind_Word w) {
-+  STUB
-+}
-+
-+void _Unwind_PNaClSetResult1(struct _Unwind_Context *c, _Unwind_Word w) {
-+  STUB
-+}
-+
-+_Unwind_Reason_Code _Unwind_RaiseException(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+_Unwind_Reason_Code _Unwind_Resume_or_Rethrow(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+void _Unwind_Resume(struct _Unwind_Exception *e) {
-+  STUB
-+}
-+
-+_Unwind_Word _Unwind_GetCFA(struct _Unwind_Context *c) {
-+  STUB
-+}
-+
-+_Unwind_Reason_Code _Unwind_Backtrace(_Unwind_Trace_Fn fn, void *p) {
-+  STUB
-+}
-diff --git a/native_client/pnacl/support/clang_direct/crtbegin.c b/native_client/pnacl/support/clang_direct/crtbegin.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..1195564ec166a49f3d091f4fb5815c7107686cdf
---- /dev/null
-+++ b/native_client/pnacl/support/clang_direct/crtbegin.c
-@@ -0,0 +1,74 @@
-+/*
-+ * Copyright (c) 2014 The Native Client Authors. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file.
-+ */
-+
-+/*
-+ * This is nacl-clang's crtbegin file (crtbegin.o, crtbeginS.o, crtbeginT.o).
-+ * Currently we only support static linking and it only supports being used
-+ * as crtbeginT.o (see __dso_handle below).
-+ */
-+
-+/*
-+ * HACK:
-+ * The real structure is defined in unwind-dw2-fde.h
-+ * this is something that is at least twice as big.
-+ */
-+struct object {
-+  void *p[16] __attribute__((aligned(8)));
-+};
-+
-+extern void __register_frame_info(void *begin, struct object *ob);
-+extern void __deregister_frame_info(const void *begin);
-+
-+typedef void (*initfini_func_ptr) (void);
-+
-+/*
-+ * Exception handling frames are aggregated into a single section called
-+ * .eh_frame.  The runtime system needs to (1) have a symbol for the beginning
-+ * of this section, and needs to (2) mark the end of the section by a NULL.
-+ */
-+
-+static char __EH_FRAME_BEGIN__[]
-+    __attribute__((section(".eh_frame"), aligned(4)))
-+    = { };
-+
-+static void __do_eh_ctor(void) {
-+  static struct object object;
-+  __register_frame_info (__EH_FRAME_BEGIN__, &object);
-+}
-+
-+static initfini_func_ptr __do_eh_ctor_init_array_entry[]
-+    __attribute__ ((__used__, section(".init_array")))
-+    = { __do_eh_ctor };
-+
-+static void __do_eh_dtor(void) {
-+  __deregister_frame_info(__EH_FRAME_BEGIN__);
-+}
-+
-+static initfini_func_ptr __do_eh_dtor_fini_array_entry[]
-+    __attribute__ ((__used__, section(".fini_array")))
-+    = { __do_eh_dtor };
-+
-+/*
-+ * References to __dso_handle are generated by the compiler front end,
-+ * which uses it when registering destructors for C++ global
-+ * variables.  The compiler will generate a function call like the
-+ * following in an initializer:
-+ *
-+ *   __cxa_atexit(destructor_func, &global_obj, &__dso_handle);
-+ *
-+ * __cxa_atexit() arranges for destructor_func(&global_obj) to be
-+ * called on exit() or when the DSO uniquely identified by
-+ * &__dso_handle is dlclose()'d.  See:
-+ * http://gcc.gnu.org/ml/gcc-patches/1999-12n/msg00664.html
-+ *
-+ * (Note that __cxa_* functions are usually provided by libsupc++ or
-+ * its equivalent, but __cxa_atexit() happens to be provided by libc.)
-+ *
-+ * __dso_handle is zero for the main executable, which is the only
-+ * case currently supported by this crtbegin.
-+ */
-+
-+void *__dso_handle = 0;

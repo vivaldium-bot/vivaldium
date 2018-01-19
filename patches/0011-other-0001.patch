@@ -16,7 +16,7 @@ index dfb4ad17849f64e8f69fd55c8bfb15e91a928ac2..6da80f715ceaf9403b296d038b0a494c
 +*.sh text eol=lf
 diff --git a/.gitmodules b/.gitmodules
 new file mode 100644
-index 0000000000000000000000000000000000000000..a1211df2c51b78a69db448e9a0af39b982b1e30a
+index 0000000000000000000000000000000000000000..72abc2f80b2e3b532fab4aebd2e3c7941b896abc
 --- /dev/null
 +++ b/.gitmodules
 @@ -0,0 +1,276 @@
@@ -35,6 +35,9 @@ index 0000000000000000000000000000000000000000..a1211df2c51b78a69db448e9a0af39b9
 +[submodule "chrome/test/data/perf/frame_rate/content"]
 +	path = chrome/test/data/perf/frame_rate/content
 +	url = ../frame_rate/content.git
++[submodule "chrome/test/data/vr/webvr_info"]
++	path = chrome/test/data/vr/webvr_info
++	url = ../../external/github.com/toji/webvr.info.git
 +[submodule "media/cdm/api"]
 +	path = media/cdm/api
 +	url = ../cdm.git
@@ -74,6 +77,9 @@ index 0000000000000000000000000000000000000000..a1211df2c51b78a69db448e9a0af39b9
 +[submodule "third_party/colorama/src"]
 +	path = third_party/colorama/src
 +	url = ../../external/colorama.git
++[submodule "third_party/crc32c/src"]
++	path = third_party/crc32c/src
++	url = ../../external/github.com/google/crc32c.git
 +[submodule "third_party/cros_system_api"]
 +	path = third_party/cros_system_api
 +	url = ../../chromiumos/platform/system_api.git
@@ -136,7 +142,7 @@ index 0000000000000000000000000000000000000000..a1211df2c51b78a69db448e9a0af39b9
 +	url = ../../external/leveldb.git
 +[submodule "third_party/libFuzzer/src"]
 +	path = third_party/libFuzzer/src
-+	url = ../llvm-project/llvm/lib/Fuzzer.git
++	url = ../llvm-project/compiler-rt/lib/fuzzer.git
 +[submodule "third_party/libaddressinput/src"]
 +	path = third_party/libaddressinput/src
 +	url = ../../external/libaddressinput.git
@@ -269,18 +275,12 @@ index 0000000000000000000000000000000000000000..a1211df2c51b78a69db448e9a0af39b9
 +[submodule "third_party/webgl/src"]
 +	path = third_party/webgl/src
 +	url = ../../external/khronosgroup/webgl.git
-+[submodule "third_party/webpagereplay"]
-+	path = third_party/webpagereplay
-+	url = ../../external/github.com/chromium/web-page-replay.git
 +[submodule "third_party/webrtc"]
 +	path = third_party/webrtc
 +	url = ../../external/webrtc/trunk/webrtc.git
 +[submodule "third_party/xdg-utils"]
 +	path = third_party/xdg-utils
 +	url = ../deps/xdg-utils.git
-+[submodule "third_party/yasm/binaries"]
-+	path = third_party/yasm/binaries
-+	url = ../deps/yasm/binaries.git
 +[submodule "third_party/yasm/source/patched-yasm"]
 +	path = third_party/yasm/source/patched-yasm
 +	url = ../deps/yasm/patched-yasm.git
@@ -292,15 +292,37 @@ index 0000000000000000000000000000000000000000..a1211df2c51b78a69db448e9a0af39b9
 +	url = ../deps/acid3.git
 +[submodule "tools/swarming_client"]
 +	path = tools/swarming_client
-+	url = ../../external/swarming.client.git
++	url = ../../infra/luci/client-py.git
 +[submodule "v8"]
 +	path = v8
 +	url = ../../v8/v8.git
+diff --git a/android_webview/BUILD.gn b/android_webview/BUILD.gn
+index 6267dbe3aa9978a69ad4d13c1078b6b544fd214d..8bda171e4e259a63660cddddc8e9494a09bc8ca0 100644
+--- a/android_webview/BUILD.gn
++++ b/android_webview/BUILD.gn
+@@ -171,7 +171,7 @@ repack("repack_100_percent") {
+     "//third_party/WebKit/public:scaled_resources_100_percent",
+     "//ui/resources",
+   ]
+-  output = "$target_gen_dir/chrome_100_percent.pak"
++  output = "$target_gen_dir/vivaldi_100_percent.pak"
+ 
+   if (enable_resource_whitelist_generation) {
+     repack_whitelist = system_webview_pak_whitelist
+@@ -181,7 +181,7 @@ repack("repack_100_percent") {
+ 
+ android_assets("pak_file_assets") {
+   sources = [
+-    "$target_gen_dir/chrome_100_percent.pak",
++    "$target_gen_dir/vivaldi_100_percent.pak",
+     "$target_gen_dir/resources.pak",
+   ]
+   deps = [
 diff --git a/apps/launcher.cc b/apps/launcher.cc
-index 3cf2ae0b61ab4ef9c7c44ecf12d5954c9166a78d..ba244f2b6c3e4f0b61ce6681ccff72acf0066442 100644
+index a0f747cd0c706cae1162de900af0420275844dba..78f9ebd541202948172e6cdd55eb3e0c354ddad5 100644
 --- a/apps/launcher.cc
 +++ b/apps/launcher.cc
-@@ -42,6 +42,9 @@
+@@ -44,6 +44,9 @@
  #include "net/base/filename_util.h"
  #include "url/gurl.h"
  
@@ -338,6 +360,19 @@ index 3cf2ae0b61ab4ef9c7c44ecf12d5954c9166a78d..ba244f2b6c3e4f0b61ce6681ccff72ac
  #if defined(OS_WIN)
    base::CommandLine::StringType about_blank_url(
        base::ASCIIToUTF16(url::kAboutBlankURL));
+diff --git a/base/android/java/src/org/chromium/base/library_loader/Linker.java b/base/android/java/src/org/chromium/base/library_loader/Linker.java
+index cbb84d9c0726274acada61985914c99bcf414698..c922c8a19cf3531a48a605ddb44627fa58f5687a 100644
+--- a/base/android/java/src/org/chromium/base/library_loader/Linker.java
++++ b/base/android/java/src/org/chromium/base/library_loader/Linker.java
+@@ -247,7 +247,7 @@ public abstract class Linker {
+                 boolean isIncrementalInstall =
+                         appClass != null && appClass.contains("incrementalinstall");
+                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIncrementalInstall) {
+-                    sSingleton = ModernLinker.create();
++                    sSingleton = LegacyLinker.create(); //!!
+                 } else {
+                     sSingleton = LegacyLinker.create();
+                 }
 diff --git a/base/base_paths_mac.mm b/base/base_paths_mac.mm
 index 9576237110c83599f0f4f4b30cf6b5ff07ff0c09..16d61b7f4d5604687b35020edb14673f5c193ed1 100644
 --- a/base/base_paths_mac.mm
@@ -473,7 +508,7 @@ index 555f57510582dde17a260b27482cbd719bebc095..a99bb80aed3d2f5b6e35a6f8bf099f66
    if (!::DuplicateHandle(GetCurrentProcess(), handle,
                           GetCurrentProcess(), &out_handle,
 diff --git a/base/test/launcher/unit_test_launcher.cc b/base/test/launcher/unit_test_launcher.cc
-index 28a50d35dc1a403364ac523d35669e3433b95118..e5e15ccac0c0282bfd8022264d8e2981532fa19f 100644
+index 8d4c520051b7b8ac512c7771e40e322b247ad0bd..23b1855996a14fb2ab47e23f6f8ad54cec9cc68a 100644
 --- a/base/test/launcher/unit_test_launcher.cc
 +++ b/base/test/launcher/unit_test_launcher.cc
 @@ -35,6 +35,9 @@
@@ -497,7 +532,7 @@ index 28a50d35dc1a403364ac523d35669e3433b95118..e5e15ccac0c0282bfd8022264d8e2981
    // We can't easily fork on Android, just run the test suite directly.
    return run_test_suite.Run();
 diff --git a/base/test/test_suite.cc b/base/test/test_suite.cc
-index 38f1f346310a3b678a624c9e2a1bb746713ed799..9c992f03ac6f98b6bfc824d8716fb66bebc11756 100644
+index 3cbeaed434a87ce6890b8703766d1205248baa40..08dbb10123d07fd415735baacbd980f3d8b9936d 100644
 --- a/base/test/test_suite.cc
 +++ b/base/test/test_suite.cc
 @@ -51,6 +51,8 @@
@@ -535,7 +570,7 @@ index 38f1f346310a3b678a624c9e2a1bb746713ed799..9c992f03ac6f98b6bfc824d8716fb66b
  
    // Enable SequencedWorkerPool in tests.
 diff --git a/base/threading/thread_restrictions.h b/base/threading/thread_restrictions.h
-index 1ef8d6b1278380783c54e73ff5a41b29b9ef4254..42de9320b4ad1a450566e78edd07cf845e6cde49 100644
+index c669e181cef943ee6c3095cbd2af07f9204a2894..28bd9e15472d6fa95149979fdd26ba299dcd884a 100644
 --- a/base/threading/thread_restrictions.h
 +++ b/base/threading/thread_restrictions.h
 @@ -58,6 +58,15 @@ class InFlightIO;
@@ -554,7 +589,7 @@ index 1ef8d6b1278380783c54e73ff5a41b29b9ef4254..42de9320b4ad1a450566e78edd07cf84
  namespace mojo {
  class SyncCallRestrictions;
  namespace edk {
-@@ -220,6 +229,12 @@ class BASE_EXPORT ThreadRestrictions {
+@@ -221,6 +230,12 @@ class BASE_EXPORT ThreadRestrictions {
    friend class ui::CommandBufferLocal;
    friend class ui::GpuState;
  
@@ -7330,7 +7365,7 @@ index 0000000000000000000000000000000000000000..daba57e0c4082bb78dc695e7437a67df
 +#endif  // CLIENT_LINUX_HANDLER_EXCEPTION_HANDLER_H_
 diff --git a/breakpad/src/client/linux/handler/exception_handler_unittest.cc b/breakpad/src/client/linux/handler/exception_handler_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..eda60c95687f6d6275563b9f22265cdc0d6d5eca
+index 0000000000000000000000000000000000000000..193a76e7bf9fb67e616d0a1f8ca7d1009d4d877e
 --- /dev/null
 +++ b/breakpad/src/client/linux/handler/exception_handler_unittest.cc
 @@ -0,0 +1,1202 @@
@@ -7804,7 +7839,7 @@ index 0000000000000000000000000000000000000000..eda60c95687f6d6275563b9f22265cdc
 +namespace {
 +const int kSimpleFirstChanceReturnStatus = 42;
 +bool SimpleFirstChanceHandler(int, void*, void*) {
-+  exit(kSimpleFirstChanceReturnStatus);
++  _exit(kSimpleFirstChanceReturnStatus);
 +}
 +}
 +
@@ -9055,10 +9090,10 @@ index 0000000000000000000000000000000000000000..f94bbd5fb7b3de14b2ed6cd2067af449
 +#endif  // CLIENT_LINUX_LOG_LOG_H_
 diff --git a/breakpad/src/client/linux/microdump_writer/microdump_writer.cc b/breakpad/src/client/linux/microdump_writer/microdump_writer.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..3764eec2cfee6fcb133b1bc0768cb701f23dcb8b
+index 0000000000000000000000000000000000000000..5c3c751d30d92005befdc2bb2123360609f25d3e
 --- /dev/null
 +++ b/breakpad/src/client/linux/microdump_writer/microdump_writer.cc
-@@ -0,0 +1,655 @@
+@@ -0,0 +1,666 @@
 +// Copyright (c) 2014, Google Inc.
 +// All rights reserved.
 +//
@@ -9242,6 +9277,7 @@ index 0000000000000000000000000000000000000000..3764eec2cfee6fcb133b1bc0768cb701
 +    DumpProductInformation();
 +    DumpOSInformation();
 +    DumpProcessType();
++    DumpCrashReason();
 +    DumpGPUInformation();
 +#if !defined(__LP64__)
 +    DumpFreeSpace();
@@ -9356,6 +9392,16 @@ index 0000000000000000000000000000000000000000..3764eec2cfee6fcb133b1bc0768cb701
 +    } else {
 +      LogAppend("UNKNOWN");
 +    }
++    LogCommitLine();
++  }
++
++  void DumpCrashReason() {
++    LogAppend("R ");
++    LogAppend(dumper_->crash_signal());
++    LogAppend(" ");
++    LogAppend(dumper_->GetCrashSignalString());
++    LogAppend(" ");
++    LogAppend(dumper_->crash_address());
 +    LogCommitLine();
 +  }
 +
@@ -9790,10 +9836,10 @@ index 0000000000000000000000000000000000000000..a1e53df62693e4132789bf3824b0de80
 +#endif  // CLIENT_LINUX_MINIDUMP_WRITER_MICRODUMP_WRITER_H_
 diff --git a/breakpad/src/client/linux/microdump_writer/microdump_writer_unittest.cc b/breakpad/src/client/linux/microdump_writer/microdump_writer_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..cbcd1399e62ed27c455c287a5f7976d8b66c95ff
+index 0000000000000000000000000000000000000000..c2fea0225ed589dda31d551076cf75ae8615f574
 --- /dev/null
 +++ b/breakpad/src/client/linux/microdump_writer/microdump_writer_unittest.cc
-@@ -0,0 +1,393 @@
+@@ -0,0 +1,420 @@
 +// Copyright (c) 2014 Google Inc.
 +// All rights reserved.
 +//
@@ -9861,6 +9907,7 @@ index 0000000000000000000000000000000000000000..cbcd1399e62ed27c455c287a5f7976d8
 +  info.build_fingerprint = build_fingerprint;
 +  info.product_info = product_info;
 +  info.gpu_fingerprint = gpu_fingerprint;
++  info.process_type = "Browser";
 +  return info;
 +}
 +
@@ -9870,6 +9917,7 @@ index 0000000000000000000000000000000000000000..cbcd1399e62ed27c455c287a5f7976d8
 +}
 +
 +const char kIdentifiableString[] = "_IDENTIFIABLE_";
++const uintptr_t kCrashAddress = 0xdeaddeadu;
 +
 +void CrashAndGetMicrodump(const MappingList& mappings,
 +                          const MicrodumpExtraInfo& microdump_extra_info,
@@ -9911,6 +9959,8 @@ index 0000000000000000000000000000000000000000..cbcd1399e62ed27c455c287a5f7976d8
 +  getcontext(&context.context);
 +  // Set a non-zero tid to avoid tripping asserts.
 +  context.tid = child;
++  context.siginfo.si_signo = MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED;
++  context.siginfo.si_addr = reinterpret_cast<void*>(kCrashAddress);
 +
 +  // Redirect temporarily stderr to the stderr.log file.
 +  int save_err = dup(STDERR_FILENO);
@@ -9968,6 +10018,8 @@ index 0000000000000000000000000000000000000000..cbcd1399e62ed27c455c287a5f7976d8
 +  std::istringstream iss(microdump_content);
 +  bool did_find_os_info = false;
 +  bool did_find_product_info = false;
++  bool did_find_process_type = false;
++  bool did_find_crash_reason = false;
 +  bool did_find_gpu_info = false;
 +  for (string line; std::getline(iss, line);) {
 +    if (line.find("O ") == 0) {
@@ -9986,9 +10038,28 @@ index 0000000000000000000000000000000000000000..cbcd1399e62ed27c455c287a5f7976d8
 +
 +      // Check that the build fingerprint is in the right place.
 +      os_info_tokens >> token;
++      ASSERT_FALSE(os_info_tokens.fail());
 +      if (expected_info.build_fingerprint)
 +        ASSERT_EQ(expected_info.build_fingerprint, token);
 +      did_find_os_info = true;
++    } else if (line.find("P ") == 0) {
++      if (expected_info.process_type)
++        ASSERT_EQ(string("P ") + expected_info.process_type, line);
++      did_find_process_type = true;
++    } else if (line.find("R ") == 0) {
++      std::istringstream crash_reason_tokens(line);
++      string token;
++      unsigned crash_reason;
++      string crash_reason_str;
++      intptr_t crash_address;
++      crash_reason_tokens.ignore(2); // Ignore the "R " preamble.
++      crash_reason_tokens >> std::hex >> crash_reason >> crash_reason_str >>
++          crash_address;
++      ASSERT_FALSE(crash_reason_tokens.fail());
++      ASSERT_EQ(MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED, crash_reason);
++      ASSERT_EQ("DUMP_REQUESTED", crash_reason_str);
++      ASSERT_EQ(0xDEADDEADu, kCrashAddress);
++      did_find_crash_reason = true;
 +    } else if (line.find("V ") == 0) {
 +      if (expected_info.product_info)
 +        ASSERT_EQ(string("V ") + expected_info.product_info, line);
@@ -10001,6 +10072,8 @@ index 0000000000000000000000000000000000000000..cbcd1399e62ed27c455c287a5f7976d8
 +  }
 +  ASSERT_TRUE(did_find_os_info);
 +  ASSERT_TRUE(did_find_product_info);
++  ASSERT_TRUE(did_find_process_type);
++  ASSERT_TRUE(did_find_crash_reason);
 +  ASSERT_TRUE(did_find_gpu_info);
 +}
 +
@@ -11546,10 +11619,10 @@ index 0000000000000000000000000000000000000000..f5b299f824d871285ad33af3c3bc33dc
 +}
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_dumper.cc b/breakpad/src/client/linux/minidump_writer/linux_dumper.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..141aa07ce390779c3c30004a63f01111b7bdf140
+index 0000000000000000000000000000000000000000..0013824b927707492ff9913f143d88dddc657267
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_dumper.cc
-@@ -0,0 +1,904 @@
+@@ -0,0 +1,976 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -11602,6 +11675,7 @@ index 0000000000000000000000000000000000000000..141aa07ce390779c3c30004a63f01111
 +#include "common/linux/linux_libc_support.h"
 +#include "common/linux/memory_mapped_file.h"
 +#include "common/linux/safe_readlink.h"
++#include "google_breakpad/common/minidump_exception_linux.h"
 +#include "third_party/lss/linux_syscall_support.h"
 +
 +#if defined(__ANDROID__)
@@ -11886,6 +11960,77 @@ index 0000000000000000000000000000000000000000..141aa07ce390779c3c30004a63f01111
 +  }
 +
 +  return success;
++}
++
++const char* LinuxDumper::GetCrashSignalString() const {
++  switch (static_cast<unsigned int>(crash_signal_)) {
++    case MD_EXCEPTION_CODE_LIN_SIGHUP:
++      return "SIGHUP";
++    case MD_EXCEPTION_CODE_LIN_SIGINT:
++      return "SIGINT";
++    case MD_EXCEPTION_CODE_LIN_SIGQUIT:
++      return "SIGQUIT";
++    case MD_EXCEPTION_CODE_LIN_SIGILL:
++      return "SIGILL";
++    case MD_EXCEPTION_CODE_LIN_SIGTRAP:
++      return "SIGTRAP";
++    case MD_EXCEPTION_CODE_LIN_SIGABRT:
++      return "SIGABRT";
++    case MD_EXCEPTION_CODE_LIN_SIGBUS:
++      return "SIGBUS";
++    case MD_EXCEPTION_CODE_LIN_SIGFPE:
++      return "SIGFPE";
++    case MD_EXCEPTION_CODE_LIN_SIGKILL:
++      return "SIGKILL";
++    case MD_EXCEPTION_CODE_LIN_SIGUSR1:
++      return "SIGUSR1";
++    case MD_EXCEPTION_CODE_LIN_SIGSEGV:
++      return "SIGSEGV";
++    case MD_EXCEPTION_CODE_LIN_SIGUSR2:
++      return "SIGUSR2";
++    case MD_EXCEPTION_CODE_LIN_SIGPIPE:
++      return "SIGPIPE";
++    case MD_EXCEPTION_CODE_LIN_SIGALRM:
++      return "SIGALRM";
++    case MD_EXCEPTION_CODE_LIN_SIGTERM:
++      return "SIGTERM";
++    case MD_EXCEPTION_CODE_LIN_SIGSTKFLT:
++      return "SIGSTKFLT";
++    case MD_EXCEPTION_CODE_LIN_SIGCHLD:
++      return "SIGCHLD";
++    case MD_EXCEPTION_CODE_LIN_SIGCONT:
++      return "SIGCONT";
++    case MD_EXCEPTION_CODE_LIN_SIGSTOP:
++      return "SIGSTOP";
++    case MD_EXCEPTION_CODE_LIN_SIGTSTP:
++      return "SIGTSTP";
++    case MD_EXCEPTION_CODE_LIN_SIGTTIN:
++      return "SIGTTIN";
++    case MD_EXCEPTION_CODE_LIN_SIGTTOU:
++      return "SIGTTOU";
++    case MD_EXCEPTION_CODE_LIN_SIGURG:
++      return "SIGURG";
++    case MD_EXCEPTION_CODE_LIN_SIGXCPU:
++      return "SIGXCPU";
++    case MD_EXCEPTION_CODE_LIN_SIGXFSZ:
++      return "SIGXFSZ";
++    case MD_EXCEPTION_CODE_LIN_SIGVTALRM:
++      return "SIGVTALRM";
++    case MD_EXCEPTION_CODE_LIN_SIGPROF:
++      return "SIGPROF";
++    case MD_EXCEPTION_CODE_LIN_SIGWINCH:
++      return "SIGWINCH";
++    case MD_EXCEPTION_CODE_LIN_SIGIO:
++      return "SIGIO";
++    case MD_EXCEPTION_CODE_LIN_SIGPWR:
++      return "SIGPWR";
++    case MD_EXCEPTION_CODE_LIN_SIGSYS:
++      return "SIGSYS";
++    case MD_EXCEPTION_CODE_LIN_DUMP_REQUESTED:
++      return "DUMP_REQUESTED";
++    default:
++      return "UNKNOWN";
++  }
 +}
 +
 +bool LinuxDumper::GetMappingAbsolutePath(const MappingInfo& mapping,
@@ -12456,10 +12601,10 @@ index 0000000000000000000000000000000000000000..141aa07ce390779c3c30004a63f01111
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/client/linux/minidump_writer/linux_dumper.h b/breakpad/src/client/linux/minidump_writer/linux_dumper.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..3a9a2e8b915613d438e66b6f2ea83c8ceeedfcd2
+index 0000000000000000000000000000000000000000..389d8a21c7b346cbaa3ea69ea340fed0fc7d0512
 --- /dev/null
 +++ b/breakpad/src/client/linux/minidump_writer/linux_dumper.h
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,304 @@
 +// Copyright (c) 2010, Google Inc.
 +// All rights reserved.
 +//
@@ -12639,6 +12784,7 @@ index 0000000000000000000000000000000000000000..3a9a2e8b915613d438e66b6f2ea83c8c
 +
 +  int crash_signal() const { return crash_signal_; }
 +  void set_crash_signal(int crash_signal) { crash_signal_ = crash_signal; }
++  const char* GetCrashSignalString() const;
 +
 +  pid_t crash_thread() const { return crash_thread_; }
 +  void set_crash_thread(pid_t crash_thread) { crash_thread_ = crash_thread; }
@@ -127814,10 +127960,10 @@ index 0000000000000000000000000000000000000000..1322a01c76eaa685acc43a80bec0116c
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_MICRODUMP_PROCESSOR_H__
 diff --git a/breakpad/src/google_breakpad/processor/minidump.h b/breakpad/src/google_breakpad/processor/minidump.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..2651a3236a9ac2fdc84a4c16cef90f7b088c1acd
+index 0000000000000000000000000000000000000000..34a2a44d7ff712319d10d7ccd53817f3e87c52c8
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/processor/minidump.h
-@@ -0,0 +1,1299 @@
+@@ -0,0 +1,1298 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -128077,8 +128223,7 @@ index 0000000000000000000000000000000000000000..2651a3236a9ac2fdc84a4c16cef90f7b
 +  bool hexdump_;
 +  unsigned int hexdump_width_;
 +
-+  // The largest memory region that will be read from a minidump.  The
-+  // default is 1MB.
++  // The largest memory region that will be read from a minidump.
 +  static uint32_t max_bytes_;
 +
 +  // Base address and size of the memory region, and its position in the
@@ -130553,10 +130698,10 @@ index 0000000000000000000000000000000000000000..0bbaae0a3638a0fd675f72cb31a3ef3a
 +#endif  // GOOGLE_BREAKPAD_PROCESSOR_STACK_FRAME_SYMBOLIZER_H__
 diff --git a/breakpad/src/google_breakpad/processor/stackwalker.h b/breakpad/src/google_breakpad/processor/stackwalker.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..4378f75be6bb00b9bab53e5be5d6bbffee26b6b8
+index 0000000000000000000000000000000000000000..0c458d500ece53d4d39f24cad517a5601a544c1d
 --- /dev/null
 +++ b/breakpad/src/google_breakpad/processor/stackwalker.h
-@@ -0,0 +1,242 @@
+@@ -0,0 +1,257 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -130685,7 +130830,15 @@ index 0000000000000000000000000000000000000000..4378f75be6bb00b9bab53e5be5d6bbff
 +  // * This address is within a loaded module for which we have symbols,
 +  //   and falls inside a function in that module.
 +  // Returns false otherwise.
-+  bool InstructionAddressSeemsValid(uint64_t address);
++  bool InstructionAddressSeemsValid(uint64_t address) const;
++
++  // Checks whether we should stop the stack trace.
++  // (either we reached the end-of-stack or we detected a
++  //  broken callstack invariant)
++  bool TerminateWalk(uint64_t caller_ip,
++                     uint64_t caller_sp,
++                     uint64_t callee_sp,
++                     bool first_unwind) const;
 +
 +  // The default number of words to search through on the stack
 +  // for a return address.
@@ -130776,6 +130929,13 @@ index 0000000000000000000000000000000000000000..4378f75be6bb00b9bab53e5be5d6bbff
 +  // the caller.  |stack_scan_allowed| controls whether stack scanning is
 +  // an allowable frame-recovery method, since it is desirable to be able to
 +  // disable stack scanning in performance-critical use cases.
++  //
++  // CONSIDER: a way to differentiate between:
++  //  - full stack traces
++  //  - explicitly truncated traces (max_frames_)
++  //  - stopping after max scanned frames
++  //  - failed stack walk (breaking one of the stack walk invariants)
++  //
 +  virtual StackFrame* GetCallerFrame(const CallStack* stack,
 +                                     bool stack_scan_allowed) = 0;
 +
@@ -140830,7 +140990,7 @@ index 0000000000000000000000000000000000000000..2d67f8618bde09521ff5ba991cfbf137
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/processor/microdump_processor_unittest.cc b/breakpad/src/processor/microdump_processor_unittest.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..af897f7dacb92ab6cd404c46803b7a65f390fe80
+index 0000000000000000000000000000000000000000..238b048c8ea588e359c4f721f3d831a53daccedd
 --- /dev/null
 +++ b/breakpad/src/processor/microdump_processor_unittest.cc
 @@ -0,0 +1,273 @@
@@ -140968,7 +141128,7 @@ index 0000000000000000000000000000000000000000..af897f7dacb92ab6cd404c46803b7a65
 +  ASSERT_EQ("arm64", state.system_info()->cpu);
 +  ASSERT_EQ("OS 64 VERSION INFO", state.system_info()->os_version);
 +  ASSERT_EQ(1U, state.threads()->size());
-+  ASSERT_EQ(12U, state.threads()->at(0)->frames()->size());
++  ASSERT_EQ(11U, state.threads()->at(0)->frames()->size());
 +
 +  ASSERT_EQ("",
 +            state.threads()->at(0)->frames()->at(0)->function_name);
@@ -141041,7 +141201,7 @@ index 0000000000000000000000000000000000000000..af897f7dacb92ab6cd404c46803b7a65
 +  ASSERT_EQ("x86", state.system_info()->cpu);
 +  ASSERT_EQ("asus/WW_Z00A/Z00A:5.0/LRX21V/2.19.40.22_20150627_5104_user:user/"
 +      "release-keys", state.system_info()->os_version);
-+  ASSERT_EQ(56U, state.threads()->at(0)->frames()->size());
++  ASSERT_EQ(17U, state.threads()->at(0)->frames()->size());
 +  ASSERT_EQ("libc.so",
 +            state.threads()->at(0)->frames()->at(0)->module->debug_file());
 +  // TODO(mmandlis): Get symbols for the test X86 microdump and test function
@@ -141371,7 +141531,7 @@ index 0000000000000000000000000000000000000000..a8b0e0df5ae1fcadf9c3d476fc7a3a3a
 +MICRODUMP_SUPPORTED_ARCHS="arm arm64"
 diff --git a/breakpad/src/processor/minidump.cc b/breakpad/src/processor/minidump.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..430d49d945f8c989936347045ea2b50dfb6433bf
+index 0000000000000000000000000000000000000000..d2d69202d40db24ef7a5fef981d8cf10603d0399
 --- /dev/null
 +++ b/breakpad/src/processor/minidump.cc
 @@ -0,0 +1,5447 @@
@@ -142572,7 +142732,7 @@ index 0000000000000000000000000000000000000000..430d49d945f8c989936347045ea2b50d
 +//
 +
 +
-+uint32_t MinidumpMemoryRegion::max_bytes_ = 2 * 1024 * 1024;  // 2MB
++uint32_t MinidumpMemoryRegion::max_bytes_ = 64 * 1024 * 1024;  // 64MB
 +
 +
 +MinidumpMemoryRegion::MinidumpMemoryRegion(Minidump* minidump)
@@ -146824,7 +146984,7 @@ index 0000000000000000000000000000000000000000..430d49d945f8c989936347045ea2b50d
 +}  // namespace google_breakpad
 diff --git a/breakpad/src/processor/minidump_dump.cc b/breakpad/src/processor/minidump_dump.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..4d916276790f16ca9c020c56ef9da1f109dc9fb7
+index 0000000000000000000000000000000000000000..b9b7555e603975855710766b35569f0886b8bfb6
 --- /dev/null
 +++ b/breakpad/src/processor/minidump_dump.cc
 @@ -0,0 +1,265 @@
@@ -147042,7 +147202,7 @@ index 0000000000000000000000000000000000000000..4d916276790f16ca9c020c56ef9da1f1
 +
 +//=============================================================================
 +static void
-+Usage(int argc, const char *argv[], bool error) {
++Usage(int argc, char *argv[], bool error) {
 +  FILE *fp = error ? stderr : stdout;
 +
 +  fprintf(fp,
@@ -147058,7 +147218,7 @@ index 0000000000000000000000000000000000000000..4d916276790f16ca9c020c56ef9da1f1
 +
 +//=============================================================================
 +static void
-+SetupOptions(int argc, const char *argv[], Options *options) {
++SetupOptions(int argc, char *argv[], Options *options) {
 +  int ch;
 +
 +  while ((ch = getopt(argc, (char * const *)argv, "xh")) != -1) {
@@ -147087,7 +147247,7 @@ index 0000000000000000000000000000000000000000..4d916276790f16ca9c020c56ef9da1f1
 +
 +}  // namespace
 +
-+int main(int argc, const char *argv[]) {
++int main(int argc, char *argv[]) {
 +  Options options;
 +  BPLOG_INIT(&argc, &argv);
 +  SetupOptions(argc, argv, &options);
@@ -149489,10 +149649,10 @@ index 0000000000000000000000000000000000000000..83682a51df86faae8bfbda5afd7f2099
 +}
 diff --git a/breakpad/src/processor/minidump_stackwalk.cc b/breakpad/src/processor/minidump_stackwalk.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..650e1efeeedbebc9f061a4cc7d77cd6ad3a781ef
+index 0000000000000000000000000000000000000000..6f3aa354a6c006a8d48954926cf254c4be04064e
 --- /dev/null
 +++ b/breakpad/src/processor/minidump_stackwalk.cc
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,168 @@
 +// Copyright (c) 2010 Google Inc.
 +// All rights reserved.
 +//
@@ -149549,6 +149709,7 @@ index 0000000000000000000000000000000000000000..650e1efeeedbebc9f061a4cc7d77cd6a
 +
 +using google_breakpad::BasicSourceLineResolver;
 +using google_breakpad::Minidump;
++using google_breakpad::MinidumpMemoryList;
 +using google_breakpad::MinidumpThreadList;
 +using google_breakpad::MinidumpProcessor;
 +using google_breakpad::ProcessState;
@@ -149578,8 +149739,9 @@ index 0000000000000000000000000000000000000000..650e1efeeedbebc9f061a4cc7d77cd6a
 +  BasicSourceLineResolver resolver;
 +  MinidumpProcessor minidump_processor(symbol_supplier.get(), &resolver);
 +
-+  // Increase the maximum number of threads.
++  // Increase the maximum number of threads and regions.
 +  MinidumpThreadList::set_max_threads(std::numeric_limits<uint32_t>::max());
++  MinidumpMemoryList::set_max_regions(std::numeric_limits<uint32_t>::max());
 +  // Process the minidump.
 +  Minidump dump(minidump_file);
 +  if (!dump.Read()) {
@@ -152277,155 +152439,3 @@ index 0000000000000000000000000000000000000000..839287bdba8ec957791859fdc14cf037
 +}
 +
 +}  // namespace google_breakpad
-diff --git a/breakpad/src/processor/pathname_stripper.h b/breakpad/src/processor/pathname_stripper.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..423ca0d05abc09d6bf0f8ef09ca8ce688d8ac20e
---- /dev/null
-+++ b/breakpad/src/processor/pathname_stripper.h
-@@ -0,0 +1,53 @@
-+// Copyright (c) 2006, Google Inc.
-+// All rights reserved.
-+//
-+// Redistribution and use in source and binary forms, with or without
-+// modification, are permitted provided that the following conditions are
-+// met:
-+//
-+//     * Redistributions of source code must retain the above copyright
-+// notice, this list of conditions and the following disclaimer.
-+//     * Redistributions in binary form must reproduce the above
-+// copyright notice, this list of conditions and the following disclaimer
-+// in the documentation and/or other materials provided with the
-+// distribution.
-+//     * Neither the name of Google Inc. nor the names of its
-+// contributors may be used to endorse or promote products derived from
-+// this software without specific prior written permission.
-+//
-+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+
-+// pathname_stripper.h: Manipulates pathnames into their component parts.
-+//
-+// Author: Mark Mentovai
-+
-+#ifndef PROCESSOR_PATHNAME_STRIPPER_H__
-+#define PROCESSOR_PATHNAME_STRIPPER_H__
-+
-+#include <string>
-+
-+#include "common/using_std_string.h"
-+
-+namespace google_breakpad {
-+
-+class PathnameStripper {
-+ public:
-+  // Given path, a pathname with components separated by slashes (/) or
-+  // backslashes (\), returns the trailing component, without any separator.
-+  // If path ends in a separator character, returns an empty string.
-+  static string File(const string &path);
-+};
-+
-+}  // namespace google_breakpad
-+
-+#endif  // PROCESSOR_PATHNAME_STRIPPER_H__
-diff --git a/breakpad/src/processor/pathname_stripper_unittest.cc b/breakpad/src/processor/pathname_stripper_unittest.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..1bff4cb01777524a0a0760d8916131209a114a35
---- /dev/null
-+++ b/breakpad/src/processor/pathname_stripper_unittest.cc
-@@ -0,0 +1,87 @@
-+// Copyright (c) 2006, Google Inc.
-+// All rights reserved.
-+//
-+// Redistribution and use in source and binary forms, with or without
-+// modification, are permitted provided that the following conditions are
-+// met:
-+//
-+//     * Redistributions of source code must retain the above copyright
-+// notice, this list of conditions and the following disclaimer.
-+//     * Redistributions in binary form must reproduce the above
-+// copyright notice, this list of conditions and the following disclaimer
-+// in the documentation and/or other materials provided with the
-+// distribution.
-+//     * Neither the name of Google Inc. nor the names of its
-+// contributors may be used to endorse or promote products derived from
-+// this software without specific prior written permission.
-+//
-+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-+
-+#include <stdio.h>
-+
-+#include "processor/pathname_stripper.h"
-+#include "processor/logging.h"
-+
-+#define ASSERT_TRUE(condition) \
-+  if (!(condition)) { \
-+    fprintf(stderr, "FAIL: %s @ %s:%d\n", #condition, __FILE__, __LINE__); \
-+    return false; \
-+  }
-+
-+#define ASSERT_EQ(e1, e2) ASSERT_TRUE((e1) == (e2))
-+
-+namespace {
-+
-+using google_breakpad::PathnameStripper;
-+
-+static bool RunTests() {
-+  ASSERT_EQ(PathnameStripper::File("/dir/file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("\\dir\\file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("/dir\\file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("\\dir/file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("dir/file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("dir\\file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("dir/\\file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("dir\\/file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("dir/"), "");
-+  ASSERT_EQ(PathnameStripper::File("dir\\"), "");
-+  ASSERT_EQ(PathnameStripper::File("dir/dir/"), "");
-+  ASSERT_EQ(PathnameStripper::File("dir\\dir\\"), "");
-+  ASSERT_EQ(PathnameStripper::File("dir1/dir2/file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("dir1\\dir2\\file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("dir1/dir2\\file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("dir1\\dir2/file"), "file");
-+  ASSERT_EQ(PathnameStripper::File(""), "");
-+  ASSERT_EQ(PathnameStripper::File("1"), "1");
-+  ASSERT_EQ(PathnameStripper::File("1/2"), "2");
-+  ASSERT_EQ(PathnameStripper::File("1\\2"), "2");
-+  ASSERT_EQ(PathnameStripper::File("/1/2"), "2");
-+  ASSERT_EQ(PathnameStripper::File("\\1\\2"), "2");
-+  ASSERT_EQ(PathnameStripper::File("dir//file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("dir\\\\file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("/dir//file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("\\dir\\\\file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("c:\\dir\\file"), "file");
-+  ASSERT_EQ(PathnameStripper::File("c:\\dir\\file.ext"), "file.ext");
-+
-+  return true;
-+}
-+
-+}  // namespace
-+
-+int main(int argc, char **argv) {
-+  BPLOG_INIT(&argc, &argv);
-+
-+  return RunTests() ? 0 : 1;
-+}

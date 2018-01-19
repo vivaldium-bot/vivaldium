@@ -1,3 +1,135 @@
+diff --git a/sdch/open-vcdiff/src/codetable.h b/sdch/open-vcdiff/src/codetable.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..6e0ffce87034db9bf2f380d25a2382b1841dc1b0
+--- /dev/null
++++ b/sdch/open-vcdiff/src/codetable.h
+@@ -0,0 +1,126 @@
++// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++//
++// Classes to implement the Code Table
++// described in sections 5.5, 5.6 and 7 of
++// RFC 3284 - The VCDIFF Generic Differencing and Compression Data Format.
++// The RFC text can be found at http://www.faqs.org/rfcs/rfc3284.html
++
++#ifndef OPEN_VCDIFF_CODETABLE_H_
++#define OPEN_VCDIFF_CODETABLE_H_
++
++#include <config.h>
++#include <stdint.h>             // uint16_t
++
++namespace open_vcdiff {
++
++// The instruction types from section 5.5 (mistakenly labeled 5.4) of the RFC.
++//
++enum VCDiffInstructionType {
++  VCD_NOOP = 0,
++  VCD_ADD  = 1,
++  VCD_RUN  = 2,
++  VCD_COPY = 3,
++  VCD_LAST_INSTRUCTION_TYPE = VCD_COPY,
++  // The following values are not true instruction types, but rather
++  // special condition values for functions that return VCDiffInstructionType.
++  VCD_INSTRUCTION_ERROR = 4,
++  VCD_INSTRUCTION_END_OF_DATA = 5
++};
++
++const char* VCDiffInstructionName(VCDiffInstructionType inst);
++
++// OpcodeOrNone: An opcode is a value between 0-255.  There is not room
++// in a single byte to express all these values plus a "no opcode found"
++// value.  So use a 16-bit integer to hold either an opcode or kNoOpcode.
++//
++typedef uint16_t OpcodeOrNone;
++const OpcodeOrNone kNoOpcode = 0x100;  // outside the opcode range 0x00 - 0xFF
++
++// struct VCDiffCodeTableData:
++//
++// A representation of the VCDiff code table as six 256-byte arrays
++// as described in Section 7 of RFC 3284.  Each instruction code
++// can represent up to two delta instructions, which is why inst,
++// size, and mode each appear twice.  Each of the two delta instructions
++// has the following three attributes:
++// * inst (NOOP, ADD, RUN, or COPY)
++// * size (0-255 bytes) of the data to be copied; if this value is zero, then
++//   the size will be encoded separately from the instruction code, as a Varint
++// * mode (SELF, HERE, NEAR(n), or SAME(n)), only used for COPY instructions
++//
++// Every valid code table should contain AT LEAST the following instructions:
++//     inst1=ADD  size1=0 mode1=X inst2=NOOP size2=X mode2=X
++//     inst1=RUN  size1=0 mode1=X inst2=NOOP size2=X mode2=X
++//     inst1=COPY size1=0 mode1=N inst2=NOOP size2=X mode2=X (for all N)
++// ... where X represents a "don't care" value which will not be read,
++// and N stands for every possible COPY mode between 0 and
++// ([same cache size] + [here cache size]) inclusive.
++// Without these instructions, it will be impossible to guarantee that
++// all ADD, RUN, and COPY encoding requests can be fulfilled.
++//
++struct VCDiffCodeTableData {
++  static const int kCodeTableSize = 256;
++
++  static const VCDiffCodeTableData kDefaultCodeTableData;
++
++  // Validates that the data contained in the VCDiffCodeTableData structure
++  // does not violate certain assumptions.  Returns true if none of these
++  // assumptions are violated, or false if an unexpected value is found.
++  // This function should be called on any non-default code table that is
++  // received as part of an encoded transmission.
++  // max_mode is the maximum value for the mode of a COPY instruction;
++  // this is equal to same_cache_size + near_cache_size + 1.
++  //
++  bool Validate(unsigned char max_mode) const;
++
++  // This version of Validate() assumes that the default address cache sizes
++  // are being used, and calculates max_mode based on that assumption.
++  bool Validate() const;
++
++  // The names of these elements are taken from RFC 3284 section 5.4
++  // (Instruction Codes), which contains the following specification:
++  //
++  // Each instruction code entry contains six fields, each of which is a single
++  // byte with an unsigned value:
++  // +-----------------------------------------------+
++  // | inst1 | size1 | mode1 | inst2 | size2 | mode2 |
++  // +-----------------------------------------------+
++  //
++  unsigned char inst1[kCodeTableSize];  // from enum VCDiffInstructionType
++  unsigned char inst2[kCodeTableSize];  // from enum VCDiffInstructionType
++  unsigned char size1[kCodeTableSize];
++  unsigned char size2[kCodeTableSize];
++  unsigned char mode1[kCodeTableSize];  // from enum VCDiffModes
++  unsigned char mode2[kCodeTableSize];  // from enum VCDiffModes
++
++ private:
++  // Single-letter abbreviations that make it easier to read
++  // the default code table data.
++  static const VCDiffInstructionType N = VCD_NOOP;
++  static const VCDiffInstructionType A = VCD_ADD;
++  static const VCDiffInstructionType R = VCD_RUN;
++  static const VCDiffInstructionType C = VCD_COPY;
++
++  static bool ValidateOpcode(int opcode,
++                             unsigned char inst,
++                             unsigned char size,
++                             unsigned char mode,
++                             unsigned char max_mode,
++                             const char* first_or_second);
++};
++
++}  // namespace open_vcdiff
++
++#endif  // OPEN_VCDIFF_CODETABLE_H_
 diff --git a/sdch/open-vcdiff/src/codetable_test.cc b/sdch/open-vcdiff/src/codetable_test.cc
 new file mode 100644
 index 0000000000000000000000000000000000000000..2ccfba4fdba317d0d28e29f4def15ca1b78791d8
@@ -409,10 +541,10 @@ index 0000000000000000000000000000000000000000..139d5dfc964adb53220cf412ce011d42
 +
 diff --git a/sdch/open-vcdiff/src/decodetable.cc b/sdch/open-vcdiff/src/decodetable.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..05f08c950776a664fe84cc9a9cdb93951ef03ee6
+index 0000000000000000000000000000000000000000..486c6ed4fa4bcc605daed437250aed7b97cf6947
 --- /dev/null
 +++ b/sdch/open-vcdiff/src/decodetable.cc
-@@ -0,0 +1,113 @@
+@@ -0,0 +1,112 @@
 +// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -441,7 +573,6 @@ index 0000000000000000000000000000000000000000..05f08c950776a664fe84cc9a9cdb9395
 +
 +VCDiffCodeTableReader::VCDiffCodeTableReader()
 +    : code_table_data_(&VCDiffCodeTableData::kDefaultCodeTableData),
-+      non_default_code_table_data_(NULL),
 +      instructions_and_sizes_(NULL),
 +      instructions_and_sizes_end_(NULL),
 +      last_instruction_start_(NULL),
@@ -528,7 +659,7 @@ index 0000000000000000000000000000000000000000..05f08c950776a664fe84cc9a9cdb9395
 +};  // namespace open_vcdiff
 diff --git a/sdch/open-vcdiff/src/decodetable.h b/sdch/open-vcdiff/src/decodetable.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..0c9f5e37f2016224c412ed874e8e5474137f2cce
+index 0000000000000000000000000000000000000000..2bcad091c5de542333c018c6519a0e9bd1e84449
 --- /dev/null
 +++ b/sdch/open-vcdiff/src/decodetable.h
 @@ -0,0 +1,151 @@
@@ -552,9 +683,9 @@ index 0000000000000000000000000000000000000000..0c9f5e37f2016224c412ed874e8e5474
 +#include <config.h>
 +#include <stddef.h>     // NULL
 +#include <stdint.h>     // int32_t
-+#include <memory>       // auto_ptr
 +#include "codetable.h"  // VCDiffInstructi...
 +#include "logging.h"
++#include "unique_ptr.h" // auto_ptr, unique_ptr
 +
 +namespace open_vcdiff {
 +
@@ -667,7 +798,7 @@ index 0000000000000000000000000000000000000000..0c9f5e37f2016224c412ed874e8e5474
 +  // management for the non-standard code table, whose contents have
 +  // been read as part of the encoded data file/stream.
 +  //
-+  std::auto_ptr<VCDiffCodeTableData> non_default_code_table_data_;
++  UNIQUE_PTR<VCDiffCodeTableData> non_default_code_table_data_;
 +
 +  const char** instructions_and_sizes_;
 +  const char* instructions_and_sizes_end_;
@@ -6638,7 +6769,7 @@ index 0000000000000000000000000000000000000000..8406884d57fd78940012b4112600eea5
 +#endif  // OPEN_VCDIFF_VARINT_BIGENDIAN_H_
 diff --git a/sdch/open-vcdiff/src/varint_bigendian_test.cc b/sdch/open-vcdiff/src/varint_bigendian_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..ceba738d4a2f948b4425d6765e5395490177c2b4
+index 0000000000000000000000000000000000000000..d5d870147d3b2c92ec690a97053c97d73f5e82f6
 --- /dev/null
 +++ b/sdch/open-vcdiff/src/varint_bigendian_test.cc
 @@ -0,0 +1,351 @@
@@ -6675,7 +6806,7 @@ index 0000000000000000000000000000000000000000..ceba738d4a2f948b4425d6765e539549
 +      : varint_buf_(VarintBE<int64_t>::kMaxBytes),
 +        verify_encoded_byte_index_(0),
 +        verify_expected_length_(0),
-+        parse_data_ptr_(parse_data_all_FFs) {
++        parse_data_ptr_(reinterpret_cast<const char*>(parse_data_all_FFs)) {
 +  }
 +
 +  virtual ~VarintBETestCommon() { }
@@ -6686,8 +6817,8 @@ index 0000000000000000000000000000000000000000..ceba738d4a2f948b4425d6765e539549
 +    ++verify_encoded_byte_index_;
 +  }
 +
-+  static const char parse_data_all_FFs[];
-+  static const char parse_data_CADA1[];
++  static const uint8_t parse_data_all_FFs[];
++  static const uint8_t parse_data_CADA1[];
 +
 +  std::vector<char> varint_buf_;
 +  string s_;
@@ -6749,10 +6880,10 @@ index 0000000000000000000000000000000000000000..ceba738d4a2f948b4425d6765e539549
 +typedef VarintBEInt64Test VarintBEInt64DeathTest;
 +#endif  // GTEST_HAS_DEATH_TEST
 +
-+const char VarintBETestCommon::parse_data_all_FFs[] =
++const uint8_t VarintBETestCommon::parse_data_all_FFs[] =
 +    { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 +
-+const char VarintBETestCommon::parse_data_CADA1[] =
++const uint8_t VarintBETestCommon::parse_data_CADA1[] =
 +    { 0xCA, 0xDA, 0x01 };
 +
 +// A macro to allow defining tests once and having them run against
@@ -6885,29 +7016,29 @@ index 0000000000000000000000000000000000000000..ceba738d4a2f948b4425d6765e539549
 +}
 +
 +TEMPLATE_TEST_F(Test, ParseZero) {
-+  const char zero_data[] = { 0x00 };
-+  parse_data_ptr_ = zero_data;
++  const uint8_t zero_data[] = { 0x00 };
++  parse_data_ptr_ = reinterpret_cast<const char*>(zero_data);
 +  EXPECT_EQ(0x00, VarintType::Parse(parse_data_ptr_ + 1, &parse_data_ptr_));
-+  EXPECT_EQ(zero_data + 1, parse_data_ptr_);
++  EXPECT_EQ(reinterpret_cast<const char*>(zero_data + 1), parse_data_ptr_);
 +}
 +
 +TEMPLATE_TEST_F(Test, ParseCADA1) {
-+  parse_data_ptr_ = parse_data_CADA1;
++  parse_data_ptr_ = reinterpret_cast<const char*>(parse_data_CADA1);
 +  EXPECT_EQ(0x12AD01,
-+            VarintType::Parse(parse_data_CADA1 + sizeof(parse_data_CADA1),
++            VarintType::Parse(parse_data_ptr_ + sizeof(parse_data_CADA1),
 +                              &parse_data_ptr_));
-+  EXPECT_EQ(parse_data_CADA1 + 3, parse_data_ptr_);
++  EXPECT_EQ(reinterpret_cast<const char*>(parse_data_CADA1 + 3), parse_data_ptr_);
 +}
 +
 +TEMPLATE_TEST_F(Test, ParseNullPointer) {
-+  parse_data_ptr_ = parse_data_CADA1;
++  parse_data_ptr_ = reinterpret_cast<const char*>(parse_data_CADA1);
 +  EXPECT_EQ(RESULT_ERROR,
 +            VarintType::Parse((const char*) NULL, &parse_data_ptr_));
 +}
 +
 +TEMPLATE_TEST_F(Test, EndPointerPrecedesBeginning) {
 +  // This is not an error.
-+  parse_data_ptr_ = parse_data_CADA1;
++  parse_data_ptr_ = reinterpret_cast<const char*>(parse_data_CADA1);
 +  EXPECT_EQ(RESULT_END_OF_DATA,
 +            VarintType::Parse(parse_data_ptr_ - 1, &parse_data_ptr_));
 +}
@@ -6919,34 +7050,34 @@ index 0000000000000000000000000000000000000000..ceba738d4a2f948b4425d6765e539549
 +
 +// This example is taken from the Varint description in RFC 3284, section 2.
 +TEMPLATE_TEST_F(Test, Parse123456789) {
-+  const char parse_data_123456789[] = { 0x80 + 58, 0x80 + 111, 0x80 + 26, 21 };
-+  parse_data_ptr_ = parse_data_123456789;
-+  EXPECT_EQ(123456789, VarintType::Parse(parse_data_123456789
++  const uint8_t parse_data_123456789[] = { 0x80 + 58, 0x80 + 111, 0x80 + 26, 21 };
++  parse_data_ptr_ = reinterpret_cast<const char*>(parse_data_123456789);
++  EXPECT_EQ(123456789, VarintType::Parse(parse_data_ptr_
 +                                             + sizeof(parse_data_123456789),
 +                                         &parse_data_ptr_));
 +}
 +
 +TEMPLATE_TEST_F(Test, Decode31Bits) {
-+  const char parse_data_31_bits[] = { 0x87, 0xFF, 0xFF, 0xFF, 0x7F };
-+  parse_data_ptr_ = parse_data_31_bits;
++  const uint8_t parse_data_31_bits[] = { 0x87, 0xFF, 0xFF, 0xFF, 0x7F };
++  parse_data_ptr_ = reinterpret_cast<const char*>(parse_data_31_bits);
 +  EXPECT_EQ(0x7FFFFFFF,
-+            VarintType::Parse(parse_data_31_bits + sizeof(parse_data_31_bits),
++            VarintType::Parse(parse_data_ptr_ + sizeof(parse_data_31_bits),
 +                              &parse_data_ptr_));
 +}
 +
 +TEST_F(VarintBEInt32Test, Decode32Bits) {
-+  const char parse_data_32_bits[] = { 0x88, 0x80, 0x80, 0x80, 0x00 };
-+  parse_data_ptr_ = parse_data_32_bits;
++  const uint8_t parse_data_32_bits[] = { 0x88, 0x80, 0x80, 0x80, 0x00 };
++  parse_data_ptr_ = reinterpret_cast<const char*>(parse_data_32_bits);
 +  EXPECT_EQ(RESULT_ERROR,
-+            VarintType::Parse(parse_data_32_bits + sizeof(parse_data_32_bits),
++            VarintType::Parse(parse_data_ptr_ + sizeof(parse_data_32_bits),
 +                              &parse_data_ptr_));
 +}
 +
 +TEST_F(VarintBEInt64Test, Decode32Bits) {
-+  const char parse_data_32_bits[] = { 0x88, 0x80, 0x80, 0x80, 0x00 };
-+  parse_data_ptr_ = parse_data_32_bits;
++  const uint8_t parse_data_32_bits[] = { 0x88, 0x80, 0x80, 0x80, 0x00 };
++  parse_data_ptr_ = reinterpret_cast<const char*>(parse_data_32_bits);
 +  EXPECT_EQ(0x80000000,
-+            VarintType::Parse(parse_data_32_bits + sizeof(parse_data_32_bits),
++            VarintType::Parse(parse_data_ptr_ + sizeof(parse_data_32_bits),
 +                              &parse_data_ptr_));
 +}
 +
@@ -6981,13 +7112,13 @@ index 0000000000000000000000000000000000000000..ceba738d4a2f948b4425d6765e539549
 +// legal (according to the RFC3284 spec) to use any number of continuation
 +// bytes, but they should not cause us to read past the end of available input.
 +TEMPLATE_TEST_F(Test, ContinuationBytesPastEndOfInput) {
-+  const char parse_data_20_continuations[] =
++  const uint8_t parse_data_20_continuations[] =
 +    { 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
 +      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
 +      0x00 };
-+  parse_data_ptr_ = parse_data_20_continuations;
++  parse_data_ptr_ = reinterpret_cast<const char*>(parse_data_20_continuations);
 +  EXPECT_EQ(RESULT_END_OF_DATA,
-+            VarintType::Parse(parse_data_20_continuations + 10,
++            VarintType::Parse(parse_data_ptr_ + 10,
 +                              &parse_data_ptr_));
 +}
 +
@@ -10560,10 +10691,10 @@ index 0000000000000000000000000000000000000000..716a107a6c61eabeda76dc0aa29e7e69
 +}  // namespace open_vcdiff
 diff --git a/sdch/open-vcdiff/src/vcdecoder3_test.cc b/sdch/open-vcdiff/src/vcdecoder3_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..b0deabfeef52d53aa5ead54042140cefa948abc4
+index 0000000000000000000000000000000000000000..4129f02195010ca86ca65fe83fe68e040d1e23f5
 --- /dev/null
 +++ b/sdch/open-vcdiff/src/vcdecoder3_test.cc
-@@ -0,0 +1,1240 @@
+@@ -0,0 +1,1242 @@
 +// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -10684,10 +10815,11 @@ index 0000000000000000000000000000000000000000..b0deabfeef52d53aa5ead54042140cef
 +}
 +
 +TEST_F(VCDiffInterleavedDecoderTest, ChecksumIsInvalid64BitVarint) {
-+  static const char kInvalidVarint[] = { 0x81, 0x80, 0x80, 0x80, 0x80, 0x80,
-+                                         0x80, 0x80, 0x80, 0x00 };
++  static const uint8_t kInvalidVarint[] = { 0x81, 0x80, 0x80, 0x80, 0x80, 0x80,
++                                            0x80, 0x80, 0x80, 0x00 };
 +  delta_window_header_[0] |= VCD_CHECKSUM;
-+  delta_window_header_.append(kInvalidVarint, sizeof(kInvalidVarint));
++  delta_window_header_.append(reinterpret_cast<const char *>(kInvalidVarint),
++                              sizeof(kInvalidVarint));
 +  // Adjust delta window size to include size of invalid Varint.
 +  string size_of_invalid_varint;
 +  VarintBE<int32_t>::AppendToString(
@@ -11225,10 +11357,11 @@ index 0000000000000000000000000000000000000000..b0deabfeef52d53aa5ead54042140cef
 +}
 +
 +TEST_F(VCDiffInterleavedDecoderTestByteByByte, ChecksumIsInvalid64BitVarint) {
-+  static const char kInvalidVarint[] = { 0x81, 0x80, 0x80, 0x80, 0x80, 0x80,
-+                                         0x80, 0x80, 0x80, 0x00 };
++  static const uint8_t kInvalidVarint[] = { 0x81, 0x80, 0x80, 0x80, 0x80, 0x80,
++                                            0x80, 0x80, 0x80, 0x00 };
 +  delta_window_header_[0] |= VCD_CHECKSUM;
-+  delta_window_header_.append(kInvalidVarint, sizeof(kInvalidVarint));
++  delta_window_header_.append(reinterpret_cast<const char *>(kInvalidVarint),
++                              sizeof(kInvalidVarint));
 +  // Adjust delta window size to include size of invalid Varint.
 +  string size_of_invalid_varint;
 +  VarintBE<int32_t>::AppendToString(
@@ -11806,10 +11939,10 @@ index 0000000000000000000000000000000000000000..b0deabfeef52d53aa5ead54042140cef
 +}  // namespace open_vcdiff
 diff --git a/sdch/open-vcdiff/src/vcdecoder4_test.cc b/sdch/open-vcdiff/src/vcdecoder4_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c528b9a435
+index 0000000000000000000000000000000000000000..c5a2969faa8d9c79fd9302a1b7312de015166bd1
 --- /dev/null
 +++ b/sdch/open-vcdiff/src/vcdecoder4_test.cc
-@@ -0,0 +1,1063 @@
+@@ -0,0 +1,1074 @@
 +// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -11933,12 +12066,12 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +  virtual ~VCDiffStandardWindowDecoderTest() {}
 +
 + private:
-+  static const char kWindowBody[];
++  static const uint8_t kWindowBody[];
 +};
 +
 +const size_t VCDiffStandardWindowDecoderTest::kWindow2Size;
 +
-+const char VCDiffStandardWindowDecoderTest::kWindowBody[] = {
++const uint8_t VCDiffStandardWindowDecoderTest::kWindowBody[] = {
 +// Window 1:
 +    VCD_SOURCE,  // Win_Indicator: take source from dictionary
 +    FirstByteOfStringLength(kDictionary),  // Source segment size
@@ -12054,7 +12187,8 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +
 +VCDiffStandardWindowDecoderTest::VCDiffStandardWindowDecoderTest() {
 +  UseStandardFileHeader();
-+  delta_window_body_.assign(kWindowBody, sizeof(kWindowBody));
++  delta_window_body_.assign(reinterpret_cast<const char *>(kWindowBody),
++                            sizeof(kWindowBody));
 +}
 +
 +TEST_F(VCDiffStandardWindowDecoderTest, Decode) {
@@ -12234,10 +12368,10 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +  VCDiffInterleavedWindowDecoderTest();
 +  virtual ~VCDiffInterleavedWindowDecoderTest() {}
 + private:
-+  static const char kWindowBody[];
++  static const uint8_t kWindowBody[];
 +};
 +
-+const char VCDiffInterleavedWindowDecoderTest::kWindowBody[] = {
++const uint8_t VCDiffInterleavedWindowDecoderTest::kWindowBody[] = {
 +// Window 1:
 +    VCD_SOURCE,  // Win_Indicator: take source from dictionary
 +    FirstByteOfStringLength(kDictionary),  // Source segment size
@@ -12335,7 +12469,8 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +  // delta_window_header_ is left blank.  All window headers and bodies are
 +  // lumped together in delta_window_body_.  This means that AddChecksum()
 +  // cannot be used to test the checksum feature.
-+  delta_window_body_.assign(kWindowBody, sizeof(kWindowBody));
++  delta_window_body_.assign(reinterpret_cast<const char *>(kWindowBody),
++                            sizeof(kWindowBody));
 +}
 +
 +TEST_F(VCDiffInterleavedWindowDecoderTest, Decode) {
@@ -12448,14 +12583,14 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +class VCDiffStandardCrossDecoderTest : public VCDiffDecoderTest {
 + protected:
 +  static const char kExpectedTarget[];
-+  static const char kWindowHeader[];
-+  static const char kWindowBody[];
++  static const uint8_t kWindowHeader[];
++  static const uint8_t kWindowBody[];
 +
 +  VCDiffStandardCrossDecoderTest();
 +  virtual ~VCDiffStandardCrossDecoderTest() {}
 +};
 +
-+const char VCDiffStandardCrossDecoderTest::kWindowHeader[] = {
++const uint8_t VCDiffStandardCrossDecoderTest::kWindowHeader[] = {
 +    VCD_SOURCE,  // Win_Indicator: take source from dictionary
 +    FirstByteOfStringLength(kDictionary),  // Source segment size
 +    SecondByteOfStringLength(kDictionary),
@@ -12468,7 +12603,7 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +    0x03   // length of addresses for COPYs
 +  };
 +
-+const char VCDiffStandardCrossDecoderTest::kWindowBody[] = {
++const uint8_t VCDiffStandardCrossDecoderTest::kWindowBody[] = {
 +    // Data for ADD (length 7)
 +    'S', 'p', 'i', 'd', 'e', 'r', 's',
 +    // Instructions and sizes (length 6)
@@ -12490,8 +12625,10 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +
 +VCDiffStandardCrossDecoderTest::VCDiffStandardCrossDecoderTest() {
 +  UseStandardFileHeader();
-+  delta_window_header_.assign(kWindowHeader, sizeof(kWindowHeader));
-+  delta_window_body_.assign(kWindowBody, sizeof(kWindowBody));
++  delta_window_header_.assign(reinterpret_cast<const char *>(kWindowHeader),
++                              sizeof(kWindowHeader));
++  delta_window_body_.assign(reinterpret_cast<const char *>(kWindowBody),
++                            sizeof(kWindowBody));
 +  expected_target_.assign(kExpectedTarget);
 +}
 +
@@ -12525,11 +12662,11 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +  virtual ~VCDiffInterleavedCrossDecoderTest() {}
 +
 + private:
-+  static const char kWindowHeader[];
-+  static const char kWindowBody[];
++  static const uint8_t kWindowHeader[];
++  static const uint8_t kWindowBody[];
 +};
 +
-+const char VCDiffInterleavedCrossDecoderTest::kWindowHeader[] = {
++const uint8_t VCDiffInterleavedCrossDecoderTest::kWindowHeader[] = {
 +    VCD_SOURCE,  // Win_Indicator: take source from dictionary
 +    FirstByteOfStringLength(kDictionary),  // Source segment size
 +    SecondByteOfStringLength(kDictionary),
@@ -12542,7 +12679,7 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +    0x00,  // length of addresses for COPYs
 +  };
 +
-+const char VCDiffInterleavedCrossDecoderTest::kWindowBody[] = {
++const uint8_t VCDiffInterleavedCrossDecoderTest::kWindowBody[] = {
 +    0x01,  // VCD_ADD size 0
 +    0x07,  // Size of ADD (7)
 +    // Data for ADD (length 7)
@@ -12558,8 +12695,10 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +
 +VCDiffInterleavedCrossDecoderTest::VCDiffInterleavedCrossDecoderTest() {
 +  UseInterleavedFileHeader();
-+  delta_window_header_.assign(kWindowHeader, sizeof(kWindowHeader));
-+  delta_window_body_.assign(kWindowBody, sizeof(kWindowBody));
++  delta_window_header_.assign(reinterpret_cast<const char *>(kWindowHeader),
++                              sizeof(kWindowHeader));
++  delta_window_body_.assign(reinterpret_cast<const char *>(kWindowBody),
++                            sizeof(kWindowBody));
 +}
 +
 +TEST_F(VCDiffInterleavedCrossDecoderTest, Decode) {
@@ -12609,16 +12748,16 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +// format.
 +class VCDiffCustomCodeTableDecoderTest : public VCDiffInterleavedDecoderTest {
 + protected:
-+  static const char kFileHeader[];
-+  static const char kWindowHeader[];
-+  static const char kWindowBody[];
-+  static const char kEncodedCustomCodeTable[];
++  static const uint8_t kFileHeader[];
++  static const uint8_t kWindowHeader[];
++  static const uint8_t kWindowBody[];
++  static const uint8_t kEncodedCustomCodeTable[];
 +
 +  VCDiffCustomCodeTableDecoderTest();
 +  virtual ~VCDiffCustomCodeTableDecoderTest() {}
 +};
 +
-+const char VCDiffCustomCodeTableDecoderTest::kFileHeader[] = {
++const uint8_t VCDiffCustomCodeTableDecoderTest::kFileHeader[] = {
 +    0xD6,  // 'V' | 0x80
 +    0xC3,  // 'C' | 0x80
 +    0xC4,  // 'D' | 0x80
@@ -12640,7 +12779,7 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +// COPY mode 0 size 18 (opcode 34) => COPY mode 0 size 28 (size1[34] = 28)
 +// COPY mode 1 size 18 (opcode 50) => COPY mode 1 size 44 (size1[50] = 44)
 +//
-+const char VCDiffCustomCodeTableDecoderTest::kEncodedCustomCodeTable[] = {
++const uint8_t VCDiffCustomCodeTableDecoderTest::kEncodedCustomCodeTable[] = {
 +    0xD6,  // 'V' | 0x80
 +    0xC3,  // 'C' | 0x80
 +    0xC4,  // 'D' | 0x80
@@ -12691,7 +12830,7 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +// has the size of the NEAR cache set to 1; only the most recent
 +// COPY instruction is available.  This will also be a test of
 +// custom cache sizes.
-+const char VCDiffCustomCodeTableDecoderTest::kWindowHeader[] = {
++const uint8_t VCDiffCustomCodeTableDecoderTest::kWindowHeader[] = {
 +    VCD_SOURCE,  // Win_Indicator: take source from dictionary
 +    FirstByteOfStringLength(kDictionary),  // Source segment size
 +    SecondByteOfStringLength(kDictionary),
@@ -12705,7 +12844,7 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +    0x00   // length of addresses for COPYs (unused)
 +  };
 +
-+const char VCDiffCustomCodeTableDecoderTest::kWindowBody[] = {
++const uint8_t VCDiffCustomCodeTableDecoderTest::kWindowBody[] = {
 +    0x22,  // VCD_COPY mode VCD_SELF, size 28
 +    0x00,  // Address of COPY: Start of dictionary
 +    0x12,  // VCD_ADD size 61
@@ -12737,13 +12876,16 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +  };
 +
 +VCDiffCustomCodeTableDecoderTest::VCDiffCustomCodeTableDecoderTest() {
-+  delta_file_header_.assign(kFileHeader, sizeof(kFileHeader));
++  delta_file_header_.assign(reinterpret_cast<const char *>(kFileHeader),
++                            sizeof(kFileHeader));
 +  delta_file_header_.push_back(0x01);  // NEAR cache size (custom)
 +  delta_file_header_.push_back(0x06);  // SAME cache size (custom)
-+  delta_file_header_.append(kEncodedCustomCodeTable,
++  delta_file_header_.append(reinterpret_cast<const char*>(kEncodedCustomCodeTable),
 +                            sizeof(kEncodedCustomCodeTable));
-+  delta_window_header_.assign(kWindowHeader, sizeof(kWindowHeader));
-+  delta_window_body_.assign(kWindowBody, sizeof(kWindowBody));
++  delta_window_header_.assign(reinterpret_cast<const char *>(kWindowHeader),
++                              sizeof(kWindowHeader));
++  delta_window_body_.assign(reinterpret_cast<const char *>(kWindowBody),
++                            sizeof(kWindowBody));
 +}
 +
 +TEST_F(VCDiffCustomCodeTableDecoderTest, CustomCodeTableEncodingMatches) {
@@ -12759,9 +12901,9 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +      reinterpret_cast<const char*>(
 +          &VCDiffCodeTableData::kDefaultCodeTableData),
 +      sizeof(VCDiffCodeTableData::kDefaultCodeTableData));
-+  EXPECT_TRUE(decoder_.DecodeChunk(kEncodedCustomCodeTable,
-+                                   sizeof(kEncodedCustomCodeTable),
-+                                   &output_));
++  EXPECT_TRUE(decoder_.DecodeChunk(
++      reinterpret_cast<const char *>(kEncodedCustomCodeTable),
++      sizeof(kEncodedCustomCodeTable), &output_));
 +  EXPECT_TRUE(decoder_.FinishDecoding());
 +  EXPECT_EQ(sizeof(custom_code_table), output_.size());
 +  const VCDiffCodeTableData* decoded_table =
@@ -12843,11 +12985,13 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +                                                    int32_t same_value) {
 +  SCOPED_TRACE(testing::Message() << "Near value: " << near_value
 +                                  << ", same value: " << same_value);
-+  delta_file_header_.assign(kFileHeader, sizeof(kFileHeader));
++  delta_file_header_.assign(reinterpret_cast<const char *>(kFileHeader),
++                            sizeof(kFileHeader));
 +  VarintBE<int32_t>::AppendToString(near_value, &delta_file_header_);
 +  VarintBE<int32_t>::AppendToString(same_value, &delta_file_header_);
-+  delta_file_header_.append(kEncodedCustomCodeTable,
-+                            sizeof(kEncodedCustomCodeTable));
++  delta_file_header_.append(
++      reinterpret_cast<const char *>(kEncodedCustomCodeTable),
++      sizeof(kEncodedCustomCodeTable));
 +  InitializeDeltaFile();
 +  EXPECT_DEBUG_DEATH({
 +    decoder_.StartDecoding(dictionary_.data(), dictionary_.size());
@@ -12875,10 +13019,10 @@ index 0000000000000000000000000000000000000000..d75a190200a6cb62824769fd5ab059c5
 +}  // unnamed namespace
 diff --git a/sdch/open-vcdiff/src/vcdecoder5_test.cc b/sdch/open-vcdiff/src/vcdecoder5_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..d3a5d1c8db3c8d20cbf448f911dbf67d407230ba
+index 0000000000000000000000000000000000000000..fac3bdbdaa116dea4867f360f5a7258f975e17ce
 --- /dev/null
 +++ b/sdch/open-vcdiff/src/vcdecoder5_test.cc
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,115 @@
 +// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -12910,10 +13054,10 @@ index 0000000000000000000000000000000000000000..d3a5d1c8db3c8d20cbf448f911dbf67d
 +  VCDiffLargeTargetTest();
 +  virtual ~VCDiffLargeTargetTest() {}
 +
-+  static const char kLargeRunWindow[];
++  static const uint8_t kLargeRunWindow[];
 +};
 +
-+const char VCDiffLargeTargetTest::kLargeRunWindow[] = {
++const uint8_t VCDiffLargeTargetTest::kLargeRunWindow[] = {
 +    0x00,  // Win_Indicator: no source segment
 +    0x0E,  // Length of the delta encoding
 +    0xA0,  // Size of the target window (0x4000000)
@@ -12951,8 +13095,9 @@ index 0000000000000000000000000000000000000000..d3a5d1c8db3c8d20cbf448f911dbf67d
 +                                   &output_));
 +  EXPECT_EQ("", output_);
 +  for (int i = 0; i < kIterations; i++) {
-+    EXPECT_TRUE(decoder_.DecodeChunk(kLargeRunWindow, sizeof(kLargeRunWindow),
-+                                     &output_));
++    EXPECT_TRUE(
++        decoder_.DecodeChunk(reinterpret_cast<const char *>(kLargeRunWindow),
++                             sizeof(kLargeRunWindow), &output_));
 +    EXPECT_EQ(0x4000000U, output_.size());
 +    EXPECT_EQ(static_cast<char>(0xBE), output_[0]);
 +    EXPECT_EQ(static_cast<char>(0xBE),
@@ -12975,8 +13120,9 @@ index 0000000000000000000000000000000000000000..d3a5d1c8db3c8d20cbf448f911dbf67d
 +  EXPECT_EQ("", output_);
 +  // The default maximum target file size is 64MB, which just matches the target
 +  // data produced by a single iteration.
-+  EXPECT_TRUE(decoder_.DecodeChunk(kLargeRunWindow, sizeof(kLargeRunWindow),
-+                                   &output_));
++  EXPECT_TRUE(
++      decoder_.DecodeChunk(reinterpret_cast<const char *>(kLargeRunWindow),
++                           sizeof(kLargeRunWindow), &output_));
 +  EXPECT_EQ(0x4000000U, output_.size());
 +  EXPECT_EQ(static_cast<char>(0xBE), output_[0]);
 +  EXPECT_EQ(static_cast<char>(0xBE),
@@ -12985,18 +13131,19 @@ index 0000000000000000000000000000000000000000..d3a5d1c8db3c8d20cbf448f911dbf67d
 +            output_[output_.size() - 1]);  // last element
 +  output_.clear();
 +  // Trying to decode a second window should exceed the target file size limit.
-+  EXPECT_FALSE(decoder_.DecodeChunk(kLargeRunWindow, sizeof(kLargeRunWindow),
-+                                    &output_));
++  EXPECT_FALSE(
++      decoder_.DecodeChunk(reinterpret_cast<const char *>(kLargeRunWindow),
++                           sizeof(kLargeRunWindow), &output_));
 +}
 +
 +}  // unnamed namespace
 +}  // namespace open_vcdiff
 diff --git a/sdch/open-vcdiff/src/vcdecoder_test.cc b/sdch/open-vcdiff/src/vcdecoder_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749c9e97761
+index 0000000000000000000000000000000000000000..1efd6904fc6a782076fce87e0df2f2032b76079e
 --- /dev/null
 +++ b/sdch/open-vcdiff/src/vcdecoder_test.cc
-@@ -0,0 +1,279 @@
+@@ -0,0 +1,284 @@
 +// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -13022,7 +13169,7 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +
 +namespace open_vcdiff {
 +
-+const char VCDiffDecoderTest::kStandardFileHeader[] = {
++const uint8_t VCDiffDecoderTest::kStandardFileHeader[] = {
 +    0xD6,  // 'V' | 0x80
 +    0xC3,  // 'C' | 0x80
 +    0xC4,  // 'D' | 0x80
@@ -13030,7 +13177,7 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +    0x00   // Hdr_Indicator: no custom code table, no compression
 +  };
 +
-+const char VCDiffDecoderTest::kInterleavedFileHeader[] = {
++const uint8_t VCDiffDecoderTest::kInterleavedFileHeader[] = {
 +    0xD6,  // 'V' | 0x80
 +    0xC3,  // 'C' | 0x80
 +    0xC4,  // 'D' | 0x80
@@ -13060,21 +13207,22 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +}
 +
 +void VCDiffDecoderTest::UseStandardFileHeader() {
-+  delta_file_header_.assign(kStandardFileHeader,
++  delta_file_header_.assign(reinterpret_cast<const char *>(kStandardFileHeader),
 +                            sizeof(kStandardFileHeader));
 +}
 +
 +void VCDiffDecoderTest::UseInterleavedFileHeader() {
-+  delta_file_header_.assign(kInterleavedFileHeader,
-+                            sizeof(kInterleavedFileHeader));
++  delta_file_header_.assign(
++      reinterpret_cast<const char *>(kInterleavedFileHeader),
++      sizeof(kInterleavedFileHeader));
 +}
 +
 +void VCDiffDecoderTest::InitializeDeltaFile() {
 +  delta_file_ = delta_file_header_ + delta_window_header_ + delta_window_body_;
 +}
 +
-+char VCDiffDecoderTest::GetByteFromStringLength(const char* s,
-+                                                int which_byte) {
++uint8_t VCDiffDecoderTest::GetByteFromStringLength(const char* s,
++                                                   int which_byte) {
 +  char varint_buf[VarintBE<int32_t>::kMaxBytes];
 +  VarintBE<int32_t>::Encode(static_cast<int32_t>(strlen(s)), varint_buf);
 +  return varint_buf[which_byte];
@@ -13100,10 +13248,10 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +// (0x7FFFFFFF) at the given offset in the delta window.
 +void VCDiffDecoderTest::WriteMaxVarintAtOffset(int offset,
 +                                               int bytes_to_replace) {
-+  static const char kMaxVarint[] = { 0x87, 0xFF, 0xFF, 0xFF, 0x7F };
++  static const uint8_t kMaxVarint[] = { 0x87, 0xFF, 0xFF, 0xFF, 0x7F };
 +  delta_file_.replace(delta_file_header_.size() + offset,
 +                      bytes_to_replace,
-+                      kMaxVarint,
++                      reinterpret_cast<const char*>(kMaxVarint),
 +                      sizeof(kMaxVarint));
 +}
 +
@@ -13111,10 +13259,10 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +// in the delta window.
 +void VCDiffDecoderTest::WriteNegativeVarintAtOffset(int offset,
 +                                                    int bytes_to_replace) {
-+  static const char kNegativeVarint[] = { 0x88, 0x80, 0x80, 0x80, 0x00 };
++  static const uint8_t kNegativeVarint[] = { 0x88, 0x80, 0x80, 0x80, 0x00 };
 +  delta_file_.replace(delta_file_header_.size() + offset,
 +                      bytes_to_replace,
-+                      kNegativeVarint,
++                      reinterpret_cast<const char*>(kNegativeVarint),
 +                      sizeof(kNegativeVarint));
 +}
 +
@@ -13122,18 +13270,18 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +// at the given offset in the delta window.
 +void VCDiffDecoderTest::WriteInvalidVarintAtOffset(int offset,
 +                                                   int bytes_to_replace) {
-+  static const char kInvalidVarint[] = { 0x87, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F };
++  static const uint8_t kInvalidVarint[] = { 0x87, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F };
 +  delta_file_.replace(delta_file_header_.size() + offset,
 +                      bytes_to_replace,
-+                      kInvalidVarint,
++                      reinterpret_cast<const char*>(kInvalidVarint),
 +                      sizeof(kInvalidVarint));
 +}
 +
 +bool VCDiffDecoderTest::FuzzOneByteInDeltaFile() {
 +  static const struct Fuzzer {
-+    char _and;
-+    char _or;
-+    char _xor;
++    uint8_t _and;
++    uint8_t _or;
++    uint8_t _xor;
 +  } fuzzers[] = {
 +    { 0xff, 0x80, 0x00 },
 +    { 0xff, 0xff, 0x00 },
@@ -13161,7 +13309,7 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +  return false;
 +}
 +
-+const char VCDiffStandardDecoderTest::kWindowHeader[] = {
++const uint8_t VCDiffStandardDecoderTest::kWindowHeader[] = {
 +    VCD_SOURCE,  // Win_Indicator: take source from dictionary
 +    FirstByteOfStringLength(kDictionary),  // Source segment size
 +    SecondByteOfStringLength(kDictionary),
@@ -13175,7 +13323,7 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +    0x03  // length of addresses for COPYs
 +  };
 +
-+const char VCDiffStandardDecoderTest::kWindowBody[] = {
++const uint8_t VCDiffStandardDecoderTest::kWindowBody[] = {
 +    // Data for ADDs: 1st section (length 61)
 +    ' ', 'I', ' ', 'h', 'a', 'v', 'e', ' ', 's', 'a', 'i', 'd', ' ',
 +    'i', 't', ' ', 't', 'w', 'i', 'c', 'e', ':', '\n',
@@ -13215,11 +13363,13 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +
 +VCDiffStandardDecoderTest::VCDiffStandardDecoderTest() {
 +  UseStandardFileHeader();
-+  delta_window_header_.assign(kWindowHeader, sizeof(kWindowHeader));
-+  delta_window_body_.assign(kWindowBody, sizeof(kWindowBody));
++  delta_window_header_.assign(reinterpret_cast<const char *>(kWindowHeader),
++                              sizeof(kWindowHeader));
++  delta_window_body_.assign(reinterpret_cast<const char *>(kWindowBody),
++                            sizeof(kWindowBody));
 +}
 +
-+const char VCDiffInterleavedDecoderTest::kWindowHeader[] = {
++const uint8_t VCDiffInterleavedDecoderTest::kWindowHeader[] = {
 +    VCD_SOURCE,  // Win_Indicator: take source from dictionary
 +    FirstByteOfStringLength(kDictionary),  // Source segment size
 +    SecondByteOfStringLength(kDictionary),
@@ -13233,7 +13383,7 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +    0x00  // length of addresses for COPYs (unused)
 +  };
 +
-+const char VCDiffInterleavedDecoderTest::kWindowBody[] = {
++const uint8_t VCDiffInterleavedDecoderTest::kWindowBody[] = {
 +    0x13,  // VCD_COPY mode VCD_SELF, size 0
 +    0x1C,  // Size of COPY (28)
 +    0x00,  // Address of COPY: Start of dictionary
@@ -13271,17 +13421,19 @@ index 0000000000000000000000000000000000000000..e4470a92977b70821190cd40f9168749
 +
 +VCDiffInterleavedDecoderTest::VCDiffInterleavedDecoderTest() {
 +  UseInterleavedFileHeader();
-+  delta_window_header_.assign(kWindowHeader, sizeof(kWindowHeader));
-+  delta_window_body_.assign(kWindowBody, sizeof(kWindowBody));
++  delta_window_header_.assign(reinterpret_cast<const char *>(kWindowHeader),
++                              sizeof(kWindowHeader));
++  delta_window_body_.assign(reinterpret_cast<const char *>(kWindowBody),
++                            sizeof(kWindowBody));
 +}
 +
 +}  // namespace open_vcdiff
 diff --git a/sdch/open-vcdiff/src/vcdecoder_test.h b/sdch/open-vcdiff/src/vcdecoder_test.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..eb15f1031b2f3f3b1363626a0e1df94096044673
+index 0000000000000000000000000000000000000000..44718e795e0ba960d8b3cc5a5043ada77ada30a9
 --- /dev/null
 +++ b/sdch/open-vcdiff/src/vcdecoder_test.h
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,161 @@
 +// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -13300,6 +13452,7 @@ index 0000000000000000000000000000000000000000..eb15f1031b2f3f3b1363626a0e1df940
 +#define OPEN_VCDIFF_VCDECODER_TEST_H_
 +
 +#include "google/vcdecoder.h"
++#include <stdint.h>  // utf8_t
 +#include <string>
 +#include "checksum.h"
 +#include "testing.h"
@@ -13364,23 +13517,23 @@ index 0000000000000000000000000000000000000000..eb15f1031b2f3f3b1363626a0e1df940
 +  // Assuming the length of the given string can be expressed as a VarintBE
 +  // of length N, this function returns the byte at position which_byte, where
 +  // 0 <= which_byte < N.
-+  static char GetByteFromStringLength(const char* s, int which_byte);
++  static uint8_t GetByteFromStringLength(const char* s, int which_byte);
 +
 +  // Assuming the length of the given string can be expressed as a one-byte
 +  // VarintBE, this function returns that byte value.
-+  static char StringLengthAsByte(const char* s) {
++  static uint8_t StringLengthAsByte(const char* s) {
 +    return GetByteFromStringLength(s, 0);
 +  }
 +
 +  // Assuming the length of the given string can be expressed as a two-byte
 +  // VarintBE, this function returns the first byte of its representation.
-+  static char FirstByteOfStringLength(const char* s) {
++  static uint8_t FirstByteOfStringLength(const char* s) {
 +    return GetByteFromStringLength(s, 0);
 +  }
 +
 +  // Assuming the length of the given string can be expressed as a two-byte
 +  // VarintBE, this function returns the second byte of its representation.
-+  static char SecondByteOfStringLength(const char* s) {
++  static uint8_t SecondByteOfStringLength(const char* s) {
 +    return GetByteFromStringLength(s, 1);
 +  }
 +
@@ -13408,8 +13561,8 @@ index 0000000000000000000000000000000000000000..eb15f1031b2f3f3b1363626a0e1df940
 + private:
 +  // These values should only be accessed via UseStandardFileHeader() and
 +  // UseInterleavedFileHeader().
-+  static const char kStandardFileHeader[];
-+  static const char kInterleavedFileHeader[];
++  static const uint8_t kStandardFileHeader[];
++  static const uint8_t kInterleavedFileHeader[];
 +
 +  // These two counters are used by FuzzOneByteInDeltaFile() to iterate through
 +  // different ways to corrupt the delta file.
@@ -13425,8 +13578,8 @@ index 0000000000000000000000000000000000000000..eb15f1031b2f3f3b1363626a0e1df940
 +  virtual ~VCDiffStandardDecoderTest() {}
 +
 + private:
-+  static const char kWindowHeader[];
-+  static const char kWindowBody[];
++  static const uint8_t kWindowHeader[];
++  static const uint8_t kWindowBody[];
 +};
 +
 +class VCDiffInterleavedDecoderTest : public VCDiffDecoderTest {
@@ -13435,8 +13588,8 @@ index 0000000000000000000000000000000000000000..eb15f1031b2f3f3b1363626a0e1df940
 +  virtual ~VCDiffInterleavedDecoderTest() {}
 +
 + private:
-+  static const char kWindowHeader[];
-+  static const char kWindowBody[];
++  static const uint8_t kWindowHeader[];
++  static const uint8_t kWindowBody[];
 +};
 +
 +}  // namespace open_vcdiff
@@ -16856,10 +17009,10 @@ index 0000000000000000000000000000000000000000..7fe5a6a3d0989e0980924f5d0129b7ff
 +}  // namespace open_vcdiff
 diff --git a/sdch/open-vcdiff/src/vcencoder_test.cc b/sdch/open-vcdiff/src/vcencoder_test.cc
 new file mode 100644
-index 0000000000000000000000000000000000000000..99f449e343aa373b870557a9014bd426c1da91ca
+index 0000000000000000000000000000000000000000..2ba5600c25fdfce977d26a778df9961b5582ee73
 --- /dev/null
 +++ b/sdch/open-vcdiff/src/vcencoder_test.cc
-@@ -0,0 +1,1061 @@
+@@ -0,0 +1,1065 @@
 +// Copyright 2008 The open-vcdiff Authors. All Rights Reserved.
 +//
 +// Licensed under the Apache License, Version 2.0 (the "License");
@@ -16983,7 +17136,7 @@ index 0000000000000000000000000000000000000000..99f449e343aa373b870557a9014bd426
 +  static const char kDictionary[];
 +  static const char kTarget[];
 +  static const char kJSONDiff[];
-+  static const char kNonAscii[];
++  static const uint8_t kNonAscii[];
 +
 +  VCDiffEncoderTest();
 +  virtual ~VCDiffEncoderTest() { }
@@ -17024,7 +17177,7 @@ index 0000000000000000000000000000000000000000..99f449e343aa373b870557a9014bd426
 +    "\"hrice:\\nWhat I tell you three times is true.\\\"\\n\"]";
 +
 +// NonASCII string "foo\x128".
-+const char VCDiffEncoderTest::kNonAscii[] = {102, 111, 111, 128, 0};
++const uint8_t VCDiffEncoderTest::kNonAscii[] = {102, 111, 111, 128, 0};
 +
 +VCDiffEncoderTest::VCDiffEncoderTest()
 +    : hashed_dictionary_(kDictionary, sizeof(kDictionary)),
@@ -17032,14 +17185,13 @@ index 0000000000000000000000000000000000000000..99f449e343aa373b870557a9014bd426
 +               VCD_FORMAT_INTERLEAVED | VCD_FORMAT_CHECKSUM,
 +               /* look_for_target_matches = */ true),
 +      simple_encoder_(kDictionary, sizeof(kDictionary)),
-+      json_encoder_(&hashed_dictionary_,
-+                    VCD_FORMAT_JSON,
++      json_encoder_(&hashed_dictionary_, VCD_FORMAT_JSON,
 +                    /* look_for_target_matches = */ true),
-+      external_encoder_(&hashed_dictionary_,
-+                    0,
-+                    /* look_for_target_matches = */ true,
-+                    new JSONCodeTableWriter()),
-+      nonascii_simple_encoder_(kNonAscii, sizeof(kNonAscii)) {
++      external_encoder_(&hashed_dictionary_, 0,
++                        /* look_for_target_matches = */ true,
++                        new JSONCodeTableWriter()),
++      nonascii_simple_encoder_(reinterpret_cast<const char *>(kNonAscii),
++                               sizeof(kNonAscii)) {
 +  EXPECT_TRUE(hashed_dictionary_.Init());
 +}
 +
@@ -17198,12 +17350,14 @@ index 0000000000000000000000000000000000000000..99f449e343aa373b870557a9014bd426
 +}
 +
 +TEST_F(VCDiffEncoderTest, NonasciiTarget) {
-+  EXPECT_TRUE(simple_encoder_.Encode(kNonAscii, strlen(kNonAscii), delta()));
++  EXPECT_TRUE(simple_encoder_.Encode(reinterpret_cast<const char *>(kNonAscii),
++                                     sizeof(kNonAscii), delta()));
 +}
 +
 +TEST_F(VCDiffEncoderTest, NonasciiTargetWithJSON) {
 +  simple_encoder_.SetFormatFlags(VCD_FORMAT_JSON);
-+  EXPECT_FALSE(simple_encoder_.Encode(kNonAscii, strlen(kNonAscii), delta()));
++  EXPECT_FALSE(simple_encoder_.Encode(reinterpret_cast<const char *>(kNonAscii),
++                                      sizeof(kNonAscii), delta()));
 +}
 +
 +#ifdef HAVE_EXT_ROPE
@@ -17414,31 +17568,33 @@ index 0000000000000000000000000000000000000000..99f449e343aa373b870557a9014bd426
 +// be treated as NULL-terminated.  An embedded NULL should be handled like
 +// any other byte of data.
 +TEST_F(VCDiffEncoderTest, DictionaryHasEmbeddedNULLs) {
-+  const char embedded_null_dictionary_text[] =
++  const uint8_t embedded_null_dictionary_text[] =
 +      { 0x00, 0xFF, 0xFE, 0xFD, 0x00, 0xFD, 0xFE, 0xFF, 0x00, 0x03 };
-+  const char embedded_null_target[] =
++  const uint8_t embedded_null_target[] =
 +      { 0xFD, 0x00, 0xFD, 0xFE, 0x03, 0x00, 0x01, 0x00 };
 +  CHECK_EQ(10, sizeof(embedded_null_dictionary_text));
 +  CHECK_EQ(8, sizeof(embedded_null_target));
-+  HashedDictionary embedded_null_dictionary(embedded_null_dictionary_text,
++  HashedDictionary embedded_null_dictionary(
++      reinterpret_cast<const char *>(embedded_null_dictionary_text),
 +      sizeof(embedded_null_dictionary_text));
 +  EXPECT_TRUE(embedded_null_dictionary.Init());
 +  VCDiffStreamingEncoder embedded_null_encoder(&embedded_null_dictionary,
 +      VCD_FORMAT_INTERLEAVED | VCD_FORMAT_CHECKSUM,
 +      /* look_for_target_matches = */ true);
 +  EXPECT_TRUE(embedded_null_encoder.StartEncoding(delta()));
-+  EXPECT_TRUE(embedded_null_encoder.EncodeChunk(embedded_null_target,
-+                                                sizeof(embedded_null_target),
-+                                                delta()));
++  EXPECT_TRUE(embedded_null_encoder.EncodeChunk(
++      reinterpret_cast<const char *>(embedded_null_target),
++      sizeof(embedded_null_target), delta()));
 +  EXPECT_TRUE(embedded_null_encoder.FinishEncoding(delta()));
-+  decoder_.StartDecoding(embedded_null_dictionary_text,
-+                         sizeof(embedded_null_dictionary_text));
++  decoder_.StartDecoding(
++      reinterpret_cast<const char *>(embedded_null_dictionary_text),
++      sizeof(embedded_null_dictionary_text));
 +  EXPECT_TRUE(decoder_.DecodeChunk(delta_data(),
 +                                   delta_size(),
 +                                   &result_target_));
 +  EXPECT_TRUE(decoder_.FinishDecoding());
 +  EXPECT_EQ(sizeof(embedded_null_target), result_target_.size());
-+  EXPECT_EQ(string(embedded_null_target,
++  EXPECT_EQ(string(reinterpret_cast<const char*>(embedded_null_target),
 +                   sizeof(embedded_null_target)),
 +            result_target_);
 +}
@@ -17446,31 +17602,32 @@ index 0000000000000000000000000000000000000000..99f449e343aa373b870557a9014bd426
 +// Binary data test part 2: An embedded CR or LF should be handled like
 +// any other byte of data.  No text-processing of the data should occur.
 +TEST_F(VCDiffEncoderTest, DictionaryHasEmbeddedNewlines) {
-+  const char embedded_null_dictionary_text[] =
++  const uint8_t embedded_null_dictionary_text[] =
 +      { 0x0C, 0xFF, 0xFE, 0x0C, 0x00, 0x0A, 0xFE, 0xFF, 0x00, 0x0A };
-+  const char embedded_null_target[] =
++  const uint8_t embedded_null_target[] =
 +      { 0x0C, 0x00, 0x0A, 0xFE, 0x03, 0x00, 0x0A, 0x00 };
 +  CHECK_EQ(10, sizeof(embedded_null_dictionary_text));
 +  CHECK_EQ(8, sizeof(embedded_null_target));
-+  HashedDictionary embedded_null_dictionary(embedded_null_dictionary_text,
++  HashedDictionary embedded_null_dictionary(
++      reinterpret_cast<const char *>(embedded_null_dictionary_text),
 +      sizeof(embedded_null_dictionary_text));
 +  EXPECT_TRUE(embedded_null_dictionary.Init());
 +  VCDiffStreamingEncoder embedded_null_encoder(&embedded_null_dictionary,
 +      VCD_FORMAT_INTERLEAVED | VCD_FORMAT_CHECKSUM,
 +      /* look_for_target_matches = */ true);
 +  EXPECT_TRUE(embedded_null_encoder.StartEncoding(delta()));
-+  EXPECT_TRUE(embedded_null_encoder.EncodeChunk(embedded_null_target,
-+                                                sizeof(embedded_null_target),
-+                                                delta()));
++  EXPECT_TRUE(embedded_null_encoder.EncodeChunk(
++      reinterpret_cast<const char *>(embedded_null_target),
++      sizeof(embedded_null_target), delta()));
 +  EXPECT_TRUE(embedded_null_encoder.FinishEncoding(delta()));
-+  decoder_.StartDecoding(embedded_null_dictionary_text,
-+                         sizeof(embedded_null_dictionary_text));
-+  EXPECT_TRUE(decoder_.DecodeChunk(delta_data(),
-+                                   delta_size(),
-+                                   &result_target_));
++  decoder_.StartDecoding(
++      reinterpret_cast<const char *>(embedded_null_dictionary_text),
++      sizeof(embedded_null_dictionary_text));
++  EXPECT_TRUE(
++      decoder_.DecodeChunk(delta_data(), delta_size(), &result_target_));
 +  EXPECT_TRUE(decoder_.FinishDecoding());
 +  EXPECT_EQ(sizeof(embedded_null_target), result_target_.size());
-+  EXPECT_EQ(string(embedded_null_target,
++  EXPECT_EQ(string(reinterpret_cast<const char *>(embedded_null_target),
 +                   sizeof(embedded_null_target)),
 +            result_target_);
 +}
