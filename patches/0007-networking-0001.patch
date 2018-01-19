@@ -1,8 +1,8 @@
 diff --git a/net/http/transport_security_state.cc b/net/http/transport_security_state.cc
-index 4ffe9e8796f8676689b0c01517b8a8ae08867f5e..79a86657d9d7b4181c9a0ba43ee78e754f144617 100644
+index b8d57e4546f5018c2ba91e103e7433ad076a9e99..bde0f3c9118327c08c7ac010bb584d06eba7b0e7 100644
 --- a/net/http/transport_security_state.cc
 +++ b/net/http/transport_security_state.cc
-@@ -757,7 +757,7 @@ TransportSecurityState::TransportSecurityState()
+@@ -744,7 +744,7 @@ TransportSecurityState::TransportSecurityState()
        sent_expect_ct_reports_cache_(kMaxReportCacheEntries) {
  // Static pinning is only enabled for official builds to make sure that
  // others don't end up with pins that cannot be easily updated.
@@ -11,6 +11,58 @@ index 4ffe9e8796f8676689b0c01517b8a8ae08867f5e..79a86657d9d7b4181c9a0ba43ee78e75
    enable_static_pins_ = false;
    enable_static_expect_ct_ = false;
  #endif
+diff --git a/net/quic/core/quic_stream_sequencer_buffer.cc b/net/quic/core/quic_stream_sequencer_buffer.cc
+index 3706d38805cf661ea74d1f69da35456079a815be..46defd0605fe926cc7e0d84ff533fe5126f7a66c 100644
+--- a/net/quic/core/quic_stream_sequencer_buffer.cc
++++ b/net/quic/core/quic_stream_sequencer_buffer.cc
+@@ -102,7 +102,10 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
+     ++current_gap;
+   }
+ 
+-  DCHECK(current_gap != gaps_.end());
++  if (current_gap == gaps_.end()) {
++    *error_details = "Received stream data outside of maximum range.";
++    return QUIC_INTERNAL_ERROR;
++  }
+ 
+   // "duplication": might duplicate with data alread filled,but also might
+   // overlap across different QuicStringPiece objects already written.
+@@ -138,7 +141,8 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
+   }
+ 
+   // Write beyond the current range this buffer is covering.
+-  if (offset + size > total_bytes_read_ + max_buffer_capacity_bytes_) {
++  if (offset + size > total_bytes_read_ + max_buffer_capacity_bytes_ ||
++      offset + size < offset) {
+     *error_details = "Received data beyond available range.";
+     return QUIC_INTERNAL_ERROR;
+   }
+diff --git a/net/quic/core/quic_stream_sequencer_buffer_test.cc b/net/quic/core/quic_stream_sequencer_buffer_test.cc
+index 88c9a0c391b5bdb95c89e4e4a8aa8c86b59c07ae..344ca583d839a78f3b905897072fba37c29204e6 100644
+--- a/net/quic/core/quic_stream_sequencer_buffer_test.cc
++++ b/net/quic/core/quic_stream_sequencer_buffer_test.cc
+@@ -297,6 +297,21 @@ TEST_F(QuicStreamSequencerBufferTest, OnStreamDataBeyondCapacity) {
+                                   clock_.ApproximateNow(), &written,
+                                   &error_details_));
+   EXPECT_TRUE(helper_->CheckBufferInvariants());
++
++  // Disallow current_gap != gaps_.end()
++  EXPECT_EQ(QUIC_INTERNAL_ERROR,
++            buffer_->OnStreamData(static_cast<QuicStreamOffset>(-1), source,
++                                  clock_.ApproximateNow(), &written,
++                                  &error_details_));
++  EXPECT_TRUE(helper_->CheckBufferInvariants());
++
++  // Disallow offset + size overflow
++  source = "bbb";
++  EXPECT_EQ(QUIC_INTERNAL_ERROR,
++            buffer_->OnStreamData(static_cast<QuicStreamOffset>(-2), source,
++                                  clock_.ApproximateNow(), &written,
++                                  &error_details_));
++  EXPECT_TRUE(helper_->CheckBufferInvariants());
+   EXPECT_EQ(0u, buffer_->BytesBuffered());
+ }
+ 
 diff --git a/net/ssl/ssl_config.cc b/net/ssl/ssl_config.cc
 index 89f81335f0582ea626292a1a7e822bb0175ccd13..efcfc3d51db1e6cf61afaf90f44f8f228a837261 100644
 --- a/net/ssl/ssl_config.cc
@@ -34,10 +86,10 @@ index 89f81335f0582ea626292a1a7e822bb0175ccd13..efcfc3d51db1e6cf61afaf90f44f8f22
        sha1_local_anchors_enabled(true),
        common_name_fallback_local_anchors_enabled(true),
 diff --git a/net/test/embedded_test_server/embedded_test_server.cc b/net/test/embedded_test_server/embedded_test_server.cc
-index 83112a2baee65a2d12c2ac58d856cf5e09fa620f..8eead700b4ac5ba2afa409cc7970c0bdfbe5385a 100644
+index df705db89c363508041e35585be5b5899fa36474..3409761611841cabf792fb1f47746aae5fda3df1 100644
 --- a/net/test/embedded_test_server/embedded_test_server.cc
 +++ b/net/test/embedded_test_server/embedded_test_server.cc
-@@ -291,7 +291,8 @@ scoped_refptr<X509Certificate> EmbeddedTestServer::GetCertificate() const {
+@@ -297,7 +297,8 @@ scoped_refptr<X509Certificate> EmbeddedTestServer::GetCertificate() const {
  
  void EmbeddedTestServer::ServeFilesFromDirectory(
      const base::FilePath& directory) {
@@ -48,7 +100,7 @@ index 83112a2baee65a2d12c2ac58d856cf5e09fa620f..8eead700b4ac5ba2afa409cc7970c0bd
  
  void EmbeddedTestServer::ServeFilesFromSourceDirectory(
 diff --git a/services/service_manager/embedder/main.cc b/services/service_manager/embedder/main.cc
-index 7acf0e44fea4f87517236c4adc735c1634532035..069c6626cdca6bc9c930a8acb6361ed41870bc97 100644
+index 87ac6f053947b2d583db94cb7427f68d902f3b60..ea2792e4cbe1eb7d0845985300cc8d65ab3404e7 100644
 --- a/services/service_manager/embedder/main.cc
 +++ b/services/service_manager/embedder/main.cc
 @@ -76,7 +76,7 @@ namespace {
@@ -60,97 +112,8 @@ index 7acf0e44fea4f87517236c4adc735c1634532035..069c6626cdca6bc9c930a8acb6361ed4
  
  class ServiceProcessLauncherDelegateImpl
      : public service_manager::ServiceProcessLauncherDelegate {
-diff --git a/services/ui/gpu/gpu_service.cc b/services/ui/gpu/gpu_service.cc
-index ef4877ec1bbfa24af83bf76438f68fbf37f0e02d..f808c24d3db90b396015c2677377ed71f712b484 100644
---- a/services/ui/gpu/gpu_service.cc
-+++ b/services/ui/gpu/gpu_service.cc
-@@ -45,6 +45,10 @@
- #include "media/gpu/content_video_view_overlay_allocator.h"
- #endif
- 
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+#include "platform_media/gpu/pipeline/propmedia_gpu_channel_manager.h"
-+#endif
-+
- namespace ui {
- 
- namespace {
-@@ -116,6 +120,11 @@ GpuService::~GpuService() {
-     wait.Wait();
-   }
-   media_gpu_channel_manager_.reset();
-+
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+  proprietary_media_gpu_channel_manager_.reset();
-+#endif
-+
-   gpu_channel_manager_.reset();
-   owned_sync_point_manager_.reset();
- 
-@@ -192,6 +201,12 @@ void GpuService::InitializeWithHost(mojom::GpuHostPtr gpu_host,
- 
-   media_gpu_channel_manager_.reset(
-       new media::MediaGpuChannelManager(gpu_channel_manager_.get()));
-+
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+  proprietary_media_gpu_channel_manager_.reset(
-+      new gpu::ProprietaryMediaGpuChannelManager(gpu_channel_manager_.get()));
-+#endif
-+
-   if (watchdog_thread())
-     watchdog_thread()->AddPowerObserver();
- }
-@@ -350,6 +365,11 @@ void GpuService::DidCreateOffscreenContext(const GURL& active_url) {
- void GpuService::DidDestroyChannel(int client_id) {
-   DCHECK(main_runner_->BelongsToCurrentThread());
-   media_gpu_channel_manager_->RemoveChannel(client_id);
-+
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+  proprietary_media_gpu_channel_manager_->RemoveChannel(client_id);
-+#endif
-+
-   (*gpu_host_)->DidDestroyChannel(client_id);
- }
- 
-@@ -417,6 +437,10 @@ void GpuService::EstablishGpuChannel(
- 
-   media_gpu_channel_manager_->AddChannel(client_id);
- 
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+  proprietary_media_gpu_channel_manager_->AddChannel(client_id);
-+#endif
-+
-   callback.Run(std::move(pipe.handle1));
- }
- 
-diff --git a/services/ui/gpu/gpu_service.h b/services/ui/gpu/gpu_service.h
-index e92a25a722b0b4e2e8bae2c0322f5b6725026068..0bee644fefae665abeb99e9ecba9e341464eff44 100644
---- a/services/ui/gpu/gpu_service.h
-+++ b/services/ui/gpu/gpu_service.h
-@@ -31,6 +31,9 @@ class GpuMemoryBufferFactory;
- class GpuWatchdogThread;
- class Scheduler;
- class SyncPointManager;
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+class ProprietaryMediaGpuChannelManager;
-+#endif
- }
- 
- namespace media {
-@@ -186,6 +189,11 @@ class GpuService : public gpu::GpuChannelManagerDelegate,
-   std::unique_ptr<gpu::GpuChannelManager> gpu_channel_manager_;
-   std::unique_ptr<media::MediaGpuChannelManager> media_gpu_channel_manager_;
- 
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+  std::unique_ptr<gpu::ProprietaryMediaGpuChannelManager>
-+      proprietary_media_gpu_channel_manager_;
-+#endif
-+
-   // On some platforms (e.g. android webview), the SyncPointManager comes from
-   // external sources.
-   std::unique_ptr<gpu::SyncPointManager> owned_sync_point_manager_;
 diff --git a/services/ui/public/cpp/gpu/gpu.cc b/services/ui/public/cpp/gpu/gpu.cc
-index 936dc5d0f89175ff46e486dfe42ea42d35f0cc2a..97478f1cea35f22380f8223fbf7a0dd675d17999 100644
+index fefcc03d17ab9439fe14f474196dafeccfee57c2..94ebc7ae28feab5f8a791749261feaa41317f9f2 100644
 --- a/services/ui/public/cpp/gpu/gpu.cc
 +++ b/services/ui/public/cpp/gpu/gpu.cc
 @@ -147,6 +147,10 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync() {
@@ -165,7 +128,7 @@ index 936dc5d0f89175ff46e486dfe42ea42d35f0cc2a..97478f1cea35f22380f8223fbf7a0dd6
    return gpu_memory_buffer_manager_.get();
  }
 diff --git a/services/ui/public/cpp/gpu/gpu.h b/services/ui/public/cpp/gpu/gpu.h
-index c64eeaeb71d9cc178ec9f8711a39975e717b822d..04aa88c4b32b9b3d5b9d109685df8bdd0b2fc25d 100644
+index c4908079823ca2b86dfe5e050843afcc7d735fa6..db4503d72edb095e3ff0c1f95c37b643f767c7d4 100644
 --- a/services/ui/public/cpp/gpu/gpu.h
 +++ b/services/ui/public/cpp/gpu/gpu.h
 @@ -53,6 +53,7 @@ class Gpu : public gpu::GpuChannelHostFactory,
@@ -177,7 +140,7 @@ index c64eeaeb71d9cc178ec9f8711a39975e717b822d..04aa88c4b32b9b3d5b9d109685df8bdd
  
   private:
 diff --git a/services/ui/public/interfaces/gpu.mojom b/services/ui/public/interfaces/gpu.mojom
-index 6bbd3b380658bf1b038a154db0743c3f268125dd..c53cc0af1159600c84e93f43d9cf396313ba026b 100644
+index 420cb0167721b6d009858375d6d5753de259b843..442253dc986a0a21957336243dbd49c0aa53dd9b 100644
 --- a/services/ui/public/interfaces/gpu.mojom
 +++ b/services/ui/public/interfaces/gpu.mojom
 @@ -20,6 +20,8 @@ interface Gpu {
@@ -190,7 +153,7 @@ index 6bbd3b380658bf1b038a154db0743c3f268125dd..c53cc0af1159600c84e93f43d9cf3963
    CreateJpegDecodeAccelerator(media.mojom.GpuJpegDecodeAccelerator& jda);
  
 diff --git a/services/ui/ws/gpu_client.h b/services/ui/ws/gpu_client.h
-index ea3a106e78250de05f7d7283d88404a43b026dd7..742b8e9a08ccb5c78132906e864f07a2d665f44a 100644
+index 32e283d25e211da55aae53080d44a3807b746a44..2c12315e6dfd8818a9dd53ef2c9ead772e6692d3 100644
 --- a/services/ui/ws/gpu_client.h
 +++ b/services/ui/ws/gpu_client.h
 @@ -44,6 +44,7 @@ class GpuClient : public mojom::Gpu {
@@ -200,4 +163,4 @@ index ea3a106e78250de05f7d7283d88404a43b026dd7..742b8e9a08ccb5c78132906e864f07a2
 +  void SetForceAllowAccessToGpu(bool enable) override {}
    void CreateJpegDecodeAccelerator(
        media::mojom::GpuJpegDecodeAcceleratorRequest jda_request) override;
-   void CreateVideoEncodeAccelerator(
+   void CreateVideoEncodeAcceleratorProvider(
