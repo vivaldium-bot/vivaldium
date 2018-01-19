@@ -1,129 +1,3 @@
-diff --git a/ui/app_list/app_list_features.cc b/ui/app_list/app_list_features.cc
-index d941310d25fb1552f62018e2056063979242b444..2607122230ddb8876ff84e517278a64c10e1f443 100644
---- a/ui/app_list/app_list_features.cc
-+++ b/ui/app_list/app_list_features.cc
-@@ -6,23 +6,50 @@
- 
- #include "base/feature_list.h"
- #include "base/metrics/field_trial_params.h"
-+#include "base/sys_info.h"
- 
- namespace app_list {
- namespace features {
- 
--const base::Feature kEnableAnswerCard{"EnableAnswerCard",
--                                      base::FEATURE_DISABLED_BY_DEFAULT};
-+const base::Feature kEnableAnswerCardDefaultOff{
-+    "EnableAnswerCard", base::FEATURE_DISABLED_BY_DEFAULT};
-+const base::Feature kEnableAnswerCardDefaultOn{
-+    "EnableAnswerCard", base::FEATURE_ENABLED_BY_DEFAULT};
- const base::Feature kEnableAnswerCardDarkRun{"EnableAnswerCardDarkRun",
-                                              base::FEATURE_DISABLED_BY_DEFAULT};
- const base::Feature kEnableBackgroundBlur{"EnableBackgroundBlur",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
- const base::Feature kEnableFullscreenAppList{"EnableFullscreenAppList",
-                                              base::FEATURE_ENABLED_BY_DEFAULT};
--const base::Feature kEnablePlayStoreAppSearch{
-+const base::Feature kEnablePlayStoreAppSearchDefaultOff{
-     "EnablePlayStoreAppSearch", base::FEATURE_DISABLED_BY_DEFAULT};
-+const base::Feature kEnablePlayStoreAppSearchDefaultOn{
-+    "EnablePlayStoreAppSearch", base::FEATURE_ENABLED_BY_DEFAULT};
-+
-+namespace {
-+
-+bool IsDeviceEve() {
-+  static size_t position = base::SysInfo::GetLsbReleaseBoard().find("eve");
-+  static bool is_device_eve = position != std::string::npos;
-+
-+  return is_device_eve;
-+}
-+
-+const base::Feature& GetAnswerCardFeature() {
-+  return IsDeviceEve() ? kEnableAnswerCardDefaultOn
-+                       : kEnableAnswerCardDefaultOff;
-+}
-+
-+const base::Feature& GetPlaystoreAppSearchFeature() {
-+  return IsDeviceEve() ? kEnablePlayStoreAppSearchDefaultOn
-+                       : kEnablePlayStoreAppSearchDefaultOff;
-+}
-+
-+}  // namespace
- 
- bool IsAnswerCardEnabled() {
--  static const bool enabled = base::FeatureList::IsEnabled(kEnableAnswerCard);
-+  static const bool enabled =
-+      base::FeatureList::IsEnabled(GetAnswerCardFeature());
-   return enabled;
- }
- 
-@@ -50,15 +77,20 @@ bool IsTouchFriendlySearchResultsPageEnabled() {
- 
- bool IsPlayStoreAppSearchEnabled() {
-   // Not using local static variable to allow tests to change this value.
--  return base::FeatureList::IsEnabled(kEnablePlayStoreAppSearch);
-+  return base::FeatureList::IsEnabled(GetPlaystoreAppSearchFeature());
- }
- 
- std::string AnswerServerUrl() {
--  return base::GetFieldTrialParamValueByFeature(kEnableAnswerCard, "ServerUrl");
-+  const std::string experiment_url = base::GetFieldTrialParamValueByFeature(
-+      GetAnswerCardFeature(), "ServerUrl");
-+  if (!experiment_url.empty())
-+    return experiment_url;
-+
-+  return "https://www.google.com/coac";
- }
- 
- std::string AnswerServerQuerySuffix() {
--  return base::GetFieldTrialParamValueByFeature(kEnableAnswerCard,
-+  return base::GetFieldTrialParamValueByFeature(GetAnswerCardFeature(),
-                                                 "QuerySuffix");
- }
- 
-diff --git a/ui/app_list/app_list_features.h b/ui/app_list/app_list_features.h
-index 8de0eb089f6f7149ac69ce6c28e30e12344ec4ce..4b7e0153d9553e4711939bf62d649d8ab85a9c94 100644
---- a/ui/app_list/app_list_features.h
-+++ b/ui/app_list/app_list_features.h
-@@ -19,7 +19,8 @@ namespace features {
- // Please keep these features sorted.
- 
- // Enables the answer card in the app list.
--APP_LIST_EXPORT extern const base::Feature kEnableAnswerCard;
-+APP_LIST_EXPORT extern const base::Feature kEnableAnswerCardDefaultOff;
-+APP_LIST_EXPORT extern const base::Feature kEnableAnswerCardDefaultOn;
- 
- // Enables the dark run answer card in the app list. In this mode, answer cards
- // may be loaded via mock URLs and are not shown to the user.
-@@ -34,7 +35,8 @@ APP_LIST_EXPORT extern const base::Feature kEnableBackgroundBlur;
- APP_LIST_EXPORT extern const base::Feature kEnableFullscreenAppList;
- 
- // Enables the Play Store app search.
--APP_LIST_EXPORT extern const base::Feature kEnablePlayStoreAppSearch;
-+APP_LIST_EXPORT extern const base::Feature kEnablePlayStoreAppSearchDefaultOff;
-+APP_LIST_EXPORT extern const base::Feature kEnablePlayStoreAppSearchDefaultOn;
- 
- bool APP_LIST_EXPORT IsAnswerCardEnabled();
- bool APP_LIST_EXPORT IsAnswerCardDarkRunEnabled();
-diff --git a/ui/app_list/views/search_result_tile_item_list_view_unittest.cc b/ui/app_list/views/search_result_tile_item_list_view_unittest.cc
-index a094f129f1623ad125d01986208447f535f05251..34b1c873b9d070641a95e7c552a0c14102df052a 100644
---- a/ui/app_list/views/search_result_tile_item_list_view_unittest.cc
-+++ b/ui/app_list/views/search_result_tile_item_list_view_unittest.cc
-@@ -45,12 +45,12 @@ class SearchResultTileItemListViewTest
-     if (IsPlayStoreAppSearchEnabled()) {
-       scoped_feature_list_.InitWithFeatures(
-           {features::kEnableFullscreenAppList,
--           features::kEnablePlayStoreAppSearch},
-+           features::kEnablePlayStoreAppSearchDefaultOff},
-           {});
-     } else {
-       scoped_feature_list_.InitWithFeatures(
-           {features::kEnableFullscreenAppList},
--          {features::kEnablePlayStoreAppSearch});
-+          {features::kEnablePlayStoreAppSearchDefaultOff});
-     }
-     ASSERT_EQ(IsPlayStoreAppSearchEnabled(),
-               features::IsPlayStoreAppSearchEnabled());
 diff --git a/ui/aura/client/drag_drop_client.cc b/ui/aura/client/drag_drop_client.cc
 index f7dc619d5907c6f615a79ffc4166d62baf7c31cf..9d7374cc2b54d79be153f31fce95b25fb048e313 100644
 --- a/ui/aura/client/drag_drop_client.cc
@@ -159,10 +33,10 @@ index f7dc619d5907c6f615a79ffc4166d62baf7c31cf..9d7374cc2b54d79be153f31fce95b25f
  }  // namespace client
  }  // namespace aura
 diff --git a/ui/aura/client/drag_drop_client.h b/ui/aura/client/drag_drop_client.h
-index 4015f0f1a93773f4073f13c433c8d1790fa2982b..5ec5bf35df192afb57f22a4963f0ea3b136f377c 100644
+index 8e9634807d3fcf3e29d8324b6b8f3f8ed774dd72..e7766b04c395dc6c77ea3f184f979abd36d581d3 100644
 --- a/ui/aura/client/drag_drop_client.h
 +++ b/ui/aura/client/drag_drop_client.h
-@@ -34,7 +34,15 @@ class AURA_EXPORT DragDropClient {
+@@ -37,7 +37,15 @@ class AURA_EXPORT DragDropClient {
                                 aura::Window* source_window,
                                 const gfx::Point& screen_location,
                                 int operation,
@@ -180,10 +54,10 @@ index 4015f0f1a93773f4073f13c433c8d1790fa2982b..5ec5bf35df192afb57f22a4963f0ea3b
    // Called when a drag and drop session is cancelled.
    virtual void DragCancel() = 0;
 diff --git a/ui/base/BUILD.gn b/ui/base/BUILD.gn
-index 119d0fab47c98b9d6e7cfd08d254f2beeb0eef76..18c41375590a46306189503a08df52f68f196268 100644
+index 4210c32aa44f90ba6bb35fed51e1d15329e479b5..a5300d11a1249f7d8f4c893154ac578386f3c513 100644
 --- a/ui/base/BUILD.gn
 +++ b/ui/base/BUILD.gn
-@@ -1015,7 +1015,7 @@ test("ui_base_unittests") {
+@@ -1018,7 +1018,7 @@ test("ui_base_unittests") {
    }
  }
  
@@ -259,8 +133,25 @@ index 5ba8480da3979e0b5ad1d36680d7f0c71a3a9458..ef51d7c20a4f69b7312360872cfce32d
  };
  
  }  // namespace ui
+diff --git a/ui/base/dragdrop/drop_target_win.cc b/ui/base/dragdrop/drop_target_win.cc
+index 0370e2bc52d1ee10f58d3c3447dce4b31012a5dc..8445b974ad8b31fdfd79dd7ff02db4d8e5a2bba6 100644
+--- a/ui/base/dragdrop/drop_target_win.cc
++++ b/ui/base/dragdrop/drop_target_win.cc
+@@ -57,6 +57,12 @@ HRESULT DropTargetWin::DragEnter(IDataObject* data_object,
+ HRESULT DropTargetWin::DragOver(DWORD key_state,
+                                 POINTL cursor_position,
+                                 DWORD* effect) {
++  // NOTE(andre@vivaldi.com): We end up here after |DropTargetWin::DragLeave|
++  // for certain drag out of patterns. Bail as the operation is done and will be
++  // resumed with an additional |DragEnter|.
++  if (!current_data_object_) {
++    return E_UNEXPECTED;
++  }
+   // Tell the helper that we moved over it so it can update the drag image.
+   IDropTargetHelper* drop_helper = DropHelper();
+   if (drop_helper)
 diff --git a/ui/base/l10n/l10n_util.cc b/ui/base/l10n/l10n_util.cc
-index 5100c0ced98f8ed8953b6a0496784b69446e986a..ded1cddaad231cb7c96a0843eaa9ac197403c5ed 100644
+index c43fd7cc09ed0bb9bcf8f656c0b6f38e223e96ba..bd5ae5fe64c12adf0d811af60e2a5f7846761f2c 100644
 --- a/ui/base/l10n/l10n_util.cc
 +++ b/ui/base/l10n/l10n_util.cc
 @@ -33,6 +33,8 @@
@@ -298,7 +189,7 @@ index 5100c0ced98f8ed8953b6a0496784b69446e986a..ded1cddaad231cb7c96a0843eaa9ac19
    // GLib implements correct environment variable parsing with
    // the precedence order: LANGUAGE, LC_ALL, LC_MESSAGES and LANG.
 diff --git a/ui/base/resource/resource_bundle.cc b/ui/base/resource/resource_bundle.cc
-index 372d3302e133c266429ea49ac449055a8ab4de87..48b6286ea02350f3986da11b100e13472c580cc7 100644
+index 4f8234778831910e796eed393fb8b1abc525c864..34f6f45927fbb5af822729d3d7a00c3c138b181f 100644
 --- a/ui/base/resource/resource_bundle.cc
 +++ b/ui/base/resource/resource_bundle.cc
 @@ -10,6 +10,7 @@
@@ -341,7 +232,7 @@ index 372d3302e133c266429ea49ac449055a8ab4de87..48b6286ea02350f3986da11b100e1347
    }
  
    std::unique_ptr<DataPack> data_pack(new DataPack(SCALE_FACTOR_100P));
-@@ -779,12 +791,12 @@ void ResourceBundle::LoadChromeResources() {
+@@ -778,12 +790,12 @@ void ResourceBundle::LoadChromeResources() {
    // scale factor to gfx::ImageSkia::AddRepresentation.
    if (IsScaleFactorSupported(SCALE_FACTOR_100P)) {
      AddDataPackFromPath(GetResourcesPakFilePath(
@@ -356,7 +247,7 @@ index 372d3302e133c266429ea49ac449055a8ab4de87..48b6286ea02350f3986da11b100e1347
    }
  }
  
-@@ -807,7 +819,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
+@@ -806,7 +818,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
    std::unique_ptr<DataPack> data_pack(new DataPack(scale_factor));
    if (data_pack->LoadFromPath(pack_path)) {
      AddDataPack(std::move(data_pack));
@@ -365,6 +256,21 @@ index 372d3302e133c266429ea49ac449055a8ab4de87..48b6286ea02350f3986da11b100e1347
      LOG(ERROR) << "Failed to load " << pack_path.value()
                 << "\nSome features may not be available.";
    }
+diff --git a/ui/base/resource/resource_bundle_android.cc b/ui/base/resource/resource_bundle_android.cc
+index 534a1f092a56aa121ec16ac9cd38dd0c1abdc98a..27f7bcb444e7a135f7cfa1906221a9c2c5457d7d 100644
+--- a/ui/base/resource/resource_bundle_android.cc
++++ b/ui/base/resource/resource_bundle_android.cc
+@@ -83,8 +83,8 @@ std::unique_ptr<DataPack> LoadDataPackFromLocalePak(
+ void ResourceBundle::LoadCommonResources() {
+   base::FilePath disk_path;
+   PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &disk_path);
+-  disk_path = disk_path.AppendASCII("chrome_100_percent.pak");
+-  if (LoadFromApkOrFile("assets/chrome_100_percent.pak",
++  disk_path = disk_path.AppendASCII("vivaldi_100_percent.pak");
++  if (LoadFromApkOrFile("assets/vivaldi_100_percent.pak",
+                         &disk_path,
+                         &g_chrome_100_percent_fd,
+                         &g_chrome_100_percent_region)) {
 diff --git a/ui/base/resource/resource_bundle_mac.mm b/ui/base/resource/resource_bundle_mac.mm
 index 3b17113ddd461f0646780b5d73a11fa745a1e346..619e8496035a9b5035ae4ad90c5941a966cce3a8 100644
 --- a/ui/base/resource/resource_bundle_mac.mm
@@ -385,8 +291,69 @@ index 3b17113ddd461f0646780b5d73a11fa745a1e346..619e8496035a9b5035ae4ad90c5941a9
                          SCALE_FACTOR_200P);
    }
  }
+diff --git a/ui/events/blink/input_handler_proxy.cc b/ui/events/blink/input_handler_proxy.cc
+index e79247fd1c2f40901ea174b0e3988d455707bdac..2b71ce8f3ebf5fc0fb30669aaf0f025063d53de9 100644
+--- a/ui/events/blink/input_handler_proxy.cc
++++ b/ui/events/blink/input_handler_proxy.cc
+@@ -32,6 +32,8 @@
+ #include "ui/gfx/geometry/point_conversions.h"
+ #include "ui/latency/latency_info.h"
+ 
++#include "app/vivaldi_apptools.h"
++
+ using blink::WebFloatPoint;
+ using blink::WebFloatSize;
+ using blink::WebGestureEvent;
+@@ -654,7 +656,25 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleMouseWheel(
+           cc::EventListenerClass::kMouseWheel);
+   switch (properties) {
+     case cc::EventListenerProperties::kPassive:
++      // Last resort fix for 1.13 (VB-34466). Should be removed with proper
++      // handling in View layer before calling render code. ASAP.
++      if (vivaldi::IsVivaldiRunning()) {
++        int modifiers = wheel_event.GetModifiers() &
++            (WebInputEvent::kShiftKey | WebInputEvent::kControlKey |
++             WebInputEvent::kAltKey | WebInputEvent::kMetaKey |
++             WebInputEvent::kRightButtonDown);
++        if (modifiers == WebInputEvent::kAltKey ||
++            modifiers == WebInputEvent::kControlKey ||
++            modifiers == WebInputEvent::kMetaKey ||
++            modifiers == WebInputEvent::kRightButtonDown)
++        {
++          result = DID_NOT_HANDLE;
++        } else {
++          result = DID_HANDLE_NON_BLOCKING;
++        }
++      } else {
+       result = DID_HANDLE_NON_BLOCKING;
++      }
+       break;
+     case cc::EventListenerProperties::kBlockingAndPassive:
+     case cc::EventListenerProperties::kBlocking:
+diff --git a/ui/message_center/message_center_tray_unittest.cc b/ui/message_center/message_center_tray_unittest.cc
+index 0af1d19e541baea702efc138ac075205bc2a3f14..1340b440ade81cdbfcbb742aa3b4f3c622cbca3c 100644
+--- a/ui/message_center/message_center_tray_unittest.cc
++++ b/ui/message_center/message_center_tray_unittest.cc
+@@ -195,7 +195,7 @@ TEST_F(MessageCenterTrayTest, MessageCenterClosesPopupsWithChangeQueue) {
+   ASSERT_TRUE(message_center_tray_->popups_visible());
+   ASSERT_FALSE(message_center_tray_->message_center_visible());
+ 
+-  bool shown = message_center_tray_->ShowMessageCenterBubble();
++  bool shown = message_center_tray_->ShowMessageCenterBubble(false /* show_by_click */);
+   EXPECT_TRUE(shown);
+ 
+   ASSERT_FALSE(message_center_tray_->popups_visible());
+@@ -215,7 +215,7 @@ TEST_F(MessageCenterTrayTest, MessageCenterClosesPopupsWithChangeQueue) {
+   ASSERT_TRUE(message_center_tray_->popups_visible());
+   ASSERT_FALSE(message_center_tray_->message_center_visible());
+ 
+-  message_center_tray_->ShowMessageCenterBubble();
++  message_center_tray_->ShowMessageCenterBubble(false /* show_by_click */);
+   message_center_tray_->HideMessageCenterBubble();
+   ASSERT_FALSE(message_center_tray_->popups_visible());
+   ASSERT_FALSE(message_center_tray_->message_center_visible());
 diff --git a/ui/shell_dialogs/select_file_dialog_win.cc b/ui/shell_dialogs/select_file_dialog_win.cc
-index 411b8bd5b4e880c8ac6e5c4c8dd3f00456949254..edf8108987f1017c15bd12c4e8bda502deea63c4 100644
+index a6f07f070e16491fa7f243fddbe693dbc9da397b..49fab24b6d51c933efdaf551c4fb38edd5e3db1f 100644
 --- a/ui/shell_dialogs/select_file_dialog_win.cc
 +++ b/ui/shell_dialogs/select_file_dialog_win.cc
 @@ -588,6 +588,10 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
@@ -401,7 +368,7 @@ index 411b8bd5b4e880c8ac6e5c4c8dd3f00456949254..edf8108987f1017c15bd12c4e8bda502
    if (!filter.empty())
      ofn.GetOPENFILENAME()->lpstrFilter = filter.c_str();
 diff --git a/ui/views/bubble/bubble_dialog_delegate.cc b/ui/views/bubble/bubble_dialog_delegate.cc
-index b335b5bfc5d30afb3468940bb64d092fa9c0cbf1..6d4ff7e024bb70dd70d95e83d56642f54a8e6c7b 100644
+index 405ee89345e76f284f51aaba3d540fc9321f63f4..c313c610cb9073b90d72816e7ab576b09de9ff24 100644
 --- a/ui/views/bubble/bubble_dialog_delegate.cc
 +++ b/ui/views/bubble/bubble_dialog_delegate.cc
 @@ -26,6 +26,8 @@
@@ -434,7 +401,7 @@ index b335b5bfc5d30afb3468940bb64d092fa9c0cbf1..6d4ff7e024bb70dd70d95e83d56642f5
    bubble_delegate->set_adjust_if_offscreen(false);
  #endif
 diff --git a/ui/views/controls/menu/menu_controller.cc b/ui/views/controls/menu/menu_controller.cc
-index e9125d68fbd0db740b72384230eb0c45cb640005..9a0868585658bff8aeb8b3908d5d93f17e9d216e 100644
+index 9c0a30130cdc9406170648e7926926233b8659f2..482bad0fa3c0d5123f584d5574c09808733493e3 100644
 --- a/ui/views/controls/menu/menu_controller.cc
 +++ b/ui/views/controls/menu/menu_controller.cc
 @@ -493,6 +493,10 @@ void MenuController::Run(Widget* parent,
@@ -449,7 +416,7 @@ index e9125d68fbd0db740b72384230eb0c45cb640005..9a0868585658bff8aeb8b3908d5d93f1
    // If the menu has already been destroyed, no further cancellation is
    // needed.  We especially don't want to set the |exit_type_| to a lesser
 diff --git a/ui/views/controls/menu/menu_controller.h b/ui/views/controls/menu/menu_controller.h
-index 06fc19b5c90aa46447f088dd29f0249a033976eb..c5335bd41393752b1cdcb1802ba6fd0d8bd72753 100644
+index 2a58d296567008c0443478a6b55a7c31556f288f..7ff3d7356877e835f3cfce808fbcb7102abf00bb 100644
 --- a/ui/views/controls/menu/menu_controller.h
 +++ b/ui/views/controls/menu/menu_controller.h
 @@ -187,6 +187,8 @@ class VIEWS_EXPORT MenuController
@@ -484,7 +451,7 @@ index 49c34b6ab7a06e8bffc5fe4f7e6853bd4fba564e..d8818cddb5bd6a76067fc217932b032e
    // This is only needed on Windows.
    if (!show_mnemonics)
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
-index d53d9c72cc6bb3d3a1df672b1d856c7ee5b11cdd..0c978b48a8414afe59367c260ff7a1d4c7292b61 100644
+index 5df66d73019ea7afa261234807a867106e42504c..a1e42e558f2621f5cb905c1818d12c52166a86a0 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
 @@ -751,7 +751,8 @@ int DesktopDragDropClientAuraX11::StartDragAndDrop(
@@ -518,10 +485,10 @@ index d53d9c72cc6bb3d3a1df672b1d856c7ee5b11cdd..0c978b48a8414afe59367c260ff7a1d4
                              ui::DragDropTypes::DRAG_EVENT_SOURCE_COUNT);
    return ui::DragDropTypes::DRAG_NONE;
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h
-index b8792c2d855d06f3b6fdc9ae3ee046b99d8dfc1d..6d0a7b5ae1bcae244fd604701ae8e9e9e00d337e 100644
+index 53a8f237e0f662e4c76ba77cd0890c72e50cea2d..676e348ea12d1bfe95c96aa6d2b42d9da1b63520 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h
 +++ b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h
-@@ -86,7 +86,10 @@ class VIEWS_EXPORT DesktopDragDropClientAuraX11
+@@ -87,7 +87,10 @@ class VIEWS_EXPORT DesktopDragDropClientAuraX11
                         aura::Window* source_window,
                         const gfx::Point& screen_location,
                         int operation,
@@ -532,9 +499,9 @@ index b8792c2d855d06f3b6fdc9ae3ee046b99d8dfc1d..6d0a7b5ae1bcae244fd604701ae8e9e9
 +
    void DragCancel() override;
    bool IsDragDropInProgress() override;
- 
+   void AddObserver(aura::client::DragDropClientObserver* observer) override;
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc b/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc
-index 67fd2faa13f594ad7f1d0371a8408813be12b413..9c0ea8870ba19d02cfbab44c216760fe1bd1c303 100644
+index 1267b568a30c3fc3e6c0a008ea2773d944025a32..98cdcad009171381161c79ecb44a8460fdc58399 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc
 +++ b/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc
 @@ -12,6 +12,9 @@
@@ -579,10 +546,10 @@ index 67fd2faa13f594ad7f1d0371a8408813be12b413..9c0ea8870ba19d02cfbab44c216760fe
      effect = DROPEFFECT_NONE;
  
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.h b/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.h
-index 44c28416eea34b215415f5d4e0c9dc6eefe16b59..073fe97e2d89715966409ea770becc1ffc2e56c6 100644
+index 25845e08f222eac50c066f4bc2bec713751166b7..76e8cf2a02c9ebef9339bfed4b068d909b49c4cc 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.h
 +++ b/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.h
-@@ -33,7 +33,8 @@ class VIEWS_EXPORT DesktopDragDropClientWin
+@@ -39,7 +39,8 @@ class VIEWS_EXPORT DesktopDragDropClientWin
                         aura::Window* source_window,
                         const gfx::Point& screen_location,
                         int operation,
@@ -591,7 +558,7 @@ index 44c28416eea34b215415f5d4e0c9dc6eefe16b59..073fe97e2d89715966409ea770becc1f
 +                       bool& cancelled) override;
    void DragCancel() override;
    bool IsDragDropInProgress() override;
- 
+   void AddObserver(aura::client::DragDropClientObserver* observer) override;
 diff --git a/ui/views/widget/desktop_aura/desktop_screen_win.cc b/ui/views/widget/desktop_aura/desktop_screen_win.cc
 index f772f64d656e88cd2631e388f92e00a845f84f16..0c63ea93115b6e2e6a3d1af9023a77d69cfb3605 100644
 --- a/ui/views/widget/desktop_aura/desktop_screen_win.cc
@@ -606,7 +573,7 @@ index f772f64d656e88cd2631e388f92e00a845f84f16..0c63ea93115b6e2e6a3d1af9023a77d6
  }
  
 diff --git a/ui/views/widget/desktop_aura/desktop_screen_x11.cc b/ui/views/widget/desktop_aura/desktop_screen_x11.cc
-index c31728ca1b4630a6665033a9b31c3cf31ccc316a..d02d559f65931114ef906676200833a29af7be3e 100644
+index df8884e7de4d830ffccb141f804984b6670f14e8..fd350cf15a71eca98d41df926a35604deb663f95 100644
 --- a/ui/views/widget/desktop_aura/desktop_screen_x11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_screen_x11.cc
 @@ -181,6 +181,7 @@ display::Display DesktopScreenX11::GetDisplayNearestWindow(
@@ -626,7 +593,7 @@ index c31728ca1b4630a6665033a9b31c3cf31ccc316a..d02d559f65931114ef906676200833a2
    return GetPrimaryDisplay();
  }
 diff --git a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
-index e8a7a79c53421cf3b78a1358436e0ad38d1cfab2..9372c6a53870752b3ce74a2569e974d2e0486805 100644
+index 316cf855f7cf9cbeae6c0b3b1f8f88299bf8bb99..0bba9e94e147d9c8a946ee00582598b13b59ec67 100644
 --- a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
 @@ -66,6 +66,8 @@
@@ -638,7 +605,7 @@ index e8a7a79c53421cf3b78a1358436e0ad38d1cfab2..9372c6a53870752b3ce74a2569e974d2
  DECLARE_UI_CLASS_PROPERTY_TYPE(views::DesktopWindowTreeHostX11*);
  
  namespace views {
-@@ -1332,6 +1334,15 @@ void DesktopWindowTreeHostX11::InitX11Window(
+@@ -1336,6 +1338,15 @@ void DesktopWindowTreeHostX11::InitX11Window(
    swa.background_pixmap = None;
    swa.bit_gravity = NorthWestGravity;
  
@@ -654,7 +621,7 @@ index e8a7a79c53421cf3b78a1358436e0ad38d1cfab2..9372c6a53870752b3ce74a2569e974d2
    ::Atom window_type;
    switch (params.type) {
      case Widget::InitParams::TYPE_MENU:
-@@ -1747,6 +1758,22 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
+@@ -1760,6 +1771,22 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
    if (event->IsAnyButton() || event->IsMouseWheelEvent())
      FlashFrame(false);
  
@@ -678,10 +645,10 @@ index e8a7a79c53421cf3b78a1358436e0ad38d1cfab2..9372c6a53870752b3ce74a2569e974d2
      SendEventToSink(event);
    } else {
 diff --git a/ui/views/widget/native_widget_aura.cc b/ui/views/widget/native_widget_aura.cc
-index 90cd8ab604d766af28d608259352366cd75e5ec7..6b733b15195abd00a1a3dc2341165614406bafdb 100644
+index af6022f14ece6fa2e3a92847ba9d50a65ceba952..5654ccd9ff98e2c61b99c58943c8abd1453cdf96 100644
 --- a/ui/views/widget/native_widget_aura.cc
 +++ b/ui/views/widget/native_widget_aura.cc
-@@ -1161,6 +1161,8 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
+@@ -1164,6 +1164,8 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
      // matches our previous behaviour; the global stacking client would almost
      // always reattach the window to the same RootWindow.
      aura::Window* root_window = native_view->GetRootWindow();
@@ -691,7 +658,7 @@ index 90cd8ab604d766af28d608259352366cd75e5ec7..6b733b15195abd00a1a3dc2341165614
          native_view, root_window, root_window->GetBoundsInScreen());
    }
 diff --git a/ui/views/widget/widget.cc b/ui/views/widget/widget.cc
-index 32a50e8860a999193a1f5230de8d55a95377b4cb..6bf6f77418886ac7d0f525331fb5a6185ca4265b 100644
+index d37585c6fa39008ae3c62ab26cc81c9b137b0642..fda4359806599b44471c532c55e32fa58e64c9be 100644
 --- a/ui/views/widget/widget.cc
 +++ b/ui/views/widget/widget.cc
 @@ -135,6 +135,7 @@ Widget::InitParams::InitParams(Type type)
@@ -703,10 +670,10 @@ index 32a50e8860a999193a1f5230de8d55a95377b4cb..6bf6f77418886ac7d0f525331fb5a618
  
  Widget::InitParams::InitParams(const InitParams& other) = default;
 diff --git a/ui/views/widget/widget.h b/ui/views/widget/widget.h
-index 63fcb9d611e8389cfee257f2489fb253d86026f7..062203a9b681ab6357c465953e6f7fda4eefb030 100644
+index 6590ea90b805d70666b0100dea00050128317689..8be41583388d4de4c1c2c511433d09a9b406a714 100644
 --- a/ui/views/widget/widget.h
 +++ b/ui/views/widget/widget.h
-@@ -283,6 +283,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+@@ -284,6 +284,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
      // If true, forces the window to be shown in the taskbar, even for window
      // types that do not appear in the taskbar by default (popup and bubble).
      bool force_show_in_taskbar;
@@ -716,7 +683,7 @@ index 63fcb9d611e8389cfee257f2489fb253d86026f7..062203a9b681ab6357c465953e6f7fda
      // Only used by X11, for root level windows. Specifies the res_name and
      // res_class fields, respectively, of the WM_CLASS window property. Controls
      // window grouping and desktop file matching in Linux window managers.
-@@ -658,6 +661,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+@@ -655,6 +658,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
    void set_frame_type(FrameType frame_type) { frame_type_ = frame_type; }
    FrameType frame_type() const { return frame_type_; }
  
@@ -767,10 +734,10 @@ index 163e4b54b033c904237190867d81efef01f3c6bc..0f595a7fc23abbab8e925a087b2cd772
      }
      case Widget::InitParams::TYPE_CONTROL:
 diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
-index d8086d862d59db36e79440cd92e1bc2b86e59c2a..96cf4fade890d34f83821dec65a35e52a08f060b 100644
+index 9664c74627974a7690e426541f1aaab89710fafb..90f1101798dad36fe60928edf4f1f0338201a81e 100644
 --- a/ui/views/win/hwnd_message_handler.cc
 +++ b/ui/views/win/hwnd_message_handler.cc
-@@ -1221,8 +1221,12 @@ bool HWNDMessageHandler::GetClientAreaInsets(gfx::Insets* insets) const {
+@@ -1225,8 +1225,12 @@ bool HWNDMessageHandler::GetClientAreaInsets(gfx::Insets* insets) const {
      // Windows automatically adds a standard width border to all sides when a
      // window is maximized.
      int border_thickness = GetSystemMetrics(SM_CXSIZEFRAME);
