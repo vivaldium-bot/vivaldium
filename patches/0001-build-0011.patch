@@ -1,3 +1,292 @@
+diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..0a6d6e3683ed770bf5d488945688078ebe3c5c08
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock.pass.cpp
+@@ -0,0 +1,64 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// UNSUPPORTED: libcpp-has-no-threads
++// UNSUPPORTED: c++03, c++98, c++11, c++14
++
++// FLAKY_TEST.
++
++// <shared_mutex>
++
++// class shared_mutex;
++
++// void lock();
++
++#include <shared_mutex>
++#include <thread>
++#include <cstdlib>
++#include <cassert>
++
++#include "test_macros.h"
++
++std::shared_mutex m;
++
++typedef std::chrono::system_clock Clock;
++typedef Clock::time_point time_point;
++typedef Clock::duration duration;
++typedef std::chrono::milliseconds ms;
++typedef std::chrono::nanoseconds ns;
++
++ms WaitTime = ms(250);
++
++// Thread sanitizer causes more overhead and will sometimes cause this test
++// to fail. To prevent this we give Thread sanitizer more time to complete the
++// test.
++#if !defined(TEST_HAS_SANITIZERS)
++ms Tolerance = ms(50);
++#else
++ms Tolerance = ms(50 * 5);
++#endif
++
++void f()
++{
++    time_point t0 = Clock::now();
++    m.lock();
++    time_point t1 = Clock::now();
++    m.unlock();
++    ns d = t1 - t0 - WaitTime;
++    assert(d < Tolerance);  // within tolerance
++}
++
++int main()
++{
++    m.lock();
++    std::thread t(f);
++    std::this_thread::sleep_for(WaitTime);
++    m.unlock();
++    t.join();
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock_shared.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock_shared.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..b7edc50978d24f060974d228bdff0c64941e68b1
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock_shared.pass.cpp
+@@ -0,0 +1,88 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// UNSUPPORTED: libcpp-has-no-threads
++// UNSUPPORTED: c++03, c++98, c++11, c++14
++
++// FLAKY_TEST.
++
++// <shared_mutex>
++
++// class shared_mutex;
++
++// void lock_shared();
++
++#include <shared_mutex>
++#include <thread>
++#include <vector>
++#include <cstdlib>
++#include <cassert>
++
++#include "test_macros.h"
++
++std::shared_mutex m;
++
++typedef std::chrono::system_clock Clock;
++typedef Clock::time_point time_point;
++typedef Clock::duration duration;
++typedef std::chrono::milliseconds ms;
++typedef std::chrono::nanoseconds ns;
++
++ms WaitTime = ms(250);
++
++// Thread sanitizer causes more overhead and will sometimes cause this test
++// to fail. To prevent this we give Thread sanitizer more time to complete the
++// test.
++#if !defined(TEST_HAS_SANITIZERS)
++ms Tolerance = ms(50);
++#else
++ms Tolerance = ms(50 * 5);
++#endif
++
++void f()
++{
++    time_point t0 = Clock::now();
++    m.lock_shared();
++    time_point t1 = Clock::now();
++    m.unlock_shared();
++    ns d = t1 - t0 - WaitTime;
++    assert(d < Tolerance);  // within tolerance
++}
++
++void g()
++{
++    time_point t0 = Clock::now();
++    m.lock_shared();
++    time_point t1 = Clock::now();
++    m.unlock_shared();
++    ns d = t1 - t0;
++    assert(d < Tolerance);  // within tolerance
++}
++
++
++int main()
++{
++    m.lock();
++    std::vector<std::thread> v;
++    for (int i = 0; i < 5; ++i)
++        v.push_back(std::thread(f));
++    std::this_thread::sleep_for(WaitTime);
++    m.unlock();
++    for (auto& t : v)
++        t.join();
++    m.lock_shared();
++    for (auto& t : v)
++        t = std::thread(g);
++    std::thread q(f);
++    std::this_thread::sleep_for(WaitTime);
++    m.unlock_shared();
++    for (auto& t : v)
++        t.join();
++    q.join();
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f3ca24a4558622a40aebd51bff6113a17e04c6b
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock.pass.cpp
+@@ -0,0 +1,53 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// UNSUPPORTED: libcpp-has-no-threads
++// UNSUPPORTED: c++03, c++98, c++11, c++14
++
++// <shared_mutex>
++
++// class shared_mutex;
++
++// bool try_lock();
++
++#include <shared_mutex>
++#include <thread>
++#include <cstdlib>
++#include <cassert>
++
++std::shared_mutex m;
++
++typedef std::chrono::system_clock Clock;
++typedef Clock::time_point time_point;
++typedef Clock::duration duration;
++typedef std::chrono::milliseconds ms;
++typedef std::chrono::nanoseconds ns;
++
++void f()
++{
++    time_point t0 = Clock::now();
++    assert(!m.try_lock());
++    assert(!m.try_lock());
++    assert(!m.try_lock());
++    while(!m.try_lock())
++        ;
++    time_point t1 = Clock::now();
++    m.unlock();
++    ns d = t1 - t0 - ms(250);
++    assert(d < ms(200));  // within 200ms
++}
++
++int main()
++{
++    m.lock();
++    std::thread t(f);
++    std::this_thread::sleep_for(ms(250));
++    m.unlock();
++    t.join();
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock_shared.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock_shared.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..f615981bc94d2840a3491a5103cf131ed68aa6cf
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock_shared.pass.cpp
+@@ -0,0 +1,60 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// UNSUPPORTED: libcpp-has-no-threads
++// UNSUPPORTED: c++03, c++98, c++11, c++14
++
++// FLAKY_TEST.
++
++// <shared_mutex>
++
++// class shared_mutex;
++
++// bool try_lock_shared();
++
++#include <shared_mutex>
++#include <thread>
++#include <vector>
++#include <cstdlib>
++#include <cassert>
++
++std::shared_mutex m;
++
++typedef std::chrono::system_clock Clock;
++typedef Clock::time_point time_point;
++typedef Clock::duration duration;
++typedef std::chrono::milliseconds ms;
++typedef std::chrono::nanoseconds ns;
++
++void f()
++{
++    time_point t0 = Clock::now();
++    assert(!m.try_lock_shared());
++    assert(!m.try_lock_shared());
++    assert(!m.try_lock_shared());
++    while(!m.try_lock_shared())
++        ;
++    time_point t1 = Clock::now();
++    m.unlock_shared();
++    ns d = t1 - t0 - ms(250);
++    assert(d < ms(200));  // within 200ms
++}
++
++
++int main()
++{
++    m.lock();
++    std::vector<std::thread> v;
++    for (int i = 0; i < 5; ++i)
++        v.push_back(std::thread(f));
++    std::this_thread::sleep_for(ms(250));
++    m.unlock();
++    for (auto& t : v)
++        t.join();
++}
 diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.sharedtimedmutex.requirements/lit.local.cfg b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.sharedtimedmutex.requirements/lit.local.cfg
 new file mode 100644
 index 0000000000000000000000000000000000000000..fd3dc778c8ce37c79d043c271468e565c1b406b9
@@ -38227,355 +38516,4 @@ index 0000000000000000000000000000000000000000..7be76f4fa96a77ca9ba9d9b0614885c0
 +    test_is_empty<EmptyBase>();
 +    test_is_empty<StaticMember>();
 +    test_is_empty<bit_zero>();
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_final.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_final.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..5a440598bb020b0a58788d17e92a11b6755502ce
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_final.pass.cpp
-@@ -0,0 +1,62 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+// UNSUPPORTED: c++98, c++03, c++11
-+// type_traits
-+
-+// is_final
-+
-+#include <type_traits>
-+#include "test_macros.h"
-+
-+struct P final { };
-+union U1 { };
-+union U2 final { };
-+
-+template <class T>
-+void test_is_final()
-+{
-+    static_assert( std::is_final<T>::value, "");
-+    static_assert( std::is_final<const T>::value, "");
-+    static_assert( std::is_final<volatile T>::value, "");
-+    static_assert( std::is_final<const volatile T>::value, "");
-+#if TEST_STD_VER > 14
-+    static_assert( std::is_final_v<T>, "");
-+    static_assert( std::is_final_v<const T>, "");
-+    static_assert( std::is_final_v<volatile T>, "");
-+    static_assert( std::is_final_v<const volatile T>, "");
-+#endif
-+}
-+
-+template <class T>
-+void test_is_not_final()
-+{
-+    static_assert(!std::is_final<T>::value, "");
-+    static_assert(!std::is_final<const T>::value, "");
-+    static_assert(!std::is_final<volatile T>::value, "");
-+    static_assert(!std::is_final<const volatile T>::value, "");
-+#if TEST_STD_VER > 14
-+    static_assert(!std::is_final_v<T>, "");
-+    static_assert(!std::is_final_v<const T>, "");
-+    static_assert(!std::is_final_v<volatile T>, "");
-+    static_assert(!std::is_final_v<const volatile T>, "");
-+#endif
-+}
-+
-+int main ()
-+{
-+    test_is_not_final<int>();
-+    test_is_not_final<int*>();
-+    test_is_final    <P>();
-+    test_is_not_final<P*>();
-+    test_is_not_final<U1>();
-+    test_is_not_final<U1*>();
-+    test_is_final    <U2>();
-+    test_is_not_final<U2*>();
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_literal_type.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_literal_type.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..7ead5f5d5df954826c844650f115d3d30242888d
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_literal_type.pass.cpp
-@@ -0,0 +1,105 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+// type_traits
-+
-+// is_literal_type
-+
-+#include <type_traits>
-+#include <cstddef>       // for std::nullptr_t
-+#include "test_macros.h"
-+
-+template <class T>
-+void test_is_literal_type()
-+{
-+    static_assert( std::is_literal_type<T>::value, "");
-+    static_assert( std::is_literal_type<const T>::value, "");
-+    static_assert( std::is_literal_type<volatile T>::value, "");
-+    static_assert( std::is_literal_type<const volatile T>::value, "");
-+#if TEST_STD_VER > 14
-+    static_assert( std::is_literal_type_v<T>, "");
-+    static_assert( std::is_literal_type_v<const T>, "");
-+    static_assert( std::is_literal_type_v<volatile T>, "");
-+    static_assert( std::is_literal_type_v<const volatile T>, "");
-+#endif
-+}
-+
-+template <class T>
-+void test_is_not_literal_type()
-+{
-+    static_assert(!std::is_literal_type<T>::value, "");
-+    static_assert(!std::is_literal_type<const T>::value, "");
-+    static_assert(!std::is_literal_type<volatile T>::value, "");
-+    static_assert(!std::is_literal_type<const volatile T>::value, "");
-+#if TEST_STD_VER > 14
-+    static_assert(!std::is_literal_type_v<T>, "");
-+    static_assert(!std::is_literal_type_v<const T>, "");
-+    static_assert(!std::is_literal_type_v<volatile T>, "");
-+    static_assert(!std::is_literal_type_v<const volatile T>, "");
-+#endif
-+}
-+
-+class Empty
-+{
-+};
-+
-+class NotEmpty
-+{
-+    virtual ~NotEmpty();
-+};
-+
-+union Union {};
-+
-+struct bit_zero
-+{
-+    int :  0;
-+};
-+
-+class Abstract
-+{
-+    virtual ~Abstract() = 0;
-+};
-+
-+enum Enum {zero, one};
-+
-+typedef void (*FunctionPtr)();
-+
-+int main()
-+{
-+#if TEST_STD_VER >= 11
-+    test_is_literal_type<std::nullptr_t>();
-+#endif
-+
-+// Before C++14, void was not a literal type
-+// In C++14, cv-void is a literal type
-+#if TEST_STD_VER < 14
-+    test_is_not_literal_type<void>();
-+#else
-+    test_is_literal_type<void>();
-+#endif
-+
-+    test_is_literal_type<int>();
-+    test_is_literal_type<int*>();
-+    test_is_literal_type<const int*>();
-+    test_is_literal_type<int&>();
-+#if TEST_STD_VER >= 11
-+    test_is_literal_type<int&&>();
-+#endif
-+    test_is_literal_type<double>();
-+    test_is_literal_type<char[3]>();
-+    test_is_literal_type<char[]>();
-+    test_is_literal_type<Empty>();
-+    test_is_literal_type<bit_zero>();
-+    test_is_literal_type<Union>();
-+    test_is_literal_type<Enum>();
-+    test_is_literal_type<FunctionPtr>();
-+
-+    test_is_not_literal_type<NotEmpty>();
-+    test_is_not_literal_type<Abstract>();
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_move_assignable.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_move_assignable.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..6209bc7b148359bfe99051eb3cf0e5ff287d5440
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_move_assignable.pass.cpp
-@@ -0,0 +1,72 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+// type_traits
-+
-+// is_move_assignable
-+
-+#include <type_traits>
-+#include "test_macros.h"
-+
-+template <class T>
-+void test_is_move_assignable()
-+{
-+    static_assert(( std::is_move_assignable<T>::value), "");
-+#if TEST_STD_VER > 14
-+    static_assert(( std::is_move_assignable_v<T>), "");
-+#endif
-+}
-+
-+template <class T>
-+void test_is_not_move_assignable()
-+{
-+    static_assert((!std::is_move_assignable<T>::value), "");
-+#if TEST_STD_VER > 14
-+    static_assert((!std::is_move_assignable_v<T>), "");
-+#endif
-+}
-+
-+class Empty
-+{
-+};
-+
-+class NotEmpty
-+{
-+public:
-+    virtual ~NotEmpty();
-+};
-+
-+union Union {};
-+
-+struct bit_zero
-+{
-+    int :  0;
-+};
-+
-+struct A
-+{
-+    A();
-+};
-+
-+int main()
-+{
-+    test_is_move_assignable<int> ();
-+    test_is_move_assignable<A> ();
-+    test_is_move_assignable<bit_zero> ();
-+    test_is_move_assignable<Union> ();
-+    test_is_move_assignable<NotEmpty> ();
-+    test_is_move_assignable<Empty> ();
-+
-+#if TEST_STD_VER >= 11
-+    test_is_not_move_assignable<const int> ();
-+    test_is_not_move_assignable<int[]> ();
-+    test_is_not_move_assignable<int[3]> ();
-+#endif
-+    test_is_not_move_assignable<void> ();
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_move_constructible.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_move_constructible.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..e81f8d4f43c4bfbad6fd6e26c3ceaae0fd0e4682
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.unary/meta.unary.prop/is_move_constructible.pass.cpp
-@@ -0,0 +1,88 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+// type_traits
-+
-+// is_move_constructible
-+
-+#include <type_traits>
-+#include "test_macros.h"
-+
-+template <class T>
-+void test_is_move_constructible()
-+{
-+    static_assert( std::is_move_constructible<T>::value, "");
-+#if TEST_STD_VER > 14
-+    static_assert( std::is_move_constructible_v<T>, "");
-+#endif
-+}
-+
-+template <class T>
-+void test_is_not_move_constructible()
-+{
-+    static_assert(!std::is_move_constructible<T>::value, "");
-+#if TEST_STD_VER > 14
-+    static_assert(!std::is_move_constructible_v<T>, "");
-+#endif
-+}
-+
-+class Empty
-+{
-+};
-+
-+class NotEmpty
-+{
-+public:
-+    virtual ~NotEmpty();
-+};
-+
-+union Union {};
-+
-+struct bit_zero
-+{
-+    int :  0;
-+};
-+
-+class Abstract
-+{
-+public:
-+    virtual ~Abstract() = 0;
-+};
-+
-+struct A
-+{
-+    A(const A&);
-+};
-+
-+struct B
-+{
-+#if TEST_STD_VER >= 11
-+    B(B&&);
-+#endif
-+};
-+
-+int main()
-+{
-+    test_is_not_move_constructible<char[3]>();
-+    test_is_not_move_constructible<char[]>();
-+    test_is_not_move_constructible<void>();
-+    test_is_not_move_constructible<Abstract>();
-+
-+    test_is_move_constructible<A>();
-+    test_is_move_constructible<int&>();
-+    test_is_move_constructible<Union>();
-+    test_is_move_constructible<Empty>();
-+    test_is_move_constructible<int>();
-+    test_is_move_constructible<double>();
-+    test_is_move_constructible<int*>();
-+    test_is_move_constructible<const int*>();
-+    test_is_move_constructible<NotEmpty>();
-+    test_is_move_constructible<bit_zero>();
-+    test_is_move_constructible<B>();
 +}

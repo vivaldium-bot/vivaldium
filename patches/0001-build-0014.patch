@@ -1,3 +1,1908 @@
+diff --git a/tools/gyp/test/actions/src/subdir1/program.c b/tools/gyp/test/actions/src/subdir1/program.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..c0931534ebb5497599b3885a5f0027fe34963b8b
+--- /dev/null
++++ b/tools/gyp/test/actions/src/subdir1/program.c
+@@ -0,0 +1,12 @@
++#include <stdio.h>
++
++extern void prog1(void);
++extern void prog2(void);
++
++int main(void)
++{
++  printf("Hello from program.c\n");
++  prog1();
++  prog2();
++  return 0;
++}
+diff --git a/tools/gyp/test/actions/src/subdir2/make-file.py b/tools/gyp/test/actions/src/subdir2/make-file.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..fff0653144745a9837ac4d3e6b109655665557c7
+--- /dev/null
++++ b/tools/gyp/test/actions/src/subdir2/make-file.py
+@@ -0,0 +1,11 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++contents = "Hello from make-file.py\n"
++
++open(sys.argv[1], 'wb').write(contents)
+diff --git a/tools/gyp/test/actions/src/subdir2/none.gyp b/tools/gyp/test/actions/src/subdir2/none.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..2caa97d55c90e0f6b2871d4af583b0aeac45cae6
+--- /dev/null
++++ b/tools/gyp/test/actions/src/subdir2/none.gyp
+@@ -0,0 +1,33 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'file',
++      'type': 'none',
++      'msvs_cygwin_shell': 0,
++      'actions': [
++        {
++          'action_name': 'make-file',
++          'inputs': [
++            'make-file.py',
++          ],
++          'outputs': [
++            'file.out',
++            # TODO:  enhance testing infrastructure to test this
++            # without having to hard-code the intermediate dir paths.
++            #'<(INTERMEDIATE_DIR)/file.out',
++          ],
++          'action': [
++            'python', '<(_inputs)', '<@(_outputs)',
++          ],
++          'process_outputs_as_sources': 1,
++          # Allows the test to run without hermetic cygwin on windows.
++          'msvs_cygwin_shell': 0,
++        }
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/actions/src/subdir3/generate_main.py b/tools/gyp/test/actions/src/subdir3/generate_main.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..804d38df3181ac934ac1f8e02050c3f4576fc241
+--- /dev/null
++++ b/tools/gyp/test/actions/src/subdir3/generate_main.py
+@@ -0,0 +1,21 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++contents = """
++#include <stdio.h>
++
++int main(void)
++{
++  printf("Hello from generate_main.py\\n");
++  return 0;
++}
++"""
++
++open(sys.argv[1], 'w').write(contents)
++
++sys.exit(0)
+diff --git a/tools/gyp/test/actions/src/subdir3/null_input.gyp b/tools/gyp/test/actions/src/subdir3/null_input.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..9b0bea5fdb40b818141cf72ef9ca06247f0a60e6
+--- /dev/null
++++ b/tools/gyp/test/actions/src/subdir3/null_input.gyp
+@@ -0,0 +1,29 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'null_input',
++      'type': 'executable',
++      'msvs_cygwin_shell': 0,
++      'actions': [
++        {
++          'action_name': 'generate_main',
++          'process_outputs_as_sources': 1,
++          'inputs': [],
++          'outputs': [
++            '<(INTERMEDIATE_DIR)/main.c',
++          ],
++          'action': [
++            # TODO:  we can't just use <(_outputs) here?!
++            'python', 'generate_main.py', '<(INTERMEDIATE_DIR)/main.c',
++          ],
++          # Allows the test to run without hermetic cygwin on windows.
++          'msvs_cygwin_shell': 0,
++        },
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/additional-targets/gyptest-additional.py b/tools/gyp/test/additional-targets/gyptest-additional.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..466283e55cb89363438d60cdcf535caca10da3fa
+--- /dev/null
++++ b/tools/gyp/test/additional-targets/gyptest-additional.py
+@@ -0,0 +1,63 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies simple actions when using an explicit build target of 'all'.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp()
++
++test.run_gyp('all.gyp',
++             '-G', 'xcode_ninja_target_pattern=^all_targets$',
++             chdir='src')
++
++test.relocate('src', 'relocate/src')
++
++# Build all.
++test.build('all.gyp', chdir='relocate/src')
++
++if test.format=='xcode':
++  chdir = 'relocate/src/dir1'
++else:
++  chdir = 'relocate/src'
++
++# Output is as expected.
++file_content = 'Hello from emit.py\n'
++test.built_file_must_match('out2.txt', file_content, chdir=chdir)
++
++test.built_file_must_not_exist('out.txt', chdir='relocate/src')
++test.built_file_must_not_exist('foolib1',
++                               type=test.SHARED_LIB,
++                               chdir=chdir)
++
++# xcode-ninja doesn't generate separate workspaces for sub-gyps by design
++if test.format == 'xcode-ninja':
++  test.pass_test()
++
++# TODO(mmoss) Make consistent with msvs, with 'dir1' before 'out/Default'?
++if test.format in ('make', 'ninja', 'cmake'):
++  chdir='relocate/src'
++else:
++  chdir='relocate/src/dir1'
++
++# Build the action explicitly.
++test.build('actions.gyp', 'action1_target', chdir=chdir)
++
++# Check that things got run.
++file_content = 'Hello from emit.py\n'
++test.built_file_must_exist('out.txt', chdir=chdir)
++
++# Build the shared library explicitly.
++test.build('actions.gyp', 'foolib1', chdir=chdir)
++
++test.built_file_must_exist('foolib1',
++                           type=test.SHARED_LIB,
++                           chdir=chdir,
++                           subdir='dir1')
++
++test.pass_test()
+diff --git a/tools/gyp/test/additional-targets/src/all.gyp b/tools/gyp/test/additional-targets/src/all.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..21c83080aaffef48c89be904d210b955646335e2
+--- /dev/null
++++ b/tools/gyp/test/additional-targets/src/all.gyp
+@@ -0,0 +1,13 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'all_targets',
++      'type': 'none',
++      'dependencies': ['dir1/actions.gyp:*'],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/additional-targets/src/dir1/actions.gyp b/tools/gyp/test/additional-targets/src/dir1/actions.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..5089c809131cb97efa0550fd3991be9d6ec113a6
+--- /dev/null
++++ b/tools/gyp/test/additional-targets/src/dir1/actions.gyp
+@@ -0,0 +1,56 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'action1_target',
++      'type': 'none',
++      'suppress_wildcard': 1,
++      'actions': [
++        {
++          'action_name': 'action1',
++          'inputs': [
++            'emit.py',
++          ],
++          'outputs': [
++            '<(PRODUCT_DIR)/out.txt',
++          ],
++          'action': ['python', 'emit.py', '<(PRODUCT_DIR)/out.txt'],
++          'msvs_cygwin_shell': 0,
++        },
++      ],
++    },
++    {
++      'target_name': 'action2_target',
++      'type': 'none',
++      'actions': [
++        {
++          'action_name': 'action2',
++          'inputs': [
++            'emit.py',
++          ],
++          'outputs': [
++            '<(PRODUCT_DIR)/out2.txt',
++          ],
++          'action': ['python', 'emit.py', '<(PRODUCT_DIR)/out2.txt'],
++          'msvs_cygwin_shell': 0,
++        },
++      ],
++    },
++    {
++      'target_name': 'foolib1',
++      'type': 'shared_library',
++      'suppress_wildcard': 1,
++      'sources': ['lib1.c'],
++    },
++  ],
++  'conditions': [
++    ['OS=="linux"', {
++      'target_defaults': {
++        'cflags': ['-fPIC'],
++      },
++    }],
++  ],
++}
+diff --git a/tools/gyp/test/additional-targets/src/dir1/emit.py b/tools/gyp/test/additional-targets/src/dir1/emit.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..fd3138738ed4a8bdba65edfab2f5159906b108cf
+--- /dev/null
++++ b/tools/gyp/test/additional-targets/src/dir1/emit.py
+@@ -0,0 +1,11 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import sys
++
++f = open(sys.argv[1], 'wb')
++f.write('Hello from emit.py\n')
++f.close()
+diff --git a/tools/gyp/test/additional-targets/src/dir1/lib1.c b/tools/gyp/test/additional-targets/src/dir1/lib1.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..df4cb10f796e29858e9c989abc50357d4bec19d8
+--- /dev/null
++++ b/tools/gyp/test/additional-targets/src/dir1/lib1.c
+@@ -0,0 +1,6 @@
++#ifdef _WIN32
++__declspec(dllexport)
++#endif
++int func1(void) {
++  return 42;
++}
+diff --git a/tools/gyp/test/analyzer/common.gypi b/tools/gyp/test/analyzer/common.gypi
+new file mode 100644
+index 0000000000000000000000000000000000000000..7c664e40dabf4d407a239ca3c1613b9ebab9c886
+--- /dev/null
++++ b/tools/gyp/test/analyzer/common.gypi
+@@ -0,0 +1,6 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++}
+diff --git a/tools/gyp/test/analyzer/gyptest-analyzer.py b/tools/gyp/test/analyzer/gyptest-analyzer.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..72de21813c1f47fe5a9af6ba199c2e8421b7c893
+--- /dev/null
++++ b/tools/gyp/test/analyzer/gyptest-analyzer.py
+@@ -0,0 +1,425 @@
++#!/usr/bin/env python
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""Tests for analyzer
++"""
++
++import json
++import TestGyp
++
++found = 'Found dependency'
++found_all = 'Found dependency (all)'
++not_found = 'No dependencies'
++
++
++def _CreateConfigFile(files, additional_compile_targets, test_targets=[]):
++  """Creates the analyzer config file, which is used as the input to analyzer.
++  See description of analyzer.py for description of the arguments."""
++  f = open('test_file', 'w')
++  to_write = {'files': files,
++              'test_targets': test_targets,
++              'additional_compile_targets': additional_compile_targets }
++  json.dump(to_write, f)
++  f.close()
++
++
++def _CreateBogusConfigFile():
++  f = open('test_file','w')
++  f.write('bogus')
++  f.close()
++
++
++def _ReadOutputFileContents():
++  f = open('analyzer_output', 'r')
++  result = json.load(f)
++  f.close()
++  return result
++
++
++# NOTE: this would be clearer if it subclassed TestGypCustom, but that trips
++# over a bug in pylint (E1002).
++test = TestGyp.TestGypCustom(format='analyzer')
++
++def CommonArgs():
++  return ('-Gconfig_path=test_file',
++           '-Ganalyzer_output_path=analyzer_output')
++
++
++def run_analyzer(*args, **kw):
++  """Runs the test specifying a particular config and output path."""
++  args += CommonArgs()
++  test.run_gyp('test.gyp', *args, **kw)
++
++
++def run_analyzer2(*args, **kw):
++  """Same as run_analyzer(), but passes in test2.gyp instead of test.gyp."""
++  args += CommonArgs()
++  test.run_gyp('test2.gyp', *args, **kw)
++
++
++def run_analyzer3(*args, **kw):
++  """Same as run_analyzer(), but passes in test3.gyp instead of test.gyp."""
++  args += CommonArgs()
++  test.run_gyp('test3.gyp', *args, **kw)
++
++
++def run_analyzer4(*args, **kw):
++  """Same as run_analyzer(), but passes in test3.gyp instead of test.gyp."""
++  args += CommonArgs()
++  test.run_gyp('test4.gyp', *args, **kw)
++
++
++def EnsureContains(matched=False, compile_targets=set(), test_targets=set()):
++  """Verifies output contains |compile_targets|."""
++  result = _ReadOutputFileContents()
++  if 'error' in result:
++    print 'unexpected error', result.get('error')
++    test.fail_test()
++
++  if 'invalid_targets' in result:
++    print 'unexpected invalid_targets', result.get('invalid_targets')
++    test.fail_test()
++
++  actual_compile_targets = set(result['compile_targets'])
++  if actual_compile_targets != compile_targets:
++    print 'actual compile_targets:', actual_compile_targets, \
++           '\nexpected compile_targets:', compile_targets
++    test.fail_test()
++
++  actual_test_targets = set(result['test_targets'])
++  if actual_test_targets != test_targets:
++    print 'actual test_targets:', actual_test_targets, \
++           '\nexpected test_targets:', test_targets
++    test.fail_test()
++
++  if matched and result['status'] != found:
++    print 'expected', found, 'got', result['status']
++    test.fail_test()
++  elif not matched and result['status'] != not_found:
++    print 'expected', not_found, 'got', result['status']
++    test.fail_test()
++
++
++def EnsureMatchedAll(compile_targets, test_targets=set()):
++  result = _ReadOutputFileContents()
++  if 'error' in result:
++    print 'unexpected error', result.get('error')
++    test.fail_test()
++
++  if 'invalid_targets' in result:
++    print 'unexpected invalid_targets', result.get('invalid_targets')
++    test.fail_test()
++
++  if result['status'] != found_all:
++    print 'expected', found_all, 'got', result['status']
++    test.fail_test()
++
++  actual_compile_targets = set(result['compile_targets'])
++  if actual_compile_targets != compile_targets:
++    print ('actual compile_targets:', actual_compile_targets,
++           '\nexpected compile_targets:', compile_targets)
++    test.fail_test()
++
++  actual_test_targets = set(result['test_targets'])
++  if actual_test_targets != test_targets:
++    print ('actual test_targets:', actual_test_targets,
++           '\nexpected test_targets:', test_targets)
++    test.fail_test()
++
++
++def EnsureError(expected_error_string):
++  """Verifies output contains the error string."""
++  result = _ReadOutputFileContents()
++  if result.get('error', '').find(expected_error_string) == -1:
++    print 'actual error:', result.get('error', ''), '\nexpected error:', \
++        expected_error_string
++    test.fail_test()
++
++
++def EnsureStdoutContains(expected_error_string):
++  if test.stdout().find(expected_error_string) == -1:
++    print 'actual stdout:', test.stdout(), '\nexpected stdout:', \
++        expected_error_string
++    test.fail_test()
++
++
++def EnsureInvalidTargets(expected_invalid_targets):
++  """Verifies output contains invalid_targets."""
++  result = _ReadOutputFileContents()
++  actual_invalid_targets = set(result['invalid_targets'])
++  if actual_invalid_targets != expected_invalid_targets:
++    print 'actual invalid_targets:', actual_invalid_targets, \
++        '\nexpected :', expected_invalid_targets
++    test.fail_test()
++
++
++# Two targets, A and B (both static_libraries) and A depends upon B. If a file
++# in B changes, then both A and B are output. It is not strictly necessary that
++# A is compiled in this case, only B.
++_CreateConfigFile(['b.c'], ['all'])
++test.run_gyp('static_library_test.gyp', *CommonArgs())
++EnsureContains(matched=True, compile_targets={'a' ,'b'})
++
++# Verifies config_path must be specified.
++test.run_gyp('test.gyp')
++EnsureStdoutContains('Must specify files to analyze via config_path')
++
++# Verifies config_path must point to a valid file.
++test.run_gyp('test.gyp', '-Gconfig_path=bogus_file',
++             '-Ganalyzer_output_path=analyzer_output')
++EnsureError('Unable to open file bogus_file')
++
++# Verify 'invalid_targets' is present when bad target is specified.
++_CreateConfigFile(['exe2.c'], ['bad_target'])
++run_analyzer()
++EnsureInvalidTargets({'bad_target'})
++
++# Verifies config_path must point to a valid json file.
++_CreateBogusConfigFile()
++run_analyzer()
++EnsureError('Unable to parse config file test_file')
++
++# Trivial test of a source.
++_CreateConfigFile(['foo.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe'})
++
++# Conditional source that is excluded.
++_CreateConfigFile(['conditional_source.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=False)
++
++# Conditional source that is included by way of argument.
++_CreateConfigFile(['conditional_source.c'], ['all'])
++run_analyzer('-Dtest_variable=1')
++EnsureContains(matched=True, compile_targets={'exe'})
++
++# Two unknown files.
++_CreateConfigFile(['unknown1.c', 'unoknow2.cc'], ['all'])
++run_analyzer()
++EnsureContains()
++
++# Two unknown files.
++_CreateConfigFile(['unknown1.c', 'subdir/subdir_sourcex.c'], ['all'])
++run_analyzer()
++EnsureContains()
++
++# Included dependency
++_CreateConfigFile(['unknown1.c', 'subdir/subdir_source.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe', 'exe3'})
++
++# Included inputs to actions.
++_CreateConfigFile(['action_input.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe'})
++
++# Don't consider outputs.
++_CreateConfigFile(['action_output.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=False)
++
++# Rule inputs.
++_CreateConfigFile(['rule_input.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe'})
++
++# Ignore path specified with PRODUCT_DIR.
++_CreateConfigFile(['product_dir_input.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=False)
++
++# Path specified via a variable.
++_CreateConfigFile(['subdir/subdir_source2.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe'})
++
++# Verifies paths with // are fixed up correctly.
++_CreateConfigFile(['parent_source.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe', 'exe3'})
++
++# Verifies relative paths are resolved correctly.
++_CreateConfigFile(['subdir/subdir_source.h'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe'})
++
++# Verifies relative paths in inputs are resolved correctly.
++_CreateConfigFile(['rel_path1.h'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe'})
++
++# Various permutations when passing in targets.
++_CreateConfigFile(['exe2.c', 'subdir/subdir2b_source.c'],
++                  ['all'], ['exe', 'exe3'])
++run_analyzer()
++EnsureContains(matched=True, test_targets={'exe3'},
++               compile_targets={'exe2', 'exe3'})
++
++_CreateConfigFile(['exe2.c', 'subdir/subdir2b_source.c'], ['all'], ['exe'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe2', 'exe3'})
++
++# Verifies duplicates are ignored.
++_CreateConfigFile(['exe2.c', 'subdir/subdir2b_source.c'], ['all'],
++                  ['exe', 'exe'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe2', 'exe3'})
++
++_CreateConfigFile(['exe2.c'], ['all'], ['exe'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe2'})
++
++_CreateConfigFile(['exe2.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe2'})
++
++_CreateConfigFile(['subdir/subdir2b_source.c', 'exe2.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe2', 'exe3'})
++
++_CreateConfigFile(['subdir/subdir2b_source.c'], ['all'], ['exe3'])
++run_analyzer()
++EnsureContains(matched=True, test_targets={'exe3'}, compile_targets={'exe3'})
++
++_CreateConfigFile(['exe2.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe2'})
++
++_CreateConfigFile(['foo.c'], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe'})
++
++# Assertions when modifying build (gyp/gypi) files, especially when said files
++# are included.
++_CreateConfigFile(['subdir2/d.cc'], ['all'], ['exe', 'exe2', 'foo', 'exe3'])
++run_analyzer2()
++EnsureContains(matched=True, test_targets={'exe', 'foo'},
++               compile_targets={'exe', 'foo'})
++
++_CreateConfigFile(['subdir2/subdir.includes.gypi'], ['all'],
++                ['exe', 'exe2', 'foo', 'exe3'])
++run_analyzer2()
++EnsureContains(matched=True, test_targets={'exe', 'foo'},
++               compile_targets={'exe', 'foo'})
++
++_CreateConfigFile(['subdir2/subdir.gyp'], ['all'],
++                  ['exe', 'exe2', 'foo', 'exe3'])
++run_analyzer2()
++EnsureContains(matched=True, test_targets={'exe', 'foo'},
++               compile_targets={'exe', 'foo'})
++
++_CreateConfigFile(['test2.includes.gypi'], ['all'],
++                  ['exe', 'exe2', 'foo', 'exe3'])
++run_analyzer2()
++EnsureContains(matched=True, test_targets={'exe', 'exe2', 'exe3'},
++               compile_targets={'exe', 'exe2', 'exe3'})
++
++# Verify modifying a file included makes all targets dirty.
++_CreateConfigFile(['common.gypi'], ['all'], ['exe', 'exe2', 'foo', 'exe3'])
++run_analyzer2('-Icommon.gypi')
++EnsureMatchedAll({'all', 'exe', 'exe2', 'foo', 'exe3'},
++                 {'exe', 'exe2', 'foo', 'exe3'})
++
++# Assertions from test3.gyp.
++_CreateConfigFile(['d.c', 'f.c'], ['all'], ['a'])
++run_analyzer3()
++EnsureContains(matched=True, test_targets={'a'}, compile_targets={'a', 'b'})
++
++_CreateConfigFile(['f.c'], ['all'], ['a'])
++run_analyzer3()
++EnsureContains(matched=True, test_targets={'a'}, compile_targets={'a', 'b'})
++
++_CreateConfigFile(['f.c'], ['all'])
++run_analyzer3()
++EnsureContains(matched=True, compile_targets={'a', 'b'})
++
++_CreateConfigFile(['c.c', 'e.c'], ['all'])
++run_analyzer3()
++EnsureContains(matched=True, compile_targets={'a', 'b', 'c', 'e'})
++
++_CreateConfigFile(['d.c'], ['all'], ['a'])
++run_analyzer3()
++EnsureContains(matched=True, test_targets={'a'}, compile_targets={'a', 'b'})
++
++_CreateConfigFile(['a.c'], ['all'], ['a', 'b'])
++run_analyzer3()
++EnsureContains(matched=True, test_targets={'a'}, compile_targets={'a'})
++
++_CreateConfigFile(['a.c'], ['all'], ['a', 'b'])
++run_analyzer3()
++EnsureContains(matched=True, test_targets={'a'}, compile_targets={'a'})
++
++_CreateConfigFile(['d.c'], ['all'], ['a', 'b'])
++run_analyzer3()
++EnsureContains(matched=True, test_targets={'a', 'b'},
++               compile_targets={'a', 'b'})
++
++_CreateConfigFile(['f.c'], ['all'], ['a'])
++run_analyzer3()
++EnsureContains(matched=True, test_targets={'a'}, compile_targets={'a', 'b'})
++
++_CreateConfigFile(['a.c'], ['all'], ['a'])
++run_analyzer3()
++EnsureContains(matched=True, test_targets={'a'}, compile_targets={'a'})
++
++_CreateConfigFile(['a.c'], ['all'])
++run_analyzer3()
++EnsureContains(matched=True, compile_targets={'a'})
++
++_CreateConfigFile(['d.c'], ['all'])
++run_analyzer3()
++EnsureContains(matched=True, compile_targets={'a', 'b'})
++
++# Assertions around test4.gyp.
++_CreateConfigFile(['f.c'], ['all'])
++run_analyzer4()
++EnsureContains(matched=True, compile_targets={'e', 'f'})
++
++_CreateConfigFile(['d.c'], ['all'])
++run_analyzer4()
++EnsureContains(matched=True, compile_targets={'a', 'b', 'c', 'd'})
++
++_CreateConfigFile(['i.c'], ['all'])
++run_analyzer4()
++EnsureContains(matched=True, compile_targets={'h', 'i'})
++
++# Assertions where 'all' is not supplied in compile_targets.
++
++_CreateConfigFile(['exe2.c'], [], ['exe2'])
++run_analyzer()
++EnsureContains(matched=True, test_targets={'exe2'}, compile_targets={'exe2'})
++
++_CreateConfigFile(['exe20.c'], [], ['exe2'])
++run_analyzer()
++EnsureContains(matched=False)
++
++
++_CreateConfigFile(['exe2.c', 'exe3.c'], [], ['exe2', 'exe3'])
++run_analyzer()
++EnsureContains(matched=True, test_targets={'exe2', 'exe3'},
++               compile_targets={'exe2', 'exe3'})
++
++_CreateConfigFile(['exe2.c', 'exe3.c'], ['exe3'], ['exe2'])
++run_analyzer()
++EnsureContains(matched=True, test_targets={'exe2'},
++               compile_targets={'exe2', 'exe3'})
++
++_CreateConfigFile(['exe3.c'], ['exe2'], ['exe2'])
++run_analyzer()
++EnsureContains(matched=False)
++
++# Assertions with 'all' listed as a test_target.
++_CreateConfigFile(['exe3.c'], [], ['all'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe3', 'all'},
++               test_targets={'all'})
++
++_CreateConfigFile(['exe2.c'], [], ['all', 'exe2'])
++run_analyzer()
++EnsureContains(matched=True, compile_targets={'exe2', 'all'},
++               test_targets={'all', 'exe2'})
++
++test.pass_test()
+diff --git a/tools/gyp/test/analyzer/static_library_test.gyp b/tools/gyp/test/analyzer/static_library_test.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..2c8e4bd826bb5e16c3cd3d8ade28392523862180
+--- /dev/null
++++ b/tools/gyp/test/analyzer/static_library_test.gyp
+@@ -0,0 +1,34 @@
++# Copyright 2015 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# These gyp files create the following dependencies:
++#
++# test.gyp:
++#   #a -> b
++#     a.c
++#   #b
++#     b.c
++#  a and b are static libraries.
++
++{
++  'targets': [
++    {
++      'target_name': 'a',
++      'type': 'static_library',
++      'sources': [
++        'a.c',
++      ],
++      'dependencies': [
++        'b',
++      ],
++    },
++    {
++      'target_name': 'b',
++      'type': 'static_library',
++      'sources': [
++        'b.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/subdir/subdir.gyp b/tools/gyp/test/analyzer/subdir/subdir.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..bfa2df48e15b07dd6b39665279c04ff712f5d236
+--- /dev/null
++++ b/tools/gyp/test/analyzer/subdir/subdir.gyp
+@@ -0,0 +1,36 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'variables': {
++    'trailing_dir_path': '../',
++   },
++  'targets': [
++    {
++      'target_name': 'foo',
++      'type': 'static_library',
++      'sources': [
++        'subdir_source.c',
++        '<(trailing_dir_path)/parent_source.c',
++      ],
++    },
++    {
++      'target_name': 'subdir2a',
++      'type': 'static_library',
++      'sources': [
++        'subdir2_source.c',
++      ],
++      'dependencies': [
++        'subdir2b',
++      ],
++    },
++    {
++      'target_name': 'subdir2b',
++      'type': 'static_library',
++      'sources': [
++        'subdir2b_source.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/subdir/subdir2/subdir2.gyp b/tools/gyp/test/analyzer/subdir/subdir2/subdir2.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..e5aaa92b18c6b4e92eca3981a6a19350dc024d39
+--- /dev/null
++++ b/tools/gyp/test/analyzer/subdir/subdir2/subdir2.gyp
+@@ -0,0 +1,15 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'subdir2',
++      'type': 'static_library',
++      'sources': [
++        '../subdir_source.h',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/subdir2/subdir.gyp b/tools/gyp/test/analyzer/subdir2/subdir.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..d6c709c9ef44082704ad5aef356d2e57e8f90b56
+--- /dev/null
++++ b/tools/gyp/test/analyzer/subdir2/subdir.gyp
+@@ -0,0 +1,18 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'foo',
++      'type': 'static_library',
++      'sources': [
++        'subdir_source.c',
++      ],
++      'includes': [
++        'subdir.includes.gypi',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/subdir2/subdir.includes.gypi b/tools/gyp/test/analyzer/subdir2/subdir.includes.gypi
+new file mode 100644
+index 0000000000000000000000000000000000000000..324e92bcd43c021e91964468f07e54ca14465e12
+--- /dev/null
++++ b/tools/gyp/test/analyzer/subdir2/subdir.includes.gypi
+@@ -0,0 +1,9 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'sources': [
++    'd.cc'
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/test.gyp b/tools/gyp/test/analyzer/test.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..c25ca73bff80ddfaf13e32f921f1832933dda771
+--- /dev/null
++++ b/tools/gyp/test/analyzer/test.gyp
+@@ -0,0 +1,114 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# These gyp files create the following dependencies:
++#
++# test.gyp:
++#   #exe -> subdir/subdir.gyp#foo, subdir/subdir2/subdir2.gyp#subdir2
++#     foo.c
++#     subdir/subdir_source2.c
++#     conditional_source.c (if test_variable==1)
++#     action_input.c
++#     action_output.c
++#     rule_input.c
++#     rule_output.pdf
++#   #exe2
++#     exe2.c
++#   #exe3 -> subdir/subdir.gyp#foo, subdir/subdir.gyp#subdir2a
++#     exe3.c
++#   #allx (type none) -> exe, exe3
++# 
++# subdir/subdir.gyp
++#   #foo
++#     subdir/subdir_source.c
++#     parent_source.c
++#   #subdir2a -> subdir2b
++#     subdir/subdir2_source.c
++#   #subdir2b
++#     subdir/subdir2b_source.c
++# 
++# subdir/subdir2/subdir2.gyp
++#   #subdir2
++#     subdir/subdir_source.h
++
++{
++  'variables': {
++    'test_variable%': 0,
++    'variable_path': 'subdir',
++   },
++  'targets': [
++    {
++      'target_name': 'exe',
++      'type': 'executable',
++      'dependencies': [
++        'subdir/subdir.gyp:foo',
++        'subdir/subdir2/subdir2.gyp:subdir2',
++      ],
++      'sources': [
++        'foo.c',
++        '<(variable_path)/subdir_source2.c',
++      ],
++      'conditions': [
++        ['test_variable==1', {
++          'sources': [
++            'conditional_source.c',
++          ],
++        }],
++      ],
++      'actions': [
++        {
++          'action_name': 'action',
++          'inputs': [
++            '<(PRODUCT_DIR)/product_dir_input.c',
++            'action_input.c',
++            '../bad_path1.h',
++            '../../bad_path2.h',
++            './rel_path1.h',
++          ],
++          'outputs': [
++            'action_output.c',
++          ],
++        },
++      ],
++      'rules': [
++        {
++          'rule_name': 'rule',
++          'extension': 'pdf',
++          'inputs': [
++            'rule_input.c',
++          ],
++          'outputs': [
++            'rule_output.pdf',
++          ],
++        },
++      ],
++    },
++    {
++      'target_name': 'exe2',
++      'type': 'executable',
++      'sources': [
++        'exe2.c',
++      ],
++    },
++    {
++      'target_name': 'exe3',
++      'type': 'executable',
++      'dependencies': [
++        'subdir/subdir.gyp:foo',
++        'subdir/subdir.gyp:subdir2a',
++      ],
++      'sources': [
++        'exe3.c',
++      ],
++    },
++    {
++      'target_name': 'allx',
++      'type': 'none',
++      'dependencies': [
++        'exe',
++        'exe3',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/test2.gyp b/tools/gyp/test/analyzer/test2.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..782b6e6428a7bf4346499e03fc166ac5ed193a9e
+--- /dev/null
++++ b/tools/gyp/test/analyzer/test2.gyp
+@@ -0,0 +1,25 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'exe',
++      'type': 'executable',
++      'dependencies': [
++        'subdir2/subdir.gyp:foo',
++      ],
++    },
++    {
++      'target_name': 'exe2',
++      'type': 'executable',
++      'includes': [
++        'test2.includes.gypi',
++      ],
++    },
++  ],
++  'includes': [
++    'test2.toplevel_includes.gypi',
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/test2.includes.gypi b/tools/gyp/test/analyzer/test2.includes.gypi
+new file mode 100644
+index 0000000000000000000000000000000000000000..3e21de23cbe64df28ec5e19686902f58aae8e307
+--- /dev/null
++++ b/tools/gyp/test/analyzer/test2.includes.gypi
+@@ -0,0 +1,13 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'sources': [
++    'a.cc',
++    'b.cc'
++  ],
++  'includes': [
++    'test2.includes.includes.gypi',
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/test2.includes.includes.gypi b/tools/gyp/test/analyzer/test2.includes.includes.gypi
+new file mode 100644
+index 0000000000000000000000000000000000000000..de3a025dbb607d771394b67428b0363fd8454357
+--- /dev/null
++++ b/tools/gyp/test/analyzer/test2.includes.includes.gypi
+@@ -0,0 +1,9 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'sources': [
++    'c.cc'
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/test2.toplevel_includes.gypi b/tools/gyp/test/analyzer/test2.toplevel_includes.gypi
+new file mode 100644
+index 0000000000000000000000000000000000000000..54fa453b085691afe42c17589a43922f6b2263e9
+--- /dev/null
++++ b/tools/gyp/test/analyzer/test2.toplevel_includes.gypi
+@@ -0,0 +1,15 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'exe3',
++      'type': 'executable',
++      'sources': [
++        'e.cc',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/test3.gyp b/tools/gyp/test/analyzer/test3.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..e52f6bc7d395cb1288eafe47f91d3904c636260c
+--- /dev/null
++++ b/tools/gyp/test/analyzer/test3.gyp
+@@ -0,0 +1,77 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'allx',
++      'type': 'none',
++      'dependencies': [
++        'a',
++        'b',
++      ],
++    },
++    {
++      'target_name': 'a',
++      'type': 'executable',
++      'sources': [
++        'a.c',
++      ],
++      'dependencies': [
++        'c',
++        'd',
++      ],
++    },
++    {
++      'target_name': 'b',
++      'type': 'executable',
++      'sources': [
++        'b.c',
++      ],
++      'dependencies': [
++        'd',
++        'e',
++      ],
++    },
++    {
++      'target_name': 'c',
++      'type': 'executable',
++      'sources': [
++        'c.c',
++      ],
++    },
++    {
++      'target_name': 'd',
++      'type': 'none',
++      'sources': [
++        'd.c',
++      ],
++      'dependencies': [
++        'f',
++        'g',
++      ],
++    },
++    {
++      'target_name': 'e',
++      'type': 'executable',
++      'sources': [
++        'e.c',
++      ],
++    },
++    {
++      'target_name': 'f',
++      'type': 'static_library',
++      'sources': [
++        'f.c',
++      ],
++    },
++    {
++      'target_name': 'g',
++      'type': 'executable',
++      'sources': [
++        'g.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/test4.gyp b/tools/gyp/test/analyzer/test4.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..91cea56c1fe35f6973b3d5d850ad4b23e03d78f2
+--- /dev/null
++++ b/tools/gyp/test/analyzer/test4.gyp
+@@ -0,0 +1,80 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'a',
++      'type': 'executable',
++      'sources': [
++        'a.c',
++      ],
++      'dependencies': [
++        'b',
++        'c',
++      ],
++    },
++    {
++      'target_name': 'b',
++      'type': 'executable',
++      'sources': [
++        'b.c',
++      ],
++      'dependencies': [
++        'd',
++      ],
++    },
++    {
++      'target_name': 'c',
++      'type': 'executable',
++      'sources': [
++        'c.c',
++      ],
++      'dependencies': [
++        'b',
++        'd',
++      ],
++    },
++    {
++      'target_name': 'd',
++      'type': 'executable',
++      'sources': [
++        'd.c',
++      ],
++    },
++    {
++      'target_name': 'e',
++      'type': 'executable',
++      'dependencies': [
++        'test5.gyp:f',
++      ],
++    },
++    {
++      'target_name': 'h',
++      'type': 'none',
++      'dependencies': [
++        'i',
++      ],
++      'rules': [
++        {
++          'rule_name': 'rule',
++          'extension': 'pdf',
++          'inputs': [
++            'rule_input.c',
++          ],
++          'outputs': [
++            'rule_output.pdf',
++          ],
++        },
++      ],
++    },
++    {
++      'target_name': 'i',
++      'type': 'static_library',
++      'sources': [
++        'i.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/analyzer/test5.gyp b/tools/gyp/test/analyzer/test5.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..f3ea5b00612d086d83f6607cfb357749b3c586dd
+--- /dev/null
++++ b/tools/gyp/test/analyzer/test5.gyp
+@@ -0,0 +1,25 @@
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'f',
++      'type': 'executable',
++      'sources': [
++        'f.c',
++      ],
++    },
++    {
++      'target_name': 'g',
++      'type': 'executable',
++      'sources': [
++        'g.c',
++      ],
++      'dependencies': [
++        'f',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/arflags/gyptest-arflags.py b/tools/gyp/test/arflags/gyptest-arflags.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..a5cbcac77d750dd886c3aa2a2298c4571f2a93c4
+--- /dev/null
++++ b/tools/gyp/test/arflags/gyptest-arflags.py
+@@ -0,0 +1,24 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2014 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies that building a target with invalid arflags fails.
++"""
++
++import os
++import sys
++import TestGyp
++
++if sys.platform == 'darwin':
++  print "This test is currently disabled: https://crbug.com/483696."
++  sys.exit(0)
++
++
++test = TestGyp.TestGyp(formats=['ninja'])
++test.run_gyp('test.gyp')
++expected_status = 0 if sys.platform in ['darwin', 'win32'] else 1
++test.build('test.gyp', target='lib', status=expected_status)
++test.pass_test()
+diff --git a/tools/gyp/test/arflags/lib.cc b/tools/gyp/test/arflags/lib.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/tools/gyp/test/arflags/test.gyp b/tools/gyp/test/arflags/test.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..f7430fae2d1359d2ad690d68ecdf586f21f846a2
+--- /dev/null
++++ b/tools/gyp/test/arflags/test.gyp
+@@ -0,0 +1,10 @@
++{
++  'targets': [
++    {
++      'target_name': 'lib',
++      'type': 'static_library',
++      'sources': ['lib.cc'],
++      'arflags': ['--nonexistent'],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/assembly/gyptest-assembly.py b/tools/gyp/test/assembly/gyptest-assembly.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..8a84310544afc97e28c517c0b6af0a9605f8b4db
+--- /dev/null
++++ b/tools/gyp/test/assembly/gyptest-assembly.py
+@@ -0,0 +1,31 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++A basic test of compiling assembler files.
++"""
++
++import sys
++import TestGyp
++
++if sys.platform != 'win32':
++  # TODO(bradnelson): get this working for windows.
++  test = TestGyp.TestGyp(formats=['!msvs'])
++
++  test.run_gyp('assembly.gyp', chdir='src')
++
++  test.relocate('src', 'relocate/src')
++
++  test.build('assembly.gyp', test.ALL, chdir='relocate/src')
++
++  expect = """\
++Hello from program.c
++Got 42.
++"""
++  test.run_built_executable('program', chdir='relocate/src', stdout=expect)
++
++
++  test.pass_test()
+diff --git a/tools/gyp/test/assembly/gyptest-override.py b/tools/gyp/test/assembly/gyptest-override.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e84a23e855ac21d212f549dca89a96107da5031f
+--- /dev/null
++++ b/tools/gyp/test/assembly/gyptest-override.py
+@@ -0,0 +1,24 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Make sure that manual rules on Windows override the built in ones.
++"""
++
++import sys
++import TestGyp
++
++if sys.platform == 'win32':
++  test = TestGyp.TestGyp(formats=['msvs', 'ninja'])
++  CHDIR = 'src'
++  test.run_gyp('override.gyp', chdir=CHDIR)
++  test.build('override.gyp', test.ALL, chdir=CHDIR)
++  expect = """\
++Hello from program.c
++Got 42.
++"""
++  test.run_built_executable('program', chdir=CHDIR, stdout=expect)
++  test.pass_test()
+diff --git a/tools/gyp/test/assembly/src/as.bat b/tools/gyp/test/assembly/src/as.bat
+new file mode 100644
+index 0000000000000000000000000000000000000000..b796db97ca56e7386396d1026c8a897f7d0eb6f5
+--- /dev/null
++++ b/tools/gyp/test/assembly/src/as.bat
+@@ -0,0 +1,4 @@
++@echo off
++:: Mock windows assembler.
++cl /MD /c %1 /Fo"%2"
++
+diff --git a/tools/gyp/test/assembly/src/assembly.gyp b/tools/gyp/test/assembly/src/assembly.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..565cb0fa0e3888d2bc427c18e6de0be25457b45b
+--- /dev/null
++++ b/tools/gyp/test/assembly/src/assembly.gyp
+@@ -0,0 +1,62 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'target_defaults': {
++    'conditions': [
++      ['OS=="win"', {
++        'defines': ['PLATFORM_WIN'],
++      }],
++      ['OS=="mac" or OS=="ios"', {
++        'defines': ['PLATFORM_MAC'],
++      }],
++      ['OS=="linux"', {
++        'defines': ['PLATFORM_LINUX'],
++      }],
++      ['OS=="android"', {
++        'defines': ['PLATFORM_ANDROID'],
++      }],
++    ],
++  },
++  'targets': [
++    {
++      'target_name': 'program',
++      'type': 'executable',
++      'dependencies': ['lib1'],
++      'sources': [
++        'program.c',
++      ],
++    },
++    {
++      'target_name': 'lib1',
++      'type': 'static_library',
++      'sources': [
++        'lib1.S',
++      ],
++    },
++  ],
++  'conditions': [
++    ['OS=="win"', {
++      'target_defaults': {
++        'rules': [
++          {
++            'rule_name': 'assembler',
++            'msvs_cygwin_shell': 0,
++            'extension': 'S',
++            'inputs': [
++              'as.bat',
++            ],
++            'outputs': [
++              '<(INTERMEDIATE_DIR)/<(RULE_INPUT_ROOT).obj',
++            ],
++            'action':
++              ['as.bat', 'lib1.c', '<(_outputs)'],
++            'message': 'Building assembly file <(RULE_INPUT_PATH)',
++            'process_outputs_as_sources': 1,
++          },
++        ],
++      },
++    },],
++  ],
++}
+diff --git a/tools/gyp/test/assembly/src/lib1.S b/tools/gyp/test/assembly/src/lib1.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..7de9f19cf97383fccc05dca2a51236cf177b2d43
+--- /dev/null
++++ b/tools/gyp/test/assembly/src/lib1.S
+@@ -0,0 +1,15 @@
++#if PLATFORM_WINDOWS || PLATFORM_MAC
++# define IDENTIFIER(n)  _##n
++#else /* Linux */
++# define IDENTIFIER(n)  n
++#endif
++
++.globl IDENTIFIER(lib1_function)
++IDENTIFIER(lib1_function):
++#if !defined(PLATFORM_ANDROID)
++  movl $42, %eax
++  ret
++#else /* Android (assuming ARM) */
++  mov r0, #42
++  bx lr
++#endif
+diff --git a/tools/gyp/test/assembly/src/lib1.c b/tools/gyp/test/assembly/src/lib1.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..be21ecd5f6a765327cf45546e032f602ad2a20d2
+--- /dev/null
++++ b/tools/gyp/test/assembly/src/lib1.c
+@@ -0,0 +1,3 @@
++int lib1_function(void) {
++  return 42;
++}
+diff --git a/tools/gyp/test/assembly/src/override.gyp b/tools/gyp/test/assembly/src/override.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..39a4072effc5cf9053a5f6b8bd34f29248ba65ee
+--- /dev/null
++++ b/tools/gyp/test/assembly/src/override.gyp
+@@ -0,0 +1,34 @@
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'program',
++      'type': 'executable',
++      'sources': [
++        'program.c',
++        'override_asm.asm',
++      ],
++      'rules': [
++      {
++        # Test that if there's a specific .asm rule, it overrides the
++        # built in one on Windows.
++        'rule_name': 'assembler',
++        'msvs_cygwin_shell': 0,
++        'extension': 'asm',
++        'inputs': [
++          'as.bat',
++        ],
++        'outputs': [
++          'output.obj',
++        ],
++        'action': ['as.bat', 'lib1.c', '<(_outputs)'],
++        'message': 'Building assembly file <(RULE_INPUT_PATH)',
++        'process_outputs_as_sources': 1,
++        },
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/assembly/src/override_asm.asm b/tools/gyp/test/assembly/src/override_asm.asm
+new file mode 100644
+index 0000000000000000000000000000000000000000..be93b23baac3f580146bc298eb67af097e82aea7
+--- /dev/null
++++ b/tools/gyp/test/assembly/src/override_asm.asm
+@@ -0,0 +1,8 @@
++; Copyright (c) 2012 Google Inc. All rights reserved.
++; Use of this source code is governed by a BSD-style license that can be
++; found in the LICENSE file.
++
++; This is a placeholder. It should not be referenced if overrides work
++; correctly.
++
++Bad stuff that shouldn't assemble.
+diff --git a/tools/gyp/test/assembly/src/program.c b/tools/gyp/test/assembly/src/program.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..eee862712e19163080434ffa93023e95939d13dc
+--- /dev/null
++++ b/tools/gyp/test/assembly/src/program.c
+@@ -0,0 +1,12 @@
++#include <stdio.h>
++
++extern int lib1_function(void);
++
++int main(void)
++{
++  fprintf(stdout, "Hello from program.c\n");
++  fflush(stdout);
++  fprintf(stdout, "Got %d.\n", lib1_function());
++  fflush(stdout);
++  return 0;
++}
+diff --git a/tools/gyp/test/build-option/gyptest-build.py b/tools/gyp/test/build-option/gyptest-build.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..34a9e11d3542a6cbaf608a49ace1baba91c47f8e
+--- /dev/null
++++ b/tools/gyp/test/build-option/gyptest-build.py
+@@ -0,0 +1,27 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verifies simplest-possible build of a "Hello, world!" program
++using the default build target.
++"""
++
++import TestGyp
++
++test = TestGyp.TestGyp(workdir='workarea_default')
++
++if test.format == 'xcode-ninja':
++  # The xcode-ninja generator doesn't support --build
++  # cf. https://code.google.com/p/gyp/issues/detail?id=453
++  test.skip_test()
++
++test.run_gyp('hello.gyp', '--build=Default')
++
++test.run_built_executable('hello', stdout="Hello, world!\n")
++
++test.up_to_date('hello.gyp', test.DEFAULT)
++
++test.pass_test()
+diff --git a/tools/gyp/test/build-option/hello.c b/tools/gyp/test/build-option/hello.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6ad129fd7a3db6381e0d65a6064a6fec380b94f
+--- /dev/null
++++ b/tools/gyp/test/build-option/hello.c
+@@ -0,0 +1,13 @@
++/*
++ * Copyright (c) 2012 Google Inc. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include <stdio.h>
++
++int main(void)
++{
++  printf("Hello, world!\n");
++  return 0;
++}
+diff --git a/tools/gyp/test/build-option/hello.gyp b/tools/gyp/test/build-option/hello.gyp
+new file mode 100644
+index 0000000000000000000000000000000000000000..1974d51ccd1934cfc0841f26e7118448b2fb1c98
+--- /dev/null
++++ b/tools/gyp/test/build-option/hello.gyp
+@@ -0,0 +1,15 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'targets': [
++    {
++      'target_name': 'hello',
++      'type': 'executable',
++      'sources': [
++        'hello.c',
++      ],
++    },
++  ],
++}
+diff --git a/tools/gyp/test/builddir/gyptest-all.py b/tools/gyp/test/builddir/gyptest-all.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..a26543f49ebee12df2a505c3c31be2812f3fa21a
+--- /dev/null
++++ b/tools/gyp/test/builddir/gyptest-all.py
+@@ -0,0 +1,85 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verify the settings that cause a set of programs to be created in
++a specific build directory, and that no intermediate built files
++get created outside of that build directory hierarchy even when
++referred to with deeply-nested ../../.. paths.
++"""
++
++import TestGyp
++
++# TODO(mmoss): Make only supports (theoretically) a single, global build
++# directory (through GYP_GENERATOR_FLAGS 'output_dir'), rather than
++# gyp-file-specific settings (e.g. the stuff in builddir.gypi) that the other
++# generators support, so this doesn't work yet for make.
++# TODO(mmoss) Make also has the issue that the top-level Makefile is written to
++# the "--depth" location, which is one level above 'src', but then this test
++# moves 'src' somewhere else, leaving the Makefile behind, so make can't find
++# its sources. I'm not sure if make is wrong for writing outside the current
++# directory, or if the test is wrong for assuming everything generated is under
++# the current directory.
++# Ninja and CMake do not support setting the build directory.
++test = TestGyp.TestGyp(formats=['!make', '!ninja', '!cmake'])
++
++test.run_gyp('prog1.gyp', '--depth=..', chdir='src')
++if test.format == 'msvs':
++  if test.uses_msbuild:
++    test.must_contain('src/prog1.vcxproj',
++      '<OutDir>..\\builddir\\Default\\</OutDir>')
++  else:
++    test.must_contain('src/prog1.vcproj',
++      'OutputDirectory="..\\builddir\\Default\\"')
++
++test.relocate('src', 'relocate/src')
++
++test.subdir('relocate/builddir')
++
++# Make sure that all the built ../../etc. files only get put under builddir,
++# by making all of relocate read-only and then making only builddir writable.
++test.writable('relocate', False)
++test.writable('relocate/builddir', True)
++
++# Suppress the test infrastructure's setting SYMROOT on the command line.
++test.build('prog1.gyp', test.ALL, SYMROOT=None, chdir='relocate/src')
++
++expect1 = """\
++Hello from prog1.c
++Hello from func1.c
++"""
++
++expect2 = """\
++Hello from subdir2/prog2.c
++Hello from func2.c
++"""
++
++expect3 = """\
++Hello from subdir2/subdir3/prog3.c
++Hello from func3.c
++"""
++
++expect4 = """\
++Hello from subdir2/subdir3/subdir4/prog4.c
++Hello from func4.c
++"""
++
++expect5 = """\
++Hello from subdir2/subdir3/subdir4/subdir5/prog5.c
++Hello from func5.c
++"""
++
++def run_builddir(prog, expect):
++  dir = 'relocate/builddir/Default/'
++  test.run(program=test.workpath(dir + prog), stdout=expect)
++
++run_builddir('prog1', expect1)
++run_builddir('prog2', expect2)
++run_builddir('prog3', expect3)
++run_builddir('prog4', expect4)
++run_builddir('prog5', expect5)
++
++test.pass_test()
+diff --git a/tools/gyp/test/builddir/gyptest-default.py b/tools/gyp/test/builddir/gyptest-default.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..4904cdab42e5cf38c2f01b5bd1775fde8dad29f3
+--- /dev/null
++++ b/tools/gyp/test/builddir/gyptest-default.py
+@@ -0,0 +1,85 @@
++#!/usr/bin/env python
++
++# Copyright (c) 2012 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++"""
++Verify the settings that cause a set of programs to be created in
++a specific build directory, and that no intermediate built files
++get created outside of that build directory hierarchy even when
++referred to with deeply-nested ../../.. paths.
++"""
++
++import TestGyp
++
++# TODO(mmoss): Make only supports (theoretically) a single, global build
++# directory (through GYP_GENERATOR_FLAGS 'output_dir'), rather than
++# gyp-file-specific settings (e.g. the stuff in builddir.gypi) that the other
++# generators support, so this doesn't work yet for make.
++# TODO(mmoss) Make also has the issue that the top-level Makefile is written to
++# the "--depth" location, which is one level above 'src', but then this test
++# moves 'src' somewhere else, leaving the Makefile behind, so make can't find
++# its sources. I'm not sure if make is wrong for writing outside the current
++# directory, or if the test is wrong for assuming everything generated is under
++# the current directory.
++# Ninja and CMake do not support setting the build directory.
++test = TestGyp.TestGyp(formats=['!make', '!ninja', '!cmake'])
++
++test.run_gyp('prog1.gyp', '--depth=..', chdir='src')
++if test.format == 'msvs':
++  if test.uses_msbuild:
++    test.must_contain('src/prog1.vcxproj',
++      '<OutDir>..\\builddir\\Default\\</OutDir>')
++  else:
++    test.must_contain('src/prog1.vcproj',
++      'OutputDirectory="..\\builddir\\Default\\"')
++
++test.relocate('src', 'relocate/src')
++
++test.subdir('relocate/builddir')
++
++# Make sure that all the built ../../etc. files only get put under builddir,
++# by making all of relocate read-only and then making only builddir writable.
++test.writable('relocate', False)
++test.writable('relocate/builddir', True)
++
++# Suppress the test infrastructure's setting SYMROOT on the command line.
++test.build('prog1.gyp', SYMROOT=None, chdir='relocate/src')
++
++expect1 = """\
++Hello from prog1.c
++Hello from func1.c
++"""
++
++expect2 = """\
++Hello from subdir2/prog2.c
++Hello from func2.c
++"""
++
++expect3 = """\
++Hello from subdir2/subdir3/prog3.c
++Hello from func3.c
++"""
++
++expect4 = """\
++Hello from subdir2/subdir3/subdir4/prog4.c
++Hello from func4.c
++"""
++
++expect5 = """\
++Hello from subdir2/subdir3/subdir4/subdir5/prog5.c
++Hello from func5.c
++"""
++
++def run_builddir(prog, expect):
++  dir = 'relocate/builddir/Default/'
++  test.run(program=test.workpath(dir + prog), stdout=expect)
++
++run_builddir('prog1', expect1)
++run_builddir('prog2', expect2)
++run_builddir('prog3', expect3)
++run_builddir('prog4', expect4)
++run_builddir('prog5', expect5)
++
++test.pass_test()
+diff --git a/tools/gyp/test/builddir/src/builddir.gypi b/tools/gyp/test/builddir/src/builddir.gypi
+new file mode 100644
+index 0000000000000000000000000000000000000000..ce175db8f84dcb8e1a1b1fc333eda21860bce91b
+--- /dev/null
++++ b/tools/gyp/test/builddir/src/builddir.gypi
+@@ -0,0 +1,18 @@
++# Copyright (c) 2009 Google Inc. All rights reserved.
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++{
++  'target_defaults': {
++    'configurations': {
++      'Default': {
++        'msvs_configuration_attributes': {
++          'OutputDirectory': '<(DEPTH)\\builddir/Default',
++        },
++      },
++    },
++  },
++  'xcode_settings': {
++    'SYMROOT': '<(DEPTH)/builddir',
++  },
++}
+diff --git a/tools/gyp/test/builddir/src/func1.c b/tools/gyp/test/builddir/src/func1.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..b8e6a06951c98722599128e0c3fbad49e3d16d68
+--- /dev/null
++++ b/tools/gyp/test/builddir/src/func1.c
+@@ -0,0 +1,6 @@
++#include <stdio.h>
++
++void func1(void)
++{
++  printf("Hello from func1.c\n");
++}
+diff --git a/tools/gyp/test/builddir/src/func2.c b/tools/gyp/test/builddir/src/func2.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..14aabac475ad2f5504594309c8373a8b48b77682
+--- /dev/null
++++ b/tools/gyp/test/builddir/src/func2.c
+@@ -0,0 +1,6 @@
++#include <stdio.h>
++
++void func2(void)
++{
++  printf("Hello from func2.c\n");
++}
 diff --git a/tools/gyp/test/builddir/src/func3.c b/tools/gyp/test/builddir/src/func3.c
 new file mode 100644
 index 0000000000000000000000000000000000000000..3b4edeae6ddbfc8364afbb20ef99e402cb555b4b
@@ -10366,10 +12271,10 @@ index 0000000000000000000000000000000000000000..efd96ac752f02833b9a7825567f7833c
 +  test.pass_test()
 diff --git a/tools/gyp/test/ios/gyptest-app-ios.py b/tools/gyp/test/ios/gyptest-app-ios.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..f9052549d0bbac325dd4d557d38995ef715288d8
+index 0000000000000000000000000000000000000000..853744f9e439c99fbf511d1ad9233068ee35b5c3
 --- /dev/null
 +++ b/tools/gyp/test/ios/gyptest-app-ios.py
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,76 @@
 +#!/usr/bin/env python
 +
 +# Copyright (c) 2012 Google Inc. All rights reserved.
@@ -10387,9 +12292,8 @@ index 0000000000000000000000000000000000000000..f9052549d0bbac325dd4d557d38995ef
 +
 +def CheckFileXMLPropertyList(file):
 +  output = subprocess.check_output(['file', file])
-+  # The double space after XML is intentional.
-+  if not 'XML  document text' in output:
-+    print 'File: Expected XML  document text, got %s' % output
++  if not 'XML 1.0 document text' in output:
++    print 'File: Expected XML 1.0 document text, got %s' % output
 +    test.fail_test()
 +
 +def CheckFileBinaryPropertyList(file):
@@ -10449,10 +12353,10 @@ index 0000000000000000000000000000000000000000..f9052549d0bbac325dd4d557d38995ef
 +  test.pass_test()
 diff --git a/tools/gyp/test/ios/gyptest-archs.py b/tools/gyp/test/ios/gyptest-archs.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..c653d997ada41ceccbdf8fd9e5160fc408dae857
+index 0000000000000000000000000000000000000000..c3340431bdd62197aa8069e8e4f9fab2ef4d1d68
 --- /dev/null
 +++ b/tools/gyp/test/ios/gyptest-archs.py
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,62 @@
 +#!/usr/bin/env python
 +
 +# Copyright (c) 2013 Google Inc. All rights reserved.
@@ -10472,6 +12376,10 @@ index 0000000000000000000000000000000000000000..c653d997ada41ceccbdf8fd9e5160fc4
 +
 +if sys.platform == 'darwin':
 +  test = TestGyp.TestGyp(formats=['ninja', 'xcode'])
++
++  if test.format == 'xcode':
++    # This test appears to hang flakily.
++    test.skip_test()  # bug=532
 +
 +  test_cases = [
 +    ('Default', 'TestArch32Bits', ['i386']),
@@ -10653,10 +12561,10 @@ index 0000000000000000000000000000000000000000..6c09d9dc0409f46c2ebfe047e0ffd39d
 +
 diff --git a/tools/gyp/test/ios/gyptest-extension.py b/tools/gyp/test/ios/gyptest-extension.py
 new file mode 100755
-index 0000000000000000000000000000000000000000..c5e76d93ff259aea1d36b3410fbd2ef7e500d0a2
+index 0000000000000000000000000000000000000000..9568946374efabda542ff92dae29fa50fc7780ae
 --- /dev/null
 +++ b/tools/gyp/test/ios/gyptest-extension.py
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,49 @@
 +#!/usr/bin/env python
 +
 +# Copyright (c) 2014 Google Inc. All rights reserved.
@@ -10685,6 +12593,9 @@ index 0000000000000000000000000000000000000000..c5e76d93ff259aea1d36b3410fbd2ef7
 +if sys.platform == 'darwin' and TestMac.Xcode.Version()>="0600":
 +
 +  test = TestGyp.TestGyp(formats=['ninja', 'xcode'])
++
++  if test.format in ('ninja', 'xcode-ninja'):
++    test.skip_test()  # bug=534
 +
 +  test.run_gyp('extension.gyp', chdir='extension')
 +
@@ -12144,13 +14055,13 @@ index 0000000000000000000000000000000000000000..d43ff4ba8d1ad9f4d18cac73a4f56601
 +</plist>
 diff --git a/tools/gyp/test/ios/xctests/gyptest-xctests.py b/tools/gyp/test/ios/xctests/gyptest-xctests.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..42610d1fc6e42a8f07ad315afbc1d527b86a69ae
+index 0000000000000000000000000000000000000000..6642cfb938a96c1f923cafaa3a10caa9bcc98ea0
 --- /dev/null
 +++ b/tools/gyp/test/ios/xctests/gyptest-xctests.py
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,49 @@
 +#!/usr/bin/env python
 +
-+# Copyright 2015 The Chromium Authors. All rights reserved.
++# Copyright 2015 Google Inc. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
 +# found in the LICENSE file.
 +
@@ -12172,6 +14083,9 @@ index 0000000000000000000000000000000000000000..42610d1fc6e42a8f07ad315afbc1d527
 +  return "0 valid identities found" not in proc.communicate()[0].strip()
 +
 +if sys.platform == "darwin":
++  # This test appears to be flaky and hangs some of the time.
++  sys.exit(2)  # bug=531
++
 +  test = TestGyp.TestGyp(formats=['xcode', 'ninja'])
 +  test.run_gyp('xctests.gyp')
 +  test_configs = ['Default']
@@ -21812,1202 +23726,3 @@ index 0000000000000000000000000000000000000000..9aafa420008ce75bf0b82dc3d81c105a
 +}
 +
 +@end
-diff --git a/tools/gyp/test/mac/app-bundle/TestApp/main.m b/tools/gyp/test/mac/app-bundle/TestApp/main.m
-new file mode 100644
-index 0000000000000000000000000000000000000000..df6a12d065b226df5b93541fe28280005251a6f4
---- /dev/null
-+++ b/tools/gyp/test/mac/app-bundle/TestApp/main.m
-@@ -0,0 +1,10 @@
-+// Copyright (c) 2011 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#import <Cocoa/Cocoa.h>
-+
-+int main(int argc, char *argv[])
-+{
-+    return NSApplicationMain(argc,  (const char **) argv);
-+}
-diff --git a/tools/gyp/test/mac/app-bundle/empty.c b/tools/gyp/test/mac/app-bundle/empty.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/tools/gyp/test/mac/app-bundle/test-assets-catalog.gyp b/tools/gyp/test/mac/app-bundle/test-assets-catalog.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..25f94a12d0cf0df1d3c92e741a8816661530205e
---- /dev/null
-+++ b/tools/gyp/test/mac/app-bundle/test-assets-catalog.gyp
-@@ -0,0 +1,43 @@
-+# Copyright (c) 2011 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'targets': [
-+    {
-+      'target_name': 'dep_framework',
-+      'product_name': 'Dependency Framework',
-+      'type': 'shared_library',
-+      'mac_bundle': 1,
-+      'sources': [ 'empty.c', ],
-+    },
-+    {
-+      'target_name': 'test_app',
-+      'product_name': 'Test App Assets Catalog Gyp',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'dependencies': [ 'dep_framework', ],
-+      'sources': [
-+        'TestApp/main.m',
-+        'TestApp/TestApp_Prefix.pch',
-+        'TestApp/TestAppAppDelegate.h',
-+        'TestApp/TestAppAppDelegate.m',
-+      ],
-+      'mac_bundle_resources': [
-+        'TestApp/English.lproj/InfoPlist.strings',  # UTF-8
-+        'TestApp/English.lproj/utf-16be.strings',
-+        'TestApp/English.lproj/utf-16le.strings',
-+        'TestApp/English.lproj/MainMenu.xib',
-+        'TestApp/Images.xcassets',
-+      ],
-+      'link_settings': {
-+        'libraries': [
-+          '$(SDKROOT)/System/Library/Frameworks/Cocoa.framework',
-+        ],
-+      },
-+      'xcode_settings': {
-+        'INFOPLIST_FILE': 'TestApp/TestApp-Info.plist',
-+        'MACOSX_DEPLOYMENT_TARGET': '10.9',
-+      },
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/mac/app-bundle/test-error.gyp b/tools/gyp/test/mac/app-bundle/test-error.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..370772cc31efbbb65a343dae5101b65f68d96edf
---- /dev/null
-+++ b/tools/gyp/test/mac/app-bundle/test-error.gyp
-@@ -0,0 +1,31 @@
-+# Copyright (c) 2011 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'targets': [
-+    {
-+      'target_name': 'test_app',
-+      'product_name': 'Test App Gyp',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'sources': [
-+        'TestApp/main.m',
-+        'TestApp/TestApp_Prefix.pch',
-+        'TestApp/TestAppAppDelegate.h',
-+        'TestApp/TestAppAppDelegate.m',
-+      ],
-+      'mac_bundle_resources': [
-+        'TestApp/English.lproj/InfoPlist-error.strings',
-+        'TestApp/English.lproj/MainMenu.xib',
-+      ],
-+      'link_settings': {
-+        'libraries': [
-+          '$(SDKROOT)/System/Library/Frameworks/Cocoa.framework',
-+        ],
-+      },
-+      'xcode_settings': {
-+        'INFOPLIST_FILE': 'TestApp/TestApp-Info.plist',
-+      },
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/mac/app-bundle/test.gyp b/tools/gyp/test/mac/app-bundle/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..21973c3623a48295b10ba17bc26fb8708a662ab9
---- /dev/null
-+++ b/tools/gyp/test/mac/app-bundle/test.gyp
-@@ -0,0 +1,41 @@
-+# Copyright (c) 2011 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'targets': [
-+    {
-+      'target_name': 'dep_framework',
-+      'product_name': 'Dependency Framework',
-+      'type': 'shared_library',
-+      'mac_bundle': 1,
-+      'sources': [ 'empty.c', ],
-+    },
-+    {
-+      'target_name': 'test_app',
-+      'product_name': 'Test App Gyp',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'dependencies': [ 'dep_framework', ],
-+      'sources': [
-+        'TestApp/main.m',
-+        'TestApp/TestApp_Prefix.pch',
-+        'TestApp/TestAppAppDelegate.h',
-+        'TestApp/TestAppAppDelegate.m',
-+      ],
-+      'mac_bundle_resources': [
-+        'TestApp/English.lproj/InfoPlist.strings',  # UTF-8
-+        'TestApp/English.lproj/utf-16be.strings',
-+        'TestApp/English.lproj/utf-16le.strings',
-+        'TestApp/English.lproj/MainMenu.xib',
-+      ],
-+      'link_settings': {
-+        'libraries': [
-+          '$(SDKROOT)/System/Library/Frameworks/Cocoa.framework',
-+        ],
-+      },
-+      'xcode_settings': {
-+        'INFOPLIST_FILE': 'TestApp/TestApp-Info.plist',
-+      },
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/mac/archs/empty_main.cc b/tools/gyp/test/mac/archs/empty_main.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..237c8ce181774d991a9dbdd8cacf1a5fb9f199f1
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/empty_main.cc
-@@ -0,0 +1 @@
-+int main() {}
-diff --git a/tools/gyp/test/mac/archs/file.mm b/tools/gyp/test/mac/archs/file.mm
-new file mode 100644
-index 0000000000000000000000000000000000000000..d0b39d1f6d8bb460947b4d38aa09e65c94d170b0
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/file.mm
-@@ -0,0 +1 @@
-+MyInt f() { return 0; }
-diff --git a/tools/gyp/test/mac/archs/file_a.cc b/tools/gyp/test/mac/archs/file_a.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..7307873c8374fbf2c4dec2811ef91a52f929963c
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/file_a.cc
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2014 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "file_a.h"
-+
-+void DependentFunctionA() {
-+}
-diff --git a/tools/gyp/test/mac/archs/file_a.h b/tools/gyp/test/mac/archs/file_a.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..7439d131820b7edf78f80931a5f4dde356f6d2e0
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/file_a.h
-@@ -0,0 +1,10 @@
-+// Copyright (c) 2014 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef _INCLUDED_TEST_MAC_DEPENDENCIES_FILE_A_H_
-+#define _INCLUDED_TEST_MAC_DEPENDENCIES_FILE_A_H_
-+
-+void DependentFunctionA();
-+
-+#endif // _INCLUDED_TEST_MAC_DEPENDENCIES_FILE_A_H_
-diff --git a/tools/gyp/test/mac/archs/file_b.cc b/tools/gyp/test/mac/archs/file_b.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..72d59cbfb4661a71445ec573bc7c226e15ee1a7c
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/file_b.cc
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2014 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "file_b.h"
-+
-+void DependentFunctionB() {
-+}
-diff --git a/tools/gyp/test/mac/archs/file_b.h b/tools/gyp/test/mac/archs/file_b.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..eb272ece5504e4182a727aeb2982925ceaefd4bd
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/file_b.h
-@@ -0,0 +1,10 @@
-+// Copyright (c) 2014 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef _INCLUDED_TEST_MAC_DEPENDENCIES_FILE_B_H_
-+#define _INCLUDED_TEST_MAC_DEPENDENCIES_FILE_B_H_
-+
-+void DependentFunctionB();
-+
-+#endif // _INCLUDED_TEST_MAC_DEPENDENCIES_FILE_B_H_
-diff --git a/tools/gyp/test/mac/archs/file_c.cc b/tools/gyp/test/mac/archs/file_c.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..ca39f7a6719f077a8821bc9315fdbaf1e5402fbb
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/file_c.cc
-@@ -0,0 +1,11 @@
-+// Copyright (c) 2014 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "file_a.h"
-+#include "file_b.h"
-+
-+void PublicFunctionC() {
-+  DependentFunctionA();
-+  DependentFunctionB();
-+}
-diff --git a/tools/gyp/test/mac/archs/file_d.cc b/tools/gyp/test/mac/archs/file_d.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..c40911cdca88fe1f950c5c651dce173aa9fa6ca3
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/file_d.cc
-@@ -0,0 +1,11 @@
-+// Copyright (c) 2014 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include "file_a.h"
-+#include "file_b.h"
-+
-+void PublicFunctionD() {
-+  DependentFunctionA();
-+  DependentFunctionB();
-+}
-diff --git a/tools/gyp/test/mac/archs/header.h b/tools/gyp/test/mac/archs/header.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..0716e500c5a69de9cd033fa0bc6935b78055ee64
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/header.h
-@@ -0,0 +1 @@
-+typedef int MyInt;
-diff --git a/tools/gyp/test/mac/archs/my_file.cc b/tools/gyp/test/mac/archs/my_file.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..94216a74df6c3691f3abfdf5c5f689064789b80e
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/my_file.cc
-@@ -0,0 +1,4 @@
-+/* Copyright (c) 2012 Google Inc. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file. */
-+int x = 1;
-diff --git a/tools/gyp/test/mac/archs/my_main_file.cc b/tools/gyp/test/mac/archs/my_main_file.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..f1fa06f2769cb58c1c6a72434690bb8b7a360853
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/my_main_file.cc
-@@ -0,0 +1,9 @@
-+/* Copyright (c) 2012 Google Inc. All rights reserved.
-+ * Use of this source code is governed by a BSD-style license that can be
-+ * found in the LICENSE file. */
-+#include <stdio.h>
-+extern int x;
-+int main() {
-+  printf("hello, world %d\n", x);
-+}
-+
-diff --git a/tools/gyp/test/mac/archs/test-archs-multiarch.gyp b/tools/gyp/test/mac/archs/test-archs-multiarch.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..567e8a6653ce862f80d56193d155963d9767463b
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/test-archs-multiarch.gyp
-@@ -0,0 +1,92 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+    {
-+      'target_name': 'static_32_64',
-+      'type': 'static_library',
-+      'sources': [ 'my_file.cc' ],
-+      'xcode_settings': {
-+        'ARCHS': [ 'i386', 'x86_64' ],
-+      },
-+    },
-+    {
-+      'target_name': 'shared_32_64',
-+      'type': 'shared_library',
-+      'sources': [ 'my_file.cc' ],
-+      'xcode_settings': {
-+        'ARCHS': [ 'i386', 'x86_64' ],
-+      },
-+    },
-+    {
-+      'target_name': 'shared_32_64_bundle',
-+      'product_name': 'My Framework',
-+      'type': 'shared_library',
-+      'mac_bundle': 1,
-+      'sources': [ 'my_file.cc' ],
-+      'xcode_settings': {
-+        'ARCHS': [ 'i386', 'x86_64' ],
-+      },
-+    },
-+    {
-+      'target_name': 'module_32_64',
-+      'type': 'loadable_module',
-+      'sources': [ 'my_file.cc' ],
-+      'xcode_settings': {
-+        'ARCHS': [ 'i386', 'x86_64' ],
-+      },
-+    },
-+    {
-+      'target_name': 'module_32_64_bundle',
-+      'product_name': 'My Bundle',
-+      'type': 'loadable_module',
-+      'mac_bundle': 1,
-+      'sources': [ 'my_file.cc' ],
-+      'xcode_settings': {
-+        'ARCHS': [ 'i386', 'x86_64' ],
-+      },
-+    },
-+    {
-+      'target_name': 'exe_32_64',
-+      'type': 'executable',
-+      'sources': [ 'empty_main.cc' ],
-+      'xcode_settings': {
-+        'ARCHS': [ 'i386', 'x86_64' ],
-+      },
-+    },
-+    {
-+      'target_name': 'exe_32_64_bundle',
-+      'product_name': 'Test App',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'sources': [ 'empty_main.cc' ],
-+      'xcode_settings': {
-+        'ARCHS': [ 'i386', 'x86_64' ],
-+      },
-+    },
-+    # This only needs to compile.
-+    {
-+      'target_name': 'precompiled_prefix_header_mm_32_64',
-+      'type': 'shared_library',
-+      'sources': [ 'file.mm', ],
-+      'xcode_settings': {
-+        'GCC_PREFIX_HEADER': 'header.h',
-+        'GCC_PRECOMPILE_PREFIX_HEADER': 'YES',
-+      },
-+    },
-+    # This does not compile but should not cause generation errors.
-+    {
-+      'target_name': 'exe_32_64_no_sources',
-+      'type': 'executable',
-+      'dependencies': [
-+        'static_32_64',
-+      ],
-+      'sources': [],
-+      'xcode_settings': {
-+        'ARCHS': ['i386', 'x86_64'],
-+      },
-+    },
-+  ]
-+}
-diff --git a/tools/gyp/test/mac/archs/test-archs-x86_64.gyp b/tools/gyp/test/mac/archs/test-archs-x86_64.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..d11a896273cab743f164c4ae1c1d5f205f1ba7df
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/test-archs-x86_64.gyp
-@@ -0,0 +1,27 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+  {
-+   'target_name': 'lib',
-+   'product_name': 'Test64',
-+   'type': 'static_library',
-+   'sources': [ 'my_file.cc' ],
-+   'xcode_settings': {
-+     'ARCHS': [ 'x86_64' ],
-+   },
-+  },
-+  {
-+   'target_name': 'exe',
-+   'product_name': 'Test64',
-+   'type': 'executable',
-+   'dependencies': [ 'lib' ],
-+   'sources': [ 'my_main_file.cc' ],
-+   'xcode_settings': {
-+     'ARCHS': [ 'x86_64' ],
-+   },
-+  },
-+ ]
-+}
-diff --git a/tools/gyp/test/mac/archs/test-dependencies.gyp b/tools/gyp/test/mac/archs/test-dependencies.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..0431f5f2f4fab2ba5c7bd070eccf5f014579d163
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/test-dependencies.gyp
-@@ -0,0 +1,92 @@
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'target_defaults': {
-+    'xcode_settings': {
-+      'ARCHS': ['i386', 'x86_64'],
-+    },
-+  },
-+  'targets': [
-+    {
-+      'target_name': 'target_a',
-+      'type': 'static_library',
-+      'sources': [
-+        'file_a.cc',
-+        'file_a.h',
-+      ],
-+    },
-+    {
-+      'target_name': 'target_b',
-+      'type': 'static_library',
-+      'sources': [
-+        'file_b.cc',
-+        'file_b.h',
-+      ],
-+    },
-+    {
-+      'target_name': 'target_c_standalone_helper',
-+      'type': 'loadable_module',
-+      'hard_dependency': 1,
-+      'dependencies': [
-+        'target_a',
-+        'target_b',
-+      ],
-+      'sources': [
-+        'file_c.cc',
-+      ],
-+    },
-+    {
-+      'target_name': 'target_c_standalone',
-+      'type': 'none',
-+      'dependencies': [
-+        'target_c_standalone_helper',
-+      ],
-+      'actions': [
-+        {
-+          'action_name': 'Package C',
-+          'inputs': [],
-+          'outputs': [
-+            '<(PRODUCT_DIR)/libc_standalone.a',
-+          ],
-+          'action': [
-+            'touch',
-+            '<@(_outputs)',
-+          ],
-+        },
-+      ],
-+    },
-+    {
-+      'target_name': 'target_d_standalone_helper',
-+      'type': 'shared_library',
-+      'dependencies': [
-+        'target_a',
-+        'target_b',
-+      ],
-+      'sources': [
-+        'file_d.cc',
-+      ],
-+    },
-+    {
-+      'target_name': 'target_d_standalone',
-+      'type': 'none',
-+      'dependencies': [
-+        'target_d_standalone_helper',
-+      ],
-+      'actions': [
-+        {
-+          'action_name': 'Package D',
-+          'inputs': [],
-+          'outputs': [
-+            '<(PRODUCT_DIR)/libd_standalone.a',
-+          ],
-+          'action': [
-+            'touch',
-+            '<@(_outputs)',
-+          ],
-+        },
-+      ],
-+    }
-+  ],
-+}
-diff --git a/tools/gyp/test/mac/archs/test-no-archs.gyp b/tools/gyp/test/mac/archs/test-no-archs.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..8f3b6b47cc163fe0754a72991c824be6dd80047b
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/test-no-archs.gyp
-@@ -0,0 +1,21 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+ 'targets': [
-+  {
-+   'target_name': 'lib',
-+   'product_name': 'Test',
-+   'type': 'static_library',
-+   'sources': [ 'my_file.cc' ],
-+  },
-+  {
-+   'target_name': 'exe',
-+   'product_name': 'Test',
-+   'type': 'executable',
-+   'dependencies': [ 'lib' ],
-+   'sources': [ 'my_main_file.cc' ],
-+  },
-+ ]
-+}
-diff --git a/tools/gyp/test/mac/archs/test-valid-archs.gyp b/tools/gyp/test/mac/archs/test-valid-archs.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..c90ec1fe9b3b0bde153d177a4bdaa576e8db6592
---- /dev/null
-+++ b/tools/gyp/test/mac/archs/test-valid-archs.gyp
-@@ -0,0 +1,28 @@
-+# Copyright (c) 2014 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+{
-+  'targets': [
-+  {
-+    'target_name': 'lib',
-+    'product_name': 'Test',
-+    'type': 'static_library',
-+    'sources': [ 'my_file.cc' ],
-+    'xcode_settings': {
-+      'ARCHS': ['i386', 'x86_64', 'unknown-arch'],
-+      'VALID_ARCHS': ['x86_64'],
-+    },
-+  },
-+  {
-+    'target_name': 'exe',
-+    'product_name': 'Test',
-+    'type': 'executable',
-+    'dependencies': [ 'lib' ],
-+    'sources': [ 'my_main_file.cc' ],
-+    'xcode_settings': {
-+      'ARCHS': ['i386', 'x86_64', 'unknown-arch'],
-+      'VALID_ARCHS': ['x86_64'],
-+    },
-+  }]
-+}
-diff --git a/tools/gyp/test/mac/bundle-resources/change.sh b/tools/gyp/test/mac/bundle-resources/change.sh
-new file mode 100755
-index 0000000000000000000000000000000000000000..6d0fe6c7c279acf081c1064d9284abef706c033e
---- /dev/null
-+++ b/tools/gyp/test/mac/bundle-resources/change.sh
-@@ -0,0 +1,3 @@
-+#!/bin/bash
-+
-+tr a-z A-Z < "${1}" > "${2}"
-diff --git a/tools/gyp/test/mac/bundle-resources/executable-file.sh b/tools/gyp/test/mac/bundle-resources/executable-file.sh
-new file mode 100755
-index 0000000000000000000000000000000000000000..796953a1a2cf23ca0c63e5842905351355ac0358
---- /dev/null
-+++ b/tools/gyp/test/mac/bundle-resources/executable-file.sh
-@@ -0,0 +1,3 @@
-+#!/bin/bash
-+
-+echo echo echo echo cho ho o o
-diff --git a/tools/gyp/test/mac/bundle-resources/secret.txt b/tools/gyp/test/mac/bundle-resources/secret.txt
-new file mode 100644
-index 0000000000000000000000000000000000000000..8baef1b4abc478178b004d62031cf7fe6db6f903
---- /dev/null
-+++ b/tools/gyp/test/mac/bundle-resources/secret.txt
-@@ -0,0 +1 @@
-+abc
-diff --git a/tools/gyp/test/mac/bundle-resources/test.gyp b/tools/gyp/test/mac/bundle-resources/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..af034ce3f4d17728611c66e3cdfc0be2940f9e08
---- /dev/null
-+++ b/tools/gyp/test/mac/bundle-resources/test.gyp
-@@ -0,0 +1,59 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'targets': [
-+    {
-+      'target_name': 'resource',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'mac_bundle_resources': [
-+        'secret.txt',
-+        'executable-file.sh',
-+      ],
-+    },
-+    # A rule with process_outputs_as_mac_bundle_resources should copy files
-+    # into the Resources folder.
-+    {
-+      'target_name': 'source_rule',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'sources': [
-+        'secret.txt',
-+      ],
-+      'rules': [
-+        {
-+          'rule_name': 'bundlerule',
-+          'extension': 'txt',
-+          'outputs': [
-+            '<(INTERMEDIATE_DIR)/<(RULE_INPUT_ROOT).txt',
-+          ],
-+          'action': ['./change.sh', '<(RULE_INPUT_PATH)', '<@(_outputs)'],
-+          'message': 'Running rule on <(RULE_INPUT_PATH)',
-+          'process_outputs_as_mac_bundle_resources': 1,
-+        },
-+      ],
-+    },
-+    # So should an ordinary rule acting on mac_bundle_resources.
-+    {
-+      'target_name': 'resource_rule',
-+      'type': 'executable',
-+      'mac_bundle': 1,
-+      'mac_bundle_resources': [
-+        'secret.txt',
-+      ],
-+      'rules': [
-+        {
-+          'rule_name': 'bundlerule',
-+          'extension': 'txt',
-+          'outputs': [
-+            '<(INTERMEDIATE_DIR)/<(RULE_INPUT_ROOT).txt',
-+          ],
-+          'action': ['./change.sh', '<(RULE_INPUT_PATH)', '<@(_outputs)'],
-+          'message': 'Running rule on <(RULE_INPUT_PATH)',
-+        },
-+      ],
-+    },
-+  ],
-+}
-+
-diff --git a/tools/gyp/test/mac/cflags/ccfile.cc b/tools/gyp/test/mac/cflags/ccfile.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..1a54d18eec7122b42c1b14bb369296f10a01a3c8
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/ccfile.cc
-@@ -0,0 +1,7 @@
-+#ifdef CFLAG
-+#error CFLAG should not be set
-+#endif
-+
-+#ifndef CCFLAG
-+#error CCFLAG should be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/ccfile_withcflags.cc b/tools/gyp/test/mac/cflags/ccfile_withcflags.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..de078a06417628dc5aa9a86a13202f13b5d14ced
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/ccfile_withcflags.cc
-@@ -0,0 +1,7 @@
-+#ifndef CFLAG
-+#error CFLAG should be set
-+#endif
-+
-+#ifndef CCFLAG
-+#error CCFLAG should be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/cfile.c b/tools/gyp/test/mac/cflags/cfile.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..0af9d0af5da474f6b11587dc1601377fa574acca
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/cfile.c
-@@ -0,0 +1,7 @@
-+#ifndef CFLAG
-+#error CFLAG should be set
-+#endif
-+
-+#ifdef CCFLAG
-+#error CCFLAG should not be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/cppfile.cpp b/tools/gyp/test/mac/cflags/cppfile.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..1a54d18eec7122b42c1b14bb369296f10a01a3c8
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/cppfile.cpp
-@@ -0,0 +1,7 @@
-+#ifdef CFLAG
-+#error CFLAG should not be set
-+#endif
-+
-+#ifndef CCFLAG
-+#error CCFLAG should be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/cppfile_withcflags.cpp b/tools/gyp/test/mac/cflags/cppfile_withcflags.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..de078a06417628dc5aa9a86a13202f13b5d14ced
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/cppfile_withcflags.cpp
-@@ -0,0 +1,7 @@
-+#ifndef CFLAG
-+#error CFLAG should be set
-+#endif
-+
-+#ifndef CCFLAG
-+#error CCFLAG should be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/cxxfile.cxx b/tools/gyp/test/mac/cflags/cxxfile.cxx
-new file mode 100644
-index 0000000000000000000000000000000000000000..1a54d18eec7122b42c1b14bb369296f10a01a3c8
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/cxxfile.cxx
-@@ -0,0 +1,7 @@
-+#ifdef CFLAG
-+#error CFLAG should not be set
-+#endif
-+
-+#ifndef CCFLAG
-+#error CCFLAG should be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/cxxfile_withcflags.cxx b/tools/gyp/test/mac/cflags/cxxfile_withcflags.cxx
-new file mode 100644
-index 0000000000000000000000000000000000000000..de078a06417628dc5aa9a86a13202f13b5d14ced
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/cxxfile_withcflags.cxx
-@@ -0,0 +1,7 @@
-+#ifndef CFLAG
-+#error CFLAG should be set
-+#endif
-+
-+#ifndef CCFLAG
-+#error CCFLAG should be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/mfile.m b/tools/gyp/test/mac/cflags/mfile.m
-new file mode 100644
-index 0000000000000000000000000000000000000000..0af9d0af5da474f6b11587dc1601377fa574acca
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/mfile.m
-@@ -0,0 +1,7 @@
-+#ifndef CFLAG
-+#error CFLAG should be set
-+#endif
-+
-+#ifdef CCFLAG
-+#error CCFLAG should not be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/mmfile.mm b/tools/gyp/test/mac/cflags/mmfile.mm
-new file mode 100644
-index 0000000000000000000000000000000000000000..1a54d18eec7122b42c1b14bb369296f10a01a3c8
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/mmfile.mm
-@@ -0,0 +1,7 @@
-+#ifdef CFLAG
-+#error CFLAG should not be set
-+#endif
-+
-+#ifndef CCFLAG
-+#error CCFLAG should be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/mmfile_withcflags.mm b/tools/gyp/test/mac/cflags/mmfile_withcflags.mm
-new file mode 100644
-index 0000000000000000000000000000000000000000..de078a06417628dc5aa9a86a13202f13b5d14ced
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/mmfile_withcflags.mm
-@@ -0,0 +1,7 @@
-+#ifndef CFLAG
-+#error CFLAG should be set
-+#endif
-+
-+#ifndef CCFLAG
-+#error CCFLAG should be set
-+#endif
-diff --git a/tools/gyp/test/mac/cflags/test.gyp b/tools/gyp/test/mac/cflags/test.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..d330a548f647ea5e9190d2cddaf7e1ad116c615f
---- /dev/null
-+++ b/tools/gyp/test/mac/cflags/test.gyp
-@@ -0,0 +1,132 @@
-+# Copyright (c) 2012 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'targets': [
-+    {
-+      'target_name': 'mytarget',
-+      'type': 'shared_library',
-+      'sources': [
-+        'cfile.c',
-+        'mfile.m',
-+        'ccfile.cc',
-+        'cppfile.cpp',
-+        'cxxfile.cxx',
-+        'mmfile.mm',
-+      ],
-+      'xcode_settings': {
-+        # Normally, defines would go in 'defines' instead. This is just for
-+        # testing.
-+        'OTHER_CFLAGS': [
-+          '-DCFLAG',
-+        ],
-+        'OTHER_CPLUSPLUSFLAGS': [
-+          '-DCCFLAG',
-+        ],
-+        'GCC_C_LANGUAGE_STANDARD': 'c99',
-+      },
-+    },
-+    {
-+      'target_name': 'mytarget_reuse_cflags',
-+      'type': 'shared_library',
-+      'sources': [
-+        'cfile.c',
-+        'mfile.m',
-+        'ccfile_withcflags.cc',
-+        'cppfile_withcflags.cpp',
-+        'cxxfile_withcflags.cxx',
-+        'mmfile_withcflags.mm',
-+      ],
-+      'xcode_settings': {
-+        'OTHER_CFLAGS': [
-+          '-DCFLAG',
-+        ],
-+        'OTHER_CPLUSPLUSFLAGS': [
-+          '$OTHER_CFLAGS',
-+          '-DCCFLAG',
-+        ],
-+        # This is a C-only flag, to check these don't get added to C++ files.
-+        'GCC_C_LANGUAGE_STANDARD': 'c99',
-+      },
-+    },
-+    {
-+      'target_name': 'mytarget_inherit_cflags',
-+      'type': 'shared_library',
-+      'sources': [
-+        'cfile.c',
-+        'mfile.m',
-+        'ccfile_withcflags.cc',
-+        'cppfile_withcflags.cpp',
-+        'cxxfile_withcflags.cxx',
-+        'mmfile_withcflags.mm',
-+      ],
-+      'xcode_settings': {
-+        'OTHER_CFLAGS': [
-+          '-DCFLAG',
-+        ],
-+        'OTHER_CPLUSPLUSFLAGS': [
-+          '$inherited',
-+          '-DCCFLAG',
-+        ],
-+        'GCC_C_LANGUAGE_STANDARD': 'c99',
-+      },
-+    },
-+    {
-+      'target_name': 'mytarget_inherit_cflags_parens',
-+      'type': 'shared_library',
-+      'sources': [
-+        'cfile.c',
-+        'mfile.m',
-+        'ccfile_withcflags.cc',
-+        'cppfile_withcflags.cpp',
-+        'cxxfile_withcflags.cxx',
-+        'mmfile_withcflags.mm',
-+      ],
-+      'xcode_settings': {
-+        'OTHER_CFLAGS': [
-+          '-DCFLAG',
-+        ],
-+        'OTHER_CPLUSPLUSFLAGS': [
-+          '$(inherited)',
-+          '-DCCFLAG',
-+        ],
-+        'GCC_C_LANGUAGE_STANDARD': 'c99',
-+      },
-+    },
-+    {
-+      'target_name': 'mytarget_inherit_cflags_braces',
-+      'type': 'shared_library',
-+      'sources': [
-+        'cfile.c',
-+        'mfile.m',
-+        'ccfile_withcflags.cc',
-+        'cppfile_withcflags.cpp',
-+        'cxxfile_withcflags.cxx',
-+        'mmfile_withcflags.mm',
-+      ],
-+      'xcode_settings': {
-+        'OTHER_CFLAGS': [
-+          '-DCFLAG',
-+        ],
-+        'OTHER_CPLUSPLUSFLAGS': [
-+          '${inherited}',
-+          '-DCCFLAG',
-+        ],
-+        'GCC_C_LANGUAGE_STANDARD': 'c99',
-+      },
-+    },
-+    {
-+      'target_name': 'ansi_standard',
-+      'type': 'shared_library',
-+      'sources': [
-+        'cfile.c',
-+      ],
-+      'xcode_settings': {
-+        'OTHER_CFLAGS': [
-+          '-DCFLAG',
-+        ],
-+        'GCC_C_LANGUAGE_STANDARD': 'ansi',
-+      },
-+    },
-+  ],
-+}
-diff --git a/tools/gyp/test/mac/clang-cxx-language-standard/c++11.cc b/tools/gyp/test/mac/clang-cxx-language-standard/c++11.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..756dc1c7e6aa4988a18c8870f4151f856d1e547e
---- /dev/null
-+++ b/tools/gyp/test/mac/clang-cxx-language-standard/c++11.cc
-@@ -0,0 +1,8 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+static_assert(__cplusplus == 201103L, "wrong c++ standard version");
-+
-+int main() { return 0; }
-+
-diff --git a/tools/gyp/test/mac/clang-cxx-language-standard/c++98.cc b/tools/gyp/test/mac/clang-cxx-language-standard/c++98.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..a6a00c70f497f37bf5e8bafc3d9af48f8ea7030f
---- /dev/null
-+++ b/tools/gyp/test/mac/clang-cxx-language-standard/c++98.cc
-@@ -0,0 +1,24 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#if __cplusplus != 199711L
-+#error wrong c++ standard version
-+#endif
-+
-+enum cxx11_keywords {
-+  alignas,
-+  alignof,
-+  char16_t,
-+  char32_t,
-+  constexpr,
-+  decltype,
-+  noexcept,
-+  nullptr,
-+  override,
-+  static_assert,
-+  thread_local,
-+};
-+
-+int main() { return 0; }
-+
-diff --git a/tools/gyp/test/mac/clang-cxx-language-standard/clang-cxx-language-standard.gyp b/tools/gyp/test/mac/clang-cxx-language-standard/clang-cxx-language-standard.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..eb60bbd0e88a97957e351432779038b51bc11277
---- /dev/null
-+++ b/tools/gyp/test/mac/clang-cxx-language-standard/clang-cxx-language-standard.gyp
-@@ -0,0 +1,30 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'make_global_settings': [
-+    ['CC', '/usr/bin/clang'],
-+    ['CXX', '/usr/bin/clang++'],
-+  ],
-+  'targets': [
-+    {
-+      'target_name': 'c++98',
-+      'type': 'executable',
-+      'sources': [ 'c++98.cc', ],
-+      'xcode_settings': {
-+        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-+        'CLANG_CXX_LANGUAGE_STANDARD': 'c++98',
-+      },
-+    },
-+    {
-+      'target_name': 'c++11',
-+      'type': 'executable',
-+      'sources': [ 'c++11.cc', ],
-+      'xcode_settings': {
-+        'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-+        'CLANG_CXX_LANGUAGE_STANDARD': 'c++0x',
-+      },
-+    },
-+  ],
-+}
-+
-diff --git a/tools/gyp/test/mac/clang-cxx-library/clang-cxx-library.gyp b/tools/gyp/test/mac/clang-cxx-library/clang-cxx-library.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..67006e50a0188c20766b19b3308d21b525200068
---- /dev/null
-+++ b/tools/gyp/test/mac/clang-cxx-library/clang-cxx-library.gyp
-@@ -0,0 +1,32 @@
-+# Copyright (c) 2013 Google Inc. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+{
-+  'make_global_settings': [
-+    ['CC', '/usr/bin/clang'],
-+    ['CXX', '/usr/bin/clang++'],
-+  ],
-+  'targets': [
-+    {
-+      'target_name': 'libc++',
-+      'type': 'executable',
-+      'sources': [ 'libc++.cc', ],
-+      'xcode_settings': {
-+        'CC': 'clang',
-+        # libc++ requires OS X 10.7+.
-+        'MACOSX_DEPLOYMENT_TARGET': '10.7',
-+        'CLANG_CXX_LIBRARY': 'libc++',
-+      },
-+    },
-+    {
-+      'target_name': 'libstdc++',
-+      'type': 'executable',
-+      'sources': [ 'libstdc++.cc', ],
-+      'xcode_settings': {
-+        'CC': 'clang',
-+        'CLANG_CXX_LIBRARY': 'libstdc++',
-+      },
-+    },
-+  ],
-+}
-+
-diff --git a/tools/gyp/test/mac/clang-cxx-library/libc++.cc b/tools/gyp/test/mac/clang-cxx-library/libc++.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..b8d6e6b3e2c277ee440693369788fd9e4398c122
---- /dev/null
-+++ b/tools/gyp/test/mac/clang-cxx-library/libc++.cc
-@@ -0,0 +1,11 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include <string>
-+#ifndef _LIBCPP_VERSION
-+#error expected std library: libc++
-+#endif
-+
-+int main() { std::string x; return x.size(); }
-+
-diff --git a/tools/gyp/test/mac/clang-cxx-library/libstdc++.cc b/tools/gyp/test/mac/clang-cxx-library/libstdc++.cc
-new file mode 100644
-index 0000000000000000000000000000000000000000..474dbf350d2539db03947ad838a16787bf34d61f
---- /dev/null
-+++ b/tools/gyp/test/mac/clang-cxx-library/libstdc++.cc
-@@ -0,0 +1,11 @@
-+// Copyright (c) 2013 Google Inc. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#include <string>
-+#ifndef __GLIBCXX__
-+#error expected std library: libstdc++
-+#endif
-+
-+int main() { std::string x; return x.size(); }
-+
-diff --git a/tools/gyp/test/mac/copies-with-xcode-envvars/copies-with-xcode-envvars.gyp b/tools/gyp/test/mac/copies-with-xcode-envvars/copies-with-xcode-envvars.gyp
-new file mode 100644
-index 0000000000000000000000000000000000000000..c1b1241fb7a059ebb52061a32a345ebd8d6550c9
---- /dev/null
-+++ b/tools/gyp/test/mac/copies-with-xcode-envvars/copies-with-xcode-envvars.gyp
-@@ -0,0 +1,87 @@
-+# Copyright (c) 2016 Mark Callow. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+#
-+# For testing use of the UI settings & environment variables
-+# available in Xcode's PBXCopyFilesBuildPhase.
-+{
-+'targets': [
-+  {
-+    'target_name': 'copies-with-xcode-envvars',
-+    'type': 'executable',
-+    'mac_bundle': 1,
-+    'sources': [ 'empty.c' ],
-+    'conditions': [
-+      ['OS == "ios" or OS == "mac"', {
-+        'copies': [{
-+          'destination': '$(BUILT_PRODUCTS_DIR)',
-+          'files': [
-+            'file0',
-+          ],
-+        }, {
-+          'destination': '$(BUILT_PRODUCTS_DIR)/$(WRAPPER_NAME)',
-+          'files': [
-+            'file1',
-+          ],
-+        }, {
-+          'destination': '<(PRODUCT_DIR)/$(EXECUTABLE_FOLDER_PATH)',
-+          'files': [
-+            'file2',
-+          ],
-+        }, {
-+          'destination': '<(PRODUCT_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)',
-+          'files': [
-+            'file3',
-+          ],
-+        }, {
-+          'destination': '<(PRODUCT_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/testimages',
-+          'files': [
-+            'file4',
-+          ],
-+        }, {
-+          'destination': '$(BUILT_PRODUCTS_DIR)/$(JAVA_FOLDER_PATH)',
-+          'files': [
-+            'file5',
-+          ],
-+        }, {
-+          'destination': '<(PRODUCT_DIR)/$(FRAMEWORKS_FOLDER_PATH)',
-+            'files': [
-+              'file6',
-+          ],
-+        }, {
-+          # NOTE: This is not an Xcode macro name but
-+          # xcodeproj_file.py recognizes it and sends
-+          # the output to the same place as
-+          # $(FRAMEWORKS_FOLDER_PATH). xcode_emulation.py
-+          # sets its value to an absolute path.
-+          'destination': '$(BUILT_FRAMEWORKS_DIR)',
-+          'files': [
-+            'file7',
-+          ],
-+        }, {
-+          'destination': '<(PRODUCT_DIR)/$(SHARED_FRAMEWORKS_FOLDER_PATH)',
-+          'files': [
-+            'file8',
-+          ],
-+        }, {
-+          'destination': '<(PRODUCT_DIR)/$(SHARED_SUPPORT_FOLDER_PATH)',
-+          'files': [
-+            'file9',
-+          ],
-+        }, {
-+          'destination': '<(PRODUCT_DIR)/$(PLUGINS_FOLDER_PATH)',
-+          'files': [
-+            'file10',
-+          ],
-+        }, {
-+          'destination': '<(PRODUCT_DIR)/$(XPCSERVICES_FOLDER_PATH)',
-+          'files': [
-+            'file11',
-+          ],
-+        }], # copies
-+      }], # OS == "ios" or OS == "mac"
-+    ], # conditions
-+  }], # targets
-+}
-+
-+# vim:ai:ts=4:sts=4:sw=2:expandtab:textwidth=70
-diff --git a/tools/gyp/test/mac/copies-with-xcode-envvars/empty.c b/tools/gyp/test/mac/copies-with-xcode-envvars/empty.c
-new file mode 100644
-index 0000000000000000000000000000000000000000..237c8ce181774d991a9dbdd8cacf1a5fb9f199f1
---- /dev/null
-+++ b/tools/gyp/test/mac/copies-with-xcode-envvars/empty.c
-@@ -0,0 +1 @@
-+int main() {}
-diff --git a/tools/gyp/test/mac/copies-with-xcode-envvars/file0 b/tools/gyp/test/mac/copies-with-xcode-envvars/file0
-new file mode 100644
-index 0000000000000000000000000000000000000000..117889361f6cbfcdd0918f6973f2b242fa677f34
---- /dev/null
-+++ b/tools/gyp/test/mac/copies-with-xcode-envvars/file0
-@@ -0,0 +1 @@
-+file0 contents

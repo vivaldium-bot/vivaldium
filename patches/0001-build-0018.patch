@@ -1,0 +1,5441 @@
+diff --git a/tools/swarming_client/utils/fs.py b/tools/swarming_client/utils/fs.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ea515f2f90db6f263b7f1c2f2703406495dee1da
+--- /dev/null
++++ b/tools/swarming_client/utils/fs.py
+@@ -0,0 +1,280 @@
++# Copyright 2015 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Wraps os, os.path and shutil functions to work around MAX_PATH on Windows."""
++
++import __builtin__
++import inspect
++import os
++import re
++import shutil
++import subprocess
++import sys
++
++
++if sys.platform == 'win32':
++
++
++  import ctypes
++  CreateSymbolicLinkW = ctypes.windll.kernel32.CreateSymbolicLinkW
++  CreateSymbolicLinkW.argtypes = (
++      ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32)
++  CreateSymbolicLinkW.restype = ctypes.c_ubyte
++  DeleteFile = ctypes.windll.kernel32.DeleteFileW
++  DeleteFile.argtypes = (ctypes.c_wchar_p,)
++  DeleteFile.restype = ctypes.c_bool
++  GetFileAttributesW = ctypes.windll.kernel32.GetFileAttributesW
++  GetFileAttributesW.argtypes = (ctypes.c_wchar_p,)
++  GetFileAttributesW.restype = ctypes.c_uint
++  RemoveDirectory = ctypes.windll.kernel32.RemoveDirectoryW
++  RemoveDirectory.argtypes = (ctypes.c_wchar_p,)
++  RemoveDirectory.restype = ctypes.c_bool
++
++  _SUPPORTS_SYMLINKS = None
++
++  def _supports_unprivileged_symlinks():
++    """Returns True if the OS supports sane symlinks without any user privilege
++    modification.
++
++    Actively work around AppCompat version lie shim. This is kinda insane to
++    shell out to figure out the real Windows version but this is ironically the
++    the most reliable way. This code was inspired by _get_os_numbers() in
++    //appengine/swarming/swarming_bot/api/platforms/win.py.
++    """
++    global _SUPPORTS_SYMLINKS
++    if _SUPPORTS_SYMLINKS != None:
++      return _SUPPORTS_SYMLINKS
++
++    _SUPPORTS_SYMLINKS = False
++    # Windows is lying to us until python adds to its manifest:
++    #   <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
++    # and it doesn't.
++    # So ask nicely to cmd.exe instead, which will always happily report the
++    # right version. Here's some sample output:
++    # - XP: Microsoft Windows XP [Version 5.1.2600]
++    # - Win10: Microsoft Windows [Version 10.0.10240]
++    # - Win7 or Win2K8R2: Microsoft Windows [Version 6.1.7601]
++    try:
++      out = subprocess.check_output(['cmd.exe', '/c', 'ver']).strip()
++      match = re.search(r'\[Version (\d+\.\d+)\.(\d+)\]', out, re.IGNORECASE)
++      if match:
++        # That's a bit gross but good enough.
++        major = float(match.group(1))
++        if major > 10:
++          _SUPPORTS_SYMLINKS = True
++        elif major == 10:
++          # https://blogs.windows.com/buildingapps/2016/12/02/symlinks-windows-10/
++          _SUPPORTS_SYMLINKS = int(match.group(2)) >= 14971
++    except (subprocess.CalledProcessError, OSError):
++      # Catastrophic issue.
++      pass
++    return _SUPPORTS_SYMLINKS
++
++
++  def extend(path):
++    """Adds '\\\\?\\' when given an absolute path so the MAX_PATH (260) limit is
++    not enforced.
++    """
++    assert os.path.isabs(path), path
++    assert isinstance(path, unicode), path
++    prefix = u'\\\\?\\'
++    return path if path.startswith(prefix) else prefix + path
++
++
++  def trim(path):
++    """Removes '\\\\?\\' when receiving a path."""
++    assert isinstance(path, unicode), path
++    prefix = u'\\\\?\\'
++    if path.startswith(prefix):
++      path = path[len(prefix):]
++    assert os.path.isabs(path), path
++    return path
++
++
++  def islink(path):
++    """Proper implementation of islink() for Windows.
++
++    The stdlib is broken.
++    https://msdn.microsoft.com/library/windows/desktop/aa365682.aspx
++    """
++    FILE_ATTRIBUTE_REPARSE_POINT = 1024
++    INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
++    res = GetFileAttributesW(extend(path))
++    if res == INVALID_FILE_ATTRIBUTES:
++      return False
++    return bool(res & FILE_ATTRIBUTE_REPARSE_POINT)
++
++
++  def symlink(source, link_name):
++    """Creates a symlink on Windows 7 and later.
++
++    This function will only work once SeCreateSymbolicLinkPrivilege has been
++    enabled. See file_path.enable_symlink().
++
++    Useful material:
++    CreateSymbolicLinkW:
++      https://msdn.microsoft.com/library/windows/desktop/aa363866.aspx
++    UAC and privilege stripping:
++      https://msdn.microsoft.com/library/bb530410.aspx
++    Privilege constants:
++      https://msdn.microsoft.com/library/windows/desktop/bb530716.aspx
++    Windows 10 and developer mode:
++      https://blogs.windows.com/buildingapps/2016/12/02/symlinks-windows-10/
++    """
++    SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE = 2
++    # TODO(maruel): This forces always creating absolute path symlinks.
++    source = extend(source)
++    flags = 1 if os.path.isdir(source) else 0
++    if _supports_unprivileged_symlinks():
++      # This enables support for this specific case:
++      # - Windows 10 with build 14971 or later
++      # - Admin account
++      # - UAC enabled
++      # - Developer mode enabled (not the default)
++      #
++      # In this specific case, file_path.enable_symlink() is unnecessary and the
++      # following flag make it magically work.
++      flags |= SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
++    if not CreateSymbolicLinkW(extend(link_name), source, flags):
++      # pylint: disable=undefined-variable
++      raise WindowsError(
++          u'symlink(%r, %r) failed: %s' %
++            (source, link_name, ctypes.GetLastError()))
++
++
++  def unlink(path):
++    """Removes a symlink on Windows 7 and later.
++
++    Does not delete the link source.
++
++    If path is not a link, but a non-empty directory, will fail with a
++    WindowsError.
++
++    Useful material:
++    CreateSymbolicLinkW:
++      https://msdn.microsoft.com/library/windows/desktop/aa363866.aspx
++    DeleteFileW:
++      https://msdn.microsoft.com/en-us/library/windows/desktop/aa363915(v=vs.85).aspx
++    RemoveDirectoryW:
++      https://msdn.microsoft.com/en-us/library/windows/desktop/aa365488(v=vs.85).aspx
++    """
++    path = extend(path)
++    if os.path.isdir(path):
++      if not RemoveDirectory(path):
++        # pylint: disable=undefined-variable
++        raise WindowsError(
++            u'unlink(%r): could not remove directory: %s' %
++              (path, ctypes.GetLastError()))
++    else:
++      if not DeleteFile(path):
++        # pylint: disable=undefined-variable
++        raise WindowsError(
++            u'unlink(%r): could not delete file: %s' %
++              (path, ctypes.GetLastError()))
++
++
++  def walk(top, *args, **kwargs):
++    return os.walk(extend(top), *args, **kwargs)
++
++
++else:
++
++
++  def extend(path):
++    """Convert the path back to utf-8.
++
++    In some rare case, concatenating str and unicode may cause a
++    UnicodeEncodeError because the default encoding is 'ascii'.
++    """
++    assert os.path.isabs(path), path
++    assert isinstance(path, unicode), path
++    return path.encode('utf-8')
++
++
++  def trim(path):
++    """Path mangling is not needed on POSIX."""
++    assert os.path.isabs(path), path
++    assert isinstance(path, str), path
++    return path.decode('utf-8')
++
++
++  def islink(path):
++    return os.path.islink(extend(path))
++
++
++  def symlink(source, link_name):
++    return os.symlink(source, extend(link_name))
++
++  def unlink(path):
++    return os.unlink(extend(path))
++
++  def walk(top, *args, **kwargs):
++    for root, dirs, files in os.walk(extend(top), *args, **kwargs):
++      yield trim(root), dirs, files
++
++
++## builtin
++
++
++def open(path, *args, **kwargs):  # pylint: disable=redefined-builtin
++  return __builtin__.open(extend(path), *args, **kwargs)
++
++
++## os
++
++
++def link(source, link_name):
++  return os.link(extend(source), extend(link_name))
++
++
++def rename(old, new):
++  return os.rename(extend(old), extend(new))
++
++
++def renames(old, new):
++  return os.renames(extend(old), extend(new))
++
++
++## shutil
++
++
++def copy2(src, dst):
++  return shutil.copy2(extend(src), extend(dst))
++
++
++def rmtree(path, *args, **kwargs):
++  return shutil.rmtree(extend(path), *args, **kwargs)
++
++
++## The rest
++
++
++def _get_lambda(func):
++  return lambda path, *args, **kwargs: func(extend(path), *args, **kwargs)
++
++
++def _is_path_fn(func):
++  return (inspect.getargspec(func)[0] or [None]) == 'path'
++
++
++_os_fns = (
++  'access', 'chdir', 'chflags', 'chroot', 'chmod', 'chown', 'lchflags',
++  'lchmod', 'lchown', 'listdir', 'lstat', 'mknod', 'mkdir', 'makedirs',
++  'remove', 'removedirs', 'rmdir', 'stat', 'statvfs', 'unlink', 'utime')
++
++_os_path_fns = (
++  'exists', 'lexists', 'getatime', 'getmtime', 'getctime', 'getsize', 'isfile',
++  'isdir', 'ismount')
++
++
++for _fn in _os_fns:
++  if hasattr(os, _fn):
++    sys.modules[__name__].__dict__.setdefault(
++        _fn, _get_lambda(getattr(os, _fn)))
++
++
++for _fn in _os_path_fns:
++  if hasattr(os.path, _fn):
++    sys.modules[__name__].__dict__.setdefault(
++        _fn, _get_lambda(getattr(os.path, _fn)))
+diff --git a/tools/swarming_client/utils/graph.py b/tools/swarming_client/utils/graph.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..9779b9fe4f9676e4401777d8405956327523f36e
+--- /dev/null
++++ b/tools/swarming_client/utils/graph.py
+@@ -0,0 +1,120 @@
++# Copyright 2013 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++import os
++import re
++
++from third_party import colorama
++
++
++UNITS = ('', 'k', 'm', 'g', 't', 'p', 'e', 'z', 'y')
++
++
++def get_console_width(default=80):
++  """Returns the console width, if available."""
++  # TODO(maruel): Implement Windows.
++  try:
++    _, columns = os.popen('stty size', 'r').read().split()
++  except (IOError, OSError, ValueError):
++    columns = default
++  return int(columns)
++
++
++def generate_histogram(data, buckets):
++  """Generates an histogram out of a list of floats.
++
++  The data is bucketed into |buckets| buckets.
++
++  Returns:
++    dict of bucket: size
++  """
++  if not data:
++    return {}
++
++  minimum = min(data)
++  maximum = max(data)
++  if minimum == maximum:
++    return {data[0]: len(data)}
++
++  buckets = min(len(data), buckets)
++  bucket_size = (maximum-minimum)/buckets
++  out = dict((i, 0) for i in xrange(buckets))
++  for i in data:
++    out[min(int((i-minimum)/bucket_size), buckets-1)] += 1
++  return dict(((k*bucket_size)+minimum, v) for k, v in out.iteritems())
++
++
++def print_histogram(data, columns=0, key_format=None):
++  """Prints ASCII art representing an histogram.
++
++  Arguments:
++    data: as formatted by generate_histogram().
++    columns: width of the graph.
++    key_format: printf like format for the keys.
++  """
++  # TODO(maruel): Add dots for tens.
++  if not data:
++    # Nothing to print.
++    return
++
++  columns = columns or get_console_width()
++  key_format = key_format or '%s'
++
++  max_key_width = max(len(key_format % k) for k in data)
++  # 3 == 1 for ' ' prefix, 2 for ': ' suffix.
++  width = columns - max_key_width - 3
++  assert width > 1
++
++  maxvalue = max(data.itervalues())
++  if all(isinstance(i, int) for i in data.itervalues()) and maxvalue < width:
++    width = maxvalue
++  norm = float(maxvalue) / width
++
++  form = '%s: %s%s%s'
++  for k in sorted(data):
++    line = '*' * int(data[k] / norm)
++    key = (key_format % k).rjust(max_key_width)
++    print(form % (key, colorama.Fore.GREEN, line, colorama.Fore.RESET))
++
++
++def to_units(number):
++  """Convert a string to numbers."""
++  unit = 0
++  while number >= 1024.:
++    unit += 1
++    number = number / 1024.
++    if unit == len(UNITS) - 1:
++      break
++  if unit:
++    return '%.2f%s' % (number, UNITS[unit])
++  return '%d' % number
++
++
++def from_units(text):
++  """Convert a text to numbers.
++
++  Example: from_unit('0.1k') == 102
++  """
++  match = re.match(r'^([0-9\.]+)(|[' + ''.join(UNITS[1:]) + r'])$', text)
++  if not match:
++    return None
++
++  number = float(match.group(1))
++  unit = match.group(2)
++  return int(number * 1024**UNITS.index(unit))
++
++
++def unit_arg(option, opt, value, parser):
++  """OptionParser callback that supports units like 10.5m or 20k."""
++  actual = from_units(value)
++  if actual is None:
++    parser.error('Invalid value \'%s\' for %s' % (value, opt))
++  setattr(parser.values, option.dest, actual)
++
++
++def unit_option(parser, *args, **kwargs):
++  """Add an option that uses unit_arg()."""
++  parser.add_option(
++      *args, type='str', metavar='N', action='callback', callback=unit_arg,
++      nargs=1, **kwargs)
+diff --git a/tools/swarming_client/utils/grpc_proxy.py b/tools/swarming_client/utils/grpc_proxy.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..9c6dc50bd0549841974c56e5c3c1da2962429703
+--- /dev/null
++++ b/tools/swarming_client/utils/grpc_proxy.py
+@@ -0,0 +1,271 @@
++# Copyright 2017 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Common gRPC implementation for Swarming and Isolate"""
++
++import logging
++import os
++import re
++import time
++import urlparse
++from utils import net
++
++# gRPC may not be installed on the worker machine. This is fine, as long as
++# the bot doesn't attempt to use gRPC (checked in IsolateServerGrpc.__init__).
++# Full external requirements are: grpcio, certifi.
++try:
++  import grpc
++  from google import auth as google_auth
++  from google.auth.transport import grpc as google_auth_transport_grpc
++  from google.auth.transport import requests as google_auth_transport_requests
++except ImportError as err:
++  grpc = None
++
++
++# If gRPC was successfully imported, try to import certifi as well.  This is not
++# actually used anywhere in this module, but if certifi is missing,
++# google.auth.transport will fail (see
++# https://stackoverflow.com/questions/24973326). So checking it here allows us
++# to print out a somewhat-sane error message.
++certifi = None
++if grpc is not None:
++  try:
++    import certifi
++  except ImportError:
++    # Will print out error messages later (ie when we have a logger)
++    pass
++
++
++# How many times to retry a gRPC call
++MAX_GRPC_ATTEMPTS = 30
++
++
++# Longest time to sleep between gRPC calls
++MAX_GRPC_SLEEP = 10.
++
++
++# Start the timeout at three minutes.
++GRPC_TIMEOUT_SEC = 3 * 60
++
++
++def available():
++  """Returns true if gRPC can be used on this host."""
++  return grpc != None
++
++
++class Proxy(object):
++  """Represents a gRPC proxy.
++
++  If the proxy begins with 'https', the returned channel will be secure and
++  authorized using default application credentials - see
++  https://developers.google.com/identity/protocols/application-default-credentials.
++  Currently, we're using Cloud Container Builder scopes for testing; this may
++  change in the future to allow different scopes to be passed in for different
++  channels.
++
++  To use the returned channel to call methods directly, say:
++
++    proxy = grpc_proxy.Proxy('https://grpc.luci.org/resource/prefix',
++                             myapi_pb2.MyApiStub)
++
++  To make a unary call with retries (recommended):
++
++    proto_output = proxy.call_unary('MyMethod', proto_input)
++
++  To make a unary call without retries, or to pass in a client side stream
++  (proto_input can be an iterator here):
++
++    proto_output = proxy.call_no_retries('MyMethod', proto_input)
++
++  You can also call the stub directly (not recommended, since no errors will be
++  caught or logged):
++
++    proto_output = proxy.stub.MyMethod(proto_input)
++
++  To make a call to a server-side streaming call (these are not retried):
++
++    for response in proxy.get_stream('MyStreaminingMethod', proto_input):
++      <process response>
++
++  To retrieve the prefix:
++
++    prefix = proxy.prefix # returns "prefix/for/resource/names"
++
++  All exceptions are logged using "logging.warning."
++  """
++
++  def __init__(self, proxy, stub_class):
++    self._verbose = os.environ.get('LUCI_GRPC_PROXY_VERBOSE')
++    if self._verbose:
++      logging.info('Enabled verbose mode for %s with stub %s',
++                   proxy, stub_class.__name__)
++    # NB: everything in url is unicode; convert to strings where
++    # needed.
++    url = urlparse.urlparse(proxy)
++    if self._verbose:
++      logging.info('Parsed URL for proxy is %r', url)
++    if url.scheme == 'http':
++      self._secure = False
++    elif url.scheme == 'https':
++      self._secure = True
++    else:
++      raise ValueError('gRPC proxy %s must use http[s], not %s' % (
++          proxy, url.scheme))
++    if url.netloc == '':
++      raise ValueError('gRPC proxy is missing hostname: %s' % proxy)
++    self._host = url.netloc
++    self._prefix = url.path
++    if self._prefix.endswith('/'):
++      self._prefix = self._prefix[:-1]
++    if self._prefix.startswith('/'):
++      self._prefix = self._prefix[1:]
++    if url.params != '' or url.fragment != '':
++      raise ValueError('gRPC proxy may not contain params or fragments: %s' %
++                       proxy)
++    self._debug_info = ['full proxy name: ' + proxy]
++    self._channel = self._create_channel()
++    self._stub = stub_class(self._channel)
++    logging.info('%s: initialized', self.name)
++    if self._verbose:
++      self._dump_proxy_info()
++
++  @property
++  def prefix(self):
++    return self._prefix
++
++  @property
++  def channel(self):
++    return self._channel
++
++  @property
++  def stub(self):
++    return self._stub
++
++  @property
++  def name(self):
++    security = 'insecure'
++    if self._secure:
++      security = 'secure'
++    return 'gRPC %s proxy %s/%s' % (
++        security, self._host, self._stub.__class__.__name__)
++
++  def call_unary(self, name, request):
++    """Calls a method, waiting if the service is not available.
++
++    Usage: proto_output = proxy.call_unary('MyMethod', proto_input)
++    """
++    for attempt in range(1, MAX_GRPC_ATTEMPTS+1):
++      try:
++        return self.call_no_retries(name, request)
++      except grpc.RpcError as g:
++        if g.code() is not grpc.StatusCode.UNAVAILABLE:
++          raise
++        logging.warning('%s: call_grpc - proxy is unavailable (attempt %d/%d)',
++                        self.name, attempt, MAX_GRPC_ATTEMPTS)
++        # Save the error in case we need to return it
++        grpc_error = g
++        time.sleep(net.calculate_sleep_before_retry(attempt, MAX_GRPC_SLEEP))
++    # If we get here, it must be because we got (and saved) an error
++    assert grpc_error is not None
++    raise grpc_error
++
++  def get_stream(self, name, request):
++    """Calls a server-side streaming method, returning an iterator.
++
++    Usage: for resp in proxy.get_stream('MyMethod', proto_input'):
++    """
++    stream = self.call_no_retries(name, request)
++    while True:
++      # The lambda "next(stream, 1)" will return a protobuf on success, or the
++      # integer 1 if the stream has ended. This allows us to avoid attempting
++      # to catch StopIteration, which gets logged by _wrap_grpc_operation.
++      response = self._wrap_grpc_operation(name + ' pull from stream',
++                                           lambda: next(stream, 1))
++      if isinstance(response, int):
++        # Iteration is finished
++        return
++      yield response
++
++  def call_no_retries(self, name, request):
++    """Calls a method without any retries.
++
++    Recommended for client-side streaming or nonidempotent unary calls.
++    """
++    method = getattr(self._stub, name)
++    if method is None:
++      raise NameError('%s: "%s" is not a valid method name', self.name, name)
++    return self._wrap_grpc_operation(
++        name, lambda: method(request, timeout=GRPC_TIMEOUT_SEC))
++
++  def _wrap_grpc_operation(self, name, fn):
++    """Wraps a gRPC operation (call or iterator increment) for logging."""
++    if self._verbose:
++      logging.info('%s/%s - starting gRPC operation', self.name, name)
++    try:
++      return fn()
++    except grpc.RpcError as g:
++      logging.warning('\n\nFailure in %s/%s: gRPC error %s', self.name, name, g)
++      self._dump_proxy_info()
++      raise g
++    except Exception as e:
++      logging.warning('\n\nFailure in %s/%s: exception %s', self.name, name, e)
++      self._dump_proxy_info()
++      raise e
++
++  def _dump_proxy_info(self):
++    logging.warning('DETAILED PROXY INFO')
++    logging.warning('prefix = %s', self.prefix)
++    logging.warning('debug info:\n\t%s\n\n',
++                    '\n\t'.join(self._debug_info))
++
++  def _create_channel(self):
++    # Make sure grpc was successfully imported
++    assert available()
++
++    if not self._secure:
++      return grpc.insecure_channel(self._host)
++
++    # Authenticate the host.
++    #
++    # You're allowed to override the root certs and server if necessary. For
++    # example, if you're running your proxy on localhost, you'll need to set
++    # GRPC_PROXY_TLS_ROOTS to the "roots.crt" file specifying the certificate
++    # for the root CA that your localhost server has used to certify itself, and
++    # the GRPC_PROXY_TLS_OVERRIDE to the name that your server is using to
++    # identify itself. For example, the ROOTS env var might be
++    # "/path/to/roots.crt" while the OVERRIDE env var might be "test_server," if
++    # this is what's used by the server you're running.
++    #
++    # If you're connecting to a real server with real SSL, none of this should
++    # be used.
++    if not certifi:
++      self._debug_info.append('CERTIFI IS NOT PRESENT;' +
++                              ' gRPC HTTPS CONNECTIONS MAY FAIL')
++    root_certs = None
++    roots = os.environ.get('LUCI_GRPC_PROXY_TLS_ROOTS')
++    if roots:
++      self._debug_info.append('Overridden root CA: %s' % roots)
++      with open(roots) as f:
++        root_certs = f.read()
++    else:
++      self._debug_info.append('Using default root CAs from certifi')
++    overd = os.environ.get('LUCI_GRPC_PROXY_TLS_OVERRIDE')
++    options = ()
++    if overd:
++      options=(('grpc.ssl_target_name_override', overd),)
++    ssl_creds = grpc.ssl_channel_credentials(root_certificates=root_certs)
++
++    # Authenticate the user.
++    scopes = ('https://www.googleapis.com/auth/cloud-source-tools',)
++    self._debug_info.append('Scopes are: %r' % scopes)
++    user_creds, _ = google_auth.default(scopes=scopes)
++
++    # Create the channel.
++    request = google_auth_transport_requests.Request()
++    if len(options) > 0:
++      self._debug_info.append('Options are: %r' % options)
++    else:
++      self._debug_info.append('No options used')
++    return google_auth_transport_grpc.secure_authorized_channel(
++        user_creds, request, self._host, ssl_creds, options=options)
+diff --git a/tools/swarming_client/utils/large.py b/tools/swarming_client/utils/large.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..90bc7f64c4f2bb5fd41051de0c4f21fb1048bfe0
+--- /dev/null
++++ b/tools/swarming_client/utils/large.py
+@@ -0,0 +1,71 @@
++# Copyright 2016 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Implements an integer set compression algorithm based on delta
++encoded varints, which is then deflate'd.
++
++The algorithm is intentionally simple.
++
++This only works with sorted list of integers. The resulting compression level
++can be very high for monotonically increasing sets.
++"""
++
++import cStringIO
++import zlib
++
++
++def pack(values):
++  """Returns a deflate'd buffer of delta encoded varints.
++
++  Arguments:
++    values: sorted list of int.
++
++  Returns:
++    compressed buffer as a str.
++  """
++  out = ''
++  if not values:
++    return ''
++  last = 0
++  max_value = 2L**63
++  assert 0 <= values[0] < max_value, 'Values must be between 0 and 2**63'
++  assert 0 <= values[-1] < max_value, 'Values must be between 0 and 2**63'
++  for value in values:
++    v = value
++    value -= last
++    assert value >= 0, 'List must be sorted ascending'
++    last = v
++    while value > 127:
++      out += chr((1 << 7) | (value & 0x7F))
++      value >>=  7
++    out += chr(value)
++  return zlib.compress(out)
++
++
++def unpack(data):
++  """Decompresses a deflate'd delta encoded list of varints.
++
++  Arguments:
++    compressed buffer as a str. Accepts None to simplify call sites.
++
++  Returns:
++    values: sorted list of int.
++  """
++  out = []
++  if data == '':
++    return out
++  value = 0
++  base = 1
++  last = 0
++  for d in zlib.decompress(data):
++    val_byte = ord(d)
++    value += (val_byte & 0x7F) * base
++    if val_byte & 0x80:
++      base <<= 7
++    else:
++      out.append(value + last)
++      last += value
++      value = 0
++      base = 1
++  return out
+diff --git a/tools/swarming_client/utils/logging_utils.py b/tools/swarming_client/utils/logging_utils.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..9b559f597eac1a38a453860ce49af3986c4f179f
+--- /dev/null
++++ b/tools/swarming_client/utils/logging_utils.py
+@@ -0,0 +1,302 @@
++# Copyright 2015 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Utility relating to logging."""
++
++import argparse
++import codecs
++import ctypes
++import logging
++import logging.handlers
++import optparse
++import os
++import sys
++import tempfile
++import time
++
++from utils import file_path
++
++# This works around file locking issue on Windows specifically in the case of
++# long lived child processes.
++#
++# Python opens files with inheritable handle and without file sharing by
++# default. This causes the RotatingFileHandler file handle to be duplicated in
++# the subprocesses even if the log file is not used in it. Because of this
++# handle in the child process, when the RotatingFileHandler tries to os.rename()
++# the file in the parent process, it fails with:
++#     WindowsError: [Error 32] The process cannot access the file because
++#     it is being used by another process
++if sys.platform == 'win32':
++  import ctypes
++  import msvcrt  # pylint: disable=F0401
++  import _subprocess  # pylint: disable=F0401
++
++  FILE_ATTRIBUTE_NORMAL = 0x00000080
++  FILE_SHARE_READ = 1
++  FILE_SHARE_WRITE = 2
++  FILE_SHARE_DELETE = 4
++  GENERIC_READ = 0x80000000
++  GENERIC_WRITE = 0x40000000
++  OPEN_ALWAYS = 4
++
++  # TODO(maruel): Make it work in cygwin too if necessary. This would have to
++  # use ctypes.cdll.kernel32 instead of _subprocess and msvcrt.
++
++
++  def shared_open(path):
++    """Opens a file with full sharing mode and without inheritance.
++
++    The file is open for both read and write.
++
++    See https://bugs.python.org/issue15244 for inspiration.
++    """
++    path = unicode(path)
++    handle = ctypes.windll.kernel32.CreateFileW(
++        path,
++        GENERIC_READ|GENERIC_WRITE,
++        FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
++        None,
++        OPEN_ALWAYS,
++        FILE_ATTRIBUTE_NORMAL,
++        None)
++    ctr_handle = msvcrt.open_osfhandle(handle, os.O_BINARY | os.O_NOINHERIT)
++    return os.fdopen(ctr_handle, 'r+b')
++
++
++  class NoInheritRotatingFileHandler(logging.handlers.RotatingFileHandler):
++    def _open(self):
++      """Opens the log file without handle inheritance but with file sharing.
++
++      Ignores self.mode.
++      """
++      f = shared_open(self.baseFilename)
++      if self.encoding:
++        # Do the equivalent of
++        # codecs.open(self.baseFilename, self.mode, self.encoding)
++        info = codecs.lookup(self.encoding)
++        f = codecs.StreamReaderWriter(
++            f, info.streamreader, info.streamwriter, 'replace')
++        f.encoding = self.encoding
++      return f
++
++
++else:  # Not Windows.
++
++
++  NoInheritRotatingFileHandler = logging.handlers.RotatingFileHandler
++
++
++# Levels used for logging.
++LEVELS = [logging.ERROR, logging.INFO, logging.DEBUG]
++
++
++class CaptureLogs(object):
++  """Captures all the logs in a context."""
++  def __init__(self, prefix, root=None):
++    handle, self._path = tempfile.mkstemp(prefix=prefix, suffix='.log')
++    os.close(handle)
++    self._handler = logging.FileHandler(self._path, 'w')
++    self._handler.setLevel(logging.DEBUG)
++    formatter = UTCFormatter(
++        '%(process)d %(asctime)s: %(levelname)-5s %(message)s')
++    self._handler.setFormatter(formatter)
++    self._root = root or logging.getLogger()
++    self._root.addHandler(self._handler)
++    assert self._root.isEnabledFor(logging.DEBUG)
++
++  def read(self):
++    """Returns the current content of the logs.
++
++    This also closes the log capture so future logs will not be captured.
++    """
++    self._disconnect()
++    assert self._path
++    try:
++      with open(self._path, 'rb') as f:
++        return f.read()
++    except IOError as e:
++      return 'Failed to read %s: %s' % (self._path, e)
++
++  def close(self):
++    """Closes and delete the log."""
++    self._disconnect()
++    if self._path:
++      try:
++        os.remove(self._path)
++      except OSError as e:
++        logging.error('Failed to delete log file %s: %s', self._path, e)
++      self._path = None
++
++  def __enter__(self):
++    return self
++
++  def __exit__(self, _exc_type, _exc_value, _traceback):
++    self.close()
++
++  def _disconnect(self):
++    if self._handler:
++      self._root.removeHandler(self._handler)
++      self._handler.close()
++      self._handler = None
++
++
++class UTCFormatter(logging.Formatter):
++  converter = time.gmtime
++
++  def formatTime(self, record, datefmt=None):
++    """Change is ',' to '.'."""
++    ct = self.converter(record.created)
++    if datefmt:
++      return time.strftime(datefmt, ct)
++    else:
++      t = time.strftime("%Y-%m-%d %H:%M:%S", ct)
++      return "%s.%03d" % (t, record.msecs)
++
++
++class Filter(object):
++  """Adds fields used by the infra-specific formatter.
++
++  Fields added:
++  - 'severity': one-letter indicator of log level (first letter of levelname).
++  """
++
++  def filter(self, record):
++    record.severity = record.levelname[0]
++    return True
++
++
++def find_stderr(root=None):
++  """Returns the logging.handler streaming to stderr, if any."""
++  for log in (root or logging.getLogger()).handlers:
++    if getattr(log, 'stream', None) is sys.stderr:
++      return log
++
++
++def prepare_logging(filename, root=None):
++  """Prepare logging for scripts.
++
++  Makes it log in UTC all the time. Prepare a rotating file based log.
++  """
++  assert not find_stderr(root)
++  formatter = UTCFormatter('%(process)d %(asctime)s %(severity)s: %(message)s')
++
++  # It is a requirement that the root logger is set to DEBUG, so the messages
++  # are not lost. It defaults to WARNING otherwise.
++  logger = root or logging.getLogger()
++  if not logger:
++    # Better print insanity than crash.
++    print >> sys.stderr, 'OMG NO ROOT'
++    return
++  logger.setLevel(logging.DEBUG)
++
++  stderr = logging.StreamHandler()
++  stderr.setFormatter(formatter)
++  stderr.addFilter(Filter())
++  # Default to ERROR.
++  stderr.setLevel(logging.ERROR)
++  logger.addHandler(stderr)
++
++  # Setup up logging to a constant file so we can debug issues where
++  # the results aren't properly sent to the result URL.
++  if filename:
++    file_path.ensure_tree(os.path.dirname(os.path.abspath(unicode(filename))))
++    try:
++      rotating_file = NoInheritRotatingFileHandler(
++          filename, maxBytes=10 * 1024 * 1024, backupCount=5,
++          encoding='utf-8')
++      rotating_file.setLevel(logging.DEBUG)
++      rotating_file.setFormatter(formatter)
++      rotating_file.addFilter(Filter())
++      logger.addHandler(rotating_file)
++    except Exception:
++      # May happen on cygwin. Do not crash.
++      logging.exception('Failed to open %s', filename)
++
++
++def set_console_level(level, root=None):
++  """Reset the console (stderr) logging level."""
++  handler = find_stderr(root)
++  if not handler:
++    # Better print insanity than crash.
++    print >> sys.stderr, 'OMG NO STDERR'
++    return
++  handler.setLevel(level)
++
++
++class OptionParserWithLogging(optparse.OptionParser):
++  """Adds --verbose option."""
++
++  # Set to True to enable --log-file options.
++  enable_log_file = True
++
++  # Set in unit tests.
++  logger_root = None
++
++  def __init__(self, verbose=0, log_file=None, **kwargs):
++    kwargs.setdefault('description', sys.modules['__main__'].__doc__)
++    optparse.OptionParser.__init__(self, **kwargs)
++    self.group_logging = optparse.OptionGroup(self, 'Logging')
++    self.group_logging.add_option(
++        '-v', '--verbose',
++        action='count',
++        default=verbose,
++        help='Use multiple times to increase verbosity')
++    if self.enable_log_file:
++      self.group_logging.add_option(
++          '-l', '--log-file',
++          default=log_file,
++          help='The name of the file to store rotating log details')
++      self.group_logging.add_option(
++          '--no-log', action='store_const', const='', dest='log_file',
++          help='Disable log file')
++
++  def parse_args(self, *args, **kwargs):
++    # Make sure this group is always the last one.
++    self.add_option_group(self.group_logging)
++
++    options, args = optparse.OptionParser.parse_args(self, *args, **kwargs)
++    prepare_logging(self.enable_log_file and options.log_file, self.logger_root)
++    set_console_level(
++        LEVELS[min(len(LEVELS) - 1, options.verbose)], self.logger_root)
++    return options, args
++
++
++class ArgumentParserWithLogging(argparse.ArgumentParser):
++  """Adds --verbose option."""
++
++  # Set to True to enable --log-file options.
++  enable_log_file = True
++
++  def __init__(self, verbose=0, log_file=None, **kwargs):
++    kwargs.setdefault('description', sys.modules['__main__'].__doc__)
++    kwargs.setdefault('conflict_handler', 'resolve')
++    self.__verbose = verbose
++    self.__log_file = log_file
++    super(ArgumentParserWithLogging, self).__init__(**kwargs)
++
++  def _add_logging_group(self):
++    group = self.add_argument_group('Logging')
++    group.add_argument(
++        '-v', '--verbose',
++        action='count',
++        default=self.__verbose,
++        help='Use multiple times to increase verbosity')
++    if self.enable_log_file:
++      group.add_argument(
++          '-l', '--log-file',
++          default=self.__log_file,
++          help='The name of the file to store rotating log details')
++      group.add_argument(
++          '--no-log', action='store_const', const='', dest='log_file',
++          help='Disable log file')
++
++  def parse_args(self, *args, **kwargs):
++    # Make sure this group is always the last one.
++    self._add_logging_group()
++
++    args = super(ArgumentParserWithLogging, self).parse_args(*args, **kwargs)
++    prepare_logging(self.enable_log_file and args.log_file, self.logger_root)
++    set_console_level(
++        LEVELS[min(len(LEVELS) - 1, args.verbose)], self.logger_root)
++    return args
+diff --git a/tools/swarming_client/utils/lru.py b/tools/swarming_client/utils/lru.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..8bd7212ac4b28fd68a84a438f4dec68f8b47f742
+--- /dev/null
++++ b/tools/swarming_client/utils/lru.py
+@@ -0,0 +1,196 @@
++# Copyright 2013 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Defines a dictionary that can evict least recently used items."""
++
++import collections
++import json
++import time
++
++
++class LRUDict(object):
++  """Dictionary that can evict least recently used items.
++
++  Implemented as a wrapper around OrderedDict object. An OrderedDict stores
++  (key, (value, timestamp)) pairs in order they are
++  inserted and can effectively pop oldest items.
++
++  Can also store its state as *.json file on disk.
++  """
++
++  # Used to determine current timestamp.
++  # Can be substituted in individual LRUDict instances.
++  time_fn = time.time
++
++  def __init__(self):
++    # Ordered key -> (value, timestamp) mapping,
++    # newest items at the bottom.
++    self._items = collections.OrderedDict()
++    # True if was modified after loading.
++    self._dirty = True
++
++  def __nonzero__(self):
++    """False if dict is empty."""
++    return bool(self._items)
++
++  def __iter__(self):
++    """Iterate over the keys."""
++    return self._items.__iter__()
++
++  def __len__(self):
++    """Number of items in the dict."""
++    return len(self._items)
++
++  def __contains__(self, key):
++    """True if |key| is in the dict."""
++    return key in self._items
++
++  def __getitem__(self, key):
++    """Returns value for |key| or raises KeyError if not found."""
++    return self._items[key][0]
++
++  @classmethod
++  def load(cls, state_file):
++    """Loads previously saved state and returns LRUDict in that state.
++
++    Raises ValueError if state file is corrupted.
++    """
++    try:
++      state = json.load(open(state_file, 'r'))
++    except (IOError, ValueError) as e:
++      raise ValueError('Broken state file %s: %s' % (state_file, e))
++
++    if isinstance(state, list):  # Old format.
++      # Items are stored oldest to newest. Put them back in the same order.
++      lru = cls()
++      for pair in state:
++        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
++          raise ValueError(
++              'Broken state file %s, expecting pairs: %s' % (state_file, pair))
++        lru._items[pair[0]] = (pair[1], 0)
++
++      # Check for duplicate keys.
++      if len(lru) != len(state):
++        raise ValueError(
++            'Broken state file %s, found duplicate keys' % (state_file,))
++
++    elif isinstance(state, dict):  # New format.
++      state_ver = state.get('version')
++      if not isinstance(state_ver, int):
++        raise ValueError(
++            'Broken state file %s, version %r is not an integer' % (
++              state_file, state_ver))
++      if state_ver > 2:
++        raise ValueError(
++            'Unsupported state file %s, version is %d. '
++            'Latest supported is 2' % (state_file, state_ver))
++      state_items = state.get('items')
++      if not isinstance(state_items, list):
++        raise ValueError(
++            'Broken state file %s, items should be json list' % (state_file,))
++      lru = cls()
++      # Items are stored oldest to newest. Put them back in the same order.
++      for item in state_items:
++        if not isinstance(item, (list, tuple)) or len(item) != 2:
++          raise ValueError(
++              'Broken state file %s, expecting pairs: %s' % (state_file, item))
++        if not isinstance(item[1], (list, tuple)) or len(item[1]) != 2:
++          raise ValueError(
++              'Broken state file %s, expecting second item to be a item: %s' % (
++                state_file, item))
++        if not isinstance(item[1][1], (int, float)):
++          raise ValueError(
++              'Broken state file %s, expecting second item of the second item '
++              'to be a number: %s' % (state_file, item))
++        lru._items[item[0]] = item[1]
++
++      # Check for duplicate keys.
++      if len(lru) != len(state_items):
++        raise ValueError(
++            'Broken state file %s, found duplicate keys' % (state_file,))
++
++    else:
++      raise ValueError(
++          'Broken state file %s, should be json object or list' % (state_file,))
++
++    # Now state from the file corresponds to state in the memory.
++    lru._dirty = False
++    return lru
++
++  def save(self, state_file):
++    """Saves cache state to a file if it was modified."""
++    if not self._dirty:
++      return False
++
++    with open(state_file, 'wb') as f:
++      contents = {
++        'version': 2,
++        'items': self._items.items(),
++      }
++      json.dump(contents, f, separators=(',',':'))
++
++    self._dirty = False
++    return True
++
++  def add(self, key, value):
++    """Adds or replaces a |value| for |key|, marks it as most recently used."""
++    self._items.pop(key, None)
++    self._items[key] = (value, self.time_fn())
++    self._dirty = True
++
++  def keys_set(self):
++    """Set of keys of items in this dict."""
++    return set(self._items)
++
++  def get(self, key, default=None):
++    """Returns value for |key| or |default| if not found."""
++    item = self._items.get(key)
++    return item[0] if item is not None else default
++
++  def get_timestamp(self, key):
++    """Returns timestamp of last use of |key|.
++
++    Raises KeyError if |key| is not in the dict.
++    """
++    return self._items[key][1]
++
++  def touch(self, key):
++    """Marks |key| as most recently used.
++
++    Raises KeyError if |key| is not in the dict.
++    """
++    self._items[key] = (self._items.pop(key)[0], self.time_fn())
++    self._dirty = True
++
++  def pop(self, key):
++    """Removes item from the dict, returns its value.
++
++    Raises KeyError if |key| is not in the dict.
++    """
++    item = self._items.pop(key)
++    self._dirty = True
++    return item[0]
++
++  def get_oldest(self):
++    """Returns oldest item as tuple (key, (value, timestamp)).
++
++    Raises KeyError if dict is empty.
++    """
++    for item in self._items.iteritems():
++      return item
++    raise KeyError('dictionary is empty')
++
++  def pop_oldest(self):
++    """Removes oldest item and returns it as (key, (value, timestamp)).
++
++    Raises KeyError if dict is empty.
++    """
++    item = self._items.popitem(last=False)
++    self._dirty = True
++    return item
++
++  def itervalues(self):
++    """Iterator over stored values in arbitrary order."""
++    for val, _ in self._items.itervalues():
++      yield val
+diff --git a/tools/swarming_client/utils/net.py b/tools/swarming_client/utils/net.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..61ef174c59206bd23fca564c53a8716df0448dbf
+--- /dev/null
++++ b/tools/swarming_client/utils/net.py
+@@ -0,0 +1,844 @@
++# Copyright 2013 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Classes and functions for generic network communication over HTTP."""
++
++import cookielib
++import itertools
++import json
++import logging
++import math
++import os
++import random
++import re
++import socket
++import ssl
++import threading
++import time
++import urllib
++import urlparse
++
++from third_party import requests
++from third_party.requests import adapters
++from third_party.requests import structures
++
++from utils import authenticators
++from utils import oauth
++from utils import tools
++
++# TODO(vadimsh): Refactor this stuff to be less magical, less global and less
++# bad.
++
++# Default maximum number of attempts to trying opening a url before aborting.
++URL_OPEN_MAX_ATTEMPTS = 30
++
++# Default timeout when retrying.
++URL_OPEN_TIMEOUT = 6*60.
++
++# Default timeout when reading from open HTTP connection.
++URL_READ_TIMEOUT = 60
++
++# Content type for url encoded POST body.
++URL_ENCODED_FORM_CONTENT_TYPE = 'application/x-www-form-urlencoded'
++# Content type for JSON body.
++JSON_CONTENT_TYPE = 'application/json; charset=UTF-8'
++# Default content type for POST body.
++DEFAULT_CONTENT_TYPE = URL_ENCODED_FORM_CONTENT_TYPE
++
++# Content type -> function that encodes a request body.
++CONTENT_ENCODERS = {
++  URL_ENCODED_FORM_CONTENT_TYPE:
++    urllib.urlencode,
++  JSON_CONTENT_TYPE:
++    lambda x: json.dumps(x, sort_keys=True, separators=(',', ':')),
++}
++
++
++# Google Storage URL regular expression.
++GS_STORAGE_HOST_URL_RE = re.compile(r'https://(.+\.)?storage\.googleapis\.com')
++
++# Global (for now) map: server URL (http://example.com) -> HttpService instance.
++# Used by get_http_service to cache HttpService instances.
++_http_services = {}
++_http_services_lock = threading.Lock()
++
++# This lock ensures that user won't be confused with multiple concurrent
++# login prompts.
++_auth_lock = threading.Lock()
++
++# Set in 'set_oauth_config'. If 'set_oauth_config' is not called before the
++# first request, will be set to oauth.make_oauth_config().
++_auth_config = None
++
++# A class to use to send HTTP requests. Can be changed by 'set_engine_class'.
++# Default is RequestsLibEngine.
++_request_engine_cls = None
++
++
++class NetError(IOError):
++  """Generic network related error."""
++
++  def __init__(self, inner_exc=None):
++    super(NetError, self).__init__(str(inner_exc or self.__doc__))
++    self.inner_exc = inner_exc
++
++
++class TimeoutError(NetError):
++  """Timeout while reading HTTP response."""
++
++
++class ConnectionError(NetError):
++  """Failed to connect to the server."""
++
++
++class HttpError(NetError):
++  """Server returned HTTP error code."""
++
++  def __init__(self, code, content_type, inner_exc):
++    super(HttpError, self).__init__(inner_exc)
++    self.code = code
++    self.content_type = content_type
++    self._details = None  # (list with header pairs, response body)
++
++  def _extract_response_details(self, engine):
++    """Returns pair (response headers or None, response body or None)."""
++    # Avoid making multiple calls to parse_request_exception since they may
++    # have side effects on the exception, e.g. urllib2 based exceptions are in
++    # fact file-like objects that can not be read twice.
++    if not self._details:
++      self._details = engine.parse_request_exception(self.inner_exc)
++    return self._details
++
++
++def set_engine_class(engine_cls):
++  """Globally changes a class to use to execute HTTP requests.
++
++  Default engine is RequestsLibEngine that uses 'requests' library. Changing the
++  engine on the fly is not supported. It must be set before the first request.
++
++  Custom engine class should support same public interface as RequestsLibEngine.
++  """
++  global _request_engine_cls
++  assert _request_engine_cls is None
++  _request_engine_cls = engine_cls
++
++
++def get_engine_class():
++  """Returns a class to use to execute HTTP requests."""
++  return _request_engine_cls or RequestsLibEngine
++
++
++def url_open(url, **kwargs):  # pylint: disable=W0621
++  """Attempts to open the given url multiple times.
++
++  |data| can be either:
++    - None for a GET request
++    - str for pre-encoded data
++    - list for data to be encoded
++    - dict for data to be encoded
++
++  See HttpService.request for a full list of arguments.
++
++  Returns HttpResponse object, where the response may be read from, or None
++  if it was unable to connect.
++  """
++  urlhost, urlpath = split_server_request_url(url)
++  service = get_http_service(urlhost)
++  return service.request(urlpath, **kwargs)
++
++
++def url_read(url, **kwargs):
++  """Attempts to open the given url multiple times and read all data from it.
++
++  Accepts same arguments as url_open function.
++
++  Returns all data read or None if it was unable to connect or read the data.
++  """
++  response = url_open(url, stream=False, **kwargs)
++  if not response:
++    return None
++  try:
++    return response.read()
++  except TimeoutError:
++    return None
++
++
++def url_read_json(url, **kwargs):
++  """Attempts to open the given url multiple times and read all data from it.
++
++  Accepts same arguments as url_open function.
++
++  Returns all data read or None if it was unable to connect or read the data.
++  """
++  urlhost, urlpath = split_server_request_url(url)
++  service = get_http_service(urlhost)
++  try:
++    return service.json_request(urlpath, **kwargs)
++  except TimeoutError:
++    return None
++
++
++def url_retrieve(filepath, url, **kwargs):
++  """Downloads an URL to a file. Returns True on success."""
++  response = url_open(url, stream=False, **kwargs)
++  if not response:
++    return False
++  try:
++    with open(filepath, 'wb') as f:
++      for buf in response.iter_content(65536):
++        f.write(buf)
++    return True
++  except (IOError, OSError, TimeoutError):
++    try:
++      os.remove(filepath)
++    except IOError:
++      pass
++    return False
++
++
++def split_server_request_url(url):
++  """Splits the url into scheme+netloc and path+params+query+fragment."""
++  url_parts = list(urlparse.urlparse(url))
++  urlhost = '%s://%s' % (url_parts[0], url_parts[1])
++  urlpath = urlparse.urlunparse(['', ''] + url_parts[2:])
++  return urlhost, urlpath
++
++
++def fix_url(url):
++  """Fixes an url to https."""
++  parts = urlparse.urlparse(url, 'https')
++  if parts.query:
++    raise ValueError('doesn\'t support query parameter.')
++  if parts.fragment:
++    raise ValueError('doesn\'t support fragment in the url.')
++  # urlparse('foo.com') will result in netloc='', path='foo.com', which is not
++  # what is desired here.
++  new = list(parts)
++  if not new[1] and new[2]:
++    new[1] = new[2].rstrip('/')
++    new[2] = ''
++  new[2] = new[2].rstrip('/')
++  return urlparse.urlunparse(new)
++
++
++def get_http_service(urlhost, allow_cached=True):
++  """Returns existing or creates new instance of HttpService that can send
++  requests to given base urlhost.
++  """
++  def new_service():
++    # Create separate authenticator only if engine is not providing
++    # authentication already. Also we use signed URLs for Google Storage, no
++    # need for special authentication.
++    authenticator = None
++    engine_cls = get_engine_class()
++    is_gs = GS_STORAGE_HOST_URL_RE.match(urlhost)
++    conf = get_oauth_config()
++    if not engine_cls.provides_auth and not is_gs and not conf.disabled:
++      authenticator = (
++          authenticators.LuciContextAuthenticator()
++          if conf.use_luci_context_auth else
++          authenticators.OAuthAuthenticator(urlhost, conf))
++    return HttpService(
++        urlhost,
++        engine=engine_cls(),
++        authenticator=authenticator)
++
++  # Ensure consistency in url naming.
++  urlhost = str(urlhost).lower().rstrip('/')
++
++  if not allow_cached:
++    return new_service()
++  with _http_services_lock:
++    service = _http_services.get(urlhost)
++    if not service:
++      service = new_service()
++      _http_services[urlhost] = service
++    return service
++
++
++def disable_oauth_config():
++  """Disables OAuth-based authentication performed by this module.
++
++  With disabled OAuth config callers of url_open (and other functions) are
++  supposed to prepare auth headers themselves and pass them via 'headers'
++  argument.
++  """
++  set_oauth_config(oauth.DISABLED_OAUTH_CONFIG)
++
++
++def set_oauth_config(config):
++  """Defines what OAuth configuration to use for authentication.
++
++  If request engine (see get_engine_class) provides authentication already (as
++  indicated by its 'provides_auth=True' class property) this setting is ignored.
++
++  Arguments:
++    config: oauth.OAuthConfig instance.
++  """
++  global _auth_config
++  _auth_config = config
++
++
++def get_oauth_config():
++  """Returns global OAuthConfig as set by 'set_oauth_config' or default one."""
++  return _auth_config or oauth.make_oauth_config()
++
++
++def get_case_insensitive_dict(original):
++  """Given a dict with string keys returns new CaseInsensitiveDict.
++
++  Raises ValueError if there are duplicate keys.
++  """
++  normalized = structures.CaseInsensitiveDict(original or {})
++  if len(normalized) != len(original):
++    raise ValueError('Duplicate keys in: %s' % repr(original))
++  return normalized
++
++
++class HttpService(object):
++  """Base class for a class that provides an API to HTTP based service:
++    - Provides 'request' method.
++    - Supports automatic request retries.
++    - Thread safe.
++  """
++
++  def __init__(self, urlhost, engine, authenticator=None):
++    self.urlhost = urlhost
++    self.engine = engine
++    self.authenticator = authenticator
++
++  @staticmethod
++  def is_transient_http_error(code, retry_404, retry_50x, suburl, content_type):
++    """Returns True if given HTTP response code is a transient error."""
++    # Google Storage can return this and it should be retried.
++    if code == 408:
++      return True
++    if code == 404:
++      # Retry 404 if allowed by the caller.
++      if retry_404:
++        return retry_404
++      # Transparently retry 404 IIF it is a CloudEndpoints API call *and* the
++      # result is not JSON. This assumes that we only use JSON encoding.
++      return (
++          suburl.startswith('/_ah/api/') and
++          not content_type.startswith('application/json'))
++    # All other 4** errors are fatal.
++    if code < 500:
++      return False
++    # Retry >= 500 error only if allowed by the caller.
++    return retry_50x
++
++  @staticmethod
++  def encode_request_body(body, content_type):
++    """Returns request body encoded according to its content type."""
++    # No body or it is already encoded.
++    if body is None or isinstance(body, str):
++      return body
++    # Any body should have content type set.
++    assert content_type, 'Request has body, but no content type'
++    encoder = CONTENT_ENCODERS.get(content_type)
++    assert encoder, ('Unknown content type %s' % content_type)
++    return encoder(body)
++
++  def login(self, allow_user_interaction):
++    """Runs authentication flow to refresh short lived access token.
++
++    Authentication flow may need to interact with the user (read username from
++    stdin, open local browser for OAuth2, etc.). If interaction is required and
++    |allow_user_interaction| is False, the login will silently be considered
++    failed (i.e. this function returns False).
++
++    'request' method always uses non-interactive login, so long-lived
++    authentication tokens (OAuth2 refresh token, etc) have to be set up
++    manually by developer (by calling 'auth.py login' perhaps) prior running
++    any swarming or isolate scripts.
++    """
++    # Use global lock to ensure two authentication flows never run in parallel.
++    with _auth_lock:
++      if self.authenticator and self.authenticator.supports_login:
++        return self.authenticator.login(allow_user_interaction)
++      return False
++
++  def logout(self):
++    """Purges access credentials from local cache."""
++    if self.authenticator and self.authenticator.supports_login:
++      self.authenticator.logout()
++
++  def request(
++      self,
++      urlpath,
++      data=None,
++      content_type=None,
++      max_attempts=URL_OPEN_MAX_ATTEMPTS,
++      retry_404=False,
++      retry_50x=True,
++      timeout=URL_OPEN_TIMEOUT,
++      read_timeout=URL_READ_TIMEOUT,
++      stream=True,
++      method=None,
++      headers=None,
++      follow_redirects=True):
++    """Attempts to open the given url multiple times.
++
++    |urlpath| is relative to the server root, i.e. '/some/request?param=1'.
++
++    |data| can be either:
++      - None for a GET request
++      - str for pre-encoded data
++      - list for data to be form-encoded
++      - dict for data to be form-encoded
++
++    - Optionally retries HTTP 404 and 50x.
++    - Retries up to |max_attempts| times. If None or 0, there's no limit in the
++      number of retries.
++    - Retries up to |timeout| duration in seconds. If None or 0, there's no
++      limit in the time taken to do retries.
++    - If both |max_attempts| and |timeout| are None or 0, this functions retries
++      indefinitely.
++
++    If |method| is given it can be 'DELETE', 'GET', 'POST' or 'PUT' and it will
++    be used when performing the request. By default it's GET if |data| is None
++    and POST if |data| is not None.
++
++    If |headers| is given, it should be a dict with HTTP headers to append
++    to request. Caller is responsible for providing headers that make sense.
++
++    If |follow_redirects| is True, will transparently follow HTTP redirects,
++    otherwise redirect response will be returned as is. It can be recognized
++    by the presence of 'Location' response header.
++
++    If |read_timeout| is not None will configure underlying socket to
++    raise TimeoutError exception whenever there's no response from the server
++    for more than |read_timeout| seconds. It can happen during any read
++    operation so once you pass non-None |read_timeout| be prepared to handle
++    these exceptions in subsequent reads from the stream.
++
++    Returns a file-like object, where the response may be read from, or None
++    if it was unable to connect. If |stream| is False will read whole response
++    into memory buffer before returning file-like object that reads from this
++    memory buffer.
++    """
++    assert urlpath and urlpath[0] == '/', urlpath
++
++    if data is not None:
++      assert method in (None, 'DELETE', 'POST', 'PUT')
++      method = method or 'POST'
++      content_type = content_type or DEFAULT_CONTENT_TYPE
++      body = self.encode_request_body(data, content_type)
++    else:
++      assert method in (None, 'DELETE', 'GET')
++      method = method or 'GET'
++      body = None
++      assert not content_type, 'Can\'t use content_type on %s' % method
++
++    # Prepare request info.
++    parsed = urlparse.urlparse('/' + urlpath.lstrip('/'))
++    resource_url = urlparse.urljoin(self.urlhost, parsed.path)
++    query_params = urlparse.parse_qsl(parsed.query)
++
++    # Prepare headers.
++    headers = get_case_insensitive_dict(headers or {})
++    if body is not None:
++      headers['Content-Length'] = len(body)
++      if content_type:
++        headers['Content-Type'] = content_type
++
++    last_error = None
++    auth_attempted = False
++
++    for attempt in retry_loop(max_attempts, timeout):
++      # Log non-first attempt.
++      if attempt.attempt:
++        logging.warning(
++            'Retrying request %s, attempt %d/%d...',
++            resource_url, attempt.attempt, max_attempts)
++
++      try:
++        # Prepare and send a new request.
++        request = HttpRequest(
++            method, resource_url, query_params, body,
++            headers, read_timeout, stream, follow_redirects)
++        if self.authenticator:
++          self.authenticator.authorize(request)
++        response = self.engine.perform_request(request)
++        response._timeout_exc_classes = self.engine.timeout_exception_classes()
++        logging.debug('Request %s succeeded', request.get_full_url())
++        return response
++
++      except (ConnectionError, TimeoutError) as e:
++        last_error = e
++        logging.warning(
++            'Unable to open url %s on attempt %d.\n%s',
++            request.get_full_url(), attempt.attempt, self._format_error(e))
++        continue
++
++      except HttpError as e:
++        last_error = e
++
++        # Access denied -> authenticate.
++        if e.code in (401, 403):
++          logging.warning(
++              'Got a reply with HTTP status code %d for %s on attempt %d.\n%s',
++              e.code, request.get_full_url(),
++              attempt.attempt, self._format_error(e, verbose=True))
++          # Try forcefully refresh the token. If it doesn't help, then server
++          # does not support authentication or user doesn't have required
++          # access.
++          if not auth_attempted:
++            auth_attempted = True
++            if self.login(allow_user_interaction=False):
++              # Success! Run request again immediately.
++              attempt.skip_sleep = True
++              continue
++          # Authentication attempt was unsuccessful.
++          logging.error(
++              'Request to %s failed with HTTP status code %d: %s',
++              request.get_full_url(), e.code, self._extract_error_message(e))
++          if self.authenticator and self.authenticator.supports_login:
++            logging.error(
++                'Use auth.py to login if haven\'t done so already:\n'
++                '    python auth.py login --service=%s', self.urlhost)
++          return None
++
++        # Hit a error that can not be retried -> stop retry loop.
++        if not self.is_transient_http_error(
++            e.code, retry_404, retry_50x, parsed.path, e.content_type):
++          # This HttpError means we reached the server and there was a problem
++          # with the request, so don't retry. Dump entire reply to debug log and
++          # only a friendly error message to error log.
++          logging.debug(
++              'Request to %s failed with HTTP status code %d.\n%s',
++              request.get_full_url(), e.code,
++              self._format_error(e, verbose=True))
++          logging.error(
++              'Request to %s failed with HTTP status code %d: %s',
++              request.get_full_url(), e.code, self._extract_error_message(e))
++          return None
++
++        # Retry all other errors.
++        logging.warning(
++            'Server responded with error on %s on attempt %d.\n%s',
++            request.get_full_url(), attempt.attempt, self._format_error(e))
++        continue
++
++    logging.error(
++        'Unable to open given url, %s, after %d attempts.\n%s',
++        request.get_full_url(), max_attempts,
++        self._format_error(last_error, verbose=True))
++    return None
++
++  def json_request(self, urlpath, data=None, **kwargs):
++    """Sends JSON request to the server and parses JSON response it get back.
++
++    Arguments:
++      urlpath: relative request path (e.g. '/auth/v1/...').
++      data: object to serialize to JSON and sent in the request.
++
++    See self.request() for more details.
++
++    Returns:
++      Deserialized JSON response on success, None on error or timeout.
++    """
++    content_type = JSON_CONTENT_TYPE if data is not None else None
++    response = self.request(
++        urlpath, content_type=content_type, data=data, stream=False, **kwargs)
++    if not response:
++      return None
++    try:
++      text = response.read()
++      if not text:
++        return None
++    except TimeoutError:
++      return None
++    try:
++      return json.loads(text)
++    except ValueError as e:
++      logging.error('Not a JSON response when calling %s: %s; full text: %s',
++                    urlpath, e, text)
++      return None
++
++  def _format_error(self, exc, verbose=False):
++    """Returns detailed description of a NetError."""
++    if not isinstance(exc, NetError):
++      return str(exc)
++    if not verbose or not isinstance(exc, HttpError):
++      return str(exc.inner_exc or exc)
++    out = [str(exc.inner_exc or exc)]
++    headers, body = exc._extract_response_details(self.engine)
++    if headers or body:
++      out.append('----------')
++      if headers:
++        for header, value in headers:
++          if not header.startswith('x-'):
++            out.append('%s: %s' % (header.capitalize(), value))
++        out.append('')
++      out.append(body or '<empty body>')
++      out.append('----------')
++    return '\n'.join(out)
++
++  def _extract_error_message(self, exc):
++    """Attempts to extract a user friendly error message from HttpError body."""
++    headers, body = exc._extract_response_details(self.engine)
++    if not headers or not body:
++      return '<no error message>'
++
++    is_json = False
++    for k, v in headers:
++      if k.lower() == 'content-type':
++        is_json = v.startswith('application/json')
++        break
++
++    # Fish out an error message from Cloud Endpoints response.
++    if is_json:
++      try:
++        as_json = json.loads(body)
++        err = as_json.get('error')
++        if isinstance(err, basestring):
++          return err
++        if isinstance(err, dict):
++          return str(err.get('message') or '<no error message>')
++      except (ValueError, KeyError, TypeError):
++        pass  # not a JSON we recognize
++
++    return body
++
++
++class HttpRequest(object):
++  """Request to HttpService."""
++
++  def __init__(
++      self, method, url, params, body,
++      headers, timeout, stream, follow_redirects):
++    """Arguments:
++      |method| - HTTP method to use
++      |url| - relative URL to the resource, without query parameters
++      |params| - list of (key, value) pairs to put into GET parameters
++      |body| - encoded body of the request (None or str)
++      |headers| - dict with request headers
++      |timeout| - socket read timeout (None to disable)
++      |stream| - True to stream response from socket
++      |follow_redirects| - True to follow HTTP redirects.
++    """
++    self.method = method
++    self.url = url
++    self.params = params[:]
++    self.body = body
++    self.headers = headers.copy()
++    self.timeout = timeout
++    self.stream = stream
++    self.follow_redirects = follow_redirects
++    self._cookies = None
++
++  @property
++  def cookies(self):
++    """CookieJar object that will be used for cookies in this request."""
++    if self._cookies is None:
++      self._cookies = cookielib.CookieJar()
++    return self._cookies
++
++  def get_full_url(self):
++    """Resource URL with url-encoded GET parameters."""
++    if not self.params:
++      return self.url
++    else:
++      return '%s?%s' % (self.url, urllib.urlencode(self.params))
++
++
++class HttpResponse(object):
++  """Response from HttpService."""
++
++  def __init__(self, response, url, headers):
++    self._response = response
++    self._url = url
++    self._headers = get_case_insensitive_dict(headers)
++    self._timeout_exc_classes = ()
++
++  def iter_content(self, chunk_size):
++    assert all(issubclass(e, Exception) for e in self._timeout_exc_classes)
++    try:
++      read = 0
++      if hasattr(self._response, 'iter_content'):
++        # request.Response.
++        for buf in self._response.iter_content(chunk_size):
++          read += len(buf)
++          yield buf
++      else:
++        # File-like object.
++        while True:
++          buf = self._response.read(chunk_size)
++          if not buf:
++            break
++          read += len(buf)
++          yield buf
++    except self._timeout_exc_classes as e:
++      logging.error('Timeout while reading from %s, read %d of %s: %s',
++          self._url, read, self.get_header('Content-Length'), e)
++      raise TimeoutError(e)
++
++  def read(self):
++    assert all(issubclass(e, Exception) for e in self._timeout_exc_classes)
++    try:
++      if hasattr(self._response, 'content'):
++        # request.Response.
++        return self._response.content
++      # File-like object.
++      return self._response.read()
++    except self._timeout_exc_classes as e:
++      logging.error('Timeout while reading from %s, expected %s bytes: %s',
++          self._url, self.get_header('Content-Length'), e)
++      raise TimeoutError(e)
++
++  def get_header(self, header):
++    """Returns response header (as str) or None if no such header."""
++    return self._headers.get(header)
++
++
++class RequestsLibEngine(object):
++  """Class that knows how to execute HttpRequests via requests library."""
++
++  # This engine doesn't know how to authenticate requests on transport level.
++  provides_auth = False
++
++  @classmethod
++  def parse_request_exception(cls, exc):
++    """Extracts HTTP headers and body from inner exceptions put in HttpError."""
++    if isinstance(exc, requests.HTTPError):
++      return exc.response.headers.items(), exc.response.content
++    return None, None
++
++  @classmethod
++  def timeout_exception_classes(cls):
++    """A tuple of exception classes that represent timeout.
++
++    Will be caught while reading a streaming response in HttpResponse.read and
++    transformed to TimeoutError.
++    """
++    return (
++        socket.timeout, ssl.SSLError,
++        requests.Timeout,
++        requests.ConnectionError,
++        requests.packages.urllib3.exceptions.ProtocolError,
++        requests.packages.urllib3.exceptions.TimeoutError)
++
++  def __init__(self):
++    super(RequestsLibEngine, self).__init__()
++    self.session = requests.Session()
++    # Configure session.
++    self.session.trust_env = False
++    self.session.verify = tools.get_cacerts_bundle()
++    # Configure connection pools.
++    for protocol in ('https://', 'http://'):
++      self.session.mount(protocol, adapters.HTTPAdapter(
++          pool_connections=64,
++          pool_maxsize=64,
++          max_retries=0,
++          pool_block=False))
++
++  def perform_request(self, request):
++    """Sends a HttpRequest to the server and reads back the response.
++
++    Returns HttpResponse.
++
++    Raises:
++      ConnectionError - failed to establish connection to the server.
++      TimeoutError - timeout while connecting or reading response.
++      HttpError - server responded with >= 400 error code.
++    """
++    try:
++      # response is a requests.models.Response.
++      response = self.session.request(
++          method=request.method,
++          url=request.url,
++          params=request.params,
++          data=request.body,
++          headers=request.headers,
++          cookies=request.cookies,
++          timeout=request.timeout,
++          stream=request.stream,
++          allow_redirects=request.follow_redirects)
++      response.raise_for_status()
++      return HttpResponse(response, request.get_full_url(), response.headers)
++    except requests.Timeout as e:
++      raise TimeoutError(e)
++    except requests.HTTPError as e:
++      raise HttpError(
++          e.response.status_code, e.response.headers.get('Content-Type'), e)
++    except (requests.ConnectionError, socket.timeout, ssl.SSLError) as e:
++      raise ConnectionError(e)
++
++
++class RetryAttempt(object):
++  """Contains information about current retry attempt.
++
++  Yielded from retry_loop.
++  """
++
++  def __init__(self, attempt, remaining):
++    """Information about current attempt in retry loop:
++      |attempt| - zero based index of attempt.
++      |remaining| - how much time is left before retry loop finishes retries.
++    """
++    self.attempt = attempt
++    self.remaining = remaining
++    self.skip_sleep = False
++
++
++def calculate_sleep_before_retry(attempt, max_duration):
++  """How long to sleep before retrying an attempt in retry_loop."""
++  # Maximum sleeping time. We're hammering a cloud-distributed service, it'll
++  # survive.
++  MAX_SLEEP = 10.
++  # random.random() returns [0.0, 1.0). Starts with relatively short waiting
++  # time by starting with 1.5/2+1.5^-1 median offset.
++  duration = (random.random() * 1.5) + math.pow(1.5, (attempt - 1))
++  assert duration > 0.1
++  duration = min(MAX_SLEEP, duration)
++  if max_duration:
++    duration = min(max_duration, duration)
++  return duration
++
++
++def sleep_before_retry(attempt, max_duration):
++  """Sleeps for some amount of time when retrying the attempt in retry_loop.
++
++  To be mocked in tests.
++  """
++  time.sleep(calculate_sleep_before_retry(attempt, max_duration))
++
++
++def current_time():
++  """Used by retry loop to get current time.
++
++  To be mocked in tests.
++  """
++  return time.time()
++
++
++def retry_loop(max_attempts=None, timeout=None):
++  """Yields whenever new attempt to perform some action is needed.
++
++  Yields instances of RetryAttempt class that contains information about current
++  attempt. Setting |skip_sleep| attribute of RetryAttempt to True will cause
++  retry loop to run next attempt immediately.
++  """
++  start = current_time()
++  for attempt in itertools.count():
++    # Too many attempts?
++    if max_attempts and attempt == max_attempts:
++      break
++    # Retried for too long?
++    remaining = (timeout - (current_time() - start)) if timeout else None
++    if remaining is not None and remaining < 0:
++      break
++    # Kick next iteration.
++    attemp_obj = RetryAttempt(attempt, remaining)
++    yield attemp_obj
++    if attemp_obj.skip_sleep:
++      continue
++    # Only sleep if we are going to try again.
++    if max_attempts and attempt != max_attempts - 1:
++      remaining = (timeout - (current_time() - start)) if timeout else None
++      if remaining is not None and remaining < 0:
++        break
++      sleep_before_retry(attempt, remaining)
+diff --git a/tools/swarming_client/utils/oauth.py b/tools/swarming_client/utils/oauth.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..26dd0ee38d7ceaf8777868b62a27cfff2cdebcd4
+--- /dev/null
++++ b/tools/swarming_client/utils/oauth.py
+@@ -0,0 +1,816 @@
++# Copyright 2013 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""OAuth2 related utilities and implementation of browser based login flow."""
++
++# pylint: disable=W0613
++
++import base64
++import BaseHTTPServer
++import collections
++import datetime
++import json
++import logging
++import optparse
++import os
++import socket
++import sys
++import threading
++import time
++import urllib
++import urlparse
++import webbrowser
++
++# All libraries here expect to find themselves in sys.path.
++ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(
++    __file__.decode(sys.getfilesystemencoding()))))
++sys.path.insert(0, os.path.join(ROOT_DIR, 'third_party'))
++sys.path.insert(0, os.path.join(ROOT_DIR, 'third_party', 'pyasn1'))
++sys.path.insert(0, os.path.join(ROOT_DIR, 'third_party', 'rsa'))
++
++import httplib2
++import rsa
++
++from pyasn1.codec.der import decoder
++from pyasn1.type import univ
++
++from oauth2client import client
++from oauth2client import locked_file
++from oauth2client import multistore_file
++
++from third_party import requests
++from utils import tools
++
++from libs import luci_context
++
++
++# Path to a file with cached OAuth2 credentials used by default. Can be
++# overridden by command line option or env variable.
++DEFAULT_OAUTH_TOKENS_CACHE = os.path.join(
++    os.path.expanduser('~'), '.isolated_oauth')
++
++# List of space separated OAuth scopes for generated tokens. GAE apps usually
++# use userinfo.email scope for authentication.
++OAUTH_SCOPES = 'https://www.googleapis.com/auth/userinfo.email'
++
++# Endpoint to generate access tokens.
++OAUTH_TOKEN_ENDPOINT = 'https://www.googleapis.com/oauth2/v3/token'
++
++
++# OAuth authentication method configuration, used by utils/net.py.
++# See doc string for 'make_oauth_config' for meaning of fields.
++OAuthConfig = collections.namedtuple('OAuthConfig', [
++  'disabled',
++  'tokens_cache',
++  'no_local_webserver',
++  'webserver_port',
++  'service_account_json',
++  'use_luci_context_auth',
++])
++
++
++# Indicates that no OAuth-based authentication performed by this module should
++# be automatically used.
++DISABLED_OAUTH_CONFIG = OAuthConfig(
++    disabled=True,
++    tokens_cache=None,
++    no_local_webserver=None,
++    webserver_port=None,
++    service_account_json=None,
++    use_luci_context_auth=None)
++
++
++# Access token with its expiration time (UTC datetime, or None if not known).
++AccessToken = collections.namedtuple('AccessToken', [
++  'token',
++  'expires_at',
++])
++
++
++# Service account credentials as loaded from JSON file.
++ServiceAccountCredentials = collections.namedtuple('ServiceAccountCredentials',
++[
++  'client_email',
++  'client_id',
++  'private_key', # PEM encoded.
++  'private_key_id',
++])
++
++
++# Configuration fetched from a service, returned by _fetch_service_config.
++_ServiceConfig = collections.namedtuple('_ServiceConfig', [
++  'client_id',
++  'client_secret',
++  'primary_url',
++])
++
++# Process cache of _fetch_service_config results.
++_service_config_cache = {}
++_service_config_cache_lock = threading.Lock()
++
++
++# LUCI context parameters as loaded from JSON file.
++#
++# See https://github.com/luci/luci-py/blob/master/client/LUCI_CONTEXT.md.
++LocalAuthParameters = collections.namedtuple('LocalAuthParameters', [
++  'rpc_port',
++  'secret',
++  'accounts',
++  'default_account_id',
++])
++
++# Values of 'accounts' section of LUCI_CONTEXT["local_auth"].
++LocalAuthAccount = collections.namedtuple('LocalAuthAccount', [
++  'id',
++])
++
++
++class BadServiceAccountCredentials(Exception):
++  """Service account JSON is missing or not valid."""
++
++
++class BadLuciContextParameters(Exception):
++  """LUCI context JSON parameters are missing or not valid."""
++
++
++def make_oauth_config(
++    disabled=None,
++    tokens_cache=None,
++    no_local_webserver=None,
++    webserver_port=None,
++    service_account_json=None):
++  """Returns new instance of OAuthConfig.
++
++  If some config option is not provided or None, it will be set to a reasonable
++  default value. This function also acts as an authoritative place for default
++  values of corresponding command line options.
++
++  Args:
++    disabled: True to completely turn off OAuth authentication.
++    tokens_cache: path to a file with cached OAuth2 credentials.
++    no_local_webserver: if True, do not try to run local web server that
++        handles redirects. Use copy-pasted verification code instead.
++    webserver_port: port to run local webserver on.
++    service_account_json: path to JSON file with service account credentials.
++  """
++  if tokens_cache is None:
++    tokens_cache = os.environ.get(
++        'SWARMING_AUTH_TOKENS_CACHE', DEFAULT_OAUTH_TOKENS_CACHE)
++  if no_local_webserver is None:
++    no_local_webserver = tools.get_bool_env_var(
++        'SWARMING_AUTH_NO_LOCAL_WEBSERVER')
++  if webserver_port is None:
++    webserver_port = 8090
++
++  if service_account_json is None:
++    service_account_json = os.environ.get('SWARMING_AUTH_SERVICE_ACCOUNT_JSON')
++
++  use_luci_context_auth = has_local_auth()
++  if disabled is None:
++    disabled = (tools.is_headless()
++                and not service_account_json and not use_luci_context_auth)
++
++  if disabled:
++    service_account_json = None
++    use_luci_context_auth = False
++  elif service_account_json and use_luci_context_auth:
++    raise ValueError('Cannot use both service account and LUCI_CONTEXT')
++
++  return OAuthConfig(
++      disabled,
++      tokens_cache,
++      no_local_webserver,
++      webserver_port,
++      service_account_json,
++      use_luci_context_auth)
++
++
++def add_oauth_options(parser):
++  """Appends OAuth related options to OptionParser."""
++  default_config = make_oauth_config()
++  parser.oauth_group = optparse.OptionGroup(parser, 'OAuth options')
++  parser.oauth_group.add_option(
++      '--auth-disabled',
++      action='store_true',
++      default=False,
++      help='Use it to disable OAuth and rely only on IP whitelist for '
++           'authentication. OAuth gets disabled by default on bots that '
++           'do not have credentials.')
++  parser.oauth_group.add_option(
++      '--auth-tokens-cache',
++      default=default_config.tokens_cache,
++      metavar='FILE',
++      help='Path to a file with oauth2client tokens cache. It should be a '
++           'safe location accessible only to a current user: knowing content '
++           'of this file is roughly equivalent to knowing account password. '
++           'Can also be set with SWARMING_AUTH_TOKENS_CACHE environment '
++           'variable. [default: %default]')
++  parser.oauth_group.add_option(
++      '--auth-no-local-webserver',
++      action='store_true',
++      default=default_config.no_local_webserver,
++      help='Do not run a local web server when performing OAuth2 login flow. '
++           'Can also be set with SWARMING_AUTH_NO_LOCAL_WEBSERVER=1 '
++           'environment variable. [default: %default]')
++  parser.oauth_group.add_option(
++      '--auth-host-port',
++      type=int,
++      default=default_config.webserver_port,
++      metavar='PORT',
++      help='Port a local web server should listen on. Used only if '
++           '--auth-no-local-webserver is not set. [default: %default]')
++  parser.oauth_group.add_option(
++      '--auth-service-account-json',
++      default=default_config.service_account_json,
++      metavar='FILE',
++      help='Path to a JSON file with service account credentials to use. '
++           'Can be generated by "Generate new JSON key" button in '
++           '"Credentials" section of any Cloud Console project. The value can '
++           'also be set with SWARMING_AUTH_SERVICE_ACCOUNT_JSON environment '
++           'variable. [default: %default]')
++  parser.add_option_group(parser.oauth_group)
++  # Use this occasion to monkey patch oauth2client's LockedFile to do retries by
++  # default.
++  _monkey_patch_oauth2client_locked_file()
++
++
++def extract_oauth_config_from_options(options):
++  """Given OptionParser with oauth options, extracts OAuthConfig from it.
++
++  OptionParser should be populated with oauth options by 'add_oauth_options'.
++  """
++  if options.auth_service_account_json and options.auth_disabled:
++    raise ValueError('Can\'t use service account together with --auth-disabled')
++
++  # If '--auth-disabled' wasn't provided, let 'make_oauth_config' decide whether
++  # to disable auth or not (by passing in None).
++  cfg = make_oauth_config(
++      disabled=True if options.auth_disabled else None,
++      tokens_cache=options.auth_tokens_cache,
++      no_local_webserver=options.auth_no_local_webserver,
++      webserver_port=options.auth_host_port,
++      service_account_json=options.auth_service_account_json)
++
++  # Validate service account JSON is correct by trying to load it.
++  if cfg.service_account_json:
++    try:
++      acc = _load_service_account_json(cfg.service_account_json)
++      _parse_private_key(acc.private_key)
++    except BadServiceAccountCredentials as exc:
++      raise ValueError('Bad service account credentials: %s' % exc)
++
++  # Validate LUCI context JSON is correct by trying to load it.
++  if cfg.use_luci_context_auth:
++    try:
++      _load_local_auth()
++    except BadLuciContextParameters as exc:
++      raise ValueError('Bad LUCI_CONTEXT local_auth parameters: %s' % exc)
++
++  return cfg
++
++
++def load_access_token(urlhost, config):
++  """Returns cached AccessToken if it is not expired yet."""
++  assert isinstance(config, OAuthConfig)
++  if config.disabled:
++    return None
++  auth_service_url = _fetch_auth_service_url(urlhost)
++  if not auth_service_url:
++    return None
++  storage = _get_storage(auth_service_url, config)
++  credentials = storage.get()
++  # Missing?
++  if not credentials or credentials.invalid:
++    return None
++  # Expired?
++  if not credentials.access_token or credentials.access_token_expired:
++    return None
++  return AccessToken(credentials.access_token, credentials.token_expiry)
++
++
++def create_access_token(urlhost, config, allow_user_interaction):
++  """Mints and caches new access_token, launching OAuth2 dance if necessary.
++
++  Args:
++    urlhost: base URL of a host to make OAuth2 token for.
++    config: OAuthConfig instance.
++    allow_user_interaction: if False, do not use interactive browser based
++        flow (return None instead if it is required).
++
++  Returns:
++    AccessToken on success.
++    None on error or if OAuth2 flow was interrupted.
++  """
++  assert isinstance(config, OAuthConfig)
++  if config.disabled:
++    return None
++  auth_service_url = _fetch_auth_service_url(urlhost)
++  if not auth_service_url:
++    return None
++
++  storage = _get_storage(auth_service_url, config)
++  credentials = None
++
++  if config.service_account_json:
++    # 2-legged flow that uses service account credentials.
++    try:
++      service_account = _load_service_account_json(config.service_account_json)
++    except BadServiceAccountCredentials as e:
++      logging.error('Bad service account credentials: %s', e)
++      return None
++
++    # Body of token refresh request (with JWT assertion signed with secret key).
++    body = urllib.urlencode({
++      'assertion': _make_assertion_jwt(service_account),
++      'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
++    })
++
++    # Exchange it for access_token.
++    http = httplib2.Http(ca_certs=tools.get_cacerts_bundle())
++    resp, content = http.request(
++        uri=OAUTH_TOKEN_ENDPOINT,
++        method='POST',
++        body=body,
++        headers={'Content-Type': 'application/x-www-form-urlencoded'})
++    if resp.status != 200:
++      logging.error(
++          'Failed to grab access token for service account: %r', content)
++      return None
++
++    try:
++      token = json.loads(content)
++      access_token = token['access_token']
++      expires_at = None
++      if 'expires_in' in token:
++        expires_at = datetime.datetime.utcnow()
++        expires_at += datetime.timedelta(seconds=int(token['expires_in']))
++    except (KeyError, ValueError) as e:
++      logging.error('Unexpected access token response format: %s', e)
++      return None
++
++    credentials = client.OAuth2Credentials(
++        access_token=access_token,
++        client_id=service_account.client_id,
++        client_secret=None,
++        refresh_token=None,
++        token_expiry=expires_at,
++        token_uri=None,
++        user_agent=None)
++  else:
++    # 3-legged flow with (perhaps cached) refresh token.
++    credentials = storage.get()
++    refreshed = False
++    if credentials and not credentials.invalid:
++      try:
++        credentials.refresh(httplib2.Http(ca_certs=tools.get_cacerts_bundle()))
++        refreshed = True
++      except client.Error as err:
++        logging.error('OAuth error: %s', err)
++
++    # Refresh token is missing or invalid, go through full flow.
++    if not refreshed:
++      if not allow_user_interaction:
++        return None
++      credentials = _run_oauth_dance(auth_service_url, config)
++      if not credentials:
++        return None
++
++  # Success.
++  logging.info('OAuth access_token refreshed. Expires in %s.',
++      credentials.token_expiry - datetime.datetime.utcnow())
++  credentials.set_store(storage)
++  storage.put(credentials)
++  return AccessToken(credentials.access_token, credentials.token_expiry)
++
++
++def purge_access_token(urlhost, config):
++  """Deletes OAuth tokens that can be used to access |urlhost|."""
++  assert isinstance(config, OAuthConfig)
++  auth_service_url = _fetch_auth_service_url(urlhost)
++  if auth_service_url:
++    _get_storage(auth_service_url, config).delete()
++
++
++def _get_storage(urlhost, config):
++  """Returns oauth2client.Storage with tokens to access |urlhost|."""
++  # Do not mix access_token caches for different service accounts.
++  if config.service_account_json:
++    creds = _load_service_account_json(config.service_account_json)
++    key = 'sa:%s:%s' % (creds.client_id, urlhost.rstrip('/'))
++  else:
++    key = urlhost.rstrip('/')
++  return multistore_file.get_credential_storage_custom_string_key(
++      config.tokens_cache, key)
++
++
++def _fetch_auth_service_url(urlhost):
++  """Fetches URL of a main authentication service used by |urlhost|.
++
++  Returns:
++    * If |urlhost| is using a authentication service, returns its URL.
++    * If |urlhost| is not using authentication servier, returns |urlhost|.
++    * If there was a error communicating with |urlhost|, returns None.
++  """
++  service_config = _fetch_service_config(urlhost)
++  if not service_config:
++    return None
++  url = (service_config.primary_url or urlhost).rstrip('/')
++  assert url.startswith(
++      ('https://', 'http://127.0.0.1:', 'http://localhost:')), url
++  return url
++
++
++def _fetch_service_config(urlhost):
++  """Fetches OAuth related configuration from a service.
++
++  The configuration includes OAuth client_id and client_secret, as well as
++  URL of a primary authentication service (or None if not used).
++
++  Returns:
++    Instance of _ServiceConfig on success, None on failure.
++  """
++  def do_fetch():
++    # client_secret is not really a secret in that case. So an attacker can
++    # impersonate service's identity in OAuth2 flow. But that's generally
++    # fine as long as a list of allowed redirect_uri's associated with client_id
++    # is limited to 'localhost' or 'urn:ietf:wg:oauth:2.0:oob'. In that case
++    # attacker needs some process running on user's machine to successfully
++    # complete the flow and grab access_token. When you have malicious code
++    # running on your machine you're screwed anyway.
++    response = requests.get(
++        '%s/auth/api/v1/server/oauth_config' % urlhost.rstrip('/'),
++        verify=tools.get_cacerts_bundle())
++    if response.status_code == 200:
++      try:
++        config = response.json()
++        if not isinstance(config, dict):
++          raise ValueError()
++        return _ServiceConfig(
++            config['client_id'],
++            config['client_not_so_secret'],
++            config.get('primary_url'))
++      except (KeyError, ValueError) as err:
++        logging.error('Invalid response from the service: %s', err)
++    else:
++      logging.warning(
++          'Error when fetching oauth_config, HTTP status code %d',
++          response.status_code)
++    return None
++
++  # Use local cache to avoid unnecessary network calls.
++  with _service_config_cache_lock:
++    if urlhost not in _service_config_cache:
++      config = do_fetch()
++      if config:
++        _service_config_cache[urlhost] = config
++    return _service_config_cache.get(urlhost)
++
++
++def _monkey_patch_oauth2client_locked_file():
++  """Enables the use of locked file by multiple processes by retrying for a few
++  seconds.
++
++  When running multiple processes that reads the same file, even if it is open
++  for a few ms, there's a risk of one getting the lock of another instance, and
++  this raises, particularly on Windows. Workaround by enforcing retry.
++  """
++  locked_file.LockedFile.open_and_lock.im_func.func_defaults = (60, 0.05)
++
++
++# Service account related code.
++
++
++def _load_service_account_json(path):
++  """Loads ServiceAccountCredentials from a JSON file.
++
++  Raises BadServiceAccountCredentials if file is missing or not valid.
++  """
++  try:
++    with open(path, 'r') as f:
++      data = json.load(f)
++    return ServiceAccountCredentials(
++        client_email=str(data['client_email']),
++        client_id=str(data['client_id']),
++        private_key=str(data['private_key']),
++        private_key_id=str(data['private_key_id']))
++  except IOError as e:
++    raise BadServiceAccountCredentials('Can\'t open %s: %s' % (path, e))
++  except ValueError as e:
++    raise BadServiceAccountCredentials('Not a JSON file %s: %s' % (path, e))
++  except KeyError as e:
++    raise BadServiceAccountCredentials('Missing key in %s: %s' % (path, e))
++
++
++def _parse_private_key(pem):
++  """PEM encoded OpenSSL private RSA key -> rsa.PrivateKey."""
++  # Cloud console generates OpenSSL compatible private RSA keys. 'rsa' library
++  # doesn't support them natively. Do some ASN unwrapping to extract naked
++  # RSA key (in der-encoded form). See https://www.ietf.org/rfc/rfc2313.txt.
++  try:
++    der = rsa.pem.load_pem(pem, 'PRIVATE KEY')
++    keyinfo, _ = decoder.decode(der)
++    if keyinfo[1][0] != univ.ObjectIdentifier('1.2.840.113549.1.1.1'):
++        raise BadServiceAccountCredentials(
++            'Not a DER-encoded OpenSSL private RSA key')
++    private_key_der = keyinfo[2].asOctets()
++  except IndexError:
++    raise BadServiceAccountCredentials(
++        'Not a DER-encoded OpenSSL private RSA key')
++  return rsa.PrivateKey.load_pkcs1(private_key_der, format='DER')
++
++
++def _make_assertion_jwt(service_account):
++  """Generates signed assertion JWT for 2-legged OAuth flow."""
++  # For more info see:
++  # https://developers.google.com/accounts/docs/OAuth2ServiceAccount.
++  now = long(time.time())
++  payload = {
++    'aud': OAUTH_TOKEN_ENDPOINT,
++    'scope': OAUTH_SCOPES,
++    'iat': now,
++    'exp': now + 3600,
++    'iss': service_account.client_email,
++  }
++  # oauth2client knows how to use PyCrypo or PyOpenSSL for signing. Both are
++  # heavy libraries, that require compiled extensions. Use pure python 'rsa' lib
++  # instead. It is slower, but we do not care (since this code path is exercised
++  # only when access token expires (once an hour).
++  pkey = _parse_private_key(service_account.private_key)
++  return _make_signed_jwt(payload, pkey)
++
++
++def _make_signed_jwt(payload, pkey):
++  """Wraps |payload| dict into signed JSON Web Token."""
++  # See http://self-issued.info/docs/draft-jones-json-web-token.html.
++  as_json = lambda d: json.dumps(d, sort_keys=True, separators=(',', ':'))
++  b64encode = lambda d: base64.urlsafe_b64encode(d).rstrip('=')
++  to_sign = '%s.%s' % (
++      b64encode(as_json({'typ': 'JWT', 'alg': 'RS256'})),
++      b64encode(as_json(payload)))
++  signature = rsa.sign(to_sign, pkey, 'SHA-256')
++  return '%s.%s' % (to_sign, b64encode(signature))
++
++
++# The chunk of code below is based on oauth2client.tools module, but adapted for
++# usage of _fetch_service_config, our command line arguments, and so on.
++
++
++def _run_oauth_dance(urlhost, config):
++  """Perform full OAuth2 dance with the browser."""
++  def out(s):
++    print s
++  def err(s):
++    print >> sys.stderr, s
++
++  # Fetch client_id and client_secret from the service itself.
++  service_config = _fetch_service_config(urlhost)
++  if not service_config:
++    err('Couldn\'t fetch OAuth configuration')
++    return None
++  if not service_config.client_id or not service_config.client_secret:
++    err('OAuth is not configured on the service')
++    return None
++
++  flow = client.OAuth2WebServerFlow(
++      service_config.client_id,
++      service_config.client_secret,
++      OAUTH_SCOPES,
++      approval_prompt='force')
++
++  use_local_webserver = not config.no_local_webserver
++  port = config.webserver_port
++  if use_local_webserver:
++    success = False
++    try:
++      httpd = ClientRedirectServer(('localhost', port), ClientRedirectHandler)
++    except socket.error:
++      pass
++    else:
++      success = True
++    use_local_webserver = success
++    if not success:
++      out(
++        'Failed to start a local webserver listening on port %d.\n'
++        'Please check your firewall settings and locally running programs that '
++        'may be blocking or using those ports.\n\n'
++        'Falling back to --auth-no-local-webserver and continuing with '
++        'authentication.\n' % port)
++
++  if use_local_webserver:
++    oauth_callback = 'http://localhost:%s/' % port
++  else:
++    oauth_callback = client.OOB_CALLBACK_URN
++  flow.redirect_uri = oauth_callback
++  authorize_url = flow.step1_get_authorize_url()
++
++  if use_local_webserver:
++    webbrowser.open(authorize_url, new=1, autoraise=True)
++    out(
++      'Your browser has been opened to visit:\n\n'
++      '    %s\n\n'
++      'If your browser is on a different machine then exit and re-run this '
++      'application with the command-line parameter\n\n'
++      '  --auth-no-local-webserver\n' % authorize_url)
++  else:
++    out(
++      'Go to the following link in your browser:\n\n'
++      '    %s\n' % authorize_url)
++
++  try:
++    code = None
++    if use_local_webserver:
++      httpd.handle_request()
++      if 'error' in httpd.query_params:
++        err('Authentication request was rejected.')
++        return None
++      if 'code' not in httpd.query_params:
++        err(
++          'Failed to find "code" in the query parameters of the redirect.\n'
++          'Try running with --auth-no-local-webserver.')
++        return None
++      code = httpd.query_params['code']
++    else:
++      code = raw_input('Enter verification code: ').strip()
++  except KeyboardInterrupt:
++    err('Canceled.')
++    return None
++
++  try:
++    return flow.step2_exchange(code)
++  except client.FlowExchangeError as e:
++    err('Authentication has failed: %s' % e)
++    return None
++
++
++# LUCI context auth related code.
++
++
++def has_local_auth():
++  """Checks LUCI_CONTEXT to see if we should enable ambient authentication."""
++  if not luci_context.read('local_auth'):
++    return False
++  try:
++    params = _load_local_auth()
++  except BadLuciContextParameters as exc:
++    logging.error('LUCI_CONTEXT["local_auth"] is broken, ignoring it: %s', exc)
++    return False
++
++  # Old protocol doesn't specify 'accounts' at all. It has only one account that
++  # is always enabled.
++  #
++  # TODO(vadimsh): Get rid of support of old protocol when it isn't deployed
++  # anywhere anymore.
++  if not params.accounts:
++    return True
++
++  # In the new protocol (when 'accounts' are always specified), use ambient
++  # authentication only if it is explicitly enabled in LUCI_CONTEXT by non-None
++  # 'default_account_id'.
++  return bool(params.default_account_id)
++
++
++def _load_local_auth():
++  """Returns a LocalAuthParameters tuple from LUCI_CONTEXT.
++
++  Returns:
++    LocalAuthParameters for connecting to a local auth server.
++
++  Raises:
++    BadLuciContextParameters if file is missing or not valid.
++  """
++  data = luci_context.read('local_auth')
++  if data is None:
++    raise BadLuciContextParameters('Missing "local_auth" in LUCI_CONTEXT')
++
++  try:
++    return LocalAuthParameters(
++      rpc_port=int(data['rpc_port']),
++      secret=str(data['secret']),
++      accounts=[
++        LocalAuthAccount(id=acc['id']) for acc in data.get('accounts', [])
++      ],
++      default_account_id=data.get('default_account_id'))
++  except (ValueError, KeyError):
++    data['secret'] = '...'  # note: 'data' is a copy, it's fine to mutate it
++    raise BadLuciContextParameters(
++        'Invalid "local_auth" section in LUCI_CONTEXT: %r' % (data,))
++
++
++def _get_luci_context_access_token(local_auth):
++  """Returns a valid AccessToken from the local LUCI context auth server.
++
++  Returns:
++    AccessToken on success.
++    None on failure.
++  """
++  logging.debug(
++      'local_auth: requesting an access token for account "%s"',
++      local_auth.default_account_id)
++  body = json.dumps({
++    'account_id': local_auth.default_account_id,  # may be None for old protocol
++    'scopes': [OAUTH_SCOPES],
++    'secret': local_auth.secret,
++  })
++  http = httplib2.Http()
++  host = 'http://127.0.0.1:%d' % local_auth.rpc_port
++  resp, content = http.request(
++      uri='%s/rpc/LuciLocalAuthService.GetOAuthToken' % host,
++      method='POST',
++      body=body,
++      headers={'Content-Type': 'application/json'})
++  if resp.status != 200:
++    logging.error(
++        'local_auth: Failed to grab access token from LUCI context server: %r',
++        content)
++    return None
++
++  try:
++    token = json.loads(content)
++    error_code = token.get('error_code')
++    error_message = token.get('error_message')
++    access_token = token.get('access_token')
++    expiry = token.get('expiry')
++  except (KeyError, ValueError) as e:
++    logging.error('local_auth: Unexpected access token response format: %s', e)
++    return None
++
++  if error_code or not access_token:
++    logging.error(
++        'local_auth: Error %d in retrieving access token: %s',
++        error_code, error_message)
++    return None
++
++  try:
++    expiry_dt = datetime.datetime.utcfromtimestamp(expiry)
++  except (TypeError, ValueError) as e:
++    logging.error('Invalid expiry in returned token: %s', e)
++    return None
++
++  logging.debug(
++      'local_auth: got an access token for account "%s" that expires in %d sec',
++       local_auth.default_account_id, expiry - time.time())
++
++  access_token = AccessToken(access_token, expiry_dt)
++  if not _validate_luci_context_access_token(access_token):
++    logging.error('local_auth: the returned access token is invalid')
++    return None
++  return access_token
++
++
++def _validate_luci_context_access_token(access_token):
++  """Validates access_token to be a valid AccessToken.
++
++  Args:
++    access_token: an AccessToken instance to validate.
++
++  Returns:
++    True if a valid AccessToken that is not expired.
++    False otherwise.
++  """
++  if isinstance(access_token, AccessToken) and access_token.token:
++    # Valid if expires_at is None or it is not expired soon
++    if access_token.expires_at:
++      if (not isinstance(access_token.expires_at, datetime.datetime) or
++          datetime.datetime.utcfromtimestamp(time.time()) >
++          access_token.expires_at - datetime.timedelta(seconds=60)):
++        return False
++    return True
++  return False
++
++
++class ClientRedirectServer(BaseHTTPServer.HTTPServer):
++  """A server to handle OAuth 2.0 redirects back to localhost.
++
++  Waits for a single request and parses the query parameters
++  into query_params and then stops serving.
++  """
++  query_params = {}
++
++
++class ClientRedirectHandler(BaseHTTPServer.BaseHTTPRequestHandler):
++  """A handler for OAuth 2.0 redirects back to localhost.
++
++  Waits for a single request and parses the query parameters
++  into the servers query_params and then stops serving.
++  """
++
++  def do_GET(self):
++    """Handle a GET request.
++
++    Parses the query parameters and prints a message
++    if the flow has completed. Note that we can't detect
++    if an error occurred.
++    """
++    self.send_response(200)
++    self.send_header('Content-type', 'text/html')
++    self.end_headers()
++    query = self.path.split('?', 1)[-1]
++    query = dict(urlparse.parse_qsl(query))
++    self.server.query_params = query
++    self.wfile.write('<html><head><title>Authentication Status</title></head>')
++    self.wfile.write('<body><p>The authentication flow has completed.</p>')
++    self.wfile.write('</body></html>')
++
++  def log_message(self, _format, *args):
++    """Do not log messages to stdout while running as command line program."""
+diff --git a/tools/swarming_client/utils/on_error.py b/tools/swarming_client/utils/on_error.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..17c5c1aa82be6f17713a911848343ef96b214a29
+--- /dev/null
++++ b/tools/swarming_client/utils/on_error.py
+@@ -0,0 +1,271 @@
++# coding=utf-8
++# Copyright 2014 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Declares a single function to report errors to a server.
++
++By running the script, you accept that errors will be reported to the server you
++connect to.
++"""
++
++import atexit
++import getpass
++import os
++import platform
++import re
++import socket
++import sys
++import time
++import traceback
++
++from . import authenticators
++from . import net
++from . import tools
++from . import zip_package
++
++
++# It is very important to not get reports from non Chromium infrastructure. We
++# *really* do not want to know anything about you, dear non Google employee.
++_ENABLED_DOMAINS = (
++  '.chromium.org',
++  '.google.com',
++  '.google.com.internal',
++)
++
++# If this envar is '1' then disable reports. Useful when developing the client.
++_DISABLE_ENVVAR = 'SWARMING_DISABLE_ON_ERROR'
++
++
++# Set this variable to the net.HttpService server to be used to report errors.
++# It must be done early at process startup. Once this value is set, it is
++# considered that the atexit handler is enabled.
++_SERVER = None
++
++# This is tricky because it is looked at during import time. At atexit time,
++# __file__ is not defined anymore so it has to be saved first. Also make it work
++# when executed directly from a .zip file. Also handle interactive mode where
++# this is always set to None.
++_SOURCE = zip_package.get_main_script_path()
++if _SOURCE:
++  _SOURCE = os.path.basename(_SOURCE)
++
++_TIME_STARTED = time.time()
++
++_HOSTNAME = None
++
++
++# Paths that can be stripped from the stack traces by _relative_path().
++_PATHS_TO_STRIP = (
++  os.getcwd() + os.path.sep,
++  os.path.dirname(os.__file__) + os.path.sep,
++  '.' + os.path.sep,
++)
++
++
++# Used to simplify the stack trace, by removing path information when possible.
++_RE_STACK_TRACE_FILE = (
++    r'^(?P<prefix>  File \")(?P<file>[^\"]+)(?P<suffix>\"\, line )'
++    r'(?P<line_no>\d+)(?P<rest>|\, in .+)$')
++
++
++### Private stuff.
++
++
++def _relative_path(path):
++  """Strips the current working directory or common library prefix.
++
++  Used by Formatter.
++  """
++  for i in _PATHS_TO_STRIP:
++    if path.startswith(i):
++      return path[len(i):]
++  return path
++
++
++def _reformat_stack(stack):
++  """Post processes the stack trace through _relative_path()."""
++  def replace(l):
++    m = re.match(_RE_STACK_TRACE_FILE, l, re.DOTALL)
++    if m:
++      groups = list(m.groups())
++      groups[1] = _relative_path(groups[1])
++      return ''.join(groups)
++    return l
++
++  # Trim paths.
++  out = map(replace, stack.splitlines(True))
++
++  # Trim indentation.
++  while all(l.startswith(' ') for l in out):
++    out = [l[1:] for l in out]
++  return ''.join(out)
++
++
++def _format_exception(e):
++  """Returns a human readable form of an exception.
++
++  Adds the maximum number of interesting information in the safest way."""
++  try:
++    out = repr(e)
++  except Exception:
++    out = ''
++  try:
++    out = str(e)
++  except Exception:
++    pass
++  return out
++
++
++def _post(params):
++  """Executes the HTTP Post to the server."""
++  if not _SERVER:
++    return None
++  return _SERVER.json_request(
++      '/ereporter2/api/v1/on_error', data=params, max_attempts=1, timeout=20)
++
++
++def _serialize_env():
++  """Makes os.environ json serializable.
++
++  It happens that the environment variable may have non-ASCII characters like
++  ANSI escape code.
++  """
++  return dict(
++      (k, v.encode('ascii', 'replace')) for k, v in os.environ.iteritems())
++
++
++def _report_exception(message, e, stack):
++  """Sends the stack trace to the breakpad server."""
++  name = 'crash report' if e else 'report'
++  sys.stderr.write('Sending the %s ...' % name)
++  message = (message or '').rstrip()
++  if e:
++    if message:
++      message += '\n'
++    message += (_format_exception(e)).rstrip()
++
++  params = {
++    'args': sys.argv,
++    'cwd': os.getcwd(),
++    'duration': time.time() - _TIME_STARTED,
++    'env': _serialize_env(),
++    'hostname': _HOSTNAME,
++    'message': message,
++    'os': sys.platform,
++    'python_version': platform.python_version(),
++    'source': _SOURCE,
++    'user': getpass.getuser(),
++  }
++  if e:
++    params['category'] = 'exception'
++    params['exception_type'] = e.__class__.__name__
++  else:
++    params['category'] = 'report'
++
++  if stack:
++    params['stack'] = _reformat_stack(stack).rstrip()
++    if len(params['stack']) > 4096:
++      params['stack'] = params['stack'][:4095] + '…'
++
++  version = getattr(sys.modules['__main__'], '__version__', None)
++  if version:
++    params['version'] = version
++
++  data = {
++    'r': params,
++    # Bump the version when changing the packet format.
++    'v': '1',
++  }
++  response = _post(data)
++  if response and response.get('url'):
++    sys.stderr.write(' done.\nReport URL: %s\n' % response['url'])
++  else:
++    sys.stderr.write(' failed!\n')
++  sys.stderr.write(message + '\n')
++
++
++def _check_for_exception_on_exit():
++  """Runs at exit. Look if there was an exception active and report if so.
++
++  Since atexit() may not be called from the frame itself, use sys.last_value.
++  """
++  # Sadly, sys.exc_info() cannot be used here, since atexit calls are called
++  # outside the exception handler.
++  exception = getattr(sys, 'last_value', None)
++  if not exception or isinstance(exception, KeyboardInterrupt):
++    return
++
++  last_tb = getattr(sys, 'last_traceback', None)
++  if not last_tb:
++    return
++
++  _report_exception(
++      'Process exited due to exception',
++      exception,
++      ''.join(traceback.format_tb(last_tb)))
++
++
++def _is_in_test():
++  """Returns True if filename of __main__ module ends with _test.py(c)."""
++  main_file = os.path.basename(getattr(sys.modules['__main__'], '__file__', ''))
++  return os.path.splitext(main_file)[0].endswith('_test')
++
++
++### Public API.
++
++
++def report_on_exception_exit(server):
++  """Registers the callback at exit to report an error if the process exits due
++  to an exception.
++  """
++  global _HOSTNAME
++  global _SERVER
++  if _SERVER:
++    raise ValueError('on_error.report_on_exception_exit() was called twice')
++
++  if tools.get_bool_env_var(_DISABLE_ENVVAR):
++    return False
++
++  if _is_in_test():
++    # Disable when running inside unit tests process.
++    return False
++
++  if not server.startswith('https://'):
++    # Only allow report over HTTPS. Silently drop it.
++    return False
++
++  _HOSTNAME = socket.getfqdn()
++  if not _HOSTNAME.endswith(_ENABLED_DOMAINS):
++    # Silently skip non-google infrastructure. Technically, it reports to the
++    # server the client code is talking to so in practice, it would be safe for
++    # non googler to manually enable this assuming their client code talks to a
++    # server they also own. Please send a CL if you desire this functionality.
++    return False
++
++  _SERVER = net.get_http_service(server, allow_cached=False)
++  atexit.register(_check_for_exception_on_exit)
++  return True
++
++
++def report(error):
++  """Either reports an error to the server or prints a error to stderr.
++
++  It's indented to be used only for non recoverable unexpected errors that must
++  be monitored at server-level like API request failure. Is should NOT be used
++  for input validation, command line argument errors, etc.
++
++  Arguments:
++    error: error message string (possibly multiple lines) or None. If a
++        exception frame is active, it will be logged.
++  """
++  exc_info = sys.exc_info()
++  if _SERVER:
++    _report_exception(
++        error, exc_info[1], ''.join(traceback.format_tb(exc_info[2])))
++    return
++
++  if error:
++    sys.stderr.write(error + '\n')
++  if exc_info[1]:
++    sys.stderr.write(_format_exception(exc_info[1]) + '\n')
+diff --git a/tools/swarming_client/utils/subprocess42.py b/tools/swarming_client/utils/subprocess42.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e6f1dfec37d27eca52a4fc08d8c2b2af73e9de14
+--- /dev/null
++++ b/tools/swarming_client/utils/subprocess42.py
+@@ -0,0 +1,689 @@
++# Copyright 2013 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""subprocess42 is the answer to life the universe and everything.
++
++It has the particularity of having a Popen implementation that can yield output
++as it is produced while implementing a timeout and NOT requiring the use of
++worker threads.
++
++Example:
++  Wait for a child process with a timeout, send SIGTERM, wait a grace period
++  then send SIGKILL:
++
++    def wait_terminate_then_kill(proc, timeout, grace):
++      try:
++        return proc.wait(timeout)
++      except subprocess42.TimeoutExpired:
++        proc.terminate()
++        try:
++          return proc.wait(grace)
++        except subprocess42.TimeoutExpired:
++          proc.kill()
++        return proc.wait()
++
++
++TODO(maruel): Add VOID support like subprocess2.
++"""
++
++import collections
++import contextlib
++import errno
++import os
++import signal
++import sys
++import threading
++import time
++
++import subprocess
++
++from subprocess import CalledProcessError, PIPE, STDOUT  # pylint: disable=W0611
++from subprocess import list2cmdline
++
++
++# Default maxsize argument.
++MAX_SIZE = 16384
++
++
++# Set to True when inhibit_crash_dump() has been called.
++_OS_ERROR_REPORTING_INHIBITED = False
++
++
++if subprocess.mswindows:
++  import ctypes
++  import msvcrt  # pylint: disable=F0401
++  from ctypes import wintypes
++  from ctypes import windll
++
++
++  # Which to be received depends on how this process was called and outside the
++  # control of this script. See Popen docstring for more details.
++  STOP_SIGNALS = (signal.SIGBREAK, signal.SIGTERM)
++
++
++  def ReadFile(handle, desired_bytes):
++    """Calls kernel32.ReadFile()."""
++    c_read = wintypes.DWORD()
++    buff = wintypes.create_string_buffer(desired_bytes+1)
++    windll.kernel32.ReadFile(
++        handle, buff, desired_bytes, wintypes.byref(c_read), None)
++    # NULL terminate it.
++    buff[c_read.value] = '\x00'
++    return wintypes.GetLastError(), buff.value
++
++  def PeekNamedPipe(handle):
++    """Calls kernel32.PeekNamedPipe(). Simplified version."""
++    c_avail = wintypes.DWORD()
++    c_message = wintypes.DWORD()
++    success = windll.kernel32.PeekNamedPipe(
++        handle, None, 0, None, wintypes.byref(c_avail),
++        wintypes.byref(c_message))
++    if not success:
++      raise OSError(wintypes.GetLastError())
++    return c_avail.value
++
++  def recv_multi_impl(conns, maxsize, timeout):
++    """Reads from the first available pipe.
++
++    It will immediately return on a closed connection, independent of timeout.
++
++    Arguments:
++    - maxsize: Maximum number of bytes to return. Defaults to MAX_SIZE.
++    - timeout: If None, it is blocking. If 0 or above, will return None if no
++          data is available within |timeout| seconds.
++
++    Returns:
++      tuple(int(index), str(data), bool(closed)).
++    """
++    assert conns
++    assert timeout is None or isinstance(timeout, (int, float)), timeout
++    maxsize = max(maxsize or MAX_SIZE, 1)
++
++    # TODO(maruel): Use WaitForMultipleObjects(). Python creates anonymous pipes
++    # for proc.stdout and proc.stderr but they are implemented as named pipes on
++    # Windows. Since named pipes are not waitable object, they can't be passed
++    # as-is to WFMO(). So this means N times CreateEvent(), N times ReadFile()
++    # and finally WFMO(). This requires caching the events handles in the Popen
++    # object and remembering the pending ReadFile() calls. This will require
++    # some re-architecture to store the relevant event handle and OVERLAPPEDIO
++    # object in Popen or the file object.
++    start = time.time()
++    handles = [
++      (i, msvcrt.get_osfhandle(c.fileno())) for i, c in enumerate(conns)
++    ]
++    while True:
++      for index, handle in handles:
++        try:
++          avail = min(PeekNamedPipe(handle), maxsize)
++          if avail:
++            return index, ReadFile(handle, avail)[1], False
++        except OSError:
++          # The pipe closed.
++          return index, None, True
++
++      if timeout is not None and (time.time() - start) >= timeout:
++        return None, None, False
++      # Polling rocks.
++      time.sleep(0.001)
++
++else:
++  import fcntl  # pylint: disable=F0401
++  import select
++
++
++  # Signals that mean this process should exit quickly.
++  STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
++
++
++  def recv_multi_impl(conns, maxsize, timeout):
++    """Reads from the first available pipe.
++
++    It will immediately return on a closed connection, independent of timeout.
++
++    Arguments:
++    - maxsize: Maximum number of bytes to return. Defaults to MAX_SIZE.
++    - timeout: If None, it is blocking. If 0 or above, will return None if no
++          data is available within |timeout| seconds.
++
++    Returns:
++      tuple(int(index), str(data), bool(closed)).
++    """
++    assert conns
++    assert timeout is None or isinstance(timeout, (int, float)), timeout
++    maxsize = max(maxsize or MAX_SIZE, 1)
++
++    # select(timeout=0) will block, it has to be a value > 0.
++    if timeout == 0:
++      timeout = 0.001
++    try:
++      r, _, _ = select.select(conns, [], [], timeout)
++    except select.error:
++      r = None
++    if not r:
++      return None, None, False
++
++    conn = r[0]
++    # Temporarily make it non-blocking.
++    # TODO(maruel): This is not very efficient when the caller is doing this in
++    # a loop. Add a mechanism to have the caller handle this.
++    flags = fcntl.fcntl(conn, fcntl.F_GETFL)
++    if not conn.closed:
++      # pylint: disable=E1101
++      fcntl.fcntl(conn, fcntl.F_SETFL, flags | os.O_NONBLOCK)
++    try:
++      try:
++        data = conn.read(maxsize)
++      except IOError as e:
++        # On posix, this means the read would block.
++        if e.errno == errno.EAGAIN:
++          return conns.index(conn), None, False
++        raise e
++
++      if not data:
++        # On posix, this means the channel closed.
++        return conns.index(conn), None, True
++
++      return conns.index(conn), data, False
++    finally:
++      if not conn.closed:
++        fcntl.fcntl(conn, fcntl.F_SETFL, flags)
++
++
++class TimeoutExpired(Exception):
++  """Compatible with python3 subprocess."""
++  def __init__(self, cmd, timeout, output=None, stderr=None):
++    self.cmd = cmd
++    self.timeout = timeout
++    self.output = output
++    # Non-standard:
++    self.stderr = stderr
++    super(TimeoutExpired, self).__init__(str(self))
++
++  def __str__(self):
++    return "Command '%s' timed out after %s seconds" % (self.cmd, self.timeout)
++
++
++class Popen(subprocess.Popen):
++  """Adds timeout support on stdout and stderr.
++
++  Inspired by
++  http://code.activestate.com/recipes/440554-module-to-allow-asynchronous-subprocess-use-on-win/
++
++  Unlike subprocess, yield_any(), recv_*(), communicate() will close stdout and
++  stderr once the child process closes them, after all the data is read.
++
++  Arguments:
++  - detached: If True, the process is created in a new process group. On
++    Windows, use CREATE_NEW_PROCESS_GROUP. On posix, use os.setpgid(0, 0).
++
++  Additional members:
++  - start: timestamp when this process started.
++  - end: timestamp when this process exited, as seen by this process.
++  - detached: If True, the child process was started as a detached process.
++  - gid: process group id, if any.
++  - duration: time in seconds the process lasted.
++
++  Additional methods:
++  - yield_any(): yields output until the process terminates.
++  - recv_any(): reads from stdout and/or stderr with optional timeout.
++  - recv_out() & recv_err(): specialized version of recv_any().
++  """
++  # subprocess.Popen.__init__() is not threadsafe; there is a race between
++  # creating the exec-error pipe for the child and setting it to CLOEXEC during
++  # which another thread can fork and cause the pipe to be inherited by its
++  # descendents, which will cause the current Popen to hang until all those
++  # descendents exit. Protect this with a lock so that only one fork/exec can
++  # happen at a time.
++  popen_lock = threading.Lock()
++
++  def __init__(self, args, **kwargs):
++    assert 'creationflags' not in kwargs
++    assert 'preexec_fn' not in kwargs, 'Use detached=True instead'
++    self.start = time.time()
++    self.end = None
++    self.gid = None
++    self.detached = kwargs.pop('detached', False)
++    if self.detached:
++      if subprocess.mswindows:
++        kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
++      else:
++        kwargs['preexec_fn'] = lambda: os.setpgid(0, 0)
++    with self.popen_lock:
++      super(Popen, self).__init__(args, **kwargs)
++    self.args = args
++    if self.detached and not subprocess.mswindows:
++      try:
++        self.gid = os.getpgid(self.pid)
++      except OSError:
++        # sometimes the process can run+finish before we collect its pgid. fun.
++        pass
++
++  def duration(self):
++    """Duration of the child process.
++
++    It is greater or equal to the actual time the child process ran. It can be
++    significantly higher than the real value if neither .wait() nor .poll() was
++    used.
++    """
++    return (self.end or time.time()) - self.start
++
++  # pylint: disable=arguments-differ,redefined-builtin
++  def communicate(self, input=None, timeout=None):
++    """Implements python3's timeout support.
++
++    Unlike wait(), timeout=0 is considered the same as None.
++
++    Raises:
++    - TimeoutExpired when more than timeout seconds were spent waiting for the
++      process.
++    """
++    if not timeout:
++      return super(Popen, self).communicate(input=input)
++
++    assert isinstance(timeout, (int, float)), timeout
++
++    if self.stdin or self.stdout or self.stderr:
++      stdout = '' if self.stdout else None
++      stderr = '' if self.stderr else None
++      t = None
++      if input is not None:
++        assert self.stdin, (
++            'Can\'t use communicate(input) if not using '
++            'Popen(stdin=subprocess42.PIPE')
++        # TODO(maruel): Switch back to non-threading.
++        def write():
++          try:
++            self.stdin.write(input)
++          except IOError:
++            pass
++        t = threading.Thread(name='Popen.communicate', target=write)
++        t.daemon = True
++        t.start()
++
++      try:
++        if self.stdout or self.stderr:
++          start = time.time()
++          end = start + timeout
++          def remaining():
++            return max(end - time.time(), 0)
++          for pipe, data in self.yield_any(timeout=remaining):
++            if pipe is None:
++              raise TimeoutExpired(self.args, timeout, stdout, stderr)
++            assert pipe in ('stdout', 'stderr'), pipe
++            if pipe == 'stdout':
++              stdout += data
++            else:
++              stderr += data
++        else:
++          # Only stdin is piped.
++          self.wait(timeout=timeout)
++      finally:
++        if t:
++          try:
++            self.stdin.close()
++          except IOError:
++            pass
++          t.join()
++    else:
++      # No pipe. The user wanted to use wait().
++      self.wait(timeout=timeout)
++      return None, None
++
++    # Indirectly initialize self.end.
++    self.wait()
++    return stdout, stderr
++
++  def wait(self, timeout=None):  # pylint: disable=arguments-differ
++    """Implements python3's timeout support.
++
++    Raises:
++    - TimeoutExpired when more than timeout seconds were spent waiting for the
++      process.
++    """
++    assert timeout is None or isinstance(timeout, (int, float)), timeout
++    if timeout is None:
++      super(Popen, self).wait()
++    elif self.returncode is None:
++      if subprocess.mswindows:
++        WAIT_TIMEOUT = 258
++        result = subprocess._subprocess.WaitForSingleObject(
++            self._handle, int(timeout * 1000))
++        if result == WAIT_TIMEOUT:
++          raise TimeoutExpired(self.args, timeout)
++        self.returncode = subprocess._subprocess.GetExitCodeProcess(
++            self._handle)
++      else:
++        # If you think the following code is horrible, it's because it is
++        # inspired by python3's stdlib.
++        end = time.time() + timeout
++        delay = 0.001
++        while True:
++          try:
++            pid, sts = subprocess._eintr_retry_call(
++                os.waitpid, self.pid, os.WNOHANG)
++          except OSError as e:
++            if e.errno != errno.ECHILD:
++              raise
++            pid = self.pid
++            sts = 0
++          if pid == self.pid:
++            # This sets self.returncode.
++            self._handle_exitstatus(sts)
++            break
++          remaining = end - time.time()
++          if remaining <= 0:
++            raise TimeoutExpired(self.args, timeout)
++          delay = min(delay * 2, remaining, .05)
++          time.sleep(delay)
++
++    if not self.end:
++      # communicate() uses wait() internally.
++      self.end = time.time()
++    return self.returncode
++
++  def poll(self):
++    ret = super(Popen, self).poll()
++    if ret is not None and not self.end:
++      self.end = time.time()
++    return ret
++
++  def yield_any_line(self, **kwargs):
++    """Yields lines until the process terminates.
++
++    Like yield_any, but yields lines.
++    """
++    return split(self.yield_any(**kwargs))
++
++  def yield_any(self, maxsize=None, timeout=None):
++    """Yields output until the process terminates.
++
++    Unlike wait(), does not raise TimeoutExpired.
++
++    Yields:
++      (pipename, data) where pipename is either 'stdout', 'stderr' or None in
++      case of timeout or when the child process closed one of the pipe(s) and
++      all pending data on the pipe was read.
++
++    Arguments:
++    - maxsize: See recv_any(). Can be a callable function.
++    - timeout: If None, the call is blocking. If set, yields None, None if no
++          data is available within |timeout| seconds. It resets itself after
++          each yield. Can be a callable function.
++    """
++    assert self.stdout or self.stderr
++    if timeout is not None:
++      # timeout=0 effectively means that the pipe is continuously polled.
++      if isinstance(timeout, (int, float)):
++        assert timeout >= 0, timeout
++        old_timeout = timeout
++        timeout = lambda: old_timeout
++      else:
++        assert callable(timeout), timeout
++
++    if maxsize is not None and not callable(maxsize):
++      assert isinstance(maxsize, (int, float)), maxsize
++
++    last_yield = time.time()
++    while self.poll() is None:
++      to = timeout() if timeout else None
++      if to is not None:
++        to = max(to - (time.time() - last_yield), 0)
++      t, data = self.recv_any(
++          maxsize=maxsize() if callable(maxsize) else maxsize, timeout=to)
++      if data or to is 0:
++        yield t, data
++        last_yield = time.time()
++
++    # Read all remaining output in the pipes.
++    # There is 3 cases:
++    # - pipes get closed automatically by the calling process before it exits
++    # - pipes are closed automated by the OS
++    # - pipes are kept open due to grand-children processes outliving the
++    #   children process.
++    while True:
++      ms = maxsize
++      if callable(maxsize):
++        ms = maxsize()
++      # timeout=0 is mainly to handle the case where a grand-children process
++      # outlives the process started.
++      t, data = self.recv_any(maxsize=ms, timeout=0)
++      if not data:
++        break
++      yield t, data
++
++  def recv_any(self, maxsize=None, timeout=None):
++    """Reads from the first pipe available from stdout and stderr.
++
++    Unlike wait(), does not throw TimeoutExpired.
++
++    Arguments:
++    - maxsize: Maximum number of bytes to return. Defaults to MAX_SIZE.
++    - timeout: If None, it is blocking. If 0 or above, will return None if no
++          data is available within |timeout| seconds.
++
++    Returns:
++      tuple(pipename or None, str(data)). pipename is one of 'stdout' or
++      'stderr'.
++    """
++    # recv_multi_impl will early exit on a closed connection. Loop accordingly
++    # to simplify call sites.
++    while True:
++      pipes = [
++        x for x in ((self.stderr, 'stderr'), (self.stdout, 'stdout')) if x[0]
++      ]
++      # If both stdout and stderr have the exact file handle, they are
++      # effectively the same pipe. Deduplicate it since otherwise it confuses
++      # recv_multi_impl().
++      if len(pipes) == 2 and self.stderr.fileno() == self.stdout.fileno():
++        pipes.pop(0)
++
++      if not pipes:
++        return None, None
++      start = time.time()
++      conns, names = zip(*pipes)
++      index, data, closed = recv_multi_impl(conns, maxsize, timeout)
++      if index is None:
++        return index, data
++      if closed:
++        self._close(names[index])
++        if not data:
++          # Loop again. The other pipe may still be open.
++          if timeout:
++            timeout -= (time.time() - start)
++          continue
++
++      if self.universal_newlines and data:
++        data = self._translate_newlines(data)
++      return names[index], data
++
++  def recv_out(self, maxsize=None, timeout=None):
++    """Reads from stdout synchronously with timeout."""
++    return self._recv('stdout', maxsize, timeout)
++
++  def recv_err(self, maxsize=None, timeout=None):
++    """Reads from stderr synchronously with timeout."""
++    return self._recv('stderr', maxsize, timeout)
++
++  def terminate(self):
++    """Tries to do something saner on Windows that the stdlib.
++
++    Windows:
++      self.detached/CREATE_NEW_PROCESS_GROUP determines what can be used:
++      - If set, only SIGBREAK can be sent and it is sent to a single process.
++      - If not set, in theory only SIGINT can be used and *all processes* in
++         the processgroup receive it. In practice, we just kill the process.
++      See http://msdn.microsoft.com/library/windows/desktop/ms683155.aspx
++      The default on Windows is to call TerminateProcess() always, which is not
++      useful.
++
++    On Posix, always send SIGTERM.
++    """
++    try:
++      if subprocess.mswindows and self.detached:
++        return self.send_signal(signal.CTRL_BREAK_EVENT)
++      super(Popen, self).terminate()
++    except OSError:
++      # The function will throw if the process terminated in-between. Swallow
++      # this.
++      pass
++
++  def kill(self):
++    """Kills the process and its children if possible.
++
++    Swallows exceptions and return True on success.
++    """
++    if self.gid:
++      try:
++        os.killpg(self.gid, signal.SIGKILL)
++      except OSError:
++        return False
++    else:
++      try:
++        super(Popen, self).kill()
++      except OSError:
++        return False
++    return True
++
++  def _close(self, which):
++    """Closes either stdout or stderr."""
++    getattr(self, which).close()
++    setattr(self, which, None)
++
++  def _recv(self, which, maxsize, timeout):
++    """Reads from one of stdout or stderr synchronously with timeout."""
++    conn = getattr(self, which)
++    if conn is None:
++      return None
++    _, data, closed = recv_multi_impl([conn], maxsize, timeout)
++    if closed:
++      self._close(which)
++    if self.universal_newlines and data:
++      data = self._translate_newlines(data)
++    return data
++
++
++@contextlib.contextmanager
++def set_signal_handler(signals, handler):
++  """Temporarilly override signals handler.
++
++  Useful when waiting for a child process to handle signals like SIGTERM, so the
++  signal can be propagated to the child process.
++  """
++  previous = {s: signal.signal(s, handler) for s in signals}
++  try:
++    yield
++  finally:
++    for sig, h in previous.iteritems():
++      signal.signal(sig, h)
++
++
++def call(*args, **kwargs):
++  """Adds support for timeout."""
++  timeout = kwargs.pop('timeout', None)
++  return Popen(*args, **kwargs).wait(timeout)
++
++
++def check_call(*args, **kwargs):
++  """Adds support for timeout."""
++  retcode = call(*args, **kwargs)
++  if retcode:
++    raise CalledProcessError(retcode, kwargs.get('args') or args[0])
++  return 0
++
++
++def check_output(*args, **kwargs):
++  """Adds support for timeout."""
++  timeout = kwargs.pop('timeout', None)
++  if 'stdout' in kwargs:
++    raise ValueError('stdout argument not allowed, it will be overridden.')
++  process = Popen(stdout=PIPE, *args, **kwargs)
++  output, _ = process.communicate(timeout=timeout)
++  retcode = process.poll()
++  if retcode:
++    raise CalledProcessError(retcode, kwargs.get('args') or args[0], output)
++  return output
++
++
++def call_with_timeout(args, timeout, **kwargs):
++  """Runs an executable; kill it in case of timeout."""
++  proc = Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, **kwargs)
++  try:
++    out, err = proc.communicate(timeout=timeout)
++  except TimeoutExpired as e:
++    out = e.output
++    err = e.stderr
++    proc.kill()
++    proc.wait()
++  return out, err, proc.returncode, proc.duration()
++
++
++def inhibit_os_error_reporting():
++  """Inhibits error reporting UI and core files.
++
++  This function should be called as early as possible in the process lifetime.
++  """
++  global _OS_ERROR_REPORTING_INHIBITED
++  if not _OS_ERROR_REPORTING_INHIBITED:
++    _OS_ERROR_REPORTING_INHIBITED = True
++    if sys.platform == 'win32':
++      # Windows has a bad habit of opening a dialog when a console program
++      # crashes, rather than just letting it crash. Therefore, when a program
++      # crashes on Windows, we don't find out until the build step times out.
++      # This code prevents the dialog from appearing, so that we find out
++      # immediately and don't waste time waiting for a user to close the dialog.
++      # https://msdn.microsoft.com/en-us/library/windows/desktop/ms680621.aspx
++      SEM_FAILCRITICALERRORS = 1
++      SEM_NOGPFAULTERRORBOX = 2
++      SEM_NOALIGNMENTFAULTEXCEPT = 0x8000
++      ctypes.windll.kernel32.SetErrorMode(
++          SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|
++            SEM_NOALIGNMENTFAULTEXCEPT)
++  # TODO(maruel): Other OSes.
++  # - OSX, need to figure out a way to make the following process tree local:
++  #     defaults write com.apple.CrashReporter UseUNC 1
++  #     defaults write com.apple.CrashReporter DialogType none
++  # - Ubuntu, disable apport if needed.
++
++
++def split(data, sep='\n'):
++  """Splits pipe data by |sep|. Does some buffering.
++
++  For example, [('stdout', 'a\nb'), ('stdout', '\n'), ('stderr', 'c\n')] ->
++  [('stdout', 'a'), ('stdout', 'b'), ('stderr', 'c')].
++
++  Args:
++    data: iterable of tuples (pipe_name, bytes).
++
++  Returns:
++    An iterator of tuples (pipe_name, bytes) where bytes is the input data
++    but split by sep into separate tuples.
++  """
++  # A dict {pipe_name -> list of pending chunks without separators}
++  pending_chunks = collections.defaultdict(list)
++  for pipe_name, chunk in data:
++    if chunk is None:
++      # Happens if a pipe is closed.
++      continue
++
++    pending = pending_chunks[pipe_name]
++    start = 0  # offset in chunk to start |sep| search from
++    while start < len(chunk):
++      j = chunk.find(sep, start)
++      if j == -1:
++        pending_chunks[pipe_name].append(chunk[start:])
++        break
++
++      to_emit = chunk[start:j]
++      start = j + 1
++      if pending:
++        # prepend and forget
++        to_emit = ''.join(pending) + to_emit
++        pending = []
++        pending_chunks[pipe_name] = pending
++      yield pipe_name, to_emit
++
++  # Emit remaining chunks that don't end with separators as is.
++  for pipe_name, chunks in sorted(pending_chunks.iteritems()):
++    if chunks:
++      yield pipe_name, ''.join(chunks)
+diff --git a/tools/swarming_client/utils/threading_utils.py b/tools/swarming_client/utils/threading_utils.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..0239aed24736c604caf15e4aac1a388cc432d5ae
+--- /dev/null
++++ b/tools/swarming_client/utils/threading_utils.py
+@@ -0,0 +1,812 @@
++# Copyright 2013 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Classes and functions related to threading."""
++
++import functools
++import inspect
++import logging
++import os
++import Queue
++import sys
++import threading
++import time
++import traceback
++
++
++# Priorities for tasks in AutoRetryThreadPool, particular values are important.
++PRIORITY_HIGH = 1 << 8
++PRIORITY_MED = 2 << 8
++PRIORITY_LOW = 3 << 8
++
++
++class LockWithAssert(object):
++  """Wrapper around (non recursive) Lock that tracks its owner."""
++
++  def __init__(self):
++    self._lock = threading.Lock()
++    self._owner = None
++
++  def __enter__(self):
++    self._lock.acquire()
++    assert self._owner is None
++    self._owner = threading.current_thread()
++
++  def __exit__(self, _exc_type, _exec_value, _traceback):
++    self.assert_locked('Releasing unowned lock')
++    self._owner = None
++    self._lock.release()
++    return False
++
++  def assert_locked(self, msg=None):
++    """Asserts the lock is owned by running thread."""
++    assert self._owner == threading.current_thread(), msg
++
++
++class ThreadPoolError(Exception):
++  """Base class for exceptions raised by ThreadPool."""
++  pass
++
++
++class ThreadPoolEmpty(ThreadPoolError):
++  """Trying to get task result from a thread pool with no pending tasks."""
++  pass
++
++
++class ThreadPoolClosed(ThreadPoolError):
++  """Trying to do something with a closed thread pool."""
++  pass
++
++
++class ThreadPool(object):
++  """Multithreaded worker pool with priority support.
++
++  When the priority of tasks match, it works in strict FIFO mode.
++  """
++  QUEUE_CLASS = Queue.PriorityQueue
++
++  def __init__(self, initial_threads, max_threads, queue_size, prefix=None):
++    """Immediately starts |initial_threads| threads.
++
++    Arguments:
++      initial_threads: Number of threads to start immediately. Can be 0 if it is
++                       uncertain that threads will be needed.
++      max_threads: Maximum number of threads that will be started when all the
++                   threads are busy working. Often the number of CPU cores.
++      queue_size: Maximum number of tasks to buffer in the queue. 0 for
++                  unlimited queue. A non-zero value may make add_task()
++                  blocking.
++      prefix: Prefix to use for thread names. Pool's threads will be
++              named '<prefix>-<thread index>'.
++    """
++    prefix = prefix or 'tp-0x%0x' % id(self)
++    logging.debug(
++        'New ThreadPool(%d, %d, %d): %s', initial_threads, max_threads,
++        queue_size, prefix)
++    assert initial_threads <= max_threads
++    assert max_threads <= 1024
++
++    self.tasks = self.QUEUE_CLASS(queue_size)
++    self._max_threads = max_threads
++    self._prefix = prefix
++
++    # Used to assign indexes to tasks.
++    self._num_of_added_tasks_lock = threading.Lock()
++    self._num_of_added_tasks = 0
++
++    # Lock that protected everything below (including conditional variable).
++    self._lock = threading.Lock()
++
++    # Condition 'bool(_outputs) or bool(_exceptions) or _pending_count == 0'.
++    self._outputs_exceptions_cond = threading.Condition(self._lock)
++    self._outputs = []
++    self._exceptions = []
++
++    # Number of pending tasks (queued or being processed now).
++    self._pending_count = 0
++
++    # List of threads.
++    self._workers = []
++    # Number of threads that are waiting for new tasks.
++    self._ready = 0
++    # Number of threads already added to _workers, but not yet running the loop.
++    self._starting = 0
++    # True if close was called. Forbids adding new tasks.
++    self._is_closed = False
++
++    for _ in range(initial_threads):
++      self._add_worker()
++
++  def _add_worker(self):
++    """Adds one worker thread if there isn't too many. Thread-safe."""
++    with self._lock:
++      if len(self._workers) >= self._max_threads or self._is_closed:
++        return False
++      worker = threading.Thread(
++        name='%s-%d' % (self._prefix, len(self._workers)), target=self._run)
++      self._workers.append(worker)
++      self._starting += 1
++    logging.debug('Starting worker thread %s', worker.name)
++    worker.daemon = True
++    worker.start()
++    return True
++
++  def add_task(self, priority, func, *args, **kwargs):
++    """Adds a task, a function to be executed by a worker.
++
++    Arguments:
++    - priority: priority of the task versus others. Lower priority takes
++                precedence.
++    - func: function to run. Can either return a return value to be added to the
++            output list or be a generator which can emit multiple values.
++    - args and kwargs: arguments to |func|. Note that if func mutates |args| or
++                       |kwargs| and that the task is retried, see
++                       AutoRetryThreadPool, the retry will use the mutated
++                       values.
++
++    Returns:
++      Index of the item added, e.g. the total number of enqueued items up to
++      now.
++    """
++    assert isinstance(priority, int)
++    assert callable(func)
++    with self._lock:
++      if self._is_closed:
++        raise ThreadPoolClosed('Can not add a task to a closed ThreadPool')
++      start_new_worker = (
++        # Pending task count plus new task > number of available workers.
++        self.tasks.qsize() + 1 > self._ready + self._starting and
++        # Enough slots.
++        len(self._workers) < self._max_threads
++      )
++      self._pending_count += 1
++    with self._num_of_added_tasks_lock:
++      self._num_of_added_tasks += 1
++      index = self._num_of_added_tasks
++    self.tasks.put((priority, index, func, args, kwargs))
++    if start_new_worker:
++      self._add_worker()
++    return index
++
++  def _run(self):
++    """Worker thread loop. Runs until a None task is queued."""
++    # Thread has started, adjust counters.
++    with self._lock:
++      self._starting -= 1
++      self._ready += 1
++    while True:
++      try:
++        task = self.tasks.get()
++      finally:
++        with self._lock:
++          self._ready -= 1
++      try:
++        if task is None:
++          # We're done.
++          return
++        _priority, _index, func, args, kwargs = task
++        if inspect.isgeneratorfunction(func):
++          for out in func(*args, **kwargs):
++            self._output_append(out)
++        else:
++          out = func(*args, **kwargs)
++          self._output_append(out)
++      except Exception as e:
++        logging.warning('Caught exception: %s', e)
++        exc_info = sys.exc_info()
++        logging.info(''.join(traceback.format_tb(exc_info[2])))
++        with self._outputs_exceptions_cond:
++          self._exceptions.append(exc_info)
++          self._outputs_exceptions_cond.notifyAll()
++      finally:
++        try:
++          # Mark thread as ready again, mark task as processed. Do it before
++          # waking up threads waiting on self.tasks.join(). Otherwise they might
++          # find ThreadPool still 'busy' and perform unnecessary wait on CV.
++          with self._outputs_exceptions_cond:
++            self._ready += 1
++            self._pending_count -= 1
++            if self._pending_count == 0:
++              self._outputs_exceptions_cond.notifyAll()
++          self.tasks.task_done()
++        except Exception as e:
++          # We need to catch and log this error here because this is the root
++          # function for the thread, nothing higher will catch the error.
++          logging.exception('Caught exception while marking task as done: %s',
++                            e)
++
++  def _output_append(self, out):
++    if out is not None:
++      with self._outputs_exceptions_cond:
++        self._outputs.append(out)
++        self._outputs_exceptions_cond.notifyAll()
++
++  def join(self):
++    """Extracts all the results from each threads unordered.
++
++    Call repeatedly to extract all the exceptions if desired.
++
++    Note: will wait for all work items to be done before returning an exception.
++    To get an exception early, use get_one_result().
++    """
++    # TODO(maruel): Stop waiting as soon as an exception is caught.
++    self.tasks.join()
++    with self._outputs_exceptions_cond:
++      if self._exceptions:
++        e = self._exceptions.pop(0)
++        raise e[0], e[1], e[2]
++      out = self._outputs
++      self._outputs = []
++    return out
++
++  def get_one_result(self):
++    """Returns the next item that was generated or raises an exception if one
++    occurred.
++
++    Raises:
++      ThreadPoolEmpty - no results available.
++    """
++    # Get first available result.
++    for result in self.iter_results():
++      return result
++    # No results -> tasks queue is empty.
++    raise ThreadPoolEmpty('Task queue is empty')
++
++  def iter_results(self):
++    """Yields results as they appear until all tasks are processed."""
++    while True:
++      # Check for pending results.
++      result = None
++      self._on_iter_results_step()
++      with self._outputs_exceptions_cond:
++        if self._exceptions:
++          e = self._exceptions.pop(0)
++          raise e[0], e[1], e[2]
++        if self._outputs:
++          # Remember the result to yield it outside of the lock.
++          result = self._outputs.pop(0)
++        else:
++          # No pending tasks -> all tasks are done.
++          if not self._pending_count:
++            return
++          # Some task is queued, wait for its result to appear.
++          # Use non-None timeout so that process reacts to Ctrl+C and other
++          # signals, see http://bugs.python.org/issue8844.
++          self._outputs_exceptions_cond.wait(timeout=0.1)
++          continue
++      yield result
++
++  def close(self):
++    """Closes all the threads."""
++    # Ensure no new threads can be started, self._workers is effectively
++    # a constant after that and can be accessed outside the lock.
++    with self._lock:
++      if self._is_closed:
++        raise ThreadPoolClosed('Can not close already closed ThreadPool')
++      self._is_closed = True
++    for _ in range(len(self._workers)):
++      # Enqueueing None causes the worker to stop.
++      self.tasks.put(None)
++    for t in self._workers:
++      # 'join' without timeout blocks signal handlers, spin with timeout.
++      while t.is_alive():
++        t.join(30)
++    logging.debug(
++      'Thread pool \'%s\' closed: spawned %d threads total',
++      self._prefix, len(self._workers))
++
++  def abort(self):
++    """Empties the queue.
++
++    To be used when the pool should stop early, like when Ctrl-C was detected.
++
++    Returns:
++      Number of tasks cancelled.
++    """
++    index = 0
++    while True:
++      try:
++        self.tasks.get_nowait()
++        self.tasks.task_done()
++        index += 1
++      except Queue.Empty:
++        return index
++
++  def _on_iter_results_step(self):
++    pass
++
++  def __enter__(self):
++    """Enables 'with' statement."""
++    return self
++
++  def __exit__(self, _exc_type, _exc_value, _traceback):
++    """Enables 'with' statement."""
++    self.close()
++
++
++class AutoRetryThreadPool(ThreadPool):
++  """Automatically retries enqueued operations on exception."""
++  # See also PRIORITY_* module-level constants.
++  INTERNAL_PRIORITY_BITS = (1<<8) - 1
++
++  def __init__(self, exceptions, retries, *args, **kwargs):
++    """
++    Arguments:
++      exceptions: list of exception classes that can be retried on.
++      retries: maximum number of retries to do.
++    """
++    assert exceptions and all(issubclass(e, Exception) for e in exceptions), (
++        exceptions)
++    assert 1 <= retries <= self.INTERNAL_PRIORITY_BITS
++    super(AutoRetryThreadPool, self).__init__(*args, **kwargs)
++    self._swallowed_exceptions = tuple(exceptions)
++    self._retries = retries
++
++  def add_task(self, priority, func, *args, **kwargs):
++    """Tasks added must not use the lower priority bits since they are reserved
++    for retries.
++    """
++    assert (priority & self.INTERNAL_PRIORITY_BITS) == 0
++    return super(AutoRetryThreadPool, self).add_task(
++        priority,
++        self._task_executer,
++        priority,
++        None,
++        func,
++        *args,
++        **kwargs)
++
++  def add_task_with_channel(self, channel, priority, func, *args, **kwargs):
++    """Tasks added must not use the lower priority bits since they are reserved
++    for retries.
++    """
++    assert (priority & self.INTERNAL_PRIORITY_BITS) == 0
++    return super(AutoRetryThreadPool, self).add_task(
++        priority,
++        self._task_executer,
++        priority,
++        channel,
++        func,
++        *args,
++        **kwargs)
++
++  def _task_executer(self, priority, channel, func, *args, **kwargs):
++    """Wraps the function and automatically retry on exceptions."""
++    try:
++      result = func(*args, **kwargs)
++      if channel is None:
++        return result
++      channel.send_result(result)
++    # pylint: disable=catching-non-exception
++    except self._swallowed_exceptions as e:
++      # Retry a few times, lowering the priority.
++      actual_retries = priority & self.INTERNAL_PRIORITY_BITS
++      if actual_retries < self._retries:
++        priority += 1
++        logging.debug(
++            'Swallowed exception \'%s\'. Retrying at lower priority %X',
++            e, priority)
++        super(AutoRetryThreadPool, self).add_task(
++            priority,
++            self._task_executer,
++            priority,
++            channel,
++            func,
++            *args,
++            **kwargs)
++        return
++      if channel is None:
++        raise
++      channel.send_exception()
++    except Exception:
++      if channel is None:
++        raise
++      channel.send_exception()
++
++
++class IOAutoRetryThreadPool(AutoRetryThreadPool):
++  """Thread pool that automatically retries on IOError.
++
++  Supposed to be used for IO bound tasks, and thus default maximum number of
++  worker threads is independent of number of CPU cores.
++  """
++  # Initial and maximum number of worker threads.
++  INITIAL_WORKERS = 2
++  MAX_WORKERS = 16 if sys.maxsize > 2L**32 else 8
++  RETRIES = 5
++
++  def __init__(self):
++    super(IOAutoRetryThreadPool, self).__init__(
++        [IOError],
++        self.RETRIES,
++        self.INITIAL_WORKERS,
++        self.MAX_WORKERS,
++        0,
++        'io')
++
++
++class Progress(object):
++  """Prints progress and accepts updates thread-safely."""
++  def __init__(self, columns):
++    """Creates a Progress bar that will updates asynchronously from the worker
++    threads.
++
++    Arguments:
++      columns: list of tuple(name, initialvalue), defines both the number of
++               columns and their initial values.
++    """
++    assert all(
++        len(c) == 2 and isinstance(c[0], str) and isinstance(c[1], int)
++        for c in columns), columns
++    # Members to be used exclusively in the primary thread.
++    self.use_cr_only = True
++    self.unfinished_commands = set()
++    self.start = time.time()
++    self._last_printed_line = ''
++    self._columns = [c[1] for c in columns]
++    self._columns_lookup = dict((c[0], i) for i, c in enumerate(columns))
++    # Setting it to True forces a print on the first print_update() call.
++    self._value_changed = True
++
++    # To be used in all threads.
++    self._queued_updates = Queue.Queue()
++
++  def update_item(self, name, raw=False, **kwargs):
++    """Queue information to print out.
++
++    Arguments:
++      name: string to print out to describe something that was completed.
++      raw: if True, prints the data without the header.
++      raw: if True, prints the data without the header.
++      <kwargs>: argument name is a name of a column. it's value is the increment
++                to the column, value is usually 0 or 1.
++    """
++    assert isinstance(name, basestring), repr(name)
++    assert isinstance(raw, bool), repr(raw)
++    assert all(isinstance(v, int) for v in kwargs.itervalues()), repr(kwargs)
++    args = [(self._columns_lookup[k], v) for k, v in kwargs.iteritems() if v]
++    self._queued_updates.put((name, raw, args))
++
++  def print_update(self):
++    """Prints the current status."""
++    # Flush all the logging output so it doesn't appear within this output.
++    for handler in logging.root.handlers:
++      handler.flush()
++
++    got_one = False
++    while True:
++      try:
++        name, raw, args = self._queued_updates.get_nowait()
++      except Queue.Empty:
++        break
++
++      for k, v in args:
++        self._columns[k] += v
++      self._value_changed = bool(args)
++      if not name:
++        # Even if raw=True, there's nothing to print.
++        continue
++
++      got_one = True
++      if raw:
++        # Prints the data as-is.
++        self._last_printed_line = ''
++        sys.stdout.write('\n%s\n' % name.strip('\n'))
++      else:
++        line, self._last_printed_line = self._gen_line(name)
++        sys.stdout.write(line)
++
++    if not got_one and self._value_changed:
++      # Make sure a line is printed in that case where statistics changes.
++      line, self._last_printed_line = self._gen_line('')
++      sys.stdout.write(line)
++      got_one = True
++    self._value_changed = False
++    if got_one:
++      # Ensure that all the output is flushed to prevent it from getting mixed
++      # with other output streams (like the logging streams).
++      sys.stdout.flush()
++
++    if self.unfinished_commands:
++      logging.debug('Waiting for the following commands to finish:\n%s',
++                    '\n'.join(self.unfinished_commands))
++
++  def _gen_line(self, name):
++    """Generates the line to be printed."""
++    next_line = ('[%s] %6.2fs %s') % (
++        self._render_columns(), time.time() - self.start, name)
++    # Fill it with whitespace only if self.use_cr_only is set.
++    prefix = ''
++    if self.use_cr_only and self._last_printed_line:
++      prefix = '\r'
++    if self.use_cr_only:
++      suffix = ' ' * max(0, len(self._last_printed_line) - len(next_line))
++    else:
++      suffix = '\n'
++    return '%s%s%s' % (prefix, next_line, suffix), next_line
++
++  def _render_columns(self):
++    """Renders the columns."""
++    columns_as_str = map(str, self._columns)
++    max_len = max(map(len, columns_as_str))
++    return '/'.join(i.rjust(max_len) for i in columns_as_str)
++
++
++class QueueWithProgress(Queue.PriorityQueue):
++  """Implements progress support in join()."""
++  def __init__(self, progress, *args, **kwargs):
++    Queue.PriorityQueue.__init__(self, *args, **kwargs)
++    self.progress = progress
++
++  def task_done(self):
++    """Contrary to Queue.task_done(), it wakes self.all_tasks_done at each task
++    done.
++    """
++    with self.all_tasks_done:
++      try:
++        unfinished = self.unfinished_tasks - 1
++        if unfinished < 0:
++          raise ValueError('task_done() called too many times')
++        self.unfinished_tasks = unfinished
++        # This is less efficient, because we want the Progress to be updated.
++        self.all_tasks_done.notify_all()
++      except Exception as e:
++        logging.exception('task_done threw an exception.\n%s', e)
++
++  def wake_up(self):
++    """Wakes up all_tasks_done.
++
++    Unlike task_done(), do not substract one from self.unfinished_tasks.
++    """
++    # TODO(maruel): This is highly inefficient, since the listener is awaken
++    # twice; once per output, once per task. There should be no relationship
++    # between the number of output and the number of input task.
++    with self.all_tasks_done:
++      self.all_tasks_done.notify_all()
++
++  def join(self):
++    """Calls print_update() whenever possible."""
++    self.progress.print_update()
++    with self.all_tasks_done:
++      while self.unfinished_tasks:
++        self.progress.print_update()
++        # Use a short wait timeout so updates are printed in a timely manner.
++        # TODO(maruel): Find a way so Progress.queue and self.all_tasks_done
++        # share the same underlying event so no polling is necessary.
++        self.all_tasks_done.wait(0.1)
++      self.progress.print_update()
++
++
++class ThreadPoolWithProgress(ThreadPool):
++  QUEUE_CLASS = QueueWithProgress
++
++  def __init__(self, progress, *args, **kwargs):
++    self.QUEUE_CLASS = functools.partial(self.QUEUE_CLASS, progress)
++    super(ThreadPoolWithProgress, self).__init__(*args, **kwargs)
++
++  def _output_append(self, out):
++    """Also wakes up the listener on new completed test_case."""
++    super(ThreadPoolWithProgress, self)._output_append(out)
++    self.tasks.wake_up()
++
++  def _on_iter_results_step(self):
++    self.tasks.progress.print_update()
++
++
++class DeadlockDetector(object):
++  """Context manager that can detect deadlocks.
++
++  It will dump stack frames of all running threads if its 'ping' method isn't
++  called in time.
++
++  Usage:
++    with DeadlockDetector(timeout=60) as detector:
++      for item in some_work():
++        ...
++        detector.ping()
++        ...
++
++  Arguments:
++    timeout - maximum allowed time between calls to 'ping'.
++  """
++
++  def __init__(self, timeout):
++    self.timeout = timeout
++    self._thread = None
++    # Thread stop condition. Also lock for shared variables below.
++    self._stop_cv = threading.Condition()
++    self._stop_flag = False
++    # Time when 'ping' was called last time.
++    self._last_ping = None
++    # True if pings are coming on time.
++    self._alive = True
++
++  def __enter__(self):
++    """Starts internal watcher thread."""
++    assert self._thread is None
++    self.ping()
++    self._thread = threading.Thread(name='deadlock-detector', target=self._run)
++    self._thread.daemon = True
++    self._thread.start()
++    return self
++
++  def __exit__(self, *_args):
++    """Stops internal watcher thread."""
++    assert self._thread is not None
++    with self._stop_cv:
++      self._stop_flag = True
++      self._stop_cv.notify()
++    self._thread.join()
++    self._thread = None
++    self._stop_flag = False
++
++  def ping(self):
++    """Notify detector that main thread is still running.
++
++    Should be called periodically to inform the detector that everything is
++    running as it should.
++    """
++    with self._stop_cv:
++      self._last_ping = time.time()
++      self._alive = True
++
++  def _run(self):
++    """Loop that watches for pings and dumps threads state if ping is late."""
++    with self._stop_cv:
++      while not self._stop_flag:
++        # Skipped deadline? Dump threads and switch to 'not alive' state.
++        if self._alive and time.time() > self._last_ping + self.timeout:
++          self.dump_threads(time.time() - self._last_ping, True)
++          self._alive = False
++
++        # Pings are on time?
++        if self._alive:
++          # Wait until the moment we need to dump stack traces.
++          # Most probably some other thread will call 'ping' to move deadline
++          # further in time. We don't bother to wake up after each 'ping',
++          # only right before initial expected deadline.
++          self._stop_cv.wait(self._last_ping + self.timeout - time.time())
++        else:
++          # Skipped some pings previously. Just periodically silently check
++          # for new pings with some arbitrary frequency.
++          self._stop_cv.wait(self.timeout * 0.1)
++
++  @staticmethod
++  def dump_threads(timeout=None, skip_current_thread=False):
++    """Dumps stack frames of all running threads."""
++    all_threads = threading.enumerate()
++    current_thread_id = threading.current_thread().ident
++
++    # Collect tracebacks: thread name -> traceback string.
++    tracebacks = {}
++
++    # pylint: disable=W0212
++    for thread_id, frame in sys._current_frames().iteritems():
++      # Don't dump deadlock detector's own thread, it's boring.
++      if thread_id == current_thread_id and skip_current_thread:
++        continue
++
++      # Try to get more informative symbolic thread name.
++      name = 'untitled'
++      for thread in all_threads:
++        if thread.ident == thread_id:
++          name = thread.name
++          break
++      name += ' #%d' % (thread_id,)
++      tracebacks[name] = ''.join(traceback.format_stack(frame))
++
++    # Function to print a message. Makes it easier to change output destination.
++    def output(msg):
++      logging.warning(msg.rstrip())
++
++    # Print tracebacks, sorting them by thread name. That way a thread pool's
++    # threads will be printed as one group.
++    output('=============== Potential deadlock detected ===============')
++    if timeout is not None:
++      output('No pings in last %d sec.' % (timeout,))
++    output('Dumping stack frames for all threads:')
++    for name in sorted(tracebacks):
++      output('Traceback for \'%s\':\n%s' % (name, tracebacks[name]))
++    output('===========================================================')
++
++
++class TaskChannel(object):
++  """Queue of results of async task execution."""
++
++  class Timeout(Exception):
++    """Raised by 'pull' in case of timeout."""
++
++  _ITEM_RESULT = 0
++  _ITEM_EXCEPTION = 1
++
++  def __init__(self):
++    self._queue = Queue.Queue()
++
++  def send_result(self, result):
++    """Enqueues a result of task execution."""
++    self._queue.put((self._ITEM_RESULT, result))
++
++  def send_exception(self, exc_info=None):
++    """Enqueue an exception raised by a task.
++
++    Arguments:
++      exc_info: If given, should be 3-tuple returned by sys.exc_info(),
++                default is current value of sys.exc_info(). Use default in
++                'except' blocks to capture currently processed exception.
++    """
++    exc_info = exc_info or sys.exc_info()
++    assert isinstance(exc_info, tuple) and len(exc_info) == 3
++    # Transparently passing Timeout will break 'pull' contract, since a caller
++    # has no way to figure out that's an exception from the task and not from
++    # 'pull' itself. Transform Timeout into generic RuntimeError with
++    # explanation.
++    if isinstance(exc_info[1], TaskChannel.Timeout):
++      exc_info = (
++          RuntimeError,
++          RuntimeError('Task raised Timeout exception'),
++          exc_info[2])
++    self._queue.put((self._ITEM_EXCEPTION, exc_info))
++
++  def pull(self, timeout=None):
++    """Dequeues available result or exception.
++
++    Args:
++      timeout: if not None will block no longer than |timeout| seconds and will
++          raise TaskChannel.Timeout exception if no results are available.
++
++    Returns:
++      Whatever task pushes to the queue by calling 'send_result'.
++
++    Raises:
++      TaskChannel.Timeout: waiting longer than |timeout|.
++      Whatever exception task raises.
++    """
++    # Do not ever use timeout == None, in that case signal handlers are not
++    # being called (at least on Python 2.7, http://bugs.python.org/issue8844).
++    while True:
++      try:
++        item_type, value = self._queue.get(
++            timeout=timeout if timeout is not None else 30.0)
++        break
++      except Queue.Empty:
++        if timeout is None:
++          continue
++        raise TaskChannel.Timeout()
++    if item_type == self._ITEM_RESULT:
++      return value
++    if item_type == self._ITEM_EXCEPTION:
++      # 'value' is captured sys.exc_info() 3-tuple. Use extended raise syntax
++      # to preserve stack frame of original exception (that was raised in
++      # another thread).
++      assert isinstance(value, tuple) and len(value) == 3
++      raise value[0], value[1], value[2]
++    assert False, 'Impossible queue item type: %r' % item_type
++
++  def wrap_task(self, task):
++    """Decorator that makes a function push results into this channel."""
++    @functools.wraps(task)
++    def wrapped(*args, **kwargs):
++      try:
++        self.send_result(task(*args, **kwargs))
++      except Exception:
++        self.send_exception()
++    return wrapped
++
++
++def num_processors():
++  """Returns the number of processors.
++
++  Python on OSX 10.6 raises a NotImplementedError exception.
++  """
++  try:
++    # Multiprocessing
++    import multiprocessing
++    return multiprocessing.cpu_count()
++  except:  # pylint: disable=W0702
++    try:
++      # Mac OS 10.6
++      return int(os.sysconf('SC_NPROCESSORS_ONLN'))  # pylint: disable=E1101
++    except:
++      # Some of the windows builders seem to get here.
++      return 4
+diff --git a/tools/swarming_client/utils/tools.py b/tools/swarming_client/utils/tools.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..823ae51e111fc06a6073f97ed03c7774fcf0827a
+--- /dev/null
++++ b/tools/swarming_client/utils/tools.py
+@@ -0,0 +1,329 @@
++# Copyright 2013 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Various utility functions and classes not specific to any single area."""
++
++import atexit
++import cStringIO
++import functools
++import json
++import logging
++import os
++import re
++import sys
++import threading
++import time
++
++import utils
++from utils import zip_package
++
++
++# Path to (possibly extracted from zip) cacert.pem bundle file.
++# See get_cacerts_bundle().
++_ca_certs = None
++_ca_certs_lock = threading.Lock()
++
++
++# @cached decorators registered by report_cache_stats_at_exit.
++_caches = []
++_caches_lock = threading.Lock()
++
++
++class Profiler(object):
++  """Context manager that records time spend inside its body."""
++  def __init__(self, name):
++    self.name = name
++    self.start_time = None
++
++  def __enter__(self):
++    self.start_time = time.time()
++    return self
++
++  def __exit__(self, _exc_type, _exec_value, _traceback):
++    time_taken = time.time() - self.start_time
++    logging.info('Profiling: Section %s took %3.3f seconds',
++                 self.name, time_taken)
++
++
++class ProfileCounter(object):
++  """Records total time spent in a chunk of code during lifetime of a process.
++
++  Recursive calls count as a single call (i.e. only the time spent in the outer
++  call is recorded).
++
++  Autoregisters itself in a global list when instantiated. All counters will be
++  reported at the process exit time (in atexit hook). Best to be used as with
++  @profile decorator.
++  """
++
++  _instances_lock = threading.Lock()
++  _instances = []
++
++  @staticmethod
++  def summarize_all():
++    print('\nProfiling report:')
++    print('-' * 80)
++    print(
++        '{:<38}{:<10}{:<16}{:<16}'.format(
++            'Name', 'Count', 'Total ms', 'Average ms'))
++    print('-' * 80)
++    with ProfileCounter._instances_lock:
++      for i in sorted(ProfileCounter._instances, key=lambda x: -x.total_time):
++        print(
++            '{:<38}{:<10}{:<16.1f}{:<16.1f}'.format(
++                i.name,
++                i.call_count,
++                i.total_time * 1000,
++                i.average_time * 1000))
++    print('-' * 80)
++
++  def __init__(self, name):
++    self._lock = threading.Lock()
++    self._call_count = 0
++    self._name = name
++    self._total_time = 0
++    self._active = threading.local()
++    with self._instances_lock:
++      self._instances.append(self)
++      if len(self._instances) == 1:
++        atexit.register(ProfileCounter.summarize_all)
++
++  @property
++  def name(self):
++    return self._name
++
++  @property
++  def call_count(self):
++    return self._call_count
++
++  @property
++  def total_time(self):
++    return self._total_time
++
++  @property
++  def average_time(self):
++    with self._lock:
++      if self._call_count:
++        return self._total_time / self._call_count
++      return 0
++
++  def __enter__(self):
++    recursion = getattr(self._active, 'recursion', 0)
++    if not recursion:
++      self._active.started = time.time()
++    self._active.recursion = recursion + 1
++
++  def __exit__(self, _exc_type, _exec_value, _traceback):
++    self._active.recursion -= 1
++    if not self._active.recursion:
++      time_inside = time.time() - self._active.started
++      with self._lock:
++        self._total_time += time_inside
++        self._call_count += 1
++
++
++def profile(func):
++  """Decorator that profiles a function if SWARMING_PROFILE env var is set.
++
++  Will gather a number of calls to that function and total time spent inside.
++  The final report is emitted to stdout at the process exit time.
++  """
++  # No performance impact whatsoever if SWARMING_PROFILE is not set.
++  if os.environ.get('SWARMING_PROFILE') != '1':
++    return func
++  timer = ProfileCounter(func.__name__)
++  @functools.wraps(func)
++  def wrapper(*args, **kwargs):
++    with timer:
++      return func(*args, **kwargs)
++  return wrapper
++
++
++def report_cache_stats_at_exit(func, cache):
++  """Registers a hook that reports state of the cache on the process exit."""
++  # Very dumb. Tries to account for object reuse though.
++  def get_size(obj, seen):
++    # Use id(...) to avoid triggering __hash__ and comparing by value instead.
++    if id(obj) in seen:
++      return 0
++    seen.add(id(obj))
++    size = sys.getsizeof(obj)
++    if isinstance(obj, (list, tuple)):
++      return size + sum(get_size(x, seen) for x in obj)
++    elif isinstance(obj, dict):
++      return size + sum(
++          get_size(k, seen) + get_size(v, seen) for k, v in obj.iteritems())
++    return size
++
++  def report_caches_state():
++    print('\nFunction cache report:')
++    print('-' * 80)
++    print('{:<40}{:<16}{:<26}'.format('Name', 'Items', 'Approx size, KB'))
++    print('-' * 80)
++    with _caches_lock:
++      total = 0
++      seen_objects = set()
++      for func, cache in sorted(_caches, key=lambda x: -len(x[1])):
++        size = get_size(cache, seen_objects)
++        total += size
++        print(
++            '{:<40}{:<16}{:<26}'.format(func.__name__, len(cache), size / 1024))
++    print('-' * 80)
++    print('Total: %.1f MB' % (total / 1024 / 1024,))
++    print('-' * 80)
++
++  with _caches_lock:
++    _caches.append((func, cache))
++    if len(_caches) == 1:
++      atexit.register(report_caches_state)
++
++
++def cached(func):
++  """Decorator that permanently caches a result of function invocation.
++
++  It tries to be super fast and because of that is somewhat limited:
++    * The function being cached can accept only positional arguments.
++    * All arguments should be hashable.
++    * The function may be called multiple times with same arguments in
++      multithreaded environment.
++    * The cache is not cleared up at all.
++
++  If SWARMING_PROFILE env var is set, will produce a report about the state of
++  the cache at the process exit (number of items and approximate size).
++  """
++  empty = object()
++  cache = {}
++
++  if os.environ.get('SWARMING_PROFILE') == '1':
++    report_cache_stats_at_exit(func, cache)
++
++  @functools.wraps(func)
++  def wrapper(*args):
++    v = cache.get(args, empty)
++    if v is empty:
++      v = func(*args)
++      cache[args] = v
++    return v
++
++  return wrapper
++
++
++class Unbuffered(object):
++  """Disable buffering on a file object."""
++  def __init__(self, stream):
++    self.stream = stream
++
++  def write(self, data):
++    self.stream.write(data)
++    if '\n' in data:
++      self.stream.flush()
++
++  def __getattr__(self, attr):
++    return getattr(self.stream, attr)
++
++
++def disable_buffering():
++  """Makes this process and child processes stdout unbuffered."""
++  if not os.environ.get('PYTHONUNBUFFERED'):
++    # Since sys.stdout is a C++ object, it's impossible to do
++    # sys.stdout.write = lambda...
++    sys.stdout = Unbuffered(sys.stdout)
++    os.environ['PYTHONUNBUFFERED'] = 'x'
++
++
++def fix_python_path(cmd):
++  """Returns the fixed command line to call the right python executable."""
++  out = cmd[:]
++  if out[0] == 'python':
++    out[0] = sys.executable
++  elif out[0].endswith('.py'):
++    out.insert(0, sys.executable)
++  return out
++
++
++def read_json(filepath):
++  with open(filepath, 'r') as f:
++    return json.load(f)
++
++
++def write_json(filepath_or_handle, data, dense):
++  """Writes data into filepath or file handle encoded as json.
++
++  If dense is True, the json is packed. Otherwise, it is human readable.
++  """
++  if dense:
++    kwargs = {'sort_keys': True, 'separators': (',',':')}
++  else:
++    kwargs = {'sort_keys': True, 'indent': 2}
++
++  if hasattr(filepath_or_handle, 'write'):
++    json.dump(data, filepath_or_handle, **kwargs)
++  else:
++    with open(filepath_or_handle, 'wb') as f:
++      json.dump(data, f, **kwargs)
++
++
++def format_json(data, dense):
++  """Returns a string with json encoded data.
++
++  If dense is True, the json is packed. Otherwise, it is human readable.
++  """
++  buf = cStringIO.StringIO()
++  write_json(buf, data, dense)
++  return buf.getvalue()
++
++
++def gen_blacklist(regexes):
++  """Returns a lambda to be used as a blacklist."""
++  compiled = [re.compile(i) for i in regexes or []]
++  return lambda f: any(j.match(f) for j in compiled)
++
++
++def get_bool_env_var(name):
++  """Return True if integer environment variable |name| value is non zero.
++
++  If environment variable is missing or is set to '0', returns False.
++  """
++  return bool(int(os.environ.get(name, '0')))
++
++
++def is_headless():
++  """True if running in non-interactive mode on some bot machine.
++
++  Examines os.environ for presence of SWARMING_HEADLESS var.
++  """
++  headless_env_keys = (
++    # This is Chromium specific. Set when running under buildbot slave.
++    'CHROME_HEADLESS',
++    # Set when running under swarm bot.
++    'SWARMING_HEADLESS',
++  )
++  return any(get_bool_env_var(key) for key in headless_env_keys)
++
++
++def get_cacerts_bundle():
++  """Returns path to a file with CA root certificates bundle.
++
++  Python's ssl module needs a real file on disk, so if code is running from
++  a zip archive, we need to extract the file first.
++  """
++  global _ca_certs
++  with _ca_certs_lock:
++    if _ca_certs is not None and os.path.exists(_ca_certs):
++      return _ca_certs
++    # Some rogue process clears /tmp and causes cacert.pem to disappear. Extract
++    # to current directory instead. We use our own bundled copy of cacert.pem.
++    _ca_certs = zip_package.extract_resource(utils, 'cacert.pem', temp_dir='.')
++    return _ca_certs
++
++
++def sliding_timeout(timeout):
++  """Returns a function that returns how much time left till (now+timeout).
++
++  If timeout is None, the returned function always returns None.
++  """
++  if timeout is None:
++    return lambda: None
++  deadline = time.time() + timeout
++  return lambda: deadline - time.time()
+diff --git a/tools/swarming_client/utils/zip_package.py b/tools/swarming_client/utils/zip_package.py
+new file mode 100755
+index 0000000000000000000000000000000000000000..43e89d3ee0b4f9a826ff733798e19edfc680564d
+--- /dev/null
++++ b/tools/swarming_client/utils/zip_package.py
+@@ -0,0 +1,362 @@
++# Copyright 2013 The LUCI Authors. All rights reserved.
++# Use of this source code is governed under the Apache License, Version 2.0
++# that can be found in the LICENSE file.
++
++"""Utilities to work with importable python zip packages."""
++
++import atexit
++import collections
++import cStringIO as StringIO
++import hashlib
++import os
++import pkgutil
++import re
++import sys
++import tempfile
++import threading
++import zipfile
++import zipimport
++
++
++# Glob patterns for files to exclude from a package by default.
++EXCLUDE_LIST = (
++  # Ignore hidden files (including .svn and .git).
++  r'\..*',
++
++  # Ignore precompiled python files since they depend on python version and we
++  # don't want zip package to be version-depended.
++  r'.*\.pyc$',
++  r'.*\.pyo$',
++)
++
++
++# Temporary files extracted by extract_resource. Removed in atexit hook.
++_extracted_files = []
++_extracted_files_lock = threading.Lock()
++
++
++# Patch zipimport.zipimporter hook to accept unicode strings
++def zipimporter_unicode(archivepath):
++  if isinstance(archivepath, unicode):
++    archivepath = archivepath.encode(sys.getfilesystemencoding())
++  return zipimport.zipimporter(archivepath)
++
++
++for i, hook in enumerate(sys.path_hooks):
++  if hook is zipimport.zipimporter:
++    sys.path_hooks[i] = zipimporter_unicode
++
++
++class ZipPackageError(RuntimeError):
++  """Failed to create a zip package."""
++
++
++class ZipPackage(object):
++  """A set of files that can be zipped to file on disk or into memory buffer.
++
++  Usage:
++    package = ZipPackage(root)
++    package.add_file('some_file.py', '__main__.py')
++    package.add_directory('some_directory')
++    package.add_buffer('generated.py', 'any string here')
++
++    buf = package.zip_into_buffer()
++    package.zip_into_file('my_zip.zip')
++  """
++
++  _FileRef = collections.namedtuple('_FileRef', ['abs_path'])
++  _BufferRef = collections.namedtuple('_BufferRef', ['buffer'])
++
++  def __init__(self, root):
++    """Initializes new empty ZipPackage.
++
++    All files added to the package should live under the |root|. It will also
++    be used when calculating relative paths of files in the package.
++
++    |root| must be an absolute path.
++    """
++    assert os.path.isabs(root), root
++    self.root = root.rstrip(os.sep) + os.sep
++    self._items = {}
++
++  @property
++  def files(self):
++    """Files added to the package as a list of relative paths in zip."""
++    return self._items.keys()
++
++  def add_file(self, absolute_path, archive_path=None):
++    """Adds a single file to the package.
++
++    |archive_path| is a relative path in archive for this file, by default it's
++    equal to |absolute_path| taken relative to |root|. In that case
++    |absolute_path| must be in a |root| subtree.
++
++    If |archive_path| is given, |absolute_path| can point to any file.
++    """
++    assert os.path.isabs(absolute_path), absolute_path
++    absolute_path = os.path.normpath(absolute_path)
++    # If |archive_path| is not given, ensure that |absolute_path| is under root.
++    if not archive_path and not absolute_path.startswith(self.root):
++      raise ZipPackageError(
++          'Path %s is not inside root %s' % (absolute_path, self.root))
++    if not os.path.exists(absolute_path):
++      raise ZipPackageError('No such file: %s' % absolute_path)
++    if not os.path.isfile(absolute_path):
++      raise ZipPackageError('Object %s is not a regular file' % absolute_path)
++    archive_path = archive_path or absolute_path[len(self.root):]
++    self._add_entry(archive_path, ZipPackage._FileRef(absolute_path))
++
++  def add_python_file(self, absolute_path, archive_path=None):
++    """Adds a single python file to the package.
++
++    Recognizes *.pyc files and adds corresponding *.py file instead.
++    """
++    base, ext = os.path.splitext(absolute_path)
++    if ext in ('.pyc', '.pyo'):
++      absolute_path = base + '.py'
++    elif ext != '.py':
++      raise ZipPackageError('Not a python file: %s' % absolute_path)
++    self.add_file(absolute_path, archive_path)
++
++  def add_directory(self, absolute_path, archive_path=None,
++                    exclude=EXCLUDE_LIST):
++    """Recursively adds all files from given directory to the package.
++
++    |archive_path| is a relative path in archive for this directory, by default
++    it's equal to |absolute_path| taken relative to |root|. In that case
++    |absolute_path| must be in |root| subtree.
++
++    If |archive_path| is given, |absolute_path| can point to any directory.
++
++    |exclude| defines a list of regular expressions for file names to exclude
++    from the package.
++
++    Only non-empty directories will be actually added to the package.
++    """
++    assert os.path.isabs(absolute_path), absolute_path
++    absolute_path = os.path.normpath(absolute_path).rstrip(os.sep) + os.sep
++    # If |archive_path| is not given, ensure that |path| is under root.
++    if not archive_path and not absolute_path.startswith(self.root):
++      raise ZipPackageError(
++          'Path %s is not inside root %s' % (absolute_path, self.root))
++    if not os.path.exists(absolute_path):
++      raise ZipPackageError('No such directory: %s' % absolute_path)
++    if not os.path.isdir(absolute_path):
++      raise ZipPackageError('Object %s is not a directory' % absolute_path)
++
++    # Precompile regular expressions.
++    exclude_regexps = [re.compile(r) for r in exclude]
++    # Returns True if |name| should be excluded from the package.
++    should_exclude = lambda name: any(r.match(name) for r in exclude_regexps)
++
++    archive_path = archive_path or absolute_path[len(self.root):]
++    for cur_dir, dirs, files in os.walk(absolute_path):
++      # Add all non-excluded files.
++      for name in files:
++        if not should_exclude(name):
++          absolute = os.path.join(cur_dir, name)
++          relative = absolute[len(absolute_path):]
++          assert absolute.startswith(absolute_path)
++          self.add_file(absolute, os.path.join(archive_path, relative))
++      # Remove excluded directories from enumeration.
++      for name in [d for d in dirs if should_exclude(d)]:
++        dirs.remove(name)
++
++  def add_buffer(self, archive_path, buf):
++    """Adds a contents of the given string |buf| to the package as a file.
++
++    |archive_path| is a path in archive for this file.
++    """
++    # Only 'str' is allowed here, no 'unicode'
++    assert isinstance(buf, str)
++    self._add_entry(archive_path, ZipPackage._BufferRef(buf))
++
++  def zip_into_buffer(self, compress=True):
++    """Zips added files into in-memory zip file and returns it as str."""
++    stream = StringIO.StringIO()
++    try:
++      self._zip_into_stream(stream, compress)
++      return stream.getvalue()
++    finally:
++      stream.close()
++
++  def zip_into_file(self, path, compress=True):
++    """Zips added files into a file on disk."""
++    with open(path, 'wb') as stream:
++      self._zip_into_stream(stream, compress)
++
++  def _add_entry(self, archive_path, ref):
++    """Adds new zip package entry."""
++    # Always use forward slashes in zip.
++    archive_path = archive_path.replace(os.sep, '/')
++    # Ensure there are no suspicious components in the path.
++    assert not any(p in ('', '.', '..') for p in archive_path.split('/'))
++    # Ensure there's no file overwrites.
++    if archive_path in self._items:
++      raise ZipPackageError('Duplicated entry: %s' % archive_path)
++    self._items[archive_path] = ref
++
++  def _zip_into_stream(self, stream, compress):
++    """Zips files added so far into some output stream.
++
++    Some measures are taken to guarantee that final zip depends only on the
++    content of added files:
++      * File modification time is not stored.
++      * Entries are sorted by file name in archive.
++    """
++    compression = zipfile.ZIP_DEFLATED if compress else zipfile.ZIP_STORED
++    zip_file = zipfile.ZipFile(stream, 'w', compression)
++    try:
++      for archive_path in sorted(self._items):
++        ref = self._items[archive_path]
++        info = zipfile.ZipInfo(filename=archive_path)
++        info.compress_type = compression
++        info.create_system = 3
++        if isinstance(ref, ZipPackage._FileRef):
++          info.external_attr = (os.stat(ref.abs_path)[0] & 0xFFFF) << 16L
++          with open(ref.abs_path, 'rb') as f:
++            buf = f.read()
++        elif isinstance(ref, ZipPackage._BufferRef):
++          buf = ref.buffer
++        else:
++          assert False, 'Unexpected type %s' % ref
++        zip_file.writestr(info, buf)
++    finally:
++      zip_file.close()
++
++
++def get_module_zip_archive(module):
++  """Given a module, returns path to a zip package that contains it or None."""
++  loader = pkgutil.get_loader(module)
++  # Handle zipimporter and its variations.
++  if loader and hasattr(loader, 'archive'):
++    return loader.archive
++
++
++def is_zipped_module(module):
++  """True if given module was loaded from a zip package."""
++  return bool(get_module_zip_archive(module))
++
++
++def get_main_script_path():
++  """If running from zip returns path to a zip file, else path to __main__.
++
++  Basically returns path to a file passed to python for execution
++  as in 'python <main_script>' considering a case of executable zip package.
++
++  Returns path relative to a current directory of when process was started.
++  """
++  # If running from interactive console __file__ is not defined.
++  main = sys.modules['__main__']
++  path = get_module_zip_archive(main)
++  if path:
++    return path
++
++  path = getattr(main, '__file__', None)
++  if path:
++    return path.decode(sys.getfilesystemencoding())
++
++
++def _write_temp_data(name, data, temp_dir):
++  """Writes content-addressed file in `temp_dir` if relevant."""
++  filename = '%s-%s' % (hashlib.sha256(data).hexdigest(), name)
++  filepath = os.path.join(temp_dir, filename)
++  if os.path.isfile(filepath):
++    with open(filepath, 'rb') as f:
++      if f.read() == data:
++        # It already exists.
++        return filepath
++    # It's different, can't use it.
++    return None
++
++  try:
++    fd = os.open(filepath, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0600)
++    with os.fdopen(fd, 'wb') as f:
++      f.write(data)
++    return filepath
++  except (IOError, OSError):
++    return None
++
++
++def extract_resource(package, resource, temp_dir=None):
++  """Returns real file system path to a |resource| file from a |package|.
++
++  If it's inside a zip package, will extract it first into a file. Such file is
++  readable and writable only by the creating user ID.
++
++  Arguments:
++    package: is a python module object that represents a package.
++    resource: should be a relative filename, using '/'' as the path separator.
++    temp_dir: if set, it will extra the file in this directory with the filename
++        being the hash of the content. Otherwise, it uses tempfile.mkstemp().
++
++  Raises ValueError if no such resource.
++  """
++  # For regular non-zip packages just construct an absolute path.
++  if not is_zipped_module(package):
++    # Package's __file__ attribute is always an absolute path.
++    ppath = package.__file__.decode(sys.getfilesystemencoding())
++    path = os.path.join(os.path.dirname(ppath),
++        resource.replace('/', os.sep))
++    if not os.path.exists(path):
++      raise ValueError('No such resource in %s: %s' % (package, resource))
++    return path
++
++  # For zipped packages extract the resource into a temp file.
++  data = pkgutil.get_data(package.__name__, resource)
++  if data is None:
++    raise ValueError('No such resource in zipped %s: %s' % (package, resource))
++
++  if temp_dir:
++    filepath = _write_temp_data(os.path.basename(resource), data, temp_dir)
++    if filepath:
++      return filepath
++
++  fd, filepath = tempfile.mkstemp(
++      prefix=u'.zip_pkg-',
++      suffix=u'-' + os.path.basename(resource),
++      dir=temp_dir)
++  with os.fdopen(fd, 'wb') as stream:
++    stream.write(data)
++
++  # Register it for removal when process dies.
++  with _extracted_files_lock:
++    _extracted_files.append(filepath)
++    # First extracted file -> register atexit hook that cleans them all.
++    if len(_extracted_files) == 1:
++      atexit.register(cleanup_extracted_resources)
++
++  return filepath
++
++
++def cleanup_extracted_resources():
++  """Removes all temporary files created by extract_resource.
++
++  Executed as atexit hook.
++  """
++  with _extracted_files_lock:
++    while _extracted_files:
++      try:
++        os.remove(_extracted_files.pop())
++      except OSError:
++        pass
++
++
++def generate_version():
++  """Generates the SHA256 based on the content of this zip.
++
++  It is hashing the content of the zip, not the compressed bits. The compression
++  has other side effects that kicks in, like zlib's library version, compression
++  level, order in which the files were specified, etc.
++  """
++  assert is_zipped_module(sys.modules['__main__'])
++  h = hashlib.sha256()
++  with zipfile.ZipFile(get_main_script_path(), 'r') as z:
++    for name in sorted(z.namelist()):
++      with z.open(name) as f:
++        h.update(str(len(name)))
++        h.update(name)
++        content = f.read()
++        h.update(str(len(content)))
++        h.update(content)
++  return h.hexdigest()

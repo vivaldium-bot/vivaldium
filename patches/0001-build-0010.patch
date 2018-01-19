@@ -1,3 +1,334 @@
+diff --git a/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/move_assign_noexcept.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/move_assign_noexcept.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..136a60fe627bf4e6c57979d64cb0093504438d81
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/move_assign_noexcept.pass.cpp
+@@ -0,0 +1,94 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// UNSUPPORTED: c++98, c++03
++
++// <string>
++
++// basic_string& operator=(basic_string&& c)
++//     noexcept(
++//         allocator_traits<allocator_type>::propagate_on_container_move_assignment::value ||
++//         allocator_traits<allocator_type>::is_always_equal::value); // C++17
++//
++//	before C++17, we use the conforming extension
++//     noexcept(
++//         allocator_type::propagate_on_container_move_assignment::value &&
++//         is_nothrow_move_assignable<allocator_type>::value);
++
++#include <string>
++#include <cassert>
++
++#include "test_macros.h"
++#include "test_allocator.h"
++
++template <class T>
++struct some_alloc
++{
++    typedef T value_type;
++    some_alloc(const some_alloc&);
++};
++
++template <class T>
++struct some_alloc2
++{
++    typedef T value_type;
++
++    some_alloc2() {}
++    some_alloc2(const some_alloc2&);
++    void deallocate(void*, unsigned) {}
++
++    typedef std::false_type propagate_on_container_move_assignment;
++    typedef std::true_type is_always_equal;
++};
++
++template <class T>
++struct some_alloc3
++{
++    typedef T value_type;
++
++    some_alloc3() {}
++    some_alloc3(const some_alloc3&);
++    void deallocate(void*, unsigned) {}
++
++    typedef std::false_type propagate_on_container_move_assignment;
++    typedef std::false_type is_always_equal;
++};
++
++int main()
++{
++    {
++        typedef std::string C;
++        static_assert(std::is_nothrow_move_assignable<C>::value, "");
++    }
++    {
++        typedef std::basic_string<char, std::char_traits<char>, test_allocator<char>> C;
++        static_assert(!std::is_nothrow_move_assignable<C>::value, "");
++    }
++    {
++        typedef std::basic_string<char, std::char_traits<char>, some_alloc<char>> C;
++#if TEST_STD_VER > 14
++    //  if the allocators are always equal, then the move assignment can be noexcept
++        static_assert( std::is_nothrow_move_assignable<C>::value, "");
++#else
++        static_assert(!std::is_nothrow_move_assignable<C>::value, "");
++#endif
++    }
++#if TEST_STD_VER > 14
++    {
++    //	POCMA is false, always equal
++        typedef std::basic_string<char, std::char_traits<char>, some_alloc2<char>> C;
++        static_assert( std::is_nothrow_move_assignable<C>::value, "");
++    }
++    {
++    //	POCMA is false, not always equal
++        typedef std::basic_string<char, std::char_traits<char>, some_alloc3<char>> C;
++        static_assert(!std::is_nothrow_move_assignable<C>::value, "");
++    }
++#endif
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/move_assignment.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/move_assignment.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..006b5b9b4cb0a8650fd23e7476c6c8f8a7a4e664
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/move_assignment.pass.cpp
+@@ -0,0 +1,74 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// UNSUPPORTED: c++98, c++03
++
++// <string>
++
++// basic_string<charT,traits,Allocator>&
++//   operator=(basic_string<charT,traits,Allocator>&& str);
++
++#include <string>
++#include <cassert>
++
++#include "test_macros.h"
++#include "test_allocator.h"
++#include "min_allocator.h"
++
++template <class S>
++void
++test(S s1, S s2)
++{
++    S s0 = s2;
++    s1 = std::move(s2);
++    LIBCPP_ASSERT(s1.__invariants());
++    LIBCPP_ASSERT(s2.__invariants());
++    assert(s1 == s0);
++    assert(s1.capacity() >= s1.size());
++}
++
++int main()
++{
++    {
++    typedef std::string S;
++    test(S(), S());
++    test(S("1"), S());
++    test(S(), S("1"));
++    test(S("1"), S("2"));
++    test(S("1"), S("2"));
++
++    test(S(),
++         S("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"));
++    test(S("123456789"),
++         S("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"));
++    test(S("1234567890123456789012345678901234567890123456789012345678901234567890"),
++         S("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"));
++    test(S("1234567890123456789012345678901234567890123456789012345678901234567890"
++           "1234567890123456789012345678901234567890123456789012345678901234567890"),
++         S("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"));
++    }
++    {
++    typedef std::basic_string<char, std::char_traits<char>, min_allocator<char>> S;
++    test(S(), S());
++    test(S("1"), S());
++    test(S(), S("1"));
++    test(S("1"), S("2"));
++    test(S("1"), S("2"));
++
++    test(S(),
++         S("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"));
++    test(S("123456789"),
++         S("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"));
++    test(S("1234567890123456789012345678901234567890123456789012345678901234567890"),
++         S("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"));
++    test(S("1234567890123456789012345678901234567890123456789012345678901234567890"
++           "1234567890123456789012345678901234567890123456789012345678901234567890"),
++         S("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"));
++    }
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/move_noexcept.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/move_noexcept.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..9a7c65ca2cf52d8be834006b5efea124b51ce8b2
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/move_noexcept.pass.cpp
+@@ -0,0 +1,50 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// UNSUPPORTED: c++98, c++03
++
++// <string>
++
++// basic_string(basic_string&&)
++//        noexcept(is_nothrow_move_constructible<allocator_type>::value);
++
++// This tests a conforming extension
++
++#include <string>
++#include <cassert>
++
++#include "test_macros.h"
++#include "test_allocator.h"
++
++template <class T>
++struct some_alloc
++{
++    typedef T value_type;
++    some_alloc(const some_alloc&);
++};
++
++int main()
++{
++    {
++        typedef std::string C;
++        static_assert(std::is_nothrow_move_constructible<C>::value, "");
++    }
++    {
++        typedef std::basic_string<char, std::char_traits<char>, test_allocator<char>> C;
++        static_assert(std::is_nothrow_move_constructible<C>::value, "");
++    }
++    {
++        typedef std::basic_string<char, std::char_traits<char>, some_alloc<char>> C;
++#if TEST_STD_VER <= 14
++        static_assert(!std::is_nothrow_move_constructible<C>::value, "");
++#else
++        static_assert( std::is_nothrow_move_constructible<C>::value, "");
++#endif
++    }
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/pointer_alloc.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/pointer_alloc.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..d9d451dc71120e185293babccf370a425a629b5c
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/pointer_alloc.pass.cpp
+@@ -0,0 +1,89 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// <string>
++
++// basic_string(const charT* s, const Allocator& a = Allocator());
++
++#include <string>
++#include <stdexcept>
++#include <algorithm>
++#include <cassert>
++#include <cstddef>
++
++#include "test_macros.h"
++#include "test_allocator.h"
++#include "min_allocator.h"
++
++template <class charT>
++void
++test(const charT* s)
++{
++    typedef std::basic_string<charT, std::char_traits<charT>, test_allocator<charT> > S;
++    typedef typename S::traits_type T;
++    typedef typename S::allocator_type A;
++    std::size_t n = T::length(s);
++    S s2(s);
++    LIBCPP_ASSERT(s2.__invariants());
++    assert(s2.size() == n);
++    assert(T::compare(s2.data(), s, n) == 0);
++    assert(s2.get_allocator() == A());
++    assert(s2.capacity() >= s2.size());
++}
++
++template <class charT, class A>
++void
++test(const charT* s, const A& a)
++{
++    typedef std::basic_string<charT, std::char_traits<charT>, A> S;
++    typedef typename S::traits_type T;
++    std::size_t n = T::length(s);
++    S s2(s, a);
++    LIBCPP_ASSERT(s2.__invariants());
++    assert(s2.size() == n);
++    assert(T::compare(s2.data(), s, n) == 0);
++    assert(s2.get_allocator() == a);
++    assert(s2.capacity() >= s2.size());
++}
++
++int main()
++{
++    {
++    typedef test_allocator<char> A;
++
++    test("");
++    test("", A(2));
++
++    test("1");
++    test("1", A(2));
++
++    test("1234567980");
++    test("1234567980", A(2));
++
++    test("123456798012345679801234567980123456798012345679801234567980");
++    test("123456798012345679801234567980123456798012345679801234567980", A(2));
++    }
++#if TEST_STD_VER >= 11
++    {
++    typedef min_allocator<char> A;
++
++    test("");
++    test("", A());
++
++    test("1");
++    test("1", A());
++
++    test("1234567980");
++    test("1234567980", A());
++
++    test("123456798012345679801234567980123456798012345679801234567980");
++    test("123456798012345679801234567980123456798012345679801234567980", A());
++    }
++#endif
++}
 diff --git a/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/pointer_assignment.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/strings/basic.string/string.cons/pointer_assignment.pass.cpp
 new file mode 100644
 index 0000000000000000000000000000000000000000..506ab9374002ebc67b0222843405d1659cce5d05
@@ -85169,293 +85500,4 @@ index 0000000000000000000000000000000000000000..c61a93aa0c7fda46473ab8099510a45a
 +int main()
 +{
 +    std::shared_mutex m;
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..0a6d6e3683ed770bf5d488945688078ebe3c5c08
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock.pass.cpp
-@@ -0,0 +1,64 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+//
-+// UNSUPPORTED: libcpp-has-no-threads
-+// UNSUPPORTED: c++03, c++98, c++11, c++14
-+
-+// FLAKY_TEST.
-+
-+// <shared_mutex>
-+
-+// class shared_mutex;
-+
-+// void lock();
-+
-+#include <shared_mutex>
-+#include <thread>
-+#include <cstdlib>
-+#include <cassert>
-+
-+#include "test_macros.h"
-+
-+std::shared_mutex m;
-+
-+typedef std::chrono::system_clock Clock;
-+typedef Clock::time_point time_point;
-+typedef Clock::duration duration;
-+typedef std::chrono::milliseconds ms;
-+typedef std::chrono::nanoseconds ns;
-+
-+ms WaitTime = ms(250);
-+
-+// Thread sanitizer causes more overhead and will sometimes cause this test
-+// to fail. To prevent this we give Thread sanitizer more time to complete the
-+// test.
-+#if !defined(TEST_HAS_SANITIZERS)
-+ms Tolerance = ms(50);
-+#else
-+ms Tolerance = ms(50 * 5);
-+#endif
-+
-+void f()
-+{
-+    time_point t0 = Clock::now();
-+    m.lock();
-+    time_point t1 = Clock::now();
-+    m.unlock();
-+    ns d = t1 - t0 - WaitTime;
-+    assert(d < Tolerance);  // within tolerance
-+}
-+
-+int main()
-+{
-+    m.lock();
-+    std::thread t(f);
-+    std::this_thread::sleep_for(WaitTime);
-+    m.unlock();
-+    t.join();
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock_shared.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock_shared.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..b7edc50978d24f060974d228bdff0c64941e68b1
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/lock_shared.pass.cpp
-@@ -0,0 +1,88 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+//
-+// UNSUPPORTED: libcpp-has-no-threads
-+// UNSUPPORTED: c++03, c++98, c++11, c++14
-+
-+// FLAKY_TEST.
-+
-+// <shared_mutex>
-+
-+// class shared_mutex;
-+
-+// void lock_shared();
-+
-+#include <shared_mutex>
-+#include <thread>
-+#include <vector>
-+#include <cstdlib>
-+#include <cassert>
-+
-+#include "test_macros.h"
-+
-+std::shared_mutex m;
-+
-+typedef std::chrono::system_clock Clock;
-+typedef Clock::time_point time_point;
-+typedef Clock::duration duration;
-+typedef std::chrono::milliseconds ms;
-+typedef std::chrono::nanoseconds ns;
-+
-+ms WaitTime = ms(250);
-+
-+// Thread sanitizer causes more overhead and will sometimes cause this test
-+// to fail. To prevent this we give Thread sanitizer more time to complete the
-+// test.
-+#if !defined(TEST_HAS_SANITIZERS)
-+ms Tolerance = ms(50);
-+#else
-+ms Tolerance = ms(50 * 5);
-+#endif
-+
-+void f()
-+{
-+    time_point t0 = Clock::now();
-+    m.lock_shared();
-+    time_point t1 = Clock::now();
-+    m.unlock_shared();
-+    ns d = t1 - t0 - WaitTime;
-+    assert(d < Tolerance);  // within tolerance
-+}
-+
-+void g()
-+{
-+    time_point t0 = Clock::now();
-+    m.lock_shared();
-+    time_point t1 = Clock::now();
-+    m.unlock_shared();
-+    ns d = t1 - t0;
-+    assert(d < Tolerance);  // within tolerance
-+}
-+
-+
-+int main()
-+{
-+    m.lock();
-+    std::vector<std::thread> v;
-+    for (int i = 0; i < 5; ++i)
-+        v.push_back(std::thread(f));
-+    std::this_thread::sleep_for(WaitTime);
-+    m.unlock();
-+    for (auto& t : v)
-+        t.join();
-+    m.lock_shared();
-+    for (auto& t : v)
-+        t = std::thread(g);
-+    std::thread q(f);
-+    std::this_thread::sleep_for(WaitTime);
-+    m.unlock_shared();
-+    for (auto& t : v)
-+        t.join();
-+    q.join();
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..6f3ca24a4558622a40aebd51bff6113a17e04c6b
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock.pass.cpp
-@@ -0,0 +1,53 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+//
-+// UNSUPPORTED: libcpp-has-no-threads
-+// UNSUPPORTED: c++03, c++98, c++11, c++14
-+
-+// <shared_mutex>
-+
-+// class shared_mutex;
-+
-+// bool try_lock();
-+
-+#include <shared_mutex>
-+#include <thread>
-+#include <cstdlib>
-+#include <cassert>
-+
-+std::shared_mutex m;
-+
-+typedef std::chrono::system_clock Clock;
-+typedef Clock::time_point time_point;
-+typedef Clock::duration duration;
-+typedef std::chrono::milliseconds ms;
-+typedef std::chrono::nanoseconds ns;
-+
-+void f()
-+{
-+    time_point t0 = Clock::now();
-+    assert(!m.try_lock());
-+    assert(!m.try_lock());
-+    assert(!m.try_lock());
-+    while(!m.try_lock())
-+        ;
-+    time_point t1 = Clock::now();
-+    m.unlock();
-+    ns d = t1 - t0 - ms(250);
-+    assert(d < ms(200));  // within 200ms
-+}
-+
-+int main()
-+{
-+    m.lock();
-+    std::thread t(f);
-+    std::this_thread::sleep_for(ms(250));
-+    m.unlock();
-+    t.join();
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock_shared.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock_shared.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..f615981bc94d2840a3491a5103cf131ed68aa6cf
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.mutex.requirements/thread.shared_mutex.requirements/thread.shared_mutex.class/try_lock_shared.pass.cpp
-@@ -0,0 +1,60 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+//
-+// UNSUPPORTED: libcpp-has-no-threads
-+// UNSUPPORTED: c++03, c++98, c++11, c++14
-+
-+// FLAKY_TEST.
-+
-+// <shared_mutex>
-+
-+// class shared_mutex;
-+
-+// bool try_lock_shared();
-+
-+#include <shared_mutex>
-+#include <thread>
-+#include <vector>
-+#include <cstdlib>
-+#include <cassert>
-+
-+std::shared_mutex m;
-+
-+typedef std::chrono::system_clock Clock;
-+typedef Clock::time_point time_point;
-+typedef Clock::duration duration;
-+typedef std::chrono::milliseconds ms;
-+typedef std::chrono::nanoseconds ns;
-+
-+void f()
-+{
-+    time_point t0 = Clock::now();
-+    assert(!m.try_lock_shared());
-+    assert(!m.try_lock_shared());
-+    assert(!m.try_lock_shared());
-+    while(!m.try_lock_shared())
-+        ;
-+    time_point t1 = Clock::now();
-+    m.unlock_shared();
-+    ns d = t1 - t0 - ms(250);
-+    assert(d < ms(200));  // within 200ms
-+}
-+
-+
-+int main()
-+{
-+    m.lock();
-+    std::vector<std::thread> v;
-+    for (int i = 0; i < 5; ++i)
-+        v.push_back(std::thread(f));
-+    std::this_thread::sleep_for(ms(250));
-+    m.unlock();
-+    for (auto& t : v)
-+        t.join();
 +}

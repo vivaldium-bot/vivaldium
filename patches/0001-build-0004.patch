@@ -1,3 +1,365 @@
+diff --git a/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/initializer_list_alloc.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/initializer_list_alloc.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..ac5d0178e73a5ec5b89eeb7258b550dc8b5fd55f
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/initializer_list_alloc.pass.cpp
+@@ -0,0 +1,45 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// UNSUPPORTED: c++98, c++03
++
++// <vector>
++
++// vector(initializer_list<value_type> il, const Allocator& a = allocator_type());
++
++#include <vector>
++#include <cassert>
++
++#include "test_allocator.h"
++#include "min_allocator.h"
++#include "asan_testing.h"
++
++int main()
++{
++    {
++    std::vector<int, test_allocator<int>> d({3, 4, 5, 6}, test_allocator<int>(3));
++    assert(d.get_allocator() == test_allocator<int>(3));
++    assert(d.size() == 4);
++    assert(is_contiguous_container_asan_correct(d));
++    assert(d[0] == 3);
++    assert(d[1] == 4);
++    assert(d[2] == 5);
++    assert(d[3] == 6);
++    }
++    {
++    std::vector<int, min_allocator<int>> d({3, 4, 5, 6}, min_allocator<int>());
++    assert(d.get_allocator() == min_allocator<int>());
++    assert(d.size() == 4);
++    assert(is_contiguous_container_asan_correct(d));
++    assert(d[0] == 3);
++    assert(d[1] == 4);
++    assert(d[2] == 5);
++    assert(d[3] == 6);
++    }
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..cd50d543234904bbb02d37043ce52b62060cf50d
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move.pass.cpp
+@@ -0,0 +1,101 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// UNSUPPORTED: c++98, c++03
++
++// <vector>
++
++// vector(vector&& c);
++
++#include <vector>
++#include <cassert>
++#include "MoveOnly.h"
++#include "test_allocator.h"
++#include "min_allocator.h"
++#include "asan_testing.h"
++
++int main()
++{
++    {
++        std::vector<MoveOnly, test_allocator<MoveOnly> > l(test_allocator<MoveOnly>(5));
++        std::vector<MoveOnly, test_allocator<MoveOnly> > lo(test_allocator<MoveOnly>(5));
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        for (int i = 1; i <= 3; ++i)
++        {
++            l.push_back(i);
++            lo.push_back(i);
++        }
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        std::vector<MoveOnly, test_allocator<MoveOnly> > l2 = std::move(l);
++        assert(l2 == lo);
++        assert(l.empty());
++        assert(l2.get_allocator() == lo.get_allocator());
++        assert(is_contiguous_container_asan_correct(l2));
++    }
++    {
++        std::vector<MoveOnly, other_allocator<MoveOnly> > l(other_allocator<MoveOnly>(5));
++        std::vector<MoveOnly, other_allocator<MoveOnly> > lo(other_allocator<MoveOnly>(5));
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        for (int i = 1; i <= 3; ++i)
++        {
++            l.push_back(i);
++            lo.push_back(i);
++        }
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        std::vector<MoveOnly, other_allocator<MoveOnly> > l2 = std::move(l);
++        assert(l2 == lo);
++        assert(l.empty());
++        assert(l2.get_allocator() == lo.get_allocator());
++        assert(is_contiguous_container_asan_correct(l2));
++    }
++    {
++        int a1[] = {1, 3, 7, 9, 10};
++        std::vector<int> c1(a1, a1+sizeof(a1)/sizeof(a1[0]));
++        assert(is_contiguous_container_asan_correct(c1));
++        std::vector<int>::const_iterator i = c1.begin();
++        std::vector<int> c2 = std::move(c1);
++        assert(is_contiguous_container_asan_correct(c2));
++        std::vector<int>::iterator j = c2.erase(i);
++        assert(*j == 3);
++        assert(is_contiguous_container_asan_correct(c2));
++    }
++    {
++        std::vector<MoveOnly, min_allocator<MoveOnly> > l(min_allocator<MoveOnly>{});
++        std::vector<MoveOnly, min_allocator<MoveOnly> > lo(min_allocator<MoveOnly>{});
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        for (int i = 1; i <= 3; ++i)
++        {
++            l.push_back(i);
++            lo.push_back(i);
++        }
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        std::vector<MoveOnly, min_allocator<MoveOnly> > l2 = std::move(l);
++        assert(l2 == lo);
++        assert(l.empty());
++        assert(l2.get_allocator() == lo.get_allocator());
++        assert(is_contiguous_container_asan_correct(l2));
++    }
++    {
++        int a1[] = {1, 3, 7, 9, 10};
++        std::vector<int, min_allocator<int>> c1(a1, a1+sizeof(a1)/sizeof(a1[0]));
++        assert(is_contiguous_container_asan_correct(c1));
++        std::vector<int, min_allocator<int>>::const_iterator i = c1.begin();
++        std::vector<int, min_allocator<int>> c2 = std::move(c1);
++        assert(is_contiguous_container_asan_correct(c2));
++        std::vector<int, min_allocator<int>>::iterator j = c2.erase(i);
++        assert(*j == 3);
++        assert(is_contiguous_container_asan_correct(c2));
++    }
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move_alloc.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move_alloc.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..767a0ce3dce9a31626fb7df7407751daea526525
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move_alloc.pass.cpp
+@@ -0,0 +1,97 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// UNSUPPORTED: c++98, c++03
++
++// <vector>
++
++// vector(vector&& c, const allocator_type& a);
++
++#include <vector>
++#include <cassert>
++#include "MoveOnly.h"
++#include "test_allocator.h"
++#include "min_allocator.h"
++#include "asan_testing.h"
++
++int main()
++{
++    {
++        std::vector<MoveOnly, test_allocator<MoveOnly> > l(test_allocator<MoveOnly>(5));
++        std::vector<MoveOnly, test_allocator<MoveOnly> > lo(test_allocator<MoveOnly>(5));
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        for (int i = 1; i <= 3; ++i)
++        {
++            l.push_back(i);
++            lo.push_back(i);
++        }
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        std::vector<MoveOnly, test_allocator<MoveOnly> > l2(std::move(l), test_allocator<MoveOnly>(6));
++        assert(l2 == lo);
++        assert(!l.empty());
++        assert(l2.get_allocator() == test_allocator<MoveOnly>(6));
++        assert(is_contiguous_container_asan_correct(l2));
++    }
++    {
++        std::vector<MoveOnly, test_allocator<MoveOnly> > l(test_allocator<MoveOnly>(5));
++        std::vector<MoveOnly, test_allocator<MoveOnly> > lo(test_allocator<MoveOnly>(5));
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        for (int i = 1; i <= 3; ++i)
++        {
++            l.push_back(i);
++            lo.push_back(i);
++        }
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        std::vector<MoveOnly, test_allocator<MoveOnly> > l2(std::move(l), test_allocator<MoveOnly>(5));
++        assert(l2 == lo);
++        assert(l.empty());
++        assert(l2.get_allocator() == test_allocator<MoveOnly>(5));
++        assert(is_contiguous_container_asan_correct(l2));
++    }
++    {
++        std::vector<MoveOnly, other_allocator<MoveOnly> > l(other_allocator<MoveOnly>(5));
++        std::vector<MoveOnly, other_allocator<MoveOnly> > lo(other_allocator<MoveOnly>(5));
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        for (int i = 1; i <= 3; ++i)
++        {
++            l.push_back(i);
++            lo.push_back(i);
++        }
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        std::vector<MoveOnly, other_allocator<MoveOnly> > l2(std::move(l), other_allocator<MoveOnly>(4));
++        assert(l2 == lo);
++        assert(!l.empty());
++        assert(l2.get_allocator() == other_allocator<MoveOnly>(4));
++        assert(is_contiguous_container_asan_correct(l2));
++    }
++    {
++        std::vector<MoveOnly, min_allocator<MoveOnly> > l(min_allocator<MoveOnly>{});
++        std::vector<MoveOnly, min_allocator<MoveOnly> > lo(min_allocator<MoveOnly>{});
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        for (int i = 1; i <= 3; ++i)
++        {
++            l.push_back(i);
++            lo.push_back(i);
++        }
++        assert(is_contiguous_container_asan_correct(l));
++        assert(is_contiguous_container_asan_correct(lo));
++        std::vector<MoveOnly, min_allocator<MoveOnly> > l2(std::move(l), min_allocator<MoveOnly>());
++        assert(l2 == lo);
++        assert(l.empty());
++        assert(l2.get_allocator() == min_allocator<MoveOnly>());
++        assert(is_contiguous_container_asan_correct(l2));
++    }
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move_assign_noexcept.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move_assign_noexcept.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..14ca7155b5a171f71ae373548dd0eec928fb47d8
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move_assign_noexcept.pass.cpp
+@@ -0,0 +1,95 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// <vector>
++
++// vector& operator=(vector&& c)
++//     noexcept(
++//          allocator_type::propagate_on_container_move_assignment::value &&
++//          is_nothrow_move_assignable<allocator_type>::value);
++
++// This tests a conforming extension
++
++// UNSUPPORTED: c++98, c++03
++
++#include <vector>
++#include <cassert>
++
++#include "MoveOnly.h"
++#include "test_allocator.h"
++
++template <class T>
++struct some_alloc
++{
++    typedef T value_type;
++    some_alloc(const some_alloc&);
++};
++
++template <class T>
++struct some_alloc2
++{
++    typedef T value_type;
++
++    some_alloc2() {}
++    some_alloc2(const some_alloc2&);
++    void deallocate(void*, unsigned) {}
++
++    typedef std::false_type propagate_on_container_move_assignment;
++    typedef std::true_type is_always_equal;
++};
++
++template <class T>
++struct some_alloc3
++{
++    typedef T value_type;
++
++    some_alloc3() {}
++    some_alloc3(const some_alloc3&);
++    void deallocate(void*, unsigned) {}
++
++    typedef std::false_type propagate_on_container_move_assignment;
++    typedef std::false_type is_always_equal;
++};
++
++
++int main()
++{
++    {
++        typedef std::vector<MoveOnly> C;
++        static_assert(std::is_nothrow_move_assignable<C>::value, "");
++    }
++    {
++        typedef std::vector<MoveOnly, test_allocator<MoveOnly>> C;
++        static_assert(!std::is_nothrow_move_assignable<C>::value, "");
++    }
++    {
++        typedef std::vector<MoveOnly, other_allocator<MoveOnly>> C;
++        static_assert(std::is_nothrow_move_assignable<C>::value, "");
++    }
++    {
++        typedef std::vector<MoveOnly, some_alloc<MoveOnly>> C;
++    //  In C++17, move assignment for allocators are not allowed to throw
++#if TEST_STD_VER > 14
++        static_assert( std::is_nothrow_move_assignable<C>::value, "");
++#else
++        static_assert(!std::is_nothrow_move_assignable<C>::value, "");
++#endif
++    }
++
++#if TEST_STD_VER > 14
++    {  // POCMA false, is_always_equal true
++        typedef std::vector<MoveOnly, some_alloc2<MoveOnly>> C;
++        static_assert( std::is_nothrow_move_assignable<C>::value, "");
++    }
++    {  // POCMA false, is_always_equal false
++        typedef std::vector<MoveOnly, some_alloc3<MoveOnly>> C;
++        static_assert(!std::is_nothrow_move_assignable<C>::value, "");
++    }
++#endif
++}
 diff --git a/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move_noexcept.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/containers/sequences/vector/vector.cons/move_noexcept.pass.cpp
 new file mode 100644
 index 0000000000000000000000000000000000000000..a1e3a632f1f28aab175efbfd46e0d00877e81b35
@@ -51591,215 +51953,4 @@ index 0000000000000000000000000000000000000000..b2efd9e077509f92ca17c26129928c50
 +    test<false, std::string>();
 +
 +    test<true, A>();
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.compare/eq_error_code_error_code.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.compare/eq_error_code_error_code.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..e2e7aeda822b6f19025f7ed81938a4f96de8f6b5
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.compare/eq_error_code_error_code.pass.cpp
-@@ -0,0 +1,106 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+// <system_error>
-+
-+// bool operator==(const error_code&      lhs, const error_code&      rhs);
-+// bool operator==(const error_code&      lhs, const error_condition& rhs);
-+// bool operator==(const error_condition& lhs, const error_code&      rhs);
-+// bool operator==(const error_condition& lhs, const error_condition& rhs);
-+// bool operator!=(const error_code&      lhs, const error_code&      rhs);
-+// bool operator!=(const error_code&      lhs, const error_condition& rhs);
-+// bool operator!=(const error_condition& lhs, const error_code&      rhs);
-+// bool operator!=(const error_condition& lhs, const error_condition& rhs);
-+
-+#include <system_error>
-+#include <cassert>
-+
-+int main()
-+{
-+    std::error_code e_code1(5, std::generic_category());
-+    std::error_code e_code2(5, std::system_category());
-+    std::error_code e_code3(6, std::generic_category());
-+    std::error_code e_code4(6, std::system_category());
-+    std::error_condition e_condition1(5, std::generic_category());
-+    std::error_condition e_condition2(5, std::system_category());
-+    std::error_condition e_condition3(6, std::generic_category());
-+    std::error_condition e_condition4(6, std::system_category());
-+
-+    assert(e_code1 == e_code1);
-+    assert(e_code1 != e_code2);
-+    assert(e_code1 != e_code3);
-+    assert(e_code1 != e_code4);
-+    assert(e_code1 == e_condition1);
-+    assert(e_code1 != e_condition2);
-+    assert(e_code1 != e_condition3);
-+    assert(e_code1 != e_condition4);
-+
-+    assert(e_code2 != e_code1);
-+    assert(e_code2 == e_code2);
-+    assert(e_code2 != e_code3);
-+    assert(e_code2 != e_code4);
-+    assert(e_code2 == e_condition1);  // ?
-+    assert(e_code2 == e_condition2);
-+    assert(e_code2 != e_condition3);
-+    assert(e_code2 != e_condition4);
-+
-+    assert(e_code3 != e_code1);
-+    assert(e_code3 != e_code2);
-+    assert(e_code3 == e_code3);
-+    assert(e_code3 != e_code4);
-+    assert(e_code3 != e_condition1);
-+    assert(e_code3 != e_condition2);
-+    assert(e_code3 == e_condition3);
-+    assert(e_code3 != e_condition4);
-+
-+    assert(e_code4 != e_code1);
-+    assert(e_code4 != e_code2);
-+    assert(e_code4 != e_code3);
-+    assert(e_code4 == e_code4);
-+    assert(e_code4 != e_condition1);
-+    assert(e_code4 != e_condition2);
-+    assert(e_code4 == e_condition3);  // ?
-+    assert(e_code4 == e_condition4);
-+
-+    assert(e_condition1 == e_code1);
-+    assert(e_condition1 == e_code2);  // ?
-+    assert(e_condition1 != e_code3);
-+    assert(e_condition1 != e_code4);
-+    assert(e_condition1 == e_condition1);
-+    assert(e_condition1 != e_condition2);
-+    assert(e_condition1 != e_condition3);
-+    assert(e_condition1 != e_condition4);
-+
-+    assert(e_condition2 != e_code1);
-+    assert(e_condition2 == e_code2);
-+    assert(e_condition2 != e_code3);
-+    assert(e_condition2 != e_code4);
-+    assert(e_condition2 != e_condition1);
-+    assert(e_condition2 == e_condition2);
-+    assert(e_condition2 != e_condition3);
-+    assert(e_condition2 != e_condition4);
-+
-+    assert(e_condition3 != e_code1);
-+    assert(e_condition3 != e_code2);
-+    assert(e_condition3 == e_code3);
-+    assert(e_condition3 == e_code4);  // ?
-+    assert(e_condition3 != e_condition1);
-+    assert(e_condition3 != e_condition2);
-+    assert(e_condition3 == e_condition3);
-+    assert(e_condition3 != e_condition4);
-+
-+    assert(e_condition4 != e_code1);
-+    assert(e_condition4 != e_code2);
-+    assert(e_condition4 != e_code3);
-+    assert(e_condition4 == e_code4);
-+    assert(e_condition4 != e_condition1);
-+    assert(e_condition4 != e_condition2);
-+    assert(e_condition4 != e_condition3);
-+    assert(e_condition4 == e_condition4);
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.errcat/nothing_to_do.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.errcat/nothing_to_do.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..b58f5c55b643afa06cbe68d6775bea59d146a613
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.errcat/nothing_to_do.pass.cpp
-@@ -0,0 +1,12 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+int main()
-+{
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.errcat/syserr.errcat.derived/message.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.errcat/syserr.errcat.derived/message.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..82770fb438b1f5be1c9449de4a639b153381604f
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.errcat/syserr.errcat.derived/message.pass.cpp
-@@ -0,0 +1,34 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+// <system_error>
-+
-+// class error_category
-+
-+// virtual string message(int ev) const = 0;
-+
-+#include <system_error>
-+#include <cassert>
-+#include <string>
-+
-+#include <stdio.h>
-+
-+int main()
-+{
-+    const std::error_category& e_cat1 = std::generic_category();
-+    const std::error_category& e_cat2 = std::system_category();
-+    std::string m1 = e_cat1.message(5);
-+    std::string m2 = e_cat2.message(5);
-+    std::string m3 = e_cat2.message(6);
-+    assert(!m1.empty());
-+    assert(!m2.empty());
-+    assert(!m3.empty());
-+    assert(m1 == m2);
-+    assert(m1 != m3);
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.errcat/syserr.errcat.nonvirtuals/default_ctor.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.errcat/syserr.errcat.nonvirtuals/default_ctor.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..f6a97ef92d8499ccee361e1845734a4e2ae2e88b
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/diagnostics/syserr/syserr.errcat/syserr.errcat.nonvirtuals/default_ctor.pass.cpp
-@@ -0,0 +1,35 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+// UNSUPPORTED: c++98, c++03, c++11
-+// <system_error>
-+
-+// class error_category
-+
-+// constexpr error_category() noexcept;
-+
-+#include <system_error>
-+#include <type_traits>
-+#include <string>
-+#include <cassert>
-+
-+class test1
-+    : public std::error_category
-+{
-+public:
-+    constexpr test1() = default;  // won't compile if error_category() is not constexpr
-+    virtual const char* name() const noexcept {return nullptr;}
-+    virtual std::string message(int) const {return std::string();}
-+};
-+
-+int main()
-+{
-+    static_assert(std::is_nothrow_default_constructible<test1>::value,
-+                                 "error_category() must exist and be noexcept");
 +}
