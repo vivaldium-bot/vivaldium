@@ -1,3 +1,906 @@
+diff --git a/third_party/catapult/trace_processor/experimental/mappers/scheduling/map_rendering_cost_test.html b/third_party/catapult/trace_processor/experimental/mappers/scheduling/map_rendering_cost_test.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..fb7f796e704c6f07f2c362bc642de28e71d26d74
+--- /dev/null
++++ b/third_party/catapult/trace_processor/experimental/mappers/scheduling/map_rendering_cost_test.html
+@@ -0,0 +1,70 @@
++<!DOCTYPE html>
++<!--
++Copyright 2015 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++
++<link rel="import" href="/perf_insights/mappers/scheduling/map_rendering_cost.html">
++<link rel="import" href="/perf_insights/mre/mre_result.html">
++<link rel="import" href="/tracing/core/test_utils.html">
++<link rel="import" href="/tracing/extras/chrome/chrome_test_utils.html">
++
++<script>
++'use strict';
++
++tr.b.unittest.testSuite(function() {
++  var TestUtils = tr.c.TestUtils;
++  var ThreadSlice = tr.model.ThreadSlice;
++
++  test('mapperTest', function() {
++    var m = tr.e.chrome.ChromeTestUtils.newChromeModel(function(m) {
++      tr.e.chrome.ChromeTestUtils.addLoadingEvent(m, {start: 0, end: 10});
++
++      var mainThread = m.rendererMain;
++
++      mainThread.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        type: ThreadSlice,
++        start: 4,
++        duration: 4,
++        title: 'TaskQueueManager::RunTask'
++      }));
++
++      mainThread.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        type: ThreadSlice,
++        start: 5,
++        duration: 2,
++        title: 'ThreadProxy::BeginMainFrame'
++      }));
++
++      // Two slices that only partially overlaps the loading phase. Both
++      // should be ignored.
++      mainThread.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        type: ThreadSlice,
++        start: -5,
++        duration: 10,
++        title: 'ThreadProxy::BeginMainFrame'
++      }));
++
++      mainThread.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        type: ThreadSlice,
++        start: 8,
++        duration: 10,
++        title: 'ThreadProxy::BeginMainFrame'
++      }));
++    });
++
++    var result = new pi.mre.MreResult();
++    pie.mapRenderingCostForTest(result, m);
++
++    assert.equal(tr.b.dictionaryLength(result.pairs), 1);
++
++    var renderingCost = result.pairs.renderingCost;
++    assert.deepEqual(renderingCost.loadingDuration, [10]);
++    assert.deepEqual(renderingCost.loadingTotalCost, [4]);
++    assert.deepEqual(renderingCost.loadingBeginMainFrameCost, [2]);
++    assert.deepEqual(renderingCost.loadingBeginMainFrameRelativeCost, [.5]);
++  });
++});
++
++</script>
+diff --git a/third_party/catapult/trace_processor/experimental/mappers/scheduling/map_wake_ups.html b/third_party/catapult/trace_processor/experimental/mappers/scheduling/map_wake_ups.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..b8e3ced519c34b41fac5fdc299d5e5e556034936
+--- /dev/null
++++ b/third_party/catapult/trace_processor/experimental/mappers/scheduling/map_wake_ups.html
+@@ -0,0 +1,131 @@
++<!DOCTYPE html>
++<!--
++Copyright 2015 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++
++<link rel="import" href="/perf_insights/mre/function_handle.html">
++<link rel="import" href="/tracing/base/math/range.html">
++
++<script>
++'use strict';
++
++tr.exportTo('pie', function() {
++  // Conservative estimate: if we hadn't been doing anything for 1ms, we
++  // probably needed to wake up the CPU for this.
++  // TODO(skyostil): Augment this with CPU power management states.
++  var IDLE_THRESHOLD_MILLISECONDS = 1;
++
++  function sanitizeReason(reason) {
++    // Remove any path name components (e.g., '/foo/bar/baz' or 'c:\foo\bar\baz'
++    // are both reduced to 'baz').
++    return reason.replace(/^.*[\/\\]/, '');
++  }
++
++  function findWakeUpReason(event) {
++    var tqmRunTask = event.findDescendentSlice('TaskQueueManager::RunTask');
++    if (tqmRunTask && tqmRunTask.subSlices.length > 0)
++      return tqmRunTask.subSlices[0].title;
++    var processTask =
++        event.findDescendentSlice('TaskQueueManager::ProcessTaskFromWorkQueue');
++    if (processTask &&
++        processTask.args.src_file &&
++        processTask.args.src_func) {
++      return processTask.args.src_file + ':' + processTask.args.src_func;
++    }
++    if (event.title === 'MessageLoop::RunTask' &&
++        event.args.src_file &&
++        event.args.src_func) {
++      return event.args.src_file + ':' + event.args.src_func;
++    }
++    return event.title;
++  }
++
++  // Estimate number of times the CPU was woken up from idle to execute
++  // different types of work (e.g., timer work) and the time the CPU had been
++  // idle before that.
++  // See https://goo.gl/l7V5xg.
++  function findWakeUpsOnThread(thread) {
++    var wakeUps = {};
++    var foundWakeUps = false;
++    var lastTaskEnd = undefined;
++    for (var event of thread.getDescendantEvents()) {
++      if (!event.isTopLevel)
++        continue;
++      var taskEnd = event.start + event.duration;
++      if (lastTaskEnd === undefined) {
++        lastTaskEnd = taskEnd;
++        continue;
++      }
++      var sleepTime = event.start - lastTaskEnd;
++      var isWakeUp = sleepTime >= IDLE_THRESHOLD_MILLISECONDS;
++      lastTaskEnd = taskEnd;
++      if (!isWakeUp)
++        continue;
++      var reason = sanitizeReason(findWakeUpReason(event));
++      if (wakeUps[reason] === undefined)
++        wakeUps[reason] = {frequency: 0, sleepTimes: []};
++      wakeUps[reason].frequency++;
++      wakeUps[reason].sleepTimes.push(sleepTime);
++      foundWakeUps = true;
++    }
++    return foundWakeUps ? wakeUps : undefined;
++  }
++
++  function updateThreadWakeUps(existingWakeUps, newWakeUps) {
++    for (var reason in newWakeUps) {
++      if (!(reason in existingWakeUps)) {
++        existingWakeUps[reason] = newWakeUps[reason];
++        continue;
++      }
++      existingWakeUps[reason].frequency += newWakeUps[reason].frequency;
++      existingWakeUps[reason].sleepTimes =
++          existingWakeUps[reason].sleepTimes.concat(
++              newWakeUps[reason].sleepTimes);
++    }
++  }
++
++  function mapWakeUps(result, model) {
++    var allWakeUps = {};
++    for (var pid in model.processes) {
++      var process = model.processes[pid];
++      for (var tid in process.threads) {
++        var thread = process.threads[tid];
++        var wakeUps = findWakeUpsOnThread(thread);
++        if (!wakeUps === undefined)
++          continue;
++        if (!(thread.name in allWakeUps))
++          allWakeUps[thread.name] = {};
++        updateThreadWakeUps(allWakeUps[thread.name], wakeUps);
++      }
++    }
++
++    // Normalize frequency to wake-ups/second.
++    // Note: if we found any wake-ups, the total duration of the trace is
++    // guaranteed to be positive.
++    var totalDurationSeconds = model.bounds.duration / 1000;
++    var foundAnyWakeUps = false;
++    for (var thread in allWakeUps) {
++      var threadWakeUps = allWakeUps[thread];
++      for (var reason in threadWakeUps) {
++        threadWakeUps[reason].frequency /= totalDurationSeconds;
++        foundAnyWakeUps = true;
++      }
++    }
++
++    if (!foundAnyWakeUps) {
++      result.addPair('wakeUps', null);
++      return;
++    }
++
++    result.addPair('wakeUps', allWakeUps);
++  }
++
++  pi.FunctionRegistry.register(mapWakeUps);
++
++  return {
++    mapWakeUpsForTest: mapWakeUps
++  };
++});
++</script>
+diff --git a/third_party/catapult/trace_processor/experimental/mappers/scheduling/map_wake_ups_test.html b/third_party/catapult/trace_processor/experimental/mappers/scheduling/map_wake_ups_test.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa92e8f310f1a8b52e31106c626aff2126992183
+--- /dev/null
++++ b/third_party/catapult/trace_processor/experimental/mappers/scheduling/map_wake_ups_test.html
+@@ -0,0 +1,77 @@
++<!DOCTYPE html>
++<!--
++Copyright 2015 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++
++<link rel="import" href="/perf_insights/mappers/scheduling/map_wake_ups.html">
++<link rel="import" href="/perf_insights/mre/mre_result.html">
++<link rel="import" href="/tracing/base/iteration_helpers.html">
++<link rel="import" href="/tracing/core/test_utils.html">
++
++<script>
++'use strict';
++
++tr.b.unittest.testSuite(function() {
++  var TestUtils = tr.c.TestUtils;
++
++  test('mapperTest', function() {
++    var m = TestUtils.newModel(function(m) {
++      var p1 = m.getOrCreateProcess(1);
++      var t2 = p1.getOrCreateThread(2);
++      t2.name = 'mainThread';
++      t2.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        title: 'goingToSleep',
++        start: 0, duration: 10
++      }));
++
++      // This slice doesn't count as a wake-up because it occurs too soon after
++      // the previous one.
++      t2.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        title: 'notAWakeUp',
++        start: 10, duration: 1
++      }));
++
++      t2.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        title: 'wakeUp1',
++        start: 20, duration: 10
++      }));
++
++      var p3 = m.getOrCreateProcess(3);
++      var t4 = p1.getOrCreateThread(4);
++      t4.name = 'mainThread';
++      t4.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        title: 'goingToSleep',
++        start: 0, duration: 10
++      }));
++
++      // This wake-up gets merged with the one above because it has the same
++      // title.
++      t4.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        title: 'wakeUp1',
++        start: 25, duration: 1
++      }));
++
++      // The name of this wake-up gets sanitized.
++      t4.sliceGroup.pushSlice(TestUtils.newSliceEx({
++        title: 'MessageLoop::RunTask',
++        args: {src_file: 'c:\\foo\\file', src_func: 'func'},
++        start: 29, duration: 1
++      }));
++    });
++
++    var result = new pi.mre.MreResult();
++    pie.mapWakeUpsForTest(result, m);
++
++    assert.equal(tr.b.dictionaryLength(result.pairs), 1);
++
++    var wakeUps = result.pairs.wakeUps;
++    assert.equal(Object.keys(wakeUps.mainThread).length, 2);
++    assert.equal(wakeUps.mainThread.wakeUp1.frequency, 200 / 3);
++    assert.deepEqual(wakeUps.mainThread.wakeUp1.sleepTimes, [9, 15]);
++    assert.deepEqual(wakeUps.mainThread['file:func'].sleepTimes, [3]);
++  });
++});
++
++</script>
+diff --git a/third_party/catapult/trace_processor/experimental/mappers/slice_cost.html b/third_party/catapult/trace_processor/experimental/mappers/slice_cost.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..b741363fa5f04719624ad78e9c0e6967622e32b6
+--- /dev/null
++++ b/third_party/catapult/trace_processor/experimental/mappers/slice_cost.html
+@@ -0,0 +1,186 @@
++<!DOCTYPE html>
++<!--
++Copyright (c) 2015 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++<link rel="import" href="/experimental/mappers/reduce.html">
++<link rel="import" href="/tracing/extras/ads/domain_category.html">
++<link rel="import" href="/tracing/extras/chrome/slice_title_fixer.html">
++<link rel="import" href="/tracing/model/source_info/js_source_info.html">
++
++<script>
++'use strict';
++
++tr.exportTo('pi.m', function() {
++  var JSSourceState = tr.model.source_info.JSSourceState;
++
++  function SliceCostInfo() {
++    this.threadGroup = undefined;
++    this.railTypeName = undefined;
++    this.title = undefined;
++    this.domainCategory = undefined;
++    this.domain = undefined;
++    this.userFriendlyCategory = undefined;
++
++    this.selfTime = 0;
++    this.cpuSelfTime = 0;
++
++    this.jsTime = 0;
++    this.jsTimeByState = {};
++    for (var state in JSSourceState) {
++      this.jsTimeByState[JSSourceState[state]] = 0;
++    }
++    this.data = {};
++  }
++
++  SliceCostInfo.asReduceTarget = function(key, firstValue) {
++    var sliceCostInfo = new SliceCostInfo();
++    sliceCostInfo.threadGroup = firstValue.threadGroup;
++    sliceCostInfo.railTypeName = firstValue.railTypeName;
++    sliceCostInfo.title = firstValue.title;
++    sliceCostInfo.domainCategory = firstValue.domainCategory;
++    sliceCostInfo.domain = firstValue.domain;
++    sliceCostInfo.userFriendlyCategory = firstValue.userFriendlyCategory;
++    sliceCostInfo.data = firstValue.data;
++    return sliceCostInfo;
++  };
++
++  SliceCostInfo.fromDict = function(d) {
++    var sliceCostInfo = new SliceCostInfo();
++    sliceCostInfo.threadGroup = d.threadGroup;
++    sliceCostInfo.railTypeName = d.railTypeName;
++    sliceCostInfo.title = d.title;
++    sliceCostInfo.domainCategory = d.domainCategory;
++    sliceCostInfo.domain = d.domain;
++    sliceCostInfo.userFriendlyCategory = d.userFriendlyCategory;
++    sliceCostInfo.selfTime = d.selfTime;
++    sliceCostInfo.cpuSelfTime = d.cpuSelfTime;
++    sliceCostInfo.jsTime = d.jsTime || 0;
++    for (var state in JSSourceState) {
++      if (d.jsTimeByState === undefined) {
++        sliceCostInfo.jsTimeByState[state] = 0;
++      } else {
++        sliceCostInfo.jsTimeByState[JSSourceState[state]] =
++            d.jsTimeByState[JSSourceState[state]] || 0;
++      }
++    }
++    sliceCostInfo.data = d.data;
++    return sliceCostInfo;
++  };
++
++  SliceCostInfo.prototype = {
++    push: function(sliceCostKey, threadSlice) {
++      if (threadSlice.selfTime !== undefined)
++        this.selfTime += threadSlice.selfTime;
++      if (threadSlice.cpuSelfTime !== undefined)
++        this.cpuSelfTime += threadSlice.cpuSelfTime;
++      if (threadSlice.jsTime !== undefined)
++        this.jsTime += threadSlice.jsTime;
++      if (threadSlice.jsTimeByState !== undefined) {
++        for (var state in JSSourceState) {
++          this.jsTimeByState[JSSourceState[state]] +=
++              threadSlice.jsTimeByState[JSSourceState[state]];
++        }
++      }
++    },
++
++    finalizeAndGetResult: function() {
++      return this;
++    }
++  };
++
++
++  function getSliceCostReport(model, threadGrouping, railTypeNameByGUID,
++      filterFunction, dataCB) {
++    var reduce = new pi.m.StreamingReducer(SliceCostInfo.asReduceTarget);
++
++    function generateDomainCosts(slice) {
++      // V8.Execute events may generate several sliceCostInfo, based on the
++      // origin of the JS being executed.
++      var range = new tr.b.math.Range();
++      slice.addBoundsToRange(range);
++      var filtered = range.filterArray(
++          slice.parentContainer.samples,
++          function(sample) {return sample.start;});
++      filtered.forEach(function(sample) {
++        var sliceCostInfo = new SliceCostInfo();
++        sliceCostInfo.threadGroup = threadGrouping.getGroupNameForEvent(slice);
++        sliceCostInfo.railTypeName = railTypeNameByGUID[slice.guid];
++
++        var ufc = model.getUserFriendlyCategoryFromEvent(slice);
++        sliceCostInfo.userFriendlyCategory = ufc || 'other';
++        sliceCostInfo.title = tr.e.chrome.SliceTitleFixer.fromEvent(slice);
++        sliceCostInfo.domain = sample.leafStackFrame.domain;
++        sliceCostInfo.domainCategory =
++            tr.e.ads.DomainCategory.fromDomain(sliceCostInfo.domain);
++        sliceCostInfo.selfTime = sample.weight;
++        sliceCostInfo.cpuSelfTime = sample.weight;
++        if (dataCB !== undefined)
++          sliceCostInfo.data = dataCB(slice);
++        // Let's use the state of the leaf frame. TODO(chiniforooshan):
++        // understand what it means if frames of a sample stack are in different
++        // states (BUG #1542).
++        var sourceInfo = sample.leafStackFrame.sourceInfo;
++        if (sourceInfo === undefined ||
++            !(sourceInfo instanceof tr.model.source_info.JSSourceInfo)) {
++          sliceCostInfo.jsTime = sample.weight;
++          sliceCostInfo.jsTimeByState[JSSourceState.UNKNOWN] = sample.weight;
++        } else {
++          sliceCostInfo.jsTimeByState[sourceInfo.state] = sample.weight;
++        }
++        var key = sliceCostInfo.threadGroup + '/' +
++                  sliceCostInfo.railTypeName + '/' +
++                  sliceCostInfo.title + '/' +
++                  sliceCostInfo.domain;
++        reduce.push(key, sliceCostInfo);
++      });
++    }
++
++    for (var event of model.descendentEvents()) {
++      if (!(event instanceof tr.model.ThreadSlice))
++        continue;
++      if (filterFunction && !filterFunction(event))
++        continue;
++
++      var threadSlice = event;
++      if (threadSlice.title === 'V8.Execute') {
++        generateDomainCosts(threadSlice);
++        continue;
++      }
++
++      var sliceCostInfo = new SliceCostInfo();
++      sliceCostInfo.threadGroup = threadGrouping.getGroupNameForEvent(
++          threadSlice);
++      sliceCostInfo.railTypeName = railTypeNameByGUID[threadSlice.guid];
++      var ufc = model.getUserFriendlyCategoryFromEvent(threadSlice);
++      sliceCostInfo.userFriendlyCategory = ufc || 'other';
++      sliceCostInfo.title = tr.e.chrome.SliceTitleFixer.fromEvent(threadSlice);
++      // For all other events, just generate one sliceCostInfo.
++      sliceCostInfo.selfTime = threadSlice.selfTime;
++      sliceCostInfo.cpuSelfTime = threadSlice.cpuSelfTime;
++      if (dataCB !== undefined)
++        sliceCostInfo.data = dataCB(event);
++
++      var key = sliceCostInfo.threadGroup + '/' +
++                sliceCostInfo.railTypeName + '/' +
++                sliceCostInfo.title;
++      reduce.push(key, sliceCostInfo);
++    }
++
++    var sliceCostInfos = [];
++    reduce.finalizeAndIterResults(function(key, sliceCostInfo) {
++      sliceCostInfos.push(sliceCostInfo);
++    });
++    return sliceCostInfos;
++  }
++
++  tr.mre.FunctionRegistry.register(getSliceCostReport);
++
++  return {
++    SliceCostInfo: SliceCostInfo,
++
++    getSliceCostReport: getSliceCostReport
++  };
++});
++</script>
+diff --git a/third_party/catapult/trace_processor/experimental/mappers/task_info_map_function.html b/third_party/catapult/trace_processor/experimental/mappers/task_info_map_function.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..2d37ed06c4bf2d23f7f529287175b475b8453291
+--- /dev/null
++++ b/third_party/catapult/trace_processor/experimental/mappers/task_info_map_function.html
+@@ -0,0 +1,112 @@
++<!DOCTYPE html>
++<!--
++Copyright (c) 2015 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++
++<link rel="import" href="/perf_insights/mappers/thread_grouping.html">
++<link rel="import" href="/perf_insights/mre/function_handle.html">
++<link rel="import" href="/tracing/base/unit.html">
++<link rel="import" href="/tracing/model/flow_event.html">
++<link rel="import" href="/tracing/model/slice.html">
++<link rel="import" href="/tracing/value/histogram.html">
++
++<script>
++'use strict';
++
++tr.exportTo('pi.m', function() {
++  var DURATION_BOUNDARIES = tr.v.HistogramBinBoundaries.createLinear(
++      0, 250, 50);
++
++  function taskInfoMapFunction(result, model) {
++    var canonicalUrl = model.canonicalUrl;
++    var threadGrouping = new pi.m.ThreadGrouping();
++    threadGrouping.autoInitUsingHelpers(model);
++    addTimeInQueue(result, canonicalUrl, model, threadGrouping);
++    addTopLevelTasksDuration(result, canonicalUrl, model, threadGrouping);
++  }
++
++  function eatTrailingDigits(str) {
++    return str && str.replace(/[\d/]*$/, '');
++  }
++
++  function histogramsToDict(dict) {
++    for (var process in dict) {
++      for (var thread in dict[process]) {
++        dict[process][thread] = dict[process][thread].asDict();
++      }
++    }
++  }
++
++  function addTimeInQueue(result, canonicalUrl, model, threadGrouping) {
++    var timeInQueue = {};
++    model.flowEvents.forEach(function(flowEvent) {
++      if (!flowEvent.endSlice instanceof tr.model.Slice)
++        return;
++      var thread = flowEvent.endSlice && flowEvent.endSlice.parentContainer;
++      if (!thread)
++        return;
++      var process = thread.getProcess();
++      if (!process)
++        return;
++      var threadName = eatTrailingDigits(thread.name) || 'Unknown';
++      var processName = threadGrouping.getGroupNameForThread(thread);
++      addToHistogram(timeInQueue, processName, threadName, flowEvent.duration,
++          canonicalUrl);
++    });
++    histogramsToDict(timeInQueue);
++    result.addPair('time_spent_in_queue', timeInQueue);
++  }
++
++  function addTopLevelTasksDuration(result, canonicalUrl, model,
++                                    threadGrouping) {
++    var timeInTask = {};
++    var cpuTimeInTask = {};
++    model.getAllThreads().forEach(function(thread) {
++      var process = thread.getProcess();
++      if (!process)
++        return;
++      var threadName = eatTrailingDigits(thread.name) || thread.tid;
++      var processName = threadGrouping.getGroupNameForThread(thread);
++      if (!thread.sliceGroup.length)
++        return;
++      thread.sliceGroup.slices.forEach(function(slice) {
++        if (!isTopLevelTask(slice))
++          return;
++        addToHistogram(timeInTask, processName, threadName, slice.duration,
++            canonicalUrl);
++        addToHistogram(cpuTimeInTask, processName, threadName,
++            slice.cpuDuration, canonicalUrl);
++      });
++    });
++    histogramsToDict(timeInTask);
++    result.addPair('time_spent_in_top_level_task', timeInTask);
++    histogramsToDict(cpuTimeInTask);
++    result.addPair('cpu_time_spent_in_top_level_task', cpuTimeInTask);
++  }
++
++  // A slice is top level if it's on the receiving end of a post task and no
++  // slice above it is.
++  function isTopLevelTask(slice) {
++    if (!slice.inFlowEvents.length)
++      return false;
++    return !slice.parentSlice || !isTopLevelTask(slice.parentSlice);
++  }
++
++  function addToHistogram(dict, processName, threadName, value, url) {
++    dict[processName] = dict[processName] || {};
++    dict[processName][threadName] = dict[processName][threadName] ||
++        new tr.v.Histogram(tr.b.Unit.byName.timeDurationInMs,
++            DURATION_BOUNDARIES);
++    dict[processName][threadName].add(value, url);
++  }
++
++  pi.FunctionRegistry.register(taskInfoMapFunction);
++
++  // Exporting for tests.
++  return {
++    taskInfoMapFunctionForTest: taskInfoMapFunction
++  };
++});
++</script>
+diff --git a/third_party/catapult/trace_processor/experimental/mappers/task_info_map_function_test.html b/third_party/catapult/trace_processor/experimental/mappers/task_info_map_function_test.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6793143541654b30039552bd86a0084f65c1b39
+--- /dev/null
++++ b/third_party/catapult/trace_processor/experimental/mappers/task_info_map_function_test.html
+@@ -0,0 +1,79 @@
++<!DOCTYPE html>
++<!--
++Copyright (c) 2015 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++
++<link rel="import" href="/perf_insights/mappers/task_info_map_function.html">
++<link rel="import" href="/perf_insights/mre/mre_result.html">
++<link rel="import" href="/tracing/base/iteration_helpers.html">
++<link rel="import" href="/tracing/core/test_utils.html">
++<link rel="import" href="/tracing/value/histogram.html">
++
++<script>
++'use strict';
++
++tr.b.unittest.testSuite(function() {
++  var test_utils = tr.c.TestUtils;
++
++  test('taskInfoMapFunctionTest', function() {
++    var m = test_utils.newModel(function(m) {
++      var p1 = m.getOrCreateProcess(1);
++      p1.name = 'Process';
++      var t2 = p1.getOrCreateThread(2);
++      t2.name = 'CrBrowserMain';  // To identify as browser process.
++      // t2_s0 is not a top-level, no incoming flow.
++      var t2_s0 = test_utils.newSliceEx(
++          { start: 0, duration: 9.7, cpuStart: 0, cpuDuration: 5.3});
++      // t2_s1 is not a top-level, no incoming flow.
++      var t2_s1 = test_utils.newSliceEx(
++          { start: 11, duration: 20.1, cpuStart: 11, cpuDuration: 8.9 });
++      // t2_s2 is a top-level slice: f2 flows into it.
++      var t2_s2 = test_utils.newSliceEx(
++          { start: 15, duration: 10.4, cpuStart: 15, cpuDuration: 3.0 });
++      // t2_s3 is not a top-level slice because it's a child of t2_s2.
++      var t2_s3 = test_utils.newSliceEx(
++          { start: 17, duration: 2.4, cpuStart: 17, cpuDuration: 1.1 });
++      t2.sliceGroup.pushSlice(t2_s0);
++      t2.sliceGroup.pushSlice(t2_s1);
++      t2.sliceGroup.pushSlice(t2_s2);
++      t2.sliceGroup.pushSlice(t2_s3);
++      var f1 = test_utils.newFlowEventEx({
++        start: 0, duration: 18.1, startSlice: t2_s0, endSlice: t2_s3
++      });
++      var f2 = test_utils.newFlowEventEx({
++        start: 9, duration: 7.2, startSlice: t2_s0, endSlice: t2_s2
++      });
++      m.flowEvents.push(f1);
++      m.flowEvents.push(f2);
++    });
++
++    var result = new pi.mre.MreResult();
++    pi.m.taskInfoMapFunctionForTest(result, m);
++
++    assert.equal(tr.b.dictionaryLength(result.pairs), 3);
++    var time_spent_in_queue = result.pairs.time_spent_in_queue;
++    assert.equal(tr.b.dictionaryLength(time_spent_in_queue.Browser), 1);
++    var histogram = tr.v.Histogram.fromDict(
++        time_spent_in_queue['Browser']['CrBrowserMain']);
++    assert.equal(histogram.getBinForValue(7.2).count, 1);
++    assert.equal(histogram.getBinForValue(18.1).count, 1);
++    var time_spent_in_top_level_task = (
++        result.pairs.time_spent_in_top_level_task);
++    assert.equal(tr.b.dictionaryLength(
++        time_spent_in_top_level_task['Browser']), 1);
++    histogram = tr.v.Histogram.fromDict(
++        time_spent_in_top_level_task['Browser']['CrBrowserMain']);
++    assert.equal(histogram.getBinForValue(10.4).count, 1);
++    var cpu_time_spent_in_top_level_task = (
++        result.pairs.cpu_time_spent_in_top_level_task);
++    assert.equal(tr.b.dictionaryLength(
++        cpu_time_spent_in_top_level_task['Browser']), 1);
++    histogram = tr.v.Histogram.fromDict(
++        cpu_time_spent_in_top_level_task['Browser']['CrBrowserMain']);
++    assert.equal(histogram.getBinForValue(3.0).count, 1);
++  });
++});
++
++</script>
+diff --git a/third_party/catapult/trace_processor/experimental/mappers/test_mapper.html b/third_party/catapult/trace_processor/experimental/mappers/test_mapper.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..4e9b070a436417d24079e916132b6575e8fcf487
+--- /dev/null
++++ b/third_party/catapult/trace_processor/experimental/mappers/test_mapper.html
+@@ -0,0 +1,25 @@
++<!DOCTYPE html>
++<!--
++Copyright (c) 2015 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++<link rel="import" href="/tracing/mre/function_handle.html">
++
++<script>
++'use strict';
++
++tr.exportTo('pi.m', function() {
++
++  function testMapFunction(result, model) {
++    var someValue = 4; // Chosen by fair roll of the dice.
++    result.addPair('simon', {value: someValue});
++  }
++  tr.mre.FunctionRegistry.register(testMapFunction);
++
++  return {
++    testMapFunction: testMapFunction
++  };
++});
++
++</script>
+diff --git a/third_party/catapult/trace_processor/experimental/mappers/thread_grouping.html b/third_party/catapult/trace_processor/experimental/mappers/thread_grouping.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..eab6d79a5d380e603b2795021d0f90245c70c0aa
+--- /dev/null
++++ b/third_party/catapult/trace_processor/experimental/mappers/thread_grouping.html
+@@ -0,0 +1,111 @@
++<!DOCTYPE html>
++<!--
++Copyright (c) 2015 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++
++<link rel="import" href="/tracing/base/iteration_helpers.html">
++<link rel="import" href="/tracing/model/helpers/chrome_model_helper.html">
++
++<script>
++'use strict';
++
++tr.exportTo('pi.m', function() {
++  function ThreadGrouping() {
++    this.groupNameForThreadGUID_ = {};
++  }
++
++  ThreadGrouping.prototype = {
++    autoInitUsingHelpers: function(model) {
++      // Everything is 'other' by default.
++      model.getAllThreads().forEach(function(thread) {
++        this.groupNameForThreadGUID_[thread.guid] = 'Other';
++      }, this);
++      var chromeHelper = model.getOrCreateHelper(
++          tr.model.helpers.ChromeModelHelper);
++
++      if (chromeHelper) {
++        var browserHelper = chromeHelper.browserHelper;
++        this.addThreadsInProcessToGroup_(browserHelper.process, 'Browser');
++
++        var gpuHelper = chromeHelper.gpuHelper;
++        if (gpuHelper) {
++          this.addThreadsInProcessToGroup_(gpuHelper.process, 'GPU');
++        }
++
++        for (var pid in chromeHelper.rendererHelpers) {
++          var rendererHelper = chromeHelper.rendererHelpers[pid];
++          this.addThreadsInProcessToGroup_(rendererHelper.process, 'Renderer');
++        }
++
++        // TODO(nduca): Modify the helpers to detect plugin processes
++        // and include those in separate processes.
++      }
++
++      // It would be very easy to add processes recognized by android helper
++      // here, too.
++    },
++
++    getGroupNameForThread: function(thread) {
++      if (!(thread instanceof tr.model.EventContainer))
++        return 'error';
++
++      var groupName = this.groupNameForThreadGUID_[thread.guid];
++      if (groupName === undefined)
++        return 'Other';
++      return groupName;
++    },
++
++    getGroupNameForEvent: function(event) {
++      var parentContainer = event.parentContainer;
++      if (parentContainer === undefined)
++        return 'Unknown';
++      return this.getGroupNameForThread(parentContainer);
++    },
++
++    addThreadsInProcessToGroup_: function(process, groupName,
++                                          opt_predicate, opt_this) {
++      var predicate = opt_predicate || tr.b.identity;
++
++      for (var tid in process.threads) {
++        var thread = process.threads[tid];
++        if (predicate.call(opt_this, thread))
++          this.groupNameForThreadGUID_[thread.guid] = groupName;
++      }
++    },
++
++    divideEventSetIntoSubGroups: function(eventSet) {
++      var resultingEventSets = {
++        other: new tr.model.EventSet()
++      };
++      tr.b.iterItems(this.groupNameForThreadGUID_, function(guid, groupName) {
++        if (resultingEventSets[groupName] !== undefined)
++          return;
++        resultingEventSets[groupName] = new tr.model.EventSet();
++      });
++
++      eventSet.forEach(function(event) {
++        var parentContainer = event.parentContainer;
++        if (parentContainer === undefined)
++          return;
++
++        if (!(parentContainer instanceof tr.model.EventContainer))
++          return;
++
++        var groupName = this.groupNameForThreadGUID_[parentContainer.guid];
++        if (groupName === undefined)
++          groupName = 'Other';
++        resultingEventSets[groupName].push(event);
++
++      }, this);
++
++      return resultingEventSets;
++    }
++  };
++
++  return {
++    ThreadGrouping: ThreadGrouping
++  };
++});
++</script>
+diff --git a/third_party/catapult/trace_processor/experimental/mappers/thread_grouping_test.html b/third_party/catapult/trace_processor/experimental/mappers/thread_grouping_test.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..78817e711364c74a8290ffc92164773b2bd0fd49
+--- /dev/null
++++ b/third_party/catapult/trace_processor/experimental/mappers/thread_grouping_test.html
+@@ -0,0 +1,58 @@
++<!DOCTYPE html>
++<!--
++Copyright (c) 2013 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++
++<link rel="import" href="/perf_insights/mre/mre_result.html">
++<link rel="import" href="/tracing/core/test_utils.html">
++<link rel="import" href="/tracing/extras/chrome/chrome_test_utils.html">
++
++<script>
++'use strict';
++
++tr.b.unittest.testSuite(function() {
++  var test_utils = tr.c.TestUtils;
++  test('basicChrome', function() {
++    var m = tr.e.chrome.ChromeTestUtils.newChromeModel(function(m) {
++      // Browser.
++      m.browserMain.sliceGroup.pushSlice(test_utils.newSliceEx({
++        name: 'BrowserSlice',
++        start: 0, duration: 10
++      }));
++
++      // Renderer.
++      m.rendererMain.sliceGroup.pushSlice(test_utils.newSliceEx({
++        name: 'RendererSlice',
++        start: 0, duration: 10
++      }));
++
++      // Something else else.
++      m.otherProcess = m.getOrCreateProcess(20);
++      m.otherProcessMain = m.otherProcess.getOrCreateThread(21);
++      m.otherProcessMain.sliceGroup.pushSlice(test_utils.newSliceEx({
++        name: 'RendererSlice',
++        start: 0, duration: 10
++      }));
++    });
++
++    var tg = new pi.m.ThreadGrouping();
++    tg.autoInitUsingHelpers(m);
++
++    var allSlices = new tr.model.EventSet();
++    for (var e of m.getDescendantEvents())
++      if (e instanceof tr.model.Slice)
++        allSlices.push(e);
++    var groups = tg.divideEventSetIntoSubGroups(allSlices);
++    var numGrouped = 0;
++    tr.b.iterItems(groups, function(groupName, eventSet) {
++      numGrouped += eventSet.length;
++    });
++    assert.equal(numGrouped, allSlices.length);
++    assert.equal(groups.Browser.length, 1);
++    assert.equal(groups.Renderer.length, 1);
++    assert.equal(groups.Other.length, 1);
++  });
++});
++</script>
 diff --git a/third_party/catapult/trace_processor/experimental/mappers/trace_import_cost.html b/third_party/catapult/trace_processor/experimental/mappers/trace_import_cost.html
 new file mode 100644
 index 0000000000000000000000000000000000000000..4dc5a0639b39f1e24cec38e9f66cd02ac7ae136d
@@ -4644,10 +5547,10 @@ index 0000000000000000000000000000000000000000..901c688482162e61517c1de860608818
 + * `why_imported`: Explain why given modules are imported in trace viewer.
 diff --git a/third_party/catapult/tracing/bin/compare_samples b/third_party/catapult/tracing/bin/compare_samples
 new file mode 100755
-index 0000000000000000000000000000000000000000..ff56ccc69faa370daedf828494eaaf6a50daacaf
+index 0000000000000000000000000000000000000000..70b19deac11af6177cb0fc5bc79fde32e7106024
 --- /dev/null
 +++ b/third_party/catapult/tracing/bin/compare_samples
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,48 @@
 +#!/usr/bin/env python
 +# Copyright 2016 The Chromium Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -4679,17 +5582,11 @@ index 0000000000000000000000000000000000000000..ff56ccc69faa370daedf828494eaaf6a
 +  parser.add_argument('--buildbot', dest='format', action='store_const',
 +                      const='buildbot',
 +                      help='assume buildbot result line format for the data')
-+  parser.add_argument('--valueset', dest='format', action='store_const',
-+                      const='valueset',
-+                      help='assume valueset format for the input data')
 +  args = parser.parse_args(argv[1:])
 +
 +  if not args.format:
 +    filename = os.path.basename(sample_a.split(',')[0])
-+    if filename == 'results-valueset.json':
-+      args.format = 'valueset'
-+    else:
-+      args.format = 'chartjson'
++    args.format = 'chartjson'
 +
 +  vinn_result = compare_samples.CompareSamples(
 +      args.sample_a,
@@ -4724,10 +5621,10 @@ index 0000000000000000000000000000000000000000..feee8828976e83e0dfcbebcee6963459
 +  sys.exit(generate_about_tracing_contents.Main(sys.argv[1:]))
 diff --git a/third_party/catapult/tracing/bin/histograms2csv b/third_party/catapult/tracing/bin/histograms2csv
 new file mode 100755
-index 0000000000000000000000000000000000000000..f39da4f9cbde36008e4187f3cb8bd83c75ef1831
+index 0000000000000000000000000000000000000000..13b8df01fdde0656cd7610b7d2d13e778da361ad
 --- /dev/null
 +++ b/third_party/catapult/tracing/bin/histograms2csv
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,40 @@
 +#!/usr/bin/env python
 +# Copyright 2016 The Chromium Authors. All rights reserved.
 +# Use of this source code is governed by a BSD-style license that can be
@@ -4744,11 +5641,8 @@ index 0000000000000000000000000000000000000000..f39da4f9cbde36008e4187f3cb8bd83c
 +sys.path.append(tracing_path)
 +import tracing_project
 +tracing_project.UpdateSysPathIfNeeded()
-+import vinn
 +
-+
-+_HISTOGRAMS_TO_CSV_CMD_LINE = os.path.join(
-+    tracing_path, 'tracing', 'value', 'histograms_to_csv_cmdline.html')
++from tracing.value import histograms_to_csv
 +
 +
 +def main():
@@ -4762,10 +5656,7 @@ index 0000000000000000000000000000000000000000..f39da4f9cbde36008e4187f3cb8bd83c
 +  parser.add_argument('-h', '--help', action='help',
 +                      help='Show this help message and exit.')
 +  args = parser.parse_args()
-+  result = vinn.RunFile(
-+      _HISTOGRAMS_TO_CSV_CMD_LINE,
-+      source_paths=list(tracing_project.TracingProject().source_paths),
-+      js_args=[os.path.abspath(args.json_path)])
++  result = histograms_to_csv.HistogramsToCsv(args.json_path)
 +  if result.returncode != 0:
 +    sys.stderr.write(result.stdout)
 +  else:
@@ -5036,7 +5927,7 @@ index 0000000000000000000000000000000000000000..af58491504df566af15f282d56f819f8
 +  sys.exit(map_traces.Main(sys.argv))
 diff --git a/third_party/catapult/tracing/bin/memory_infra_remote_dump b/third_party/catapult/tracing/bin/memory_infra_remote_dump
 new file mode 100755
-index 0000000000000000000000000000000000000000..f77bd1810c4b902cf93cdd1d3aa8c0841f619e8a
+index 0000000000000000000000000000000000000000..0ac184e5554a08cb152a5fafadc4b6ce8712d0e5
 --- /dev/null
 +++ b/third_party/catapult/tracing/bin/memory_infra_remote_dump
 @@ -0,0 +1,129 @@
@@ -5091,7 +5982,7 @@ index 0000000000000000000000000000000000000000..f77bd1810c4b902cf93cdd1d3aa8c084
 +  def __init__(self, host, port):
 +    url = 'ws://%s:%s/devtools/browser' % (host, port)
 +    print 'Connecting to ' + url
-+    self.ws = websocket.create_connection(url)
++    self.ws = websocket.CreateConnection(url)
 +    self.cmd = 0
 +
 +  def send(self, method, params={}):
@@ -5227,346 +6118,3 @@ index 0000000000000000000000000000000000000000..4b610dd0699b3421efe41187150aae58
 +  sys.path.append(tracing_path)
 +  from tracing_build import merge_traces
 +  sys.exit(merge_traces.Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/results2json b/third_party/catapult/tracing/bin/results2json
-new file mode 100755
-index 0000000000000000000000000000000000000000..9a8195e13e909ccb9cfa96967e6362c26f736e3f
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/results2json
-@@ -0,0 +1,36 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import argparse
-+import json
-+import sys
-+import os
-+
-+tracing_path = os.path.abspath(os.path.join(
-+  os.path.dirname(os.path.realpath(__file__)), '..'))
-+sys.path.append(tracing_path)
-+from tracing import results_renderer
-+
-+
-+def main():
-+  parser = argparse.ArgumentParser(
-+      description='Extract HistogramSet JSON from results2.html.',
-+      add_help=False)
-+  parser.add_argument('html_path', metavar='HTML_PATH',
-+                      help='HTML file path (input).')
-+  parser.add_argument('json_path', metavar='JSON_PATH',
-+                      help='JSON file path (input/output).')
-+  parser.add_argument('-h', '--help', action='help',
-+                      help='Show this help message and exit.')
-+  args = parser.parse_args()
-+
-+  histograms = results_renderer.ReadExistingResults(
-+      open(args.html_path, 'r').read())
-+  if os.path.exists(args.json_path):
-+    histograms.extend(json.load(open(args.json_path, 'r')))
-+  json.dump(histograms, open(args.json_path, 'w'))
-+
-+if __name__ == '__main__':
-+  sys.exit(main())
-diff --git a/third_party/catapult/tracing/bin/run_dev_server_tests b/third_party/catapult/tracing/bin/run_dev_server_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..bd09476721e433f991b8193a6d0de767594cc92d
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_dev_server_tests
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..', '..'))
-+  sys.path.append(tracing_path)
-+  from catapult_build import run_dev_server_tests
-+  sys.exit(run_dev_server_tests.Main(sys.argv + ['--tests=tracing']))
-diff --git a/third_party/catapult/tracing/bin/run_metric b/third_party/catapult/tracing/bin/run_metric
-new file mode 100755
-index 0000000000000000000000000000000000000000..c1d913c5658a495a6076ea80366165e7a824c065
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_metric
-@@ -0,0 +1,75 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import argparse
-+import codecs
-+import json
-+import os
-+import sys
-+
-+sys.path.insert(1, os.path.join(os.path.dirname(__file__), '..'))
-+from tracing import results_renderer
-+from tracing.metrics import metric_runner
-+from tracing.metrics import discover
-+
-+def Main(argv):
-+  all_metrics = discover.DiscoverMetrics(
-+      ['/tracing/metrics/all_metrics.html'])
-+
-+  parser = argparse.ArgumentParser(
-+      description='Runs metrics on local traces')
-+  parser.add_argument('trace_file_or_dir',
-+                      help='A trace file, or a dir containing trace files')
-+  parser.add_argument('metrics', nargs='+',
-+                      help=('Function names of registered metrics '
-+                            '(not filenames.) '
-+                            'Available metrics are: %s' %
-+                            ', '.join(all_metrics)),
-+                      choices=all_metrics, metavar='metricName')
-+  parser.add_argument('--filename', default='results2', type=str,
-+                      help='Output file name (no extension)')
-+  parser.add_argument('--reset', action='store_true',
-+                      help=('Whether to ignore existing results in HTML file '
-+                            '(if it exists'))
-+  parser.add_argument('--also-output-json', action='store_true',
-+                      help=('Also output json file containing values. Note that'
-+                            'this only contains the results of current run'))
-+
-+  args = parser.parse_args(argv[1:])
-+  trace_file_or_dir = os.path.abspath(args.trace_file_or_dir)
-+
-+  if os.path.isdir(trace_file_or_dir):
-+    trace_dir = trace_file_or_dir
-+    traces = [os.path.join(trace_dir, trace) for trace in os.listdir(trace_dir)]
-+  else:
-+    traces = [trace_file_or_dir]
-+
-+  failures = []
-+  histograms = []
-+  for trace_url, mre_result in metric_runner.RunMetricOnTraces(
-+      traces, args.metrics).iteritems():
-+    failures.extend(mre_result.failures)
-+    histograms.extend(mre_result.pairs.get('histograms', []))
-+
-+  if failures:
-+    print 'Running metric failed:'
-+    for failure in failures:
-+      print failure['stack']
-+
-+  output_file = args.filename + '.html'
-+  open(output_file, 'a').close() # Create file if it doesn't exist.
-+  with codecs.open(output_file, mode='r+', encoding='utf-8') as output_stream:
-+    results_renderer.RenderHTMLView(histograms, output_stream, args.reset)
-+    print 'HTML result created in file://' + os.path.abspath(output_file)
-+
-+  if args.also_output_json:
-+    output_file = args.filename + '.json'
-+    with open(output_file, 'w') as f:
-+      json.dump(histograms, f, indent=2, sort_keys=True, separators=(',', ': '))
-+    print 'JSON result created in file://' + os.path.abspath(output_file)
-+
-+
-+if __name__ == '__main__':
-+  sys.exit(Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/run_node_tests b/third_party/catapult/tracing/bin/run_node_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..d044e0f1c2276f97735490d73199c677cb19a682
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_node_tests
-@@ -0,0 +1,23 @@
-+#!/usr/bin/env node
-+// Copyright (c) 2016 The Chromium Authors. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+'use strict';
-+
-+var fs = require('fs');
-+var path = require('path');
-+
-+var catapultPath = fs.realpathSync(path.join(__dirname, '..', '..'));
-+var catapultBuildPath = path.join(catapultPath, 'catapult_build');
-+
-+var node_bootstrap = require(path.join(catapultBuildPath, 'node_bootstrap.js'));
-+
-+HTMLImportsLoader.addArrayToSourcePath(
-+    node_bootstrap.getSourcePathsForProject('tracing'));
-+
-+// Go!
-+var headless_test_module_filenames =
-+    node_bootstrap.getHeadlessTestModuleFilenamesForProject('tracing');
-+
-+HTMLImportsLoader.loadHTML('/tracing/base/headless_tests.html');
-+tr.b.unittest.loadAndRunTests(headless_test_module_filenames);
-\ No newline at end of file
-diff --git a/third_party/catapult/tracing/bin/run_py_tests b/third_party/catapult/tracing/bin/run_py_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..e81cb180b7974a752c1b23c625c3134b528ace7d
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_py_tests
-@@ -0,0 +1,46 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import platform
-+import sys
-+
-+_CATAPULT_PATH = os.path.abspath(
-+    os.path.join(
-+        os.path.dirname(os.path.realpath(__file__)),
-+        os.path.pardir,
-+        os.path.pardir))
-+_TRACING_PATH = os.path.join(_CATAPULT_PATH, 'tracing')
-+
-+sys.path.insert(0, _TRACING_PATH)
-+from tracing import tracing_project
-+
-+
-+def _RunTestsOrDie(top_level_dir):
-+  path = [_TRACING_PATH]
-+  path.extend(tracing_project.GetDependencyPaths())
-+  exit_code = run_with_typ.Run(top_level_dir, path=path)
-+  if exit_code:
-+    sys.exit(exit_code)
-+
-+
-+def _AddToPathIfNeeded(path):
-+  if path not in sys.path:
-+    sys.path.insert(0, path)
-+
-+
-+if __name__ == '__main__':
-+  _AddToPathIfNeeded(_CATAPULT_PATH)
-+
-+  from hooks import install
-+  if '--no-install-hooks' in sys.argv:
-+    sys.argv.remove('--no-install-hooks')
-+  else:
-+    install.InstallHooks()
-+
-+  from catapult_build import run_with_typ
-+  _RunTestsOrDie(os.path.join(_TRACING_PATH, 'tracing'))
-+  _RunTestsOrDie(os.path.join(_TRACING_PATH, 'tracing_build'))
-+  sys.exit(0)
-diff --git a/third_party/catapult/tracing/bin/run_symbolizer_tests b/third_party/catapult/tracing/bin/run_symbolizer_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..3f3117536763bf972b75efc7cb499a33cfc0af2e
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_symbolizer_tests
-@@ -0,0 +1,39 @@
-+#!/usr/bin/env python
-+# Copyright 2017 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+"""
-+The symbolizer tests take a long time to run [potentially 5+ minutes each], so
-+they are invoked directly from separately from run_py_tests.
-+"""
-+
-+import os
-+import sys
-+
-+_CATAPULT_PATH = os.path.abspath(
-+    os.path.join(
-+        os.path.dirname(os.path.realpath(__file__)),
-+        os.path.pardir,
-+        os.path.pardir))
-+_TRACING_PATH = os.path.join(_CATAPULT_PATH, 'tracing')
-+
-+
-+def _RunTestsOrDie(top_level_dir):
-+  exit_code = run_with_typ.Run(top_level_dir, path=[_TRACING_PATH],
-+                               suffixes=['*_test_slow.py'])
-+  if exit_code:
-+    sys.exit(exit_code)
-+
-+
-+def _AddToPathIfNeeded(path):
-+  if path not in sys.path:
-+    sys.path.insert(0, path)
-+
-+
-+if __name__ == '__main__':
-+  _AddToPathIfNeeded(_CATAPULT_PATH)
-+
-+  from catapult_build import run_with_typ
-+  _RunTestsOrDie(os.path.join(_TRACING_PATH, 'tracing', 'extras', 'symbolizer'))
-+  sys.exit(0)
-diff --git a/third_party/catapult/tracing/bin/run_tests b/third_party/catapult/tracing/bin/run_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..3f94c67af0b8611d05fad569ed3de129050a0996
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_tests
-@@ -0,0 +1,25 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+
-+_THIS_PATH = os.path.dirname(os.path.realpath(__file__))
-+_TESTS = [
-+    {'path': os.path.join(_THIS_PATH, 'run_py_tests')},
-+    {'path': os.path.join(_THIS_PATH, 'run_vinn_tests'),
-+     'disabled': {'win32'}},
-+    {'path': os.path.join(_THIS_PATH, 'run_dev_server_tests'),
-+     'chrome_path_arg': True}
-+]
-+
-+
-+if __name__ == '__main__':
-+  catapult_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..', '..'))
-+  sys.path.append(catapult_path)
-+  from catapult_build import test_runner
-+  sys.exit(test_runner.Main('tracing', _TESTS, sys.argv))
-diff --git a/third_party/catapult/tracing/bin/run_vinn_tests b/third_party/catapult/tracing/bin/run_vinn_tests
-new file mode 100755
-index 0000000000000000000000000000000000000000..42ec180f119bcc8836c0d6678146a5cbfd2af392
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/run_vinn_tests
-@@ -0,0 +1,14 @@
-+#!/usr/bin/env python
-+# Copyright (c) 2015 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import os
-+import sys
-+
-+if __name__ == '__main__':
-+  tracing_path = os.path.abspath(os.path.join(
-+    os.path.dirname(os.path.realpath(__file__)), '..'))
-+  sys.path.append(tracing_path)
-+  from tracing_build import run_vinn_tests
-+  sys.exit(run_vinn_tests.Main(sys.argv))
-diff --git a/third_party/catapult/tracing/bin/slim_trace b/third_party/catapult/tracing/bin/slim_trace
-new file mode 100755
-index 0000000000000000000000000000000000000000..2e170777840855ede68c7d119a21f7f41fd47c64
---- /dev/null
-+++ b/third_party/catapult/tracing/bin/slim_trace
-@@ -0,0 +1,16 @@
-+#!/usr/bin/env python
-+# Copyright 2016 The Chromium Authors. All rights reserved.
-+# Use of this source code is governed by a BSD-style license that can be
-+# found in the LICENSE file.
-+
-+import sys
-+import os
-+
-+tracing_path = os.path.abspath(os.path.join(
-+  os.path.dirname(os.path.realpath(__file__)), '..'))
-+sys.path.append(tracing_path)
-+from tracing_build import slim_trace
-+
-+
-+if __name__ == '__main__':
-+  sys.exit(slim_trace.Main(sys.argv))
