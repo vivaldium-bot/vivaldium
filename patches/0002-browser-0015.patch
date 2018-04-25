@@ -1,0 +1,2279 @@
+diff --git a/chrome/test/data/vr/webvr_info/samples/test-slow-render.html b/chrome/test/data/vr/webvr_info/samples/test-slow-render.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..4d1c51175565f441f8424fd2086912484f709f96
+--- /dev/null
++++ b/chrome/test/data/vr/webvr_info/samples/test-slow-render.html
+@@ -0,0 +1,317 @@
++<!doctype html>
++<!--
++Copyright 2016 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++<html>
++  <head>
++    <meta charset="utf-8">
++    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
++    <meta name="mobile-web-app-capable" content="yes">
++    <meta name="apple-mobile-web-app-capable" content="yes">
++
++    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-10-13 -->
++    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-10-13" content="Aqw0TUvp8CwZmgIS50pM1blhzy05y7OkBeW3AQQGjer4KuKV0p13xfrRbe2bT8B1+DgRW0O3Dda0yOjcL46GBwgAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA3ODU5MDE4fQ==">
++
++    <title>TEST - Slow Rendering</title>
++
++    <!--
++      This test attempts to be GPU bound, so that WebVR implementations can
++      guage how well they handle that scenario.
++    -->
++
++    <style>
++      #webgl-canvas {
++        box-sizing: border-box;
++        height: 100%;
++        left: 0;
++        margin: 0;
++        position: absolute;
++        top: 0;
++        width: 100%;
++      }
++    </style>
++
++    <!-- This entire block in only to facilitate dynamically enabling and
++    disabling the WebVR polyfill, and is not necessary for most WebVR apps.
++    If you want to use the polyfill in your app, just include the js file and
++    everything will work the way you want it to by default. -->
++    <script>
++      var WebVRConfig = {
++        // Prevents the polyfill from initializing automatically.
++        DEFER_INITIALIZATION: true,
++        // Ensures the polyfill is always active when initialized, even if the
++        // native API is available. This is probably NOT what most pages want.
++        ALWAYS_APPEND_POLYFILL_DISPLAY: true,
++        // Polyfill optimizations
++        DIRTY_SUBMIT_FRAME_BINDINGS: true,
++        BUFFER_SCALE: 0.75,
++      };
++    </script>
++    <script src="js/third-party/webvr-polyfill.js"></script>
++    <script src="js/third-party/wglu/wglu-url.js"></script>
++    <script>
++      // Dynamically turn the polyfill on if requested by the query args.
++      if (WGLUUrl.getBool('polyfill', false)) {
++        InitializeWebVRPolyfill();
++      } else {
++        // Shim for migration from older version of WebVR. Shouldn't be necessary for very long.
++        InitializeSpecShim();
++      }
++    </script>
++    <!-- End sample polyfill enabling logic -->
++
++    <script src="js/third-party/gl-matrix-min.js"></script>
++
++    <script src="js/third-party/wglu/wglu-program.js"></script>
++    <script src="js/third-party/wglu/wglu-stats.js"></script>
++    <script src="js/third-party/wglu/wglu-texture.js"></script>
++
++    <script src="js/vr-cube-sea.js"></script>
++    <script src="js/vr-samples-util.js"></script>
++  </head>
++  <body>
++    <canvas id="webgl-canvas"></canvas>
++    <script>
++      /* global mat4, VRCubeSea, WGLUStats, WGLUTextureLoader, VRSamplesUtil */
++      (function () {
++      "use strict";
++
++      var vrDisplay = null;
++      var frameData = null;
++      var projectionMat = mat4.create();
++      var viewMat = mat4.create();
++      var vrPresentButton = null;
++
++      var heavyGpu = WGLUUrl.getBool('heavyGpu', false);
++      var cubeCount = WGLUUrl.getInt('cubeCount', heavyGpu ? 12 : 10);
++      var cubeScale = WGLUUrl.getFloat('cubeScale', 1.0);
++      var simulatedWorkTimeMs = WGLUUrl.getFloat('workTime', 0);
++      var standardSize = WGLUUrl.getBool('standardSize', false);
++      var renderScale = WGLUUrl.getFloat('renderScale', 1.0);
++      var latencyPatch = WGLUUrl.getBool('latencyPatch', false);
++
++      // ================================
++      // WebVR-specific code begins here.
++      // ================================
++
++      // WebGL setup.
++      var gl = null;
++      var cubeSea = null;
++      var stats = null;
++
++      function onContextLost( event ) {
++        event.preventDefault();
++        console.log( 'WebGL Context Lost.' );
++        gl = null;
++        cubeSea = null;
++        stats = null;
++      }
++
++      function onContextRestored( event ) {
++        console.log( 'WebGL Context Restored.' );
++        initWebGL(vrDisplay ? vrDisplay.capabilities.hasExternalDisplay : false);
++      }
++
++      var webglCanvas = document.getElementById("webgl-canvas");
++      webglCanvas.addEventListener( 'webglcontextlost', onContextLost, false );
++      webglCanvas.addEventListener( 'webglcontextrestored', onContextRestored, false );
++
++      function initWebGL (preserveDrawingBuffer) {
++        var glAttribs = {
++          alpha: false,
++          preserveDrawingBuffer: preserveDrawingBuffer
++        };
++        gl = webglCanvas.getContext("webgl", glAttribs);
++        if (!gl) {
++          gl = webglCanvas.getContext("experimental-webgl", glAttribs);
++          if (!gl) {
++            VRSamplesUtil.addError("Your browser does not support WebGL.");
++            return;
++          }
++        }
++        gl.clearColor(0.1, 0.2, 0.3, 1.0);
++        gl.enable(gl.DEPTH_TEST);
++        gl.enable(gl.CULL_FACE);
++
++        var textureLoader = new WGLUTextureLoader(gl);
++        var texture = textureLoader.loadTexture("media/textures/cube-sea.png");
++        cubeSea = new VRCubeSea(gl, texture, cubeCount, cubeScale, heavyGpu);
++        var enablePerformanceMonitoring = WGLUUrl.getBool(
++            'enablePerformanceMonitoring', false);
++        stats = new WGLUStats(gl, enablePerformanceMonitoring);
++
++        // Wait until we have a WebGL context to resize and start rendering.
++        window.addEventListener("resize", onResize, false);
++        onResize();
++        window.requestAnimationFrame(onAnimationFrame);
++      }
++
++      function onVRRequestPresent () {
++        vrDisplay.requestPresent([{ source: webglCanvas }]).then(function () {
++        }, function (err) {
++          var errMsg = "requestPresent failed.";
++          if (err && err.message) {
++            errMsg += "<br/>" + err.message
++          }
++          VRSamplesUtil.addError(errMsg, 2000);
++        });
++      }
++
++      function onVRExitPresent () {
++        if (!vrDisplay.isPresenting)
++          return;
++
++        vrDisplay.exitPresent().then(function () {
++        }, function () {
++          VRSamplesUtil.addError("exitPresent failed.", 2000);
++        });
++      }
++
++      function onVRPresentChange () {
++        onResize();
++
++        if (vrDisplay.isPresenting) {
++          if (vrDisplay.capabilities.hasExternalDisplay) {
++            VRSamplesUtil.removeButton(vrPresentButton);
++            vrPresentButton = VRSamplesUtil.addButton("Exit VR", "E", "media/icons/cardboard64.png", onVRExitPresent);
++          }
++        } else {
++          if (vrDisplay.capabilities.hasExternalDisplay) {
++            VRSamplesUtil.removeButton(vrPresentButton);
++            vrPresentButton = VRSamplesUtil.addButton("Enter VR", "E", "media/icons/cardboard64.png", onVRRequestPresent);
++          }
++        }
++      }
++
++      if (navigator.getVRDisplays) {
++        frameData = new VRFrameData();
++
++        navigator.getVRDisplays().then(function (displays) {
++          if (displays.length > 0) {
++            vrDisplay = displays[displays.length - 1];
++            vrDisplay.depthNear = 0.1;
++            vrDisplay.depthFar = 1024.0;
++
++            if (vrDisplay.capabilities.canPresent)
++              vrPresentButton = VRSamplesUtil.addButton("Enter VR", "E", "media/icons/cardboard64.png", onVRRequestPresent);
++
++            // For the benefit of automated testing. Safe to ignore.
++            if (vrDisplay.capabilities.canPresent && WGLUUrl.getBool('canvasClickPresents', false))
++              webglCanvas.addEventListener("click", onVRRequestPresent, false);
++
++            window.addEventListener('vrdisplaypresentchange', onVRPresentChange, false);
++            window.addEventListener('vrdisplayactivate', onVRRequestPresent, false);
++            window.addEventListener('vrdisplaydeactivate', onVRExitPresent, false);
++
++            initWebGL(vrDisplay.capabilities.hasExternalDisplay);
++          } else {
++            initWebGL(false);
++            VRSamplesUtil.addInfo("WebVR supported, but no VRDisplays found.", 3000);
++          }
++        }, function () {
++          VRSamplesUtil.addError("Your browser does not support WebVR. See <a href='http://webvr.info'>webvr.info</a> for assistance.");
++        });
++      } else if (navigator.getVRDevices) {
++        initWebGL(false);
++        VRSamplesUtil.addError("Your browser supports WebVR but not the latest version. See <a href='http://webvr.info'>webvr.info</a> for more info.");
++      } else {
++        initWebGL(false);
++        VRSamplesUtil.addError("Your browser does not support WebVR. See <a href='http://webvr.info'>webvr.info</a> for assistance.");
++      }
++
++      function onResize () {
++        if (vrDisplay && vrDisplay.isPresenting) {
++          var leftEye = vrDisplay.getEyeParameters("left");
++          var rightEye = vrDisplay.getEyeParameters("right");
++
++          // If user has specified renderWidth/Height in URL, use that instead of the
++          // recommended resolution. Useful for testing to get cross-device comparable
++          // results. This still gets multiplied by renderScale if that is set.
++          var renderWidth = standardSize ? 1024 : Math.max(leftEye.renderWidth, rightEye.renderWidth);
++          var renderHeight = standardSize ? 1024 : Math.max(leftEye.renderHeight, rightEye.renderHeight);
++
++          webglCanvas.width = renderWidth * 2 * renderScale;
++          webglCanvas.height = renderHeight * renderScale;
++        } else {
++          webglCanvas.width = webglCanvas.offsetWidth * window.devicePixelRatio;
++          webglCanvas.height = webglCanvas.offsetHeight * window.devicePixelRatio;
++        }
++      }
++
++      var now = (window.performance && performance.now) ? performance.now.bind(performance) : Date.now;
++
++      function onAnimationFrame (t) {
++        // do not attempt to render if there is no available WebGL context
++        if (!gl || !stats || !cubeSea) {
++          return;
++        }
++        stats.begin();
++
++        if (simulatedWorkTimeMs > 0) {
++          // Simulate a heavy Javascript workload
++          var start = now();
++          mat4.perspective(projectionMat, Math.PI*0.4, webglCanvas.width / webglCanvas.height, 0.1, 1024.0);
++          while (now() - start < simulatedWorkTimeMs) {
++            // Spin our wheels doing useless BS :)
++            mat4.invert(projectionMat, projectionMat);
++            mat4.translate(projectionMat, projectionMat, [1.0, 1.0, 1.0]);
++          }
++        }
++
++        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
++
++        if (vrDisplay) {
++          vrDisplay.requestAnimationFrame(onAnimationFrame);
++
++          vrDisplay.getFrameData(frameData);
++
++          if (vrDisplay.isPresenting) {
++            gl.viewport(0, 0, webglCanvas.width * 0.5, webglCanvas.height);
++            cubeSea.render(frameData.leftProjectionMatrix, frameData.leftViewMatrix, stats, t);
++
++            gl.viewport(webglCanvas.width * 0.5, 0, webglCanvas.width * 0.5, webglCanvas.height);
++            cubeSea.render(frameData.rightProjectionMatrix, frameData.rightViewMatrix, stats, t);
++
++            if (latencyPatch) {
++              // Draw a square overlay in the right eye with brightness
++              // proportional to the magnitude of the headset's angular
++              // velocity. This is intended for a hardware latency tester.
++              let VELOCITY_SCALE = 0.25;
++              let angularVelocity = vec3.len(frameData.pose.angularVelocity);
++              let brightness = Math.min(angularVelocity * VELOCITY_SCALE, 1.0);
++              gl.scissor(webglCanvas.width * 0.625, webglCanvas.height * 0.25,
++                         webglCanvas.width * 0.25, webglCanvas.height * 0.5);
++              gl.enable(gl.SCISSOR_TEST);
++              gl.clearColor(brightness, brightness, brightness, 1.0);
++              gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
++              gl.disable(gl.SCISSOR_TEST);
++              gl.clearColor(0.1, 0.2, 0.3, 1.0);
++            }
++
++            vrDisplay.submitFrame();
++          } else {
++            gl.viewport(0, 0, webglCanvas.width, webglCanvas.height);
++            mat4.perspective(projectionMat, Math.PI*0.4, webglCanvas.width / webglCanvas.height, 0.1, 1024.0);
++            cubeSea.render(projectionMat, frameData.leftViewMatrix, stats, t);
++            stats.renderOrtho();
++          }
++        } else {
++          window.requestAnimationFrame(onAnimationFrame);
++
++          // No VRDisplay found.
++          gl.viewport(0, 0, webglCanvas.width, webglCanvas.height);
++          mat4.perspective(projectionMat, Math.PI*0.4, webglCanvas.width / webglCanvas.height, 0.1, 1024.0);
++          mat4.identity(viewMat);
++          cubeSea.render(projectionMat, viewMat, stats, t);
++
++          stats.renderOrtho();
++        }
++
++        stats.end();
++      }
++      })();
++    </script>
++  </body>
++</html>
+diff --git a/chrome/test/data/vr/webvr_info/samples/test-vr-links.html b/chrome/test/data/vr/webvr_info/samples/test-vr-links.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..f433b8b9db40e7909bf56a45fa6b8f5f1742eb09
+--- /dev/null
++++ b/chrome/test/data/vr/webvr_info/samples/test-vr-links.html
+@@ -0,0 +1,431 @@
++<!doctype html>
++<!--
++Copyright 2016 The Chromium Authors. All rights reserved.
++Use of this source code is governed by a BSD-style license that can be
++found in the LICENSE file.
++-->
++<html>
++  <head>
++    <meta charset="utf-8">
++    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
++    <meta name="mobile-web-app-capable" content="yes">
++    <meta name="apple-mobile-web-app-capable" content="yes">
++
++    <!-- Origin Trial Token, feature = WebVR (For Chrome M59+), origin = https://webvr.info, expires = 2017-10-13 -->
++    <meta http-equiv="origin-trial" data-feature="WebVR (For Chrome M59+)" data-expires="2017-10-13" content="Aqw0TUvp8CwZmgIS50pM1blhzy05y7OkBeW3AQQGjer4KuKV0p13xfrRbe2bT8B1+DgRW0O3Dda0yOjcL46GBwgAAABMeyJvcmlnaW4iOiJodHRwczovL3dlYnZyLmluZm86NDQzIiwiZmVhdHVyZSI6IldlYlZSMS4xIiwiZXhwaXJ5IjoxNTA3ODU5MDE4fQ==">
++
++    <title>TEST - VR Links</title>
++
++    <!--
++      This test provides a couple of interactive VR elements that link to other
++      pages, both 2D and WebVR-enabled, so that user agents can test their
++      navigation behavior.
++    -->
++
++    <style>
++      #webgl-canvas, #presenting-message {
++        box-sizing: border-box;
++        height: 100%;
++        left: 0;
++        margin: 0;
++        position: absolute;
++        top: 0;
++        width: 100%;
++      }
++      #presenting-message {
++        color: white;
++        font-family: sans-serif;
++        font-size: 2em;
++        font-weight: bold;
++        z-index: 1;
++        text-align: center;
++        padding: 0.5em;
++        background-color: #444;
++        display: none;
++      }
++    </style>
++
++    <!-- This entire block in only to facilitate dynamically enabling and
++    disabling the WebVR polyfill, and is not necessary for most WebVR apps.
++    If you want to use the polyfill in your app, just include the js file and
++    everything will work the way you want it to by default. -->
++    <script>
++      var WebVRConfig = {
++        // Prevents the polyfill from initializing automatically.
++        DEFER_INITIALIZATION: true,
++        // Ensures the polyfill is always active when initialized, even if the
++        // native API is available. This is probably NOT what most pages want.
++        ALWAYS_APPEND_POLYFILL_DISPLAY: true,
++        // Polyfill optimizations
++        DIRTY_SUBMIT_FRAME_BINDINGS: true,
++        BUFFER_SCALE: 0.75,
++      };
++    </script>
++    <script src="js/third-party/webvr-polyfill.js"></script>
++    <script src="js/third-party/wglu/wglu-url.js"></script>
++    <script>
++      // Dynamically turn the polyfill on if requested by the query args.
++      if (WGLUUrl.getBool('polyfill', false)) {
++        InitializeWebVRPolyfill();
++      } else {
++        // Shim for migration from older version of WebVR. Shouldn't be necessary for very long.
++        InitializeSpecShim();
++      }
++    </script>
++    <!-- End sample polyfill enabling logic -->
++
++    <script src="js/third-party/gl-matrix-min.js"></script>
++
++    <script src="js/third-party/wglu/wglu-debug-geometry.js"></script>
++    <script src="js/third-party/wglu/wglu-program.js"></script>
++    <script src="js/third-party/wglu/wglu-stats.js"></script>
++    <script src="js/third-party/wglu/wglu-texture.js"></script>
++
++    <script src="js/vr-cube-island.js"></script>
++    <script src="js/vr-samples-util.js"></script>
++  </head>
++  <body>
++    <canvas id="webgl-canvas"></canvas>
++    <div id="presenting-message">Put on your headset now</div>
++    <script>
++      /* global mat4, VRCubeSea, WGLUStats, WGLUTextureLoader, VRSamplesUtil */
++      (function () {
++      "use strict";
++
++      var PLAYER_HEIGHT = 1.65;
++
++      var vrDisplay = null;
++      var frameData = null;
++      var projectionMat = mat4.create();
++      var viewMat = mat4.create();
++
++      var vrPresentButton = null;
++      var presentingMessage = document.getElementById("presenting-message");
++
++      var nextPageId;
++      
++      // ===================================================
++      // WebGL scene setup. This code is not WebVR specific.
++      // ===================================================
++
++      // WebGL setup.
++      var gl = null;
++      var cubeIsland = null;
++      var debugGeom = null;
++      var stats = null;
++      
++      function onContextLost( event ) {
++        event.preventDefault();
++        console.log( 'WebGL Context Lost.' );
++        gl = null;
++        cubeIsland = null;
++        debugGeom = null;
++        stats = null;
++      }
++
++      function onContextRestored( event ) {
++        console.log( 'WebGL Context Restored.' );
++        initWebGL();
++      }
++      
++      var webglCanvas = document.getElementById("webgl-canvas");
++      webglCanvas.addEventListener( 'webglcontextlost', onContextLost, false );
++      webglCanvas.addEventListener( 'webglcontextrestored', onContextRestored, false );
++
++      function initWebGL() {
++        var glAttribs = {
++          alpha: false,
++        };
++        var pageId = WGLUUrl.getInt('id', 0);
++        nextPageId = pageId + 1;
++        var useWebgl2 = WGLUUrl.getBool('webgl2', false);
++        var contextTypes = useWebgl2 ? ["webgl2"] : ["webgl", "experimental-webgl"];
++        for (var i in contextTypes) {
++          gl = webglCanvas.getContext(contextTypes[i], glAttribs);
++          if (gl)
++            break;
++        }
++        if (!gl) {
++          var webglType = (useWebgl2 ? "WebGL 2" : "WebGL")
++          VRSamplesUtil.addError("Your browser does not support " + webglType + ".");
++          return;
++        }
++        gl.clearColor(0.1, 0.2, 0.3, 1.0);
++        gl.enable(gl.DEPTH_TEST);
++        gl.enable(gl.CULL_FACE);
++        
++        var textureLoader = new WGLUTextureLoader(gl);
++        var texture = textureLoader.loadTexture("media/textures/cube-sea.png");
++        cubeIsland = new VRCubeIsland(gl, texture, 2, 2);
++        debugGeom = new WGLUDebugGeometry(gl);
++        
++        var enablePerformanceMonitoring = WGLUUrl.getBool(
++            'enablePerformanceMonitoring', false);
++        stats = new WGLUStats(gl, enablePerformanceMonitoring);
++
++        window.addEventListener("resize", onResize, false);
++        onResize();
++        window.requestAnimationFrame(onAnimationFrame);
++      }
++      initWebGL();
++
++      // ================================
++      // WebVR-specific code begins here.
++      // ================================
++
++      function onVRRequestPresent () {
++        // This can only be called in response to a user gesture.
++        vrDisplay.requestPresent([{ source: webglCanvas }]).then(function () {
++          // Nothing to do because we're handling things in onVRPresentChange.
++        }, function (err) {
++          var errMsg = "requestPresent failed.";
++          if (err && err.message) {
++            errMsg += "<br/>" + err.message
++          }
++          VRSamplesUtil.addError(errMsg, 2000);
++        });
++      }
++
++      function onVRExitPresent () {
++        if (!vrDisplay.isPresenting)
++          return;
++
++        vrDisplay.exitPresent().then(function () {
++          // Nothing to do because we're handling things in onVRPresentChange.
++        }, function (err) {
++          var errMsg = "exitPresent failed.";
++          if (err && err.message) {
++            errMsg += "<br/>" + err.message
++          }
++          VRSamplesUtil.addError(errMsg, 2000);
++        });
++      }
++
++      function onVRPresentChange () {
++        onResize();
++
++        if (vrDisplay.isPresenting) {
++          if (vrDisplay.capabilities.hasExternalDisplay) {
++            presentingMessage.style.display = "block";
++
++            VRSamplesUtil.removeButton(vrPresentButton);
++            vrPresentButton = VRSamplesUtil.addButton("Exit VR", "E", "media/icons/cardboard64.png", onVRExitPresent);
++          }
++        } else {
++          if (vrDisplay.capabilities.hasExternalDisplay) {
++            presentingMessage.style.display = "";
++
++            VRSamplesUtil.removeButton(vrPresentButton);
++            vrPresentButton = VRSamplesUtil.addButton("Enter VR", "E", "media/icons/cardboard64.png", onVRRequestPresent);
++          }
++        }
++      }
++
++      if (navigator.getVRDisplays) {
++        frameData = new VRFrameData();
++
++        navigator.getVRDisplays().then(function (displays) {
++          if (displays.length > 0) {
++            vrDisplay = displays[displays.length - 1];
++
++            vrDisplay.depthNear = 0.1;
++            vrDisplay.depthFar = 1024.0;
++
++            if (vrDisplay.stageParameters &&
++                vrDisplay.stageParameters.sizeX > 0 &&
++                vrDisplay.stageParameters.sizeZ > 0) {
++              cubeIsland.resize(vrDisplay.stageParameters.sizeX, vrDisplay.stageParameters.sizeZ);
++            }
++
++            if (vrDisplay.capabilities.canPresent)
++              vrPresentButton = VRSamplesUtil.addButton("Enter VR", "E", "media/icons/cardboard64.png", onVRRequestPresent);
++
++            // For the benefit of automated testing. Safe to ignore.
++            if (vrDisplay.capabilities.canPresent && WGLUUrl.getBool('canvasClickPresents', false))
++              webglCanvas.addEventListener("click", onVRRequestPresent, false);
++
++            window.addEventListener('vrdisplaypresentchange', onVRPresentChange, false);
++            window.addEventListener('vrdisplayactivate', onVRRequestPresent, false);
++            window.addEventListener('vrdisplaydeactivate', onVRExitPresent, false);
++          } else {
++            VRSamplesUtil.addInfo("WebVR supported, but no VRDisplays found.", 3000);
++          }
++        }, function () {
++          VRSamplesUtil.addError("Your browser does not support WebVR. See <a href='http://webvr.info'>webvr.info</a> for assistance.");
++        });
++      } else if (navigator.getVRDevices) {
++        VRSamplesUtil.addError("Your browser supports WebVR but not the latest version. See <a href='http://webvr.info'>webvr.info</a> for more info.");
++      } else {
++        VRSamplesUtil.addError("Your browser does not support WebVR. See <a href='http://webvr.info'>webvr.info</a> for assistance.");
++      }
++
++      function onResize () {
++        if (vrDisplay && vrDisplay.isPresenting) {
++          var leftEye = vrDisplay.getEyeParameters("left");
++          var rightEye = vrDisplay.getEyeParameters("right");
++
++          webglCanvas.width = Math.max(leftEye.renderWidth, rightEye.renderWidth) * 2;
++          webglCanvas.height = Math.max(leftEye.renderHeight, rightEye.renderHeight);
++        } else {
++          webglCanvas.width = webglCanvas.offsetWidth * window.devicePixelRatio;
++          webglCanvas.height = webglCanvas.offsetHeight * window.devicePixelRatio;
++        }
++      }
++
++      var leftIntersect = false;
++      var rightIntersect = false;
++
++      var playerPosition = [0, PLAYER_HEIGHT, 0];
++      var leftPosition = [-0.5, PLAYER_HEIGHT, -1.0];
++      var rightPosition = [0.5, PLAYER_HEIGHT, -1.0];
++
++      function onClick () {
++        if (leftIntersect) {
++          // Navigate back to this page (with a different query string to force
++          // navigation)
++          window.location = "test-vr-links.html?id=" + nextPageId;
++        } else if (rightIntersect) {
++          // Navigate to a 2D site
++          window.location = "index.html"
++        } else {
++          if (gl) {
++            // Reset the background color to a random value
++            gl.clearColor(
++                Math.random() * 0.5,
++                Math.random() * 0.5,
++                Math.random() * 0.5, 1.0);
++          }
++        }
++      }
++      
++      // Register for mouse restricted events while in VR
++      // (e.g. mouse no longer available on desktop 2D view)
++      function onDisplayPointerRestricted() {
++        if (webglCanvas && webglCanvas.requestPointerLock) {
++          webglCanvas.requestPointerLock();
++        }
++      }
++
++      // Register for mouse unrestricted events while in VR
++      // (e.g. mouse once again available on desktop 2D view)
++      function onDisplayPointerUnrestricted() {
++        var lock = document.pointerLockElement;
++        if (lock && lock === webglCanvas && document.exitPointerLock) {
++          document.exitPointerLock();
++        }
++      }
++      
++      webglCanvas.addEventListener("click", onClick, false);
++      window.addEventListener('vrdisplaypointerrestricted', onDisplayPointerRestricted);
++      window.addEventListener('vrdisplaypointerunrestricted', onDisplayPointerUnrestricted);
++
++      function getStandingViewMatrix (out, view) {
++        if (vrDisplay.stageParameters) {
++          // If the headset provides stageParameters use the
++          // sittingToStandingTransform to transform the view matrix into a
++          // space where the floor in the center of the users play space is the
++          // origin.
++          mat4.invert(out, vrDisplay.stageParameters.sittingToStandingTransform);
++          mat4.multiply(out, view, out);
++        } else {
++          // Otherwise you'll want to translate the view to compensate for the
++          // scene floor being at Y=0. Ideally this should match the user's
++          // height (you may want to make it configurable). For this demo we'll
++          // just assume all human beings are 1.65 meters (~5.4ft) tall.
++          mat4.identity(out);
++          mat4.translate(out, out, [0, PLAYER_HEIGHT, 0]);
++          mat4.invert(out, out);
++          mat4.multiply(out, view, out);
++        }
++      }
++
++      function renderSceneView (projection, view) {
++        cubeIsland.render(projection, view, stats);
++
++        debugGeom.bind(projection, view);
++
++        if (leftIntersect) {
++          debugGeom.drawCube(0, leftPosition, 0.35, [0.5, 0, 1, 1]);
++        } else {
++          debugGeom.drawCube(0, leftPosition, 0.3, [0, 0, 1, 1]);
++        }
++
++        if (rightIntersect) {
++          debugGeom.drawCube(0, rightPosition, 0.35, [0.5, 1, 0, 1]);
++        } else {
++          debugGeom.drawCube(0, rightPosition, 0.3, [0, 1, 0, 1]);
++        }
++      }
++
++      function lookingAtSphere(position, radius, pose) {
++        var lookVec = vec3.fromValues(0, 0, -1);
++        vec3.transformQuat(lookVec, lookVec, pose.orientation);
++
++        var m = vec3.create();
++        vec3.sub(m, playerPosition, position); 
++        var b = vec3.dot(m, lookVec); 
++        var c = vec3.dot(m, m) - radius * radius; 
++
++        // Exit if player's origin outside of sphere (c > 0) and lookVec is pointing away from sphere (b > 0) 
++        if (c > 0.0 && b > 0.0) 
++          return false; 
++        var discr = b*b - c; 
++
++        // negative discriminant = lookVec misses sphere 
++        return (discr >= 0.0);
++      }
++
++      function onAnimationFrame (t) {
++        // do not attempt to render if there is no available WebGL context
++        if (!gl || !stats || !cubeIsland || !debugGeom) {
++          window.requestAnimationFrame(onAnimationFrame);
++          return;
++        }
++        stats.begin();
++
++        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
++
++        if (vrDisplay) {
++          vrDisplay.requestAnimationFrame(onAnimationFrame);
++
++          vrDisplay.getFrameData(frameData);
++
++          leftIntersect = lookingAtSphere(leftPosition, 0.35, frameData.pose);
++          rightIntersect = lookingAtSphere(rightPosition, 0.35, frameData.pose);
++
++          if (vrDisplay.isPresenting) {
++            gl.viewport(0, 0, webglCanvas.width * 0.5, webglCanvas.height);
++            getStandingViewMatrix(viewMat, frameData.leftViewMatrix);
++            renderSceneView(frameData.leftProjectionMatrix, viewMat);
++
++            gl.viewport(webglCanvas.width * 0.5, 0, webglCanvas.width * 0.5, webglCanvas.height);
++            getStandingViewMatrix(viewMat, frameData.rightViewMatrix);
++            renderSceneView(frameData.rightProjectionMatrix, viewMat);
++
++            vrDisplay.submitFrame();
++          } else {
++            gl.viewport(0, 0, webglCanvas.width, webglCanvas.height);
++            mat4.perspective(projectionMat, Math.PI*0.4, webglCanvas.width / webglCanvas.height, 0.1, 1024.0);
++            getStandingViewMatrix(viewMat, frameData.leftViewMatrix);
++            renderSceneView(projectionMat, viewMat);
++            stats.renderOrtho();
++          }
++        } else {
++          window.requestAnimationFrame(onAnimationFrame);
++
++          // No VRDisplay found.
++          gl.viewport(0, 0, webglCanvas.width, webglCanvas.height);
++          mat4.perspective(projectionMat, Math.PI*0.4, webglCanvas.width / webglCanvas.height, 0.1, 1024.0);
++          mat4.identity(viewMat);
++          mat4.translate(viewMat, viewMat, [0, -PLAYER_HEIGHT, 0]);
++          renderSceneView(projectionMat, viewMat);
++
++          stats.renderOrtho();
++        }
++
++        stats.end();
++      }
++      })();
++    </script>
++  </body>
++</html>
+diff --git a/chrome/test/data/vr/webvr_info/stylesheets/pygment_trac.css b/chrome/test/data/vr/webvr_info/stylesheets/pygment_trac.css
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6a6452d249f902a80b0775bf01352cbca6f284b
+--- /dev/null
++++ b/chrome/test/data/vr/webvr_info/stylesheets/pygment_trac.css
+@@ -0,0 +1,69 @@
++.highlight  { background: #ffffff; }
++.highlight .c { color: #999988; font-style: italic } /* Comment */
++.highlight .err { color: #a61717; background-color: #e3d2d2 } /* Error */
++.highlight .k { font-weight: bold } /* Keyword */
++.highlight .o { font-weight: bold } /* Operator */
++.highlight .cm { color: #999988; font-style: italic } /* Comment.Multiline */
++.highlight .cp { color: #999999; font-weight: bold } /* Comment.Preproc */
++.highlight .c1 { color: #999988; font-style: italic } /* Comment.Single */
++.highlight .cs { color: #999999; font-weight: bold; font-style: italic } /* Comment.Special */
++.highlight .gd { color: #000000; background-color: #ffdddd } /* Generic.Deleted */
++.highlight .gd .x { color: #000000; background-color: #ffaaaa } /* Generic.Deleted.Specific */
++.highlight .ge { font-style: italic } /* Generic.Emph */
++.highlight .gr { color: #aa0000 } /* Generic.Error */
++.highlight .gh { color: #999999 } /* Generic.Heading */
++.highlight .gi { color: #000000; background-color: #ddffdd } /* Generic.Inserted */
++.highlight .gi .x { color: #000000; background-color: #aaffaa } /* Generic.Inserted.Specific */
++.highlight .go { color: #888888 } /* Generic.Output */
++.highlight .gp { color: #555555 } /* Generic.Prompt */
++.highlight .gs { font-weight: bold } /* Generic.Strong */
++.highlight .gu { color: #800080; font-weight: bold; } /* Generic.Subheading */
++.highlight .gt { color: #aa0000 } /* Generic.Traceback */
++.highlight .kc { font-weight: bold } /* Keyword.Constant */
++.highlight .kd { font-weight: bold } /* Keyword.Declaration */
++.highlight .kn { font-weight: bold } /* Keyword.Namespace */
++.highlight .kp { font-weight: bold } /* Keyword.Pseudo */
++.highlight .kr { font-weight: bold } /* Keyword.Reserved */
++.highlight .kt { color: #445588; font-weight: bold } /* Keyword.Type */
++.highlight .m { color: #009999 } /* Literal.Number */
++.highlight .s { color: #d14 } /* Literal.String */
++.highlight .na { color: #008080 } /* Name.Attribute */
++.highlight .nb { color: #0086B3 } /* Name.Builtin */
++.highlight .nc { color: #445588; font-weight: bold } /* Name.Class */
++.highlight .no { color: #008080 } /* Name.Constant */
++.highlight .ni { color: #800080 } /* Name.Entity */
++.highlight .ne { color: #990000; font-weight: bold } /* Name.Exception */
++.highlight .nf { color: #990000; font-weight: bold } /* Name.Function */
++.highlight .nn { color: #555555 } /* Name.Namespace */
++.highlight .nt { color: #000080 } /* Name.Tag */
++.highlight .nv { color: #008080 } /* Name.Variable */
++.highlight .ow { font-weight: bold } /* Operator.Word */
++.highlight .w { color: #bbbbbb } /* Text.Whitespace */
++.highlight .mf { color: #009999 } /* Literal.Number.Float */
++.highlight .mh { color: #009999 } /* Literal.Number.Hex */
++.highlight .mi { color: #009999 } /* Literal.Number.Integer */
++.highlight .mo { color: #009999 } /* Literal.Number.Oct */
++.highlight .sb { color: #d14 } /* Literal.String.Backtick */
++.highlight .sc { color: #d14 } /* Literal.String.Char */
++.highlight .sd { color: #d14 } /* Literal.String.Doc */
++.highlight .s2 { color: #d14 } /* Literal.String.Double */
++.highlight .se { color: #d14 } /* Literal.String.Escape */
++.highlight .sh { color: #d14 } /* Literal.String.Heredoc */
++.highlight .si { color: #d14 } /* Literal.String.Interpol */
++.highlight .sx { color: #d14 } /* Literal.String.Other */
++.highlight .sr { color: #009926 } /* Literal.String.Regex */
++.highlight .s1 { color: #d14 } /* Literal.String.Single */
++.highlight .ss { color: #990073 } /* Literal.String.Symbol */
++.highlight .bp { color: #999999 } /* Name.Builtin.Pseudo */
++.highlight .vc { color: #008080 } /* Name.Variable.Class */
++.highlight .vg { color: #008080 } /* Name.Variable.Global */
++.highlight .vi { color: #008080 } /* Name.Variable.Instance */
++.highlight .il { color: #009999 } /* Literal.Number.Integer.Long */
++
++.type-csharp .highlight .k { color: #0000FF }
++.type-csharp .highlight .kt { color: #0000FF }
++.type-csharp .highlight .nf { color: #000000; font-weight: normal }
++.type-csharp .highlight .nc { color: #2B91AF }
++.type-csharp .highlight .nn { color: #000000 }
++.type-csharp .highlight .s { color: #A31515 }
++.type-csharp .highlight .sc { color: #A31515 }
+diff --git a/chrome/test/data/vr/webvr_info/stylesheets/stylesheet.css b/chrome/test/data/vr/webvr_info/stylesheets/stylesheet.css
+new file mode 100644
+index 0000000000000000000000000000000000000000..d63a1194948a3d8b14869e91bbdf30bb3449ed92
+--- /dev/null
++++ b/chrome/test/data/vr/webvr_info/stylesheets/stylesheet.css
+@@ -0,0 +1,297 @@
++* {
++  -moz-sizing: border-box;
++  -webkit-sizing: border-box;
++  box-sizing: border-box;
++  margin: 0;
++  padding: 0;
++}
++
++html,
++body {
++  height: 100%;
++  width: 100%;
++}
++
++html {
++  font-size: 16px;
++}
++
++body {
++  background-color: #f1f1f1;
++  color: #333;
++  font: 1rem/1.4 -apple-system, BlinkMacSystemFont,
++    Segoe UI, Roboto, Oxygen,
++    Ubuntu, Cantarell, Fira Sans,
++    Droid Sans, Helvetica Neue, sans-serif;
++}
++
++a {
++  color: #369;
++  text-decoration: none;
++}
++
++a:hover {
++  color: #036;
++  text-decoration: underline;
++}
++
++.link-important {
++  font-weight: bold;
++}
++
++.header {
++  padding-bottom: 2rem;
++  text-align: center;
++}
++
++#nav {
++  position: absolute;
++  top: 0;
++}
++
++#nav a {
++  display: inline-block;
++  margin-right:20px;
++  font-size: 15px;
++  opacity: 0.4;
++  padding-top: 14px;
++  color:black;
++}
++
++#nav a.selected{
++  border-top: 2px solid black;
++  opacity: 1.0;
++}
++
++.wordmark {
++  color: inherit;
++  display: block;
++}
++
++.wordmark > span {
++  background: #2ea;
++  box-shadow: 3px 3px 0 0 rgba(0,0,0,.15);
++  color: #fff;
++  display: inline-block;
++  font-size: 64px;
++  font-size: calc(16px + 1vh + 3vw);  /* Responsive font-size for mobile */
++  font-style: italic;
++  font-weight: 300;
++  margin-bottom: 15px;
++  max-width: 100%;
++  padding: 15px 30px;
++  transition: .25s box-shadow ease-in-out, .5s width ease-in-out;
++}
++
++.wordmark:hover {
++  text-decoration: none;
++}
++
++.wordmark:hover > span {
++  background: #2ea;
++  box-shadow: 3px 3px 0 0 rgba(0,0,0,.25);
++}
++
++.tagline {
++  color: #999;
++  font-size: 1rem;
++  font-weight: normal;
++}
++
++.device-box {
++  border-bottom: 1px solid #D8D8D8;
++  overflow: hidden;
++  max-height: 60px;
++  position: relative;
++  padding-left:72px;
++  font-size: 14px;
++  padding-bottom:20px;
++
++  -moz-transition: max-height 0.25s ease-in-out;
++  -ms-transition: max-height 0.25s ease-in-out;
++  -o-transition: max-height 0.25s ease-in-out;
++  -webkit-transition: max-height 0.25s ease-in-out;
++  transition: max-height 0.25s ease-in-out;
++}
++
++.device-box.open {
++  max-height:250px;
++}
++
++.device-box > span {
++  margin: 0.5rem 0;
++  display: block;
++}
++
++.device-box > img {
++  width: 48px;
++  /*float:left;*/
++  /*margin: 6px 8px;*/
++  position: absolute;
++  left: 11px;
++  top: 8px;
++}
++
++.device-box-header {
++  display: block;
++  padding: 23px 0 6px;
++}
++
++.carrot {
++  background-size: cover;
++  background-image: url('../images/carrot.svg');
++  display: block;
++  width: 12px;
++  height: 12px;
++  position: absolute;
++  right:20px;
++  top: 22px;
++  opacity: 0.4;
++}
++
++.device-box:hover {
++  cursor: pointer;
++}
++
++.device-box:hover > .carrot {
++  opacity: 0.8;
++}
++
++.device-box.open > .carrot {
++  -moz-transform: scaleY(-1);
++  -o-transform: scaleY(-1);
++  -webkit-transform: scaleY(-1);
++  transform: scaleY(-1);
++  filter: FlipV;
++  -ms-filter: "FlipV";
++}
++
++.devices {
++  overflow: auto;
++}
++
++@media screen and (min-width: 650px) {
++  .device-col {
++    width: 48%;
++    float: left;
++  }
++  .device-col:last-of-type{
++    margin-left: 4%;
++  }
++}
++
++.no-headset > img {
++  float:left;
++  display: inline-block;
++  width: 82px;
++  margin: 5px 20px 0px 10px;
++}
++
++
++@media screen and (max-width: 650px) {
++  .no-headset > img {
++    float: initial;
++    display: block;
++    margin-left: auto;
++    margin-right: auto;
++    margin-bottom:20px;
++    margin-top:35px;
++  }
++}
++
++
++code,
++pre {
++  font-family: Consolas, Andale Mono, Monaco,
++    Lucida Console, Liberation Mono, DejaVu Sans Mono,
++    Bitstream Vera Sans Mono, Courier New, monospace;
++}
++
++hr {
++  background-color: rgba(0,0,0,.15);
++  height: 1px;
++  padding-bottom: 2px;
++}
++
++.container {
++  max-width: 740px;
++  margin: 0 auto;
++  min-width: 300px;
++  padding: 2rem;
++  padding-top: 4rem;
++  width: 100%;
++}
++
++h3,
++h4,
++ul,
++ol,
++dl,
++p,
++blockquote {
++  margin: 1.5rem 0;
++}
++
++ul,
++ol,
++dl {
++  margin-left: 2.75rem;
++}
++
++ul {
++  list-style: none;
++}
++
++ul li:before {
++  content: "•";
++  color: #999;
++  display: inline-block;
++  margin-left: -1em;
++  width: 1em;
++}
++
++li + li {
++  margin-top: .25rem;
++}
++
++h3 {
++  border-bottom: 1px solid #ddd;
++  color: #111;
++  line-height: 1.4;
++  padding-bottom: .35rem;
++}
++
++h3 + p {
++  margin-top: 1rem;
++}
++
++p {
++  font-weight: normal;
++}
++
++iframe {
++  border: 0;
++  height: 100%;
++  width: 100%;
++}
++
++.iframe-wrap {
++  height: 600px;
++}
++
++.iframe-wrap--chrome {
++  height: 400px;
++}
++
++.iframe--chrome {
++  min-width: 400px;
++  margin-left: -15px;
++  width: 100%;
++  width: calc(100% + 35px);
++}
++
++@media only screen and (max-width: 449px) {
++  .wordmark > span {
++    display: block;
++  }
++}
+diff --git a/chrome/test/data/webui/accessibility_audit_browsertest.js b/chrome/test/data/webui/accessibility_audit_browsertest.js
+index 3890525864d4488dad5e9d05171bd0aaf1f1ceb9..88506bffe9eea217db83c354bc2ad9a6cc9eb7f5 100644
+--- a/chrome/test/data/webui/accessibility_audit_browsertest.js
++++ b/chrome/test/data/webui/accessibility_audit_browsertest.js
+@@ -19,7 +19,7 @@ function WebUIAccessibilityAuditBrowserTest() {}
+ WebUIAccessibilityAuditBrowserTest.prototype = {
+   __proto__: testing.Test.prototype,
+ 
+-  browsePreload: 'chrome://terms',
++  browsePrintPreload: '../../../../components/resources/terms/terms_en.html',
+ 
+   runAccessibilityChecks: true,
+   accessibilityIssuesAreErrors: true,
+diff --git a/chrome/test/nacl/nacl_browsertest_util.h b/chrome/test/nacl/nacl_browsertest_util.h
+index a16881b71ad16a427b77648fb72eccd0cef41cf0..d66788bee594b213a087eb4f4f685bf89433f3cc 100644
+--- a/chrome/test/nacl/nacl_browsertest_util.h
++++ b/chrome/test/nacl/nacl_browsertest_util.h
+@@ -170,14 +170,14 @@ class NaClBrowserTestGLibcExtension : public NaClBrowserTestGLibc {
+ // PNaCl tests take a long time on windows debug builds
+ // and sometimes time out.  Disable until it is made faster:
+ // https://code.google.com/p/chromium/issues/detail?id=177555
+-#if (defined(OS_WIN) && !defined(NDEBUG))
++#if (defined(OS_WIN) && !defined(NDEBUG)) || defined(DISABLE_NACL)
+ #  define MAYBE_PNACL(test_name) DISABLED_##test_name
+ #else
+ #  define MAYBE_PNACL(test_name) test_name
+ #endif
+ 
+ // NaCl glibc toolchain is not available on MIPS
+-#if defined(ARCH_CPU_MIPS_FAMILY)
++#if defined(ARCH_CPU_MIPS_FAMILY) || defined(DISABLE_NACL)
+ #  define MAYBE_GLIBC(test_name) DISABLED_##test_name
+ #else
+ #  define MAYBE_GLIBC(test_name) test_name
+diff --git a/chrome/tools/build/android/FILES.cfg b/chrome/tools/build/android/FILES.cfg
+index a2413a6d409b518280b70b7a5dd42c83ec2d7cf1..d5fa87399d30c71af040152c9238184d239a3073 100644
+--- a/chrome/tools/build/android/FILES.cfg
++++ b/chrome/tools/build/android/FILES.cfg
+@@ -27,12 +27,14 @@
+ #           considered an error.
+ 
+ FILES = [
++  #{
++  #  'filename': 'apks/ContentShell.apk',
++  #  'buildtype': ['dev', 'official'],
++  #},
+   {
+-    'filename': 'apks/ContentShell.apk',
+-    'buildtype': ['dev', 'official'],
+-  },
+-  {
+-    'filename': 'apks/ChromePublic.apk',
++    'filename': 'apks/Vivaldi.apk',
+     'buildtype': ['dev', 'official'],
++    'direct_archive': 1,
++    'archive': 'Vivaldi.apk'
+   },
+ ]
+diff --git a/chrome/tools/build/linux/FILES.cfg b/chrome/tools/build/linux/FILES.cfg
+index d6f82c11b3f21de3d073ff4bb015d41a74cd66f1..1a36c8b52ecd8cb47d2ab18286045e72574c863c 100644
+--- a/chrome/tools/build/linux/FILES.cfg
++++ b/chrome/tools/build/linux/FILES.cfg
+@@ -28,7 +28,7 @@
+ 
+ FILES = [
+   {
+-    'filename': 'chrome',
++    'filename': 'vivaldi',
+     'buildtype': ['dev', 'official'],
+   },
+   {
+@@ -36,11 +36,11 @@ FILES = [
+     'buildtype': ['dev', 'official'],
+   },
+   {
+-    'filename': 'chrome_100_percent.pak',
++    'filename': 'vivaldi_100_percent.pak',
+     'buildtype': ['dev', 'official'],
+   },
+   {
+-    'filename': 'chrome_200_percent.pak',
++    'filename': 'vivaldi_200_percent.pak',
+     'buildtype': ['dev', 'official'],
+   },
+   {
+@@ -168,16 +168,16 @@ FILES = [
+     'archive': 'pnacl.zip',
+   },
+   # Remoting files:
+-  {
+-    'filename': 'remoting-webapp.v2.zip',
+-    'buildtype': ['dev', 'official'],
+-    'archive': 'remoting-webapp.v2.zip',
+-  },
+-  {
+-    'filename': 'remoting-me2me-host-linux.zip',
+-    'buildtype': ['official'],
+-    'archive': 'remoting-me2me-host-linux.zip',
+-  },
++#  {
++#    'filename': 'remoting-webapp.v2.zip',
++#    'buildtype': ['dev', 'official'],
++#    'archive': 'remoting-webapp.v2.zip',
++#  },
++#  {
++#    'filename': 'remoting-me2me-host-linux.zip',
++#    'buildtype': ['official'],
++#    'archive': 'remoting-me2me-host-linux.zip',
++#  },
+   # Breakpad symbols:
+   {
+     'filename': 'chrome.breakpad.ia32',
+@@ -300,4 +300,10 @@ FILES = [
+     'archive': 'content-shell.zip',
+     'optional': ['dev'],
+   },
+- ]
++  {
++    'filename': 'translations/*.xmb',
++    'buildtype': ['dev', 'official'],
++    'optional': ['dev', 'official'],
++    'archive': 'pending-translations.zip',
++  },
++]
+diff --git a/chrome/tools/build/mac/FILES.cfg b/chrome/tools/build/mac/FILES.cfg
+index a10d0b11d0e64a14cfe51b886762d752365f6abf..083b7bfb4f8d45ed604ed79135ef89c14a8982b0 100644
+--- a/chrome/tools/build/mac/FILES.cfg
++++ b/chrome/tools/build/mac/FILES.cfg
+@@ -27,45 +27,44 @@
+ 
+ FILES = [
+   {
+-    'filename': 'Chromium.app',
+-    'buildtype': ['dev'],
+-  },
+-  {
+-    'filename': 'Google Chrome.app',
+-    'buildtype': ['official'],
++    'filename': 'Vivaldi*.dmg',
++    'buildtype': ['dev', 'official'],
++    'direct_archive': 1,
++    'archive': 'Vivaldi*.dmg',
+   },
+   {
+-    'filename': 'Google Chrome Packaging',
+-    'buildtype': ['official'],
++    'filename': 'Vivaldi.app',
++    'buildtype': ['dev', 'official'],
+   },
+   {
+-    'filename': 'Google Chrome Packaging',
++    'filename': 'Vivaldi Packaging',
+     'buildtype': ['official'],
+     'archive': 'packaging.zip',
+   },
+-  # PNaCl translator (archive only, component updater used for shipping).
+-  {
+-    'filename': 'pnacl',
+-    'buildtype': ['dev', 'official'],
+-    'archive': 'pnacl.zip',
+-  },
++#  # PNaCl translator (archive only, component updater used for shipping).
++#  {
++#    'filename': 'pnacl',
++#    'buildtype': ['dev', 'official'],
++#    'archive': 'pnacl.zip',
++#  },
+   # Browser tests:
+-  {
+-    'filename': 'browser_tests',
+-    'buildtype': ['dev', 'official'],
+-    'archive': 'browser_tests',
+-  },
++#  {
++#    'filename': 'browser_tests',
++#    'buildtype': ['dev', 'official'],
++#    'archive': 'browser_tests',
++#  },
+   # Remoting files:
+-  {
+-    'filename': 'remoting-me2me-host-mac.zip',
+-    'buildtype': ['dev', 'official'],
+-    'archive': 'remoting-me2me-host-mac.zip',
+-  },
++#  {
++#    'filename': 'remoting-me2me-host-mac.zip',
++#    'buildtype': ['dev', 'official'],
++#    'archive': 'remoting-me2me-host-mac.zip',
++#  },
+   # Symbols archive:
+   {
+-    'filename': 'Google Chrome.dSYM.tar.bz2',
+-    'buildtype': ['official'],
+-    'archive': 'Google Chrome.dSYM.tar.bz2',
++    'filename': 'Vivaldi.dSYM.tar.bz2',
++    'buildtype': ['dev', 'official'],
++    'archive': 'Vivaldi.dSYM.tar.bz2',
++    'optional': ['dev', 'official'],
+   },
+   {
+     'filename': 'nacl_irt_x86_64.nexe.debug',
+@@ -133,4 +132,10 @@ FILES = [
+     'archive': 'content-shell.zip',
+     'optional': ['dev'],
+   },
++  {
++    'filename': 'translations/*.xmb',
++    'buildtype': ['dev', 'official'],
++    'optional': ['dev', 'official'],
++    'archive': 'pending-translations.zip',
++  },
+ ]
+diff --git a/chrome/tools/build/mac/infoplist_strings_util.mm b/chrome/tools/build/mac/infoplist_strings_util.mm
+index 6558aecf410e5ee5184d9bd02a5f4dc58cb03322..c1fadaa159771f5adf6b4edf6dca6093bf3d9bc9 100644
+--- a/chrome/tools/build/mac/infoplist_strings_util.mm
++++ b/chrome/tools/build/mac/infoplist_strings_util.mm
+@@ -28,7 +28,7 @@
+ 
+ namespace {
+ 
+-NSString* ApplicationVersionString(const char* version_file_path) {
++NSString* ApplicationVersionString(const char* version_file_path, const char* vivaldi_version_file_path, const char* vivaldi_build_num) {
+   NSError* error = nil;
+   NSString* path_string = [NSString stringWithUTF8String:version_file_path];
+   NSString* version_file =
+@@ -51,7 +51,29 @@ NSString* ApplicationVersionString(const char* version_file_path) {
+       [scanner scanInt:&build] &&
+       [scanner scanString:@"PATCH=" intoString:nil] &&
+       [scanner scanInt:&patch]) {
+-    return [NSString stringWithFormat:@"%d.%d.%d.%d",
++      if (vivaldi_build_num) {
++          path_string = [NSString stringWithUTF8String:vivaldi_version_file_path];
++          version_file =
++              [NSString stringWithContentsOfFile:path_string
++                                encoding:NSUTF8StringEncoding
++                                   error:&error];
++          if (!version_file || error) {
++              fprintf(stderr, "Failed to load version file: %s\n",
++                  [[error description] UTF8String]);
++              return nil;
++          }
++		  scanner = [NSScanner scannerWithString:version_file];
++          if ([scanner scanString:@"VIVALDI_MAJOR=" intoString:nil] &&
++              [scanner scanInt:&major] &&
++              [scanner scanString:@"VIVALDI_MINOR=" intoString:nil] &&
++              [scanner scanInt:&minor] &&
++              [scanner scanString:@"VIVALDI_NIGHTLY=" intoString:nil] &&
++              [scanner scanInt:&build] ) {
++              return [NSString stringWithFormat:@"%d.%d.%d.%s",
++                  major, minor, build, vivaldi_build_num];
++          }
++      }
++      return [NSString stringWithFormat:@"%d.%d.%d.%d",
+             major, minor, build, patch];
+   }
+   fprintf(stderr, "Failed to parse version file\n");
+@@ -161,10 +183,13 @@ int main(int argc, char* const argv[]) {
+   const char* branding_strings_name = NULL;
+   const char* output_dir = NULL;
+   const char* app_type = kAppType_Main;
++  const char* vivaldi_build_num = NULL;
++  const char* vivaldi_version_file_path = NULL;
++
+ 
+   // Process the args
+   int ch;
+-  while ((ch = getopt(argc, argv, "t:v:g:b:o:")) != -1) {
++  while ((ch = getopt(argc, argv, "t:v:g:b:o:V:B:")) != -1) {
+     switch (ch) {
+       case 't':
+         app_type = optarg;
+@@ -180,6 +205,12 @@ int main(int argc, char* const argv[]) {
+         break;
+       case 'o':
+         output_dir = optarg;
++        break;
++	  case 'B':
++        vivaldi_build_num = optarg;
++        break;
++    case 'V':
++        vivaldi_version_file_path = optarg;
+         break;
+       default:
+         fprintf(stderr, "ERROR: bad command line arg\n");
+@@ -214,7 +245,7 @@ int main(int argc, char* const argv[]) {
+   base::i18n::InitializeICU();
+ 
+   // Parse the version file and build our string
+-  NSString* version_string = ApplicationVersionString(version_file_path);
++  NSString* version_string = ApplicationVersionString(version_file_path, vivaldi_version_file_path, vivaldi_build_num);
+   if (!version_string) {
+     fprintf(stderr, "ERROR: failed to get a version string");
+     exit(1);
+diff --git a/chrome/tools/build/win/FILES.cfg b/chrome/tools/build/win/FILES.cfg
+index d0e5b99262ea7b75b9ccb28c8cb6d19e7e52b302..840a317567972f7d389357b7329345edf63b4eab 100644
+--- a/chrome/tools/build/win/FILES.cfg
++++ b/chrome/tools/build/win/FILES.cfg
+@@ -30,20 +30,20 @@
+ #           considered an error.
+ 
+ FILES = [
+-  {
+-    'filename': 'browser_tests.exe',
+-    'buildtype': ['official'],
+-    'archive':  'browser_tests.exe',
+-    'optional': ['official'],
+-  },
+-  {
+-    'filename': 'sync_integration_tests.exe',
+-    'buildtype': ['official'],
+-    'archive':  'sync_integration_tests.exe',
+-    'optional': ['official'],
+-  },
+-  {
+-    'filename': 'chrome.exe',
++#  {
++#    'filename': 'browser_tests.exe',
++#    'buildtype': ['official'],
++#    'archive':  'browser_tests.exe',
++#    'optional': ['official'],
++#  },
++#  {
++#    'filename': 'sync_integration_tests.exe',
++#    'buildtype': ['official'],
++#    'archive':  'sync_integration_tests.exe',
++#    'optional': ['official'],
++#  },
++  {
++    'filename': 'vivaldi.exe',
+     'buildtype': ['dev', 'official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+@@ -54,23 +54,23 @@ FILES = [
+     'filegroup': ['default', 'symsrc'],
+   },
+   {
+-    'filename': 'chrome.dll',
++    'filename': 'vivaldi.dll',
+     'buildtype': ['dev', 'official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+   {
+-    'filename': 'chrome_child.dll',
++    'filename': 'vivaldi_child.dll',
+     'buildtype': ['dev', 'official'],
+     'filegroup': ['default', 'symsrc'],
+     'optional': ['dev', 'official'],
+   },
+   {
+-    'filename': 'chrome_elf.dll',
++    'filename': 'vivaldi_elf.dll',
+     'buildtype': ['dev', 'official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+   {
+-    'filename': 'chrome_watcher.dll',
++    'filename': 'vivaldi_watcher.dll',
+     'buildtype': ['dev', 'official'],
+     'filegroup': ['default', 'symsrc'],
+   },
+@@ -85,11 +85,11 @@ FILES = [
+     'filegroup': ['default'],
+   },
+   {
+-    'filename': 'chrome_100_percent.pak',
++    'filename': 'vivaldi_100_percent.pak',
+     'buildtype': ['dev', 'official'],
+   },
+   {
+-    'filename': 'chrome_200_percent.pak',
++    'filename': 'vivaldi_200_percent.pak',
+     'buildtype': ['dev', 'official'],
+     'optional': ['dev', 'official'],
+   },
+@@ -567,26 +567,26 @@ FILES = [
+   # know what you're doing! The build configuration has to be modified to run
+   # Syzygy on the target in question before adding a staging dependency here!
+   {
+-    'filename': 'syzygy/chrome.dll',
++    'filename': 'syzygy/vivaldi.dll',
+     'arch': ['32bit'],
+     'buildtype': ['dev', 'official'],
+-    'archive': 'syzygy/chrome.dll',
++    'archive': 'syzygy/vivaldi.dll',
+     'filegroup': ['symsrc'],
+     'optional': ['dev', 'official'],
+   },
+   {
+-    'filename': 'syzygy/chrome_child.dll',
++    'filename': 'syzygy/vivaldi_child.dll',
+     'arch': ['32bit'],
+     'buildtype': ['dev', 'official'],
+-    'archive': 'syzygy/chrome_child.dll',
++    'archive': 'syzygy/vivaldi_child.dll',
+     'filegroup': ['symsrc'],
+     'optional': ['dev', 'official'],
+   },
+   {
+-    'filename': 'syzygy/instrumented/chrome_child.dll',
++    'filename': 'syzygy/instrumented/vivaldi_child.dll',
+     'arch': ['32bit'],
+     'buildtype': ['official'],
+-    'archive': 'syzygy/instrumented/chrome_child.dll',
++    'archive': 'syzygy/instrumented/vivaldi_child.dll',
+     'filegroup': ['symsrc'],
+     'optional': ['official'],
+   },
+@@ -612,11 +612,11 @@ FILES = [
+     'optional': ['dev', 'official'],
+   },
+   # Test binaries for external QA:
+-  {
+-    'filename': 'interactive_ui_tests.exe',
+-    'buildtype': ['dev', 'official'],
+-    'optional': ['dev', 'official'],
+-  },
++#  {
++#    'filename': 'interactive_ui_tests.exe',
++#    'buildtype': ['dev', 'official'],
++#    'optional': ['dev', 'official'],
++#  },
+   # Installer files (official build only):
+   {
+     'filename': 'setup.exe',
+@@ -625,9 +625,10 @@ FILES = [
+     'filegroup': ['symsrc'],
+   },
+   {
+-    'filename': 'mini_installer.exe',
++    'filename': 'Vivaldi.*.exe',
+     'buildtype': ['dev', 'official'],
+-    'archive': 'mini_installer.exe',
++    'archive': 'Vivaldi.*.exe',
++    'direct_archive': 1,
+     'filegroup': ['symsrc'],
+   },
+   {
+@@ -642,32 +643,34 @@ FILES = [
+   },
+   {
+     'filename': 'courgette.exe',
+-    'buildtype': ['official'],
++    'buildtype': ['dev', 'official'],
+     'archive': 'courgette.exe',
++    'optional': ['dev', 'official'],
+   },
+   {
+     'filename': 'courgette64.exe',
+-    'buildtype': ['official'],
++    'buildtype': ['dev', 'official'],
+     'archive': 'courgette64.exe',
++    'optional': ['dev', 'official'],
+   },
+   {
+-    'filename': 'chrome.dll.pdb',
++    'filename': 'vivaldi.dll.pdb',
+     'buildtype': ['dev', 'official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+   {
+-    'filename': 'chrome_child.dll.pdb',
++    'filename': 'vivaldi_child.dll.pdb',
+     'buildtype': ['dev', 'official'],
+     'optional': ['dev', 'official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+   {
+-    'filename': 'chrome_elf.dll.pdb',
++    'filename': 'vivaldi_elf.dll.pdb',
+     'buildtype': ['dev', 'official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+   {
+-    'filename': 'chrome.exe.pdb',
++    'filename': 'vivaldi.exe.pdb',
+     'buildtype': ['dev', 'official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
+@@ -712,6 +715,12 @@ FILES = [
+     'buildtype': ['dev', 'official'],
+     'archive': 'chrome-win32-syms.zip',
+   },
++  {
++    'filename': 'update_notifier.exe.pdb',
++    'buildtype': ['dev', 'official'],
++    'optional': ['dev', 'official'],
++    'archive': 'chrome-win32-syms.zip',
++  },
+   # Partner API files.
+   {
+     'filename': 'gcapi.h',
+@@ -738,14 +747,14 @@ FILES = [
+   # know what you're doing! The build configuration has to be modified to run
+   # Syzygy on the target in question before adding a staging dependency here!
+   {
+-    'filename': 'syzygy/chrome.dll.pdb',
++    'filename': 'syzygy/vivaldi.dll.pdb',
+     'arch': ['32bit'],
+     'buildtype': ['dev', 'official'],
+     'archive': 'chrome-win32-syms.zip',
+     'optional': ['dev', 'official'],
+   },
+   {
+-    'filename': 'syzygy/chrome_child.dll.pdb',
++    'filename': 'syzygy/vivaldi_child.dll.pdb',
+     'arch': ['32bit'],
+     'buildtype': ['dev', 'official'],
+     'archive': 'chrome-win32-syms.zip',
+@@ -862,4 +871,10 @@ FILES = [
+     'archive': 'metrics-metadata.zip',
+     'optional': ['dev', 'official'],
+   },
++  {
++    'filename': 'translations/*.xmb',
++    'buildtype': ['dev', 'official'],
++    'optional': ['dev', 'official'],
++    'archive': 'pending-translations.zip',
++  },
+ ]
+diff --git a/chrome/tools/build/win/create_installer_archive.py b/chrome/tools/build/win/create_installer_archive.py
+index 60a9d643efa79464a730e69bf24c19c16c9fad5a..a4c6e2d2757c028fc0c8b8278a4cd24124b80d0b 100755
+--- a/chrome/tools/build/win/create_installer_archive.py
++++ b/chrome/tools/build/win/create_installer_archive.py
+@@ -22,13 +22,15 @@ import shutil
+ import subprocess
+ import sys
+ 
++class LZMA_OOM(Exception):
++  pass
+ 
+ ARCHIVE_DIR = "installer_archive"
+ 
+ # suffix to uncompresed full archive file, appended to options.output_name
+ ARCHIVE_SUFFIX = ".7z"
+ BSDIFF_EXEC = "bsdiff.exe"
+-CHROME_DIR = "Chrome-bin"
++CHROME_DIR = "Vivaldi-bin"
+ CHROME_PATCH_FILE_SUFFIX = "_patch"  # prefixed by options.output_name
+ 
+ # compressed full archive suffix, will be prefixed by options.output_name
+@@ -47,7 +49,7 @@ VERSION_FILE = "VERSION"
+ g_archive_inputs = []
+ 
+ 
+-def BuildVersion(build_dir):
++def BuildVersion(build_dir, vivaldi_version=None, vivaldi_build_version= None):
+   """Returns the full build version string constructed from information in
+   VERSION_FILE.  Any segment not found in that file will default to '0'.
+   """
+@@ -55,7 +57,7 @@ def BuildVersion(build_dir):
+   minor = 0
+   build = 0
+   patch = 0
+-  for line in open(os.path.join(build_dir, '../../chrome', VERSION_FILE), 'r'):
++  for line in open(os.path.join(build_dir, '../../chromium/chrome', VERSION_FILE), 'r'):
+     line = line.rstrip()
+     if line.startswith('MAJOR='):
+       major = line[6:]
+@@ -65,6 +67,16 @@ def BuildVersion(build_dir):
+       build = line[6:]
+     elif line.startswith('PATCH='):
+       patch = line[6:]
++  if vivaldi_version and vivaldi_build_version:
++    for line in open(os.path.join(build_dir, '../../VIVALDI_VERSION'), 'r'):
++      line = line.rstrip()
++      if line.startswith('VIVALDI_MAJOR='):
++        major = line[14:]
++      elif line.startswith('VIVALDI_MINOR='):
++        minor = line[14:]
++      elif line.startswith('VIVALDI_NIGHTLY='):
++        build = line[16:]
++    patch = vivaldi_build_version
+   return '%s.%s.%s.%s' % (major, minor, build, patch)
+ 
+ 
+@@ -89,9 +101,14 @@ def CompressUsingLZMA(build_dir, compressed_file, input_file, verbose):
+           '-mb0s2:3',
+           os.path.abspath(compressed_file),
+           os.path.abspath(input_file),]
++  def retry(exit_code):
++    if exit_code != 8:
++      return None
++    raise LZMA_OOM("Out of memory during compression")
++
+   if os.path.exists(compressed_file):
+     os.remove(compressed_file)
+-  RunSystemCommand(cmd, verbose)
++  RunSystemCommand(cmd, verbose, retry_fun = retry)
+ 
+ 
+ def CopyAllFilesToStagingDir(config, distribution, staging_dir, build_dir,
+@@ -122,14 +139,65 @@ def CopySectionFilesToStagingDir(config, section, staging_dir, src_dir):
+     dst_dir = os.path.join(staging_dir, config.get(section, option))
+     dst_dir = dst_dir.replace('\\', os.sep)
+     src_paths = glob.glob(os.path.join(src_dir, option))
+-    if src_paths and not os.path.exists(dst_dir):
++    if src_paths and not os.path.exists(dst_dir) and (len(src_paths) != 1 or not os.path.isdir(src_paths[0])):
+       os.makedirs(dst_dir)
+     for src_path in src_paths:
++      if os.path.isdir(src_path):
++        for root, dirs, files in os.walk(src_path):
++          for f in files:
++            g_archive_inputs.append(os.path.join(root, f))
++        shutil.copytree(src_path, dst_dir)
++        continue
+       dst_path = os.path.join(dst_dir, os.path.basename(src_path))
+       if not os.path.exists(dst_path):
+         g_archive_inputs.append(src_path)
+         shutil.copy(src_path, dst_dir)
+ 
++def SignTarget(target):
++  if not (os.environ.get("VIVALDI_SIGN_EXECUTABLE", None) and
++	  os.environ.get("VIVALDI_SIGNING_KEY", None)):
++    return;
++  if target.rpartition(".")[-1].lower() not in ["dll", "exe"]:
++    return
++
++  print "Starting Signing of", target
++  signcommand = ([os.environ.get("VIVALDI_SIGN_EXECUTABLE"),
++      "sign",
++      "/v",
++    ] +
++    os.environ.get("VIVALDI_SIGNING_KEY").split()+
++    [
++      target # target file
++    ])
++
++  ret = subprocess.call(signcommand)
++  if ret != 0:
++    raise Exception("Signing %s failed", target)
++
++def SignTargets(config, distribution, staging_dir,enable_hidpi):
++  if (os.environ.get("VIVALDI_SIGN_EXECUTABLE", None) and
++	  os.environ.get("VIVALDI_SIGNING_KEY", None)):
++
++    print "Start Signing"
++    sections = ['GENERAL']
++    if distribution:
++      if len(distribution) > 1 and distribution[0] == '_':
++        distribution = distribution[1:]
++      sections.append(distribution.upper())
++    if enable_hidpi == '1':
++      sections.append('HIDPI')
++
++    for section in sections:
++      for option in config.options(section):
++        if option.endswith('dir'):
++          continue
++
++        src_dir = os.path.join(staging_dir, config.get(section, option))
++        src_paths = glob.glob(os.path.join(src_dir, option))
++        for target in src_paths:
++          SignTarget(target)
++    print "Completed signing"
++
+ def GenerateDiffPatch(options, orig_file, new_file, patch_file):
+   if (options.diff_algorithm == "COURGETTE"):
+     exe_file = os.path.join(options.last_chrome_installer, COURGETTE_EXEC)
+@@ -141,10 +209,11 @@ def GenerateDiffPatch(options, orig_file, new_file, patch_file):
+ 
+ def GetLZMAExec(build_dir):
+   if sys.platform == 'win32':
+-    lzma_exec = os.path.join(build_dir, "..", "..", "third_party",
++    lzma_exec = os.path.join(build_dir, "..", "..",  "chromium", "third_party",
+                              "lzma_sdk", "Executable", "7za.exe")
+   else:
+     lzma_exec = '7za'  # Use system 7za.
++
+   return lzma_exec
+ 
+ def GetPrevVersion(build_dir, temp_dir, last_chrome_installer, output_name):
+@@ -158,9 +227,9 @@ def GetPrevVersion(build_dir, temp_dir, last_chrome_installer, output_name):
+          'x',
+          '-o"%s"' % temp_dir,
+          prev_archive_file,
+-         'Chrome-bin/*/chrome.dll',]
++         'Chrome-bin/*/vivaldi.dll',]
+   RunSystemCommand(cmd, options.verbose)
+-  dll_path = glob.glob(os.path.join(temp_dir, 'Chrome-bin', '*', 'chrome.dll'))
++  dll_path = glob.glob(os.path.join(temp_dir, 'Chrome-bin', '*', 'vivaldi.dll'))
+   return os.path.split(os.path.split(dll_path[0])[0])[1]
+ 
+ def MakeStagingDirectory(staging_dir):
+@@ -185,7 +254,7 @@ def Readconfig(input_file, current_version):
+   config.read(input_file)
+   return config
+ 
+-def RunSystemCommand(cmd, verbose):
++def RunSystemCommand(cmd, verbose, retry_fun=None, **kw):
+   """Runs |cmd|, prints the |cmd| and its output if |verbose|; otherwise
+   captures its output and only emits it on failure.
+   """
+@@ -195,7 +264,7 @@ def RunSystemCommand(cmd, verbose):
+   try:
+     # Run |cmd|, redirecting stderr to stdout in order for captured errors to be
+     # inline with corresponding stdout.
+-    output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
++    output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, **kw)
+     if verbose:
+       print output
+   except subprocess.CalledProcessError as e:
+@@ -296,8 +365,11 @@ def CreateArchiveFile(options, staging_dir, current_version, prev_version):
+ 
+   compressed_archive_file_path = os.path.join(options.output_dir,
+                                               compressed_archive_file)
+-  CompressUsingLZMA(options.build_dir, compressed_archive_file_path, orig_file,
+-                    options.verbose)
++  try:
++    CompressUsingLZMA(options.build_dir, compressed_archive_file_path, orig_file,
++                      options.verbose)
++  except LZMA_OOM:
++    return os.path.basename(orig_file)
+ 
+   return compressed_archive_file
+ 
+@@ -306,6 +378,7 @@ def PrepareSetupExec(options, current_version, prev_version):
+   """Prepares setup.exe for bundling in mini_installer based on options."""
+   if options.setup_exe_format == "FULL":
+     setup_file = SETUP_EXEC
++    SignTarget(SETUP_EXEC)
+   elif options.setup_exe_format == "DIFF":
+     if not options.last_chrome_installer:
+       raise Exception(
+@@ -318,9 +391,11 @@ def PrepareSetupExec(options, current_version, prev_version):
+     setup_file = SETUP_PATCH_FILE_PREFIX + '_' + current_version + \
+                  '_from_' + prev_version + COMPRESSED_FILE_EXT
+     setup_file_path = os.path.join(options.build_dir, setup_file)
++    SignTarget(setup_file_path)
+     CompressUsingLZMA(options.build_dir, setup_file_path, patch_file,
+                       options.verbose)
+   else:
++    SignTarget(os.path.join(options.build_dir, SETUP_EXEC))
+     cmd = ['makecab.exe',
+            '/D', 'CompressionType=LZX',
+            '/V1',
+@@ -328,6 +403,7 @@ def PrepareSetupExec(options, current_version, prev_version):
+            os.path.join(options.build_dir, SETUP_EXEC),]
+     RunSystemCommand(cmd, options.verbose)
+     setup_file = SETUP_EXEC[:-1] + "_"
++
+   return setup_file
+ 
+ 
+@@ -527,7 +603,7 @@ def main(options):
+   """Main method that reads input file, creates archive file and writes
+   resource input file.
+   """
+-  current_version = BuildVersion(options.build_dir)
++  current_version = BuildVersion(options.build_dir, vivaldi_version=options.vivaldi_version, vivaldi_build_version= options.vivaldi_build_version)
+ 
+   config = Readconfig(options.input_file, current_version)
+ 
+@@ -550,6 +626,11 @@ def main(options):
+                            staging_dir, options.build_dir,
+                            options.enable_hidpi)
+ 
++  if options.sign_executables:
++    SignTargets(config, options.distribution,
++                             staging_dir,
++                             options.enable_hidpi)
++
+   if options.component_build == '1':
+     DoComponentBuildTasks(staging_dir, options.build_dir,
+                           options.target_arch, options.setup_runtime_deps,
+@@ -605,7 +686,7 @@ def _ParseOptions():
+   parser.add_option('-a', '--diff_algorithm', default='BSDIFF',
+       help='Diff algorithm to use when generating differential patches '
+            '{BSDIFF|COURGETTE}.')
+-  parser.add_option('-n', '--output_name', default='chrome',
++  parser.add_option('-n', '--output_name', default='vivaldi',
+       help='Name used to prefix names of generated archives.')
+   parser.add_option('--enable_hidpi', default='0',
+       help='Whether to include HiDPI resource files.')
+@@ -628,6 +709,11 @@ def _ParseOptions():
+            'with the installer archive {x86|x64}.')
+   parser.add_option('-v', '--verbose', action='store_true', dest='verbose',
+                     default=False)
++  #Vivaldi specific options
++  parser.add_option('--sign-executables', action='store_true',
++      help='Whether to sign the executables being archived first')
++  parser.add_option('--vivaldi-version', action="store_true")
++  parser.add_option('--vivaldi-build-version', default="", type="str")
+ 
+   options, _ = parser.parse_args()
+   if not options.build_dir:
+diff --git a/chrome/tools/build/win/syzygy/BUILD.gn b/chrome/tools/build/win/syzygy/BUILD.gn
+index 08139f1bb3f592bbc4d3f59d6825b9aff6240655..33fe2e2ffcb3b3a6ed94346b27f5b4b6b251b7aa 100644
+--- a/chrome/tools/build/win/syzygy/BUILD.gn
++++ b/chrome/tools/build/win/syzygy/BUILD.gn
+@@ -49,7 +49,7 @@ if (is_syzyasan) {
+       # Copies the uninstrumented chrome_child.dll.
+       copy("chrome_child_dll_syzygy_copy") {
+         sources = [
+-          "$root_out_dir/chrome_child.dll",
++          "$root_out_dir/vivaldi_child.dll",
+         ]
+         outputs = [
+           "$syzygy_dest_dir/{{source_file_part}}",
+diff --git a/chrome/utility/importer/bookmark_html_reader.cc b/chrome/utility/importer/bookmark_html_reader.cc
+index ae39a99ef3a776bed8ba413e5d0a4d579e7fb0e4..4f11fbe7b79beacbbbeb4e29dc17d21634fa93a1 100644
+--- a/chrome/utility/importer/bookmark_html_reader.cc
++++ b/chrome/utility/importer/bookmark_html_reader.cc
+@@ -119,6 +119,7 @@ void ImportBookmarksFile(
+ 
+   base::string16 last_folder;
+   bool last_folder_on_toolbar = false;
++  bool last_folder_speeddial = false;
+   bool last_folder_is_empty = true;
+   bool has_subfolder = false;
+   bool has_last_folder = false;
+@@ -153,6 +154,7 @@ void ImportBookmarksFile(
+                                           charset,
+                                           &last_folder,
+                                           &last_folder_on_toolbar,
++                                          &last_folder_speeddial,
+                                           &last_folder_add_date)) {
+       has_last_folder = true;
+       continue;
+@@ -202,6 +204,7 @@ void ImportBookmarksFile(
+       entry.creation_time = add_date;
+       entry.url = url;
+       entry.title = title;
++      entry.speeddial = last_folder_speeddial;
+ 
+       if (toolbar_folder_index) {
+         // The toolbar folder should be at the top level.
+@@ -216,6 +219,7 @@ void ImportBookmarksFile(
+         }
+         entry.path.assign(path.begin(), path.end());
+       }
++
+       bookmarks->push_back(entry);
+ 
+       // Save the favicon. DataURLToFaviconUsage will handle the case where
+@@ -250,6 +254,7 @@ void ImportBookmarksFile(
+       if (last_folder_is_empty) {
+         // Empty folder should be added explicitly.
+         ImportedBookmarkEntry entry;
++        entry.speeddial = last_folder_speeddial;
+         entry.is_folder = true;
+         entry.creation_time = last_folder_add_date;
+         entry.title = folder_title;
+@@ -321,11 +326,13 @@ bool ParseFolderNameFromLine(const std::string& lineDt,
+                              const std::string& charset,
+                              base::string16* folder_name,
+                              bool* is_toolbar_folder,
++                             bool* is_speeddial_folder,
+                              base::Time* add_date) {
+   const char kFolderOpen[] = "<H3";
+   const char kFolderClose[] = "</H3>";
+   const char kToolbarFolderAttribute[] = "PERSONAL_TOOLBAR_FOLDER";
+   const char kAddDateAttribute[] = "ADD_DATE";
++  const char kSpeedDialAttribute[] = "SPEEDDIAL";
+ 
+   std::string line = stripDt(lineDt);
+ 
+@@ -361,6 +368,12 @@ bool ParseFolderNameFromLine(const std::string& lineDt,
+   else
+     *is_toolbar_folder = false;
+ 
++  if (GetAttribute(attribute_list, kSpeedDialAttribute, &value) &&
++    base::LowerCaseEqualsASCII(value, "true"))
++    *is_speeddial_folder = true;
++  else
++    *is_speeddial_folder = false;
++
+   return true;
+ }
+ 
+diff --git a/chrome/utility/importer/bookmark_html_reader.h b/chrome/utility/importer/bookmark_html_reader.h
+index 8150347cefd0bc7cf6cccbce838ad8aae717c9f8..046a74c86a26e49fbf83065d759e331e36f98b7f 100644
+--- a/chrome/utility/importer/bookmark_html_reader.h
++++ b/chrome/utility/importer/bookmark_html_reader.h
+@@ -76,6 +76,7 @@ bool ParseFolderNameFromLine(const std::string& line,
+                              const std::string& charset,
+                              base::string16* folder_name,
+                              bool* is_toolbar_folder,
++                             bool* is_speeddial_folder,
+                              base::Time* add_date);
+ // See above, this will also put the data: URL of the favicon into |*favicon|
+ // if there is a favicon given. |post_data| is set for POST base keywords to
+diff --git a/chrome/utility/importer/bookmark_html_reader_unittest.cc b/chrome/utility/importer/bookmark_html_reader_unittest.cc
+index 2b6d8db7221a9f2c3fa64472f2cc3856e88df613..2b92a010e0b76a0a966cb1cf141ad16eb564e969 100644
+--- a/chrome/utility/importer/bookmark_html_reader_unittest.cc
++++ b/chrome/utility/importer/bookmark_html_reader_unittest.cc
+@@ -39,23 +39,26 @@ TEST(BookmarkHTMLReaderTest, ParseTests) {
+   // Escaped characters in name.
+   base::string16 folder_name;
+   bool is_toolbar_folder;
++  bool is_speeddial_folder;
+   base::Time folder_add_date;
+   result = internal::ParseFolderNameFromLine(
+       "<DT><H3 ADD_DATE=\"1207558707\" >&lt; &gt;"
+       " &amp; &quot; &#39; \\ /</H3>",
+-      charset, &folder_name, &is_toolbar_folder, &folder_add_date);
++      charset, &folder_name, &is_toolbar_folder, &is_speeddial_folder, &folder_add_date);
+   EXPECT_TRUE(result);
+   EXPECT_EQ(ASCIIToUTF16("< > & \" ' \\ /"), folder_name);
+   EXPECT_FALSE(is_toolbar_folder);
++  EXPECT_FALSE(is_speeddial_folder);
+   EXPECT_TRUE(base::Time::FromTimeT(1207558707) == folder_add_date);
+ 
+   // Empty name and toolbar folder attribute.
+   result = internal::ParseFolderNameFromLine(
+       "<DT><H3 PERSONAL_TOOLBAR_FOLDER=\"true\"></H3>",
+-      charset, &folder_name, &is_toolbar_folder, &folder_add_date);
++      charset, &folder_name, &is_toolbar_folder, &is_speeddial_folder, &folder_add_date);
+   EXPECT_TRUE(result);
+   EXPECT_EQ(base::string16(), folder_name);
+   EXPECT_TRUE(is_toolbar_folder);
++  EXPECT_FALSE(is_speeddial_folder);
+ 
+   // Unicode characters in title and shortcut.
+   base::string16 title;
+diff --git a/chrome/utility/importer/external_process_importer_bridge.cc b/chrome/utility/importer/external_process_importer_bridge.cc
+index 38a8e7a41bf771a59fdb3d227243b88c5b85b8d0..71d0ab5a7070c7f77847db54178667a498a0f909 100644
+--- a/chrome/utility/importer/external_process_importer_bridge.cc
++++ b/chrome/utility/importer/external_process_importer_bridge.cc
+@@ -19,6 +19,9 @@
+ 
+ using chrome::mojom::ProfileImportObserver;
+ 
++#include "importer/viv_importer.h"
++#include "importer/vivaldi_profile_import_process_messages.h"
++
+ namespace {
+ 
+ // Rather than sending all import items over IPC at once we chunk them into
+@@ -27,7 +30,9 @@ namespace {
+ const int kNumBookmarksToSend = 100;
+ const int kNumHistoryRowsToSend = 100;
+ const int kNumFaviconsToSend = 100;
++const int kNumNotesToSend = 10;
+ const int kNumAutofillFormDataToSend = 100;
++const int kNumSpeedDialToSend = 100;
+ 
+ } // namespace
+ 
+@@ -63,6 +68,52 @@ void ExternalProcessImporterBridge::AddBookmarks(
+   DCHECK_EQ(0, bookmarks_left);
+ }
+ 
++void ExternalProcessImporterBridge::AddNotes(
++      const std::vector<ImportedNotesEntry>& notes,
++      const base::string16& first_folder_name)
++{
++  (*observer_)->OnNotesImportStart(first_folder_name, notes.size());
++
++  // |notes_left| is required for the checks below as Windows has a
++  // Debug bounds-check which prevents pushing an iterator beyond its end()
++  // (i.e., |it + 2 < s.end()| crashes in debug mode if |i + 1 == s.end()|).
++  int notes_left = notes.end() - notes.begin();
++  for (std::vector<ImportedNotesEntry>::const_iterator it =
++           notes.begin(); it < notes.end();) {
++    std::vector<ImportedNotesEntry> notes_group;
++    std::vector<ImportedNotesEntry>::const_iterator end_group =
++        it + std::min(notes_left, kNumNotesToSend);
++    notes_group.assign(it, end_group);
++
++    (*observer_)->OnNotesImportGroup(notes_group);
++    notes_left -= end_group - it;
++    it = end_group;
++  }
++  DCHECK_EQ(0, notes_left);
++}
++
++void ExternalProcessImporterBridge::AddSpeedDial(
++    const std::vector<ImportedSpeedDialEntry>& speeddials) {
++  (*observer_)->OnSpeedDialImportStart(speeddials.size());
++
++  // |sd_left| is required for the checks below as Windows has a
++  // Debug bounds-check which prevents pushing an iterator beyond its end()
++  // (i.e., |it + 2 < s.end()| crashes in debug mode if |i + 1 == s.end()|).
++  int sd_left = speeddials.end() - speeddials.begin();
++  for (std::vector<ImportedSpeedDialEntry>::const_iterator it =
++           speeddials.begin(); it < speeddials.end();) {
++    std::vector<ImportedSpeedDialEntry> sd_group;
++    std::vector<ImportedSpeedDialEntry>::const_iterator end_group =
++        it + std::min(sd_left, kNumSpeedDialToSend);
++    sd_group.assign(it, end_group);
++
++    (*observer_)->OnSpeedDialImportGroup(sd_group);
++    sd_left -= end_group - it;
++    it = end_group;
++  }
++  DCHECK_EQ(0, sd_left);
++}
++
+ void ExternalProcessImporterBridge::AddHomePage(const GURL& home_page) {
+   (*observer_)->OnHomePageImportReady(home_page);
+ }
+@@ -173,6 +224,11 @@ void ExternalProcessImporterBridge::NotifyItemEnded(importer::ImportItem item) {
+   (*observer_)->OnImportItemFinished(item);
+ }
+ 
++void ExternalProcessImporterBridge::NotifyItemFailed(importer::ImportItem item,
++                                                     const std::string& error) {
++  (*observer_)->OnImportItemFailed(item, error);
++}
++
+ void ExternalProcessImporterBridge::NotifyEnded() {
+   (*observer_)->OnImportFinished(true, std::string());
+ }
+diff --git a/chrome/utility/importer/external_process_importer_bridge.h b/chrome/utility/importer/external_process_importer_bridge.h
+index 7e05c4e04f8e61b418d373a73bd8901347df4c76..5a106ec4f2d0c1a3800fbf4eff8b1bd9d48973d2 100644
+--- a/chrome/utility/importer/external_process_importer_bridge.h
++++ b/chrome/utility/importer/external_process_importer_bridge.h
+@@ -52,6 +52,13 @@ class ExternalProcessImporterBridge : public ImporterBridge {
+   void AddBookmarks(const std::vector<ImportedBookmarkEntry>& bookmarks,
+                     const base::string16& first_folder_name) override;
+ 
++  void AddNotes(
++      const std::vector<ImportedNotesEntry>& notes,
++      const base::string16& first_folder_name) override;
++
++  void AddSpeedDial(
++      const std::vector<ImportedSpeedDialEntry>& speeddials) override;
++
+   void AddHomePage(const GURL& home_page) override;
+ 
+ #if defined(OS_WIN)
+@@ -80,6 +87,8 @@ class ExternalProcessImporterBridge : public ImporterBridge {
+   void NotifyItemStarted(importer::ImportItem item) override;
+   void NotifyItemEnded(importer::ImportItem item) override;
+   void NotifyEnded() override;
++  void NotifyItemFailed(importer::ImportItem item,
++                        const std::string& error) override;
+ 
+   base::string16 GetLocalizedString(int message_id) override;
+   // End ImporterBridge implementation.
+diff --git a/chrome/utility/importer/importer_creator.cc b/chrome/utility/importer/importer_creator.cc
+index 2bef627aa890484a3fb75fa9bd04b2994f997305..6c63a6a38b69ccbb664701d8d5ed85a1f111368b 100644
+--- a/chrome/utility/importer/importer_creator.cc
++++ b/chrome/utility/importer/importer_creator.cc
+@@ -22,9 +22,13 @@
+ #include "chrome/utility/importer/safari_importer.h"
+ #endif
+ 
++#include "importer/chromium_importer.h"
++#include "importer/viv_importer.h"
++
+ namespace importer {
+ 
+-scoped_refptr<Importer> CreateImporterByType(ImporterType type) {
++scoped_refptr<Importer> CreateImporterByType(ImporterType type,
++       const ImportConfig &import_config) {
+   switch (type) {
+ #if defined(OS_WIN)
+     case TYPE_IE:
+@@ -43,6 +47,18 @@ scoped_refptr<Importer> CreateImporterByType(ImporterType type) {
+     case TYPE_SAFARI:
+       return new SafariImporter(base::mac::GetUserLibraryPath());
+ #endif
++    case TYPE_OPERA:
++      return new OperaImporter(import_config);
++    case TYPE_OPERA_BOOKMARK_FILE:
++      return new OperaImporter(import_config);
++    case TYPE_CHROME:
++    case TYPE_CHROMIUM:
++    case TYPE_YANDEX:
++    case TYPE_OPERA_OPIUM:
++    case TYPE_OPERA_OPIUM_BETA:
++    case TYPE_OPERA_OPIUM_DEV:
++    case TYPE_VIVALDI:
++      return new ChromiumImporter(import_config);
+     default:
+       NOTREACHED();
+       return nullptr;
+diff --git a/chrome/utility/importer/importer_creator.h b/chrome/utility/importer/importer_creator.h
+index dc61cd1b4f3d3832b91a2e62595ebc3d9fe43029..11aa6acc351bd6b6c7c67c638365a4e7f6667d4d 100644
+--- a/chrome/utility/importer/importer_creator.h
++++ b/chrome/utility/importer/importer_creator.h
+@@ -11,9 +11,10 @@
+ class Importer;
+ 
+ namespace importer {
++struct ImportConfig;
+ 
+ // Creates an Importer of the specified |type|.
+-scoped_refptr<Importer> CreateImporterByType(ImporterType type);
++scoped_refptr<Importer> CreateImporterByType(ImporterType type, const ImportConfig &import_config);
+ 
+ }  // namespace importer
+ 
+diff --git a/chrome/utility/importer/profile_import_impl.cc b/chrome/utility/importer/profile_import_impl.cc
+index 97fafc01166bbc7fbc94f6038f925ed4dedc3c2e..8540e445e5fdd2ab0b5c04b858764025c6aa6a97 100644
+--- a/chrome/utility/importer/profile_import_impl.cc
++++ b/chrome/utility/importer/profile_import_impl.cc
+@@ -28,17 +28,18 @@ ProfileImportImpl::~ProfileImportImpl() {}
+ 
+ void ProfileImportImpl::StartImport(
+     const importer::SourceProfile& source_profile,
+-    uint16_t items,
++    const importer::ImportConfig& import_config,
+     std::unique_ptr<base::DictionaryValue> localized_strings,
+     chrome::mojom::ProfileImportObserverPtr observer) {
+   content::UtilityThread::Get()->EnsureBlinkInitialized();
+-  importer_ = importer::CreateImporterByType(source_profile.importer_type);
++  importer_ = importer::CreateImporterByType(source_profile.importer_type,
++                                             import_config);
+   if (!importer_.get()) {
+     observer->OnImportFinished(false, "Importer could not be created.");
+     return;
+   }
+ 
+-  items_to_import_ = items;
++  items_to_import_ = import_config.imported_items;
+ 
+   // Create worker thread in which importer runs.
+   import_thread_.reset(new base::Thread("import_thread"));
+@@ -54,7 +55,8 @@ void ProfileImportImpl::StartImport(
+       ThreadSafeProfileImportObserverPtr::Create(std::move(observer)));
+   import_thread_->task_runner()->PostTask(
+       FROM_HERE,
+-      base::BindOnce(&Importer::StartImport, importer_, source_profile, items,
++      base::BindOnce(&Importer::StartImport, importer_, source_profile,
++                     import_config.imported_items,
+                      base::RetainedRef(bridge_)));
+ }
+ 
+diff --git a/chrome/utility/importer/profile_import_impl.h b/chrome/utility/importer/profile_import_impl.h
+index 4fb2499aa536d3618df2bbc4072fb23420f42c2e..f9be141382e5d6ae994bee56ab75f335300b8466 100644
+--- a/chrome/utility/importer/profile_import_impl.h
++++ b/chrome/utility/importer/profile_import_impl.h
+@@ -26,6 +26,7 @@ class Thread;
+ 
+ namespace importer {
+ struct SourceProfile;
++struct ImportConfig;
+ }
+ 
+ class ProfileImportImpl : public chrome::mojom::ProfileImport {
+@@ -37,7 +38,7 @@ class ProfileImportImpl : public chrome::mojom::ProfileImport {
+  private:
+   // chrome::mojom::ProfileImport:
+   void StartImport(const importer::SourceProfile& source_profile,
+-                   uint16_t items,
++                   const importer::ImportConfig& import_config,
+                    std::unique_ptr<base::DictionaryValue> localized_strings,
+                    chrome::mojom::ProfileImportObserverPtr observer) override;
+   void CancelImport() override;
