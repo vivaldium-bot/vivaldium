@@ -1,8 +1,37 @@
+diff --git a/components/autofill/content/browser/content_autofill_driver.cc b/components/autofill/content/browser/content_autofill_driver.cc
+index e7ce37455adb9c43afe8dcd281401f2763962924..d34d02054e4416a36f5c711900a137d119e550c6 100644
+--- a/components/autofill/content/browser/content_autofill_driver.cc
++++ b/components/autofill/content/browser/content_autofill_driver.cc
+@@ -27,6 +27,9 @@
+ #include "services/service_manager/public/cpp/interface_provider.h"
+ #include "ui/gfx/geometry/size_f.h"
+ 
++#include "app/vivaldi_apptools.h"
++#include "content/public/browser/guest_mode.h"
++
+ namespace autofill {
+ 
+ ContentAutofillDriver::ContentAutofillDriver(
+@@ -162,6 +165,14 @@ void ContentAutofillDriver::PopupHidden() {
+ 
+ gfx::RectF ContentAutofillDriver::TransformBoundingBoxToViewportCoordinates(
+     const gfx::RectF& bounding_box) {
++  if (vivaldi::IsVivaldiRunning()) {
++    // Same code in ContentPasswordManagerDriver::TransformToRootCoordinates
++    // Both should be in sync.
++    if (!content::GuestMode::IsCrossProcessFrameGuest(
++        content::WebContents::FromRenderFrameHost(render_frame_host_))) {
++      return bounding_box;
++    }
++  }
+   content::RenderWidgetHostView* view = render_frame_host_->GetView();
+   if (!view)
+     return bounding_box;
 diff --git a/components/autofill/content/renderer/autofill_agent.cc b/components/autofill/content/renderer/autofill_agent.cc
-index 2395f19d53d2e14e3c961452adebf654bb22bca7..1c46cc9d34ae3fbf0319daaf7ab1af9b39488e6c 100644
+index 726783400394a22bf8b6aa2ca53a8f582c0c37bb..cef161b7efc7c01572ecb98a528cc09a6c864613 100644
 --- a/components/autofill/content/renderer/autofill_agent.cc
 +++ b/components/autofill/content/renderer/autofill_agent.cc
-@@ -295,7 +295,6 @@ void AutofillAgent::FireHostSubmitEvents(const FormData& form_data,
+@@ -329,7 +329,6 @@ void AutofillAgent::FireHostSubmitEvents(const FormData& form_data,
  }
  
  void AutofillAgent::Shutdown() {
@@ -11,10 +40,10 @@ index 2395f19d53d2e14e3c961452adebf654bb22bca7..1c46cc9d34ae3fbf0319daaf7ab1af9b
  }
  
 diff --git a/components/autofill/core/browser/personal_data_manager.cc b/components/autofill/core/browser/personal_data_manager.cc
-index f2af614cd3cb24011290a78eda5469bf939f59dd..654a75707bc23e144430d796593082f22016bd3b 100644
+index 302334a550e476335f2c43384cb7f3a898575ea2..12f43e66d1fac43470c4ba6c5b6a0f7c042744a3 100644
 --- a/components/autofill/core/browser/personal_data_manager.cc
 +++ b/components/autofill/core/browser/personal_data_manager.cc
-@@ -1154,9 +1154,16 @@ const std::string& PersonalDataManager::GetDefaultCountryCodeForNewAddress()
+@@ -1237,9 +1237,16 @@ const std::string& PersonalDataManager::GetDefaultCountryCodeForNewAddress()
    if (default_country_code_.empty())
      default_country_code_ = MostCommonCountryCodeFromProfiles();
  
@@ -32,7 +61,7 @@ index f2af614cd3cb24011290a78eda5469bf939f59dd..654a75707bc23e144430d796593082f2
    // Failing that, guess based on locale.
    if (default_country_code_.empty())
 diff --git a/components/bookmarks/browser/bookmark_codec.cc b/components/bookmarks/browser/bookmark_codec.cc
-index 830c55150c2b78a0b49dc2b11c7900d0a2811c39..ed4e3c11c4aa6891f3558cef843dce4eb8071dae 100644
+index 75735b9bb7ca6777879db65654f1046341acbe12..c80b53cb3f6cc7d8b58e633df1f88204a7dca5c1 100644
 --- a/components/bookmarks/browser/bookmark_codec.cc
 +++ b/components/bookmarks/browser/bookmark_codec.cc
 @@ -19,6 +19,8 @@
@@ -210,7 +239,7 @@ index 313729ef96d8a2bc23826c13ea26c586e45c501e..db954175e5cb382f3246e0b675d1d340
    // Helper to recursively reassign IDs.
    void ReassignIDsHelper(BookmarkNode* node);
 diff --git a/components/bookmarks/browser/bookmark_codec_unittest.cc b/components/bookmarks/browser/bookmark_codec_unittest.cc
-index a9d8523658af4b1be46f21c10d379bb6aecca74d..03e576ac6f2a04dcb58938b86e61219131953708 100644
+index ff14a3f78c515ab03b861f47ca0fe344f29a4fe4..bf289cc4b36718a28fb5524ed9cd9ac5360ea873 100644
 --- a/components/bookmarks/browser/bookmark_codec_unittest.cc
 +++ b/components/bookmarks/browser/bookmark_codec_unittest.cc
 @@ -171,6 +171,7 @@ class BookmarkCodecTest : public testing::Test {
@@ -222,7 +251,7 @@ index a9d8523658af4b1be46f21c10d379bb6aecca74d..03e576ac6f2a04dcb58938b86e612191
                                  value);
      model->set_next_node_id(max_id);
 diff --git a/components/bookmarks/browser/bookmark_model.cc b/components/bookmarks/browser/bookmark_model.cc
-index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20ad7a481d 100644
+index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa9617f30cb6 100644
 --- a/components/bookmarks/browser/bookmark_model.cc
 +++ b/components/bookmarks/browser/bookmark_model.cc
 @@ -31,6 +31,10 @@
@@ -237,14 +266,14 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
  
  namespace bookmarks {
 @@ -117,6 +121,7 @@ BookmarkModel::BookmarkModel(std::unique_ptr<BookmarkClient> client)
-       bookmark_bar_node_(NULL),
-       other_node_(NULL),
-       mobile_node_(NULL),
-+      trash_node_(NULL),
+       bookmark_bar_node_(nullptr),
+       other_node_(nullptr),
+       mobile_node_(nullptr),
++      trash_node_(nullptr),
        next_node_id_(1),
-       observers_(
-           base::ObserverList<BookmarkModelObserver>::NOTIFY_EXISTING_ONLY),
-@@ -410,6 +415,9 @@ void BookmarkModel::SetNodeMetaInfo(const BookmarkNode* node,
+       observers_(base::ObserverListPolicy::EXISTING_ONLY),
+       loaded_signal_(base::WaitableEvent::ResetPolicy::MANUAL,
+@@ -412,6 +417,9 @@ void BookmarkModel::SetNodeMetaInfo(const BookmarkNode* node,
  
    for (BookmarkModelObserver& observer : observers_)
      observer.BookmarkMetaInfoChanged(this, node);
@@ -254,7 +283,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
  }
  
  void BookmarkModel::SetNodeMetaInfoMap(
-@@ -572,16 +580,32 @@ void BookmarkModel::BlockTillLoaded() {
+@@ -579,16 +587,32 @@ void BookmarkModel::BlockTillLoaded() {
    loaded_signal_.Wait();
  }
  
@@ -270,12 +299,12 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
  const BookmarkNode* BookmarkModel::AddFolder(const BookmarkNode* parent,
                                               int index,
 -                                             const base::string16& title) {
--  return AddFolderWithMetaInfo(parent, index, title, NULL);
+-  return AddFolderWithMetaInfo(parent, index, title, nullptr);
 +                                             const base::string16& title,
 +                                             const base::string16& nickname,
 +                                             const base::string16& description,
 +                                             bool speeddial) {
-+  return AddFolderWithMetaInfo(parent, index, title, NULL, nickname, description, speeddial);
++  return AddFolderWithMetaInfo(parent, index, title, nullptr, nickname, description, speeddial);
  }
 +
  const BookmarkNode* BookmarkModel::AddFolderWithMetaInfo(
@@ -293,7 +322,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
    if (!loaded_ || is_root_node(parent) || !IsValidIndex(parent, index, true)) {
      // Can't add to the root.
      NOTREACHED();
-@@ -592,25 +616,65 @@ const BookmarkNode* BookmarkModel::AddFolderWithMetaInfo(
+@@ -599,20 +623,65 @@ const BookmarkNode* BookmarkModel::AddFolderWithMetaInfo(
        base::MakeUnique<BookmarkNode>(generate_next_node_id(), GURL());
    new_node->set_date_folder_modified(Time::Now());
    // Folders shouldn't have line breaks in their titles.
@@ -335,13 +364,8 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
                                            int index,
                                            const base::string16& title,
                                            const GURL& url) {
--  return AddURLWithCreationTimeAndMetaInfo(
--      parent,
--      index,
--      title,
--      url,
--      Time::Now(),
--      NULL);
+-  return AddURLWithCreationTimeAndMetaInfo(parent, index, title, url,
+-                                           Time::Now(), nullptr);
 +  return vivAddURL(parent, index, title, url, base::UTF8ToUTF16(""),
 +                   base::UTF8ToUTF16(""), base::UTF8ToUTF16(""), false);
 +}
@@ -358,7 +382,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
 +  return AddURLWithCreationTimeAndMetaInfo(parent, index,
 +                                title,
 +                                url, Time::Now(),
-+                                NULL,
++                                nullptr,
 +                                nickname,
 +                                description,
 +                                thumbnail,
@@ -367,7 +391,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
  }
  
  const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
-@@ -619,7 +683,12 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
+@@ -621,7 +690,12 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
      const base::string16& title,
      const GURL& url,
      const Time& creation_time,
@@ -381,7 +405,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
    if (!loaded_ || !url.is_valid() || is_root_node(parent) ||
        !IsValidIndex(parent, index, true)) {
      NOTREACHED();
-@@ -638,6 +707,16 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
+@@ -640,6 +714,16 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
    if (meta_info)
      new_node->SetMetaInfoMap(*meta_info);
  
@@ -398,7 +422,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
    return AddNode(AsMutable(parent), index, std::move(new_node));
  }
  
-@@ -754,6 +833,8 @@ const BookmarkPermanentNode* BookmarkModel::PermanentNode(
+@@ -756,6 +840,8 @@ const BookmarkPermanentNode* BookmarkModel::PermanentNode(
        return other_node_;
      case BookmarkNode::MOBILE:
        return mobile_node_;
@@ -406,8 +430,8 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
 +      return trash_node_;
      default:
        NOTREACHED();
-       return NULL;
-@@ -839,11 +920,14 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
+       return nullptr;
+@@ -831,11 +917,14 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
        details->owned_other_folder_node();
    std::unique_ptr<BookmarkPermanentNode> owned_mobile_folder_node =
        details->owned_mobile_folder_node();
@@ -422,7 +446,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
  
    // Get any extra nodes and take ownership of them at the |root_|.
    std::vector<std::unique_ptr<BookmarkPermanentNode>> extra_nodes =
-@@ -861,6 +945,8 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
+@@ -848,6 +937,8 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
    root_children.push_back(std::move(owned_bb_node));
    root_children.push_back(std::move(owned_other_folder_node));
    root_children.push_back(std::move(owned_mobile_folder_node));
@@ -431,7 +455,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
    std::move(extra_nodes.begin(), extra_nodes.end(),
              std::back_inserter(root_children));
  
-@@ -1014,6 +1100,7 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
+@@ -986,6 +1077,7 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
      BookmarkNode::Type type) {
    DCHECK(type == BookmarkNode::BOOKMARK_BAR ||
           type == BookmarkNode::OTHER_NODE ||
@@ -439,7 +463,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
           type == BookmarkNode::MOBILE);
    BookmarkPermanentNode* node =
        new BookmarkPermanentNode(generate_next_node_id());
-@@ -1031,6 +1118,9 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
+@@ -1003,6 +1095,9 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
      case BookmarkNode::MOBILE:
        title_id = IDS_BOOKMARK_BAR_MOBILE_FOLDER_NAME;
        break;
@@ -449,7 +473,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
      default:
        NOTREACHED();
        title_id = IDS_BOOKMARK_BAR_FOLDER_NAME;
-@@ -1112,10 +1202,14 @@ std::unique_ptr<BookmarkLoadDetails> BookmarkModel::CreateLoadDetails() {
+@@ -1087,10 +1182,14 @@ std::unique_ptr<BookmarkLoadDetails> BookmarkModel::CreateLoadDetails() {
        CreatePermanentNode(BookmarkNode::OTHER_NODE);
    BookmarkPermanentNode* mobile_node =
        CreatePermanentNode(BookmarkNode::MOBILE);
@@ -466,7 +490,7 @@ index 689ef752d25792d6b3f3a625bdefcbce10d66ae5..7463f5faf83034e99fa6d797dce29c20
  }
  
 diff --git a/components/bookmarks/browser/bookmark_model.h b/components/bookmarks/browser/bookmark_model.h
-index 2a52eb1e2dbc54921704eb2527cf9baaeb5a61c2..dfda290ef3384254175fe1aadd12a224837107fa 100644
+index dc54a7f8ebda7036f3cd79165858c540b5287389..e390b64f8a9875f8466b9396ba5f3e326306fa65 100644
 --- a/components/bookmarks/browser/bookmark_model.h
 +++ b/components/bookmarks/browser/bookmark_model.h
 @@ -104,6 +104,9 @@ class BookmarkModel : public BookmarkUndoProvider,
@@ -479,7 +503,7 @@ index 2a52eb1e2dbc54921704eb2527cf9baaeb5a61c2..dfda290ef3384254175fe1aadd12a224
    bool is_root_node(const BookmarkNode* node) const { return node == &root_; }
  
    // Returns whether the given |node| is one of the permanent nodes - root node,
-@@ -193,17 +196,38 @@ class BookmarkModel : public BookmarkUndoProvider,
+@@ -196,17 +199,38 @@ class BookmarkModel : public BookmarkUndoProvider,
    // the main thread.
    void BlockTillLoaded();
  
@@ -520,7 +544,7 @@ index 2a52eb1e2dbc54921704eb2527cf9baaeb5a61c2..dfda290ef3384254175fe1aadd12a224
  
    // Adds a url at the specified position.
    const BookmarkNode* AddURL(const BookmarkNode* parent,
-@@ -211,6 +235,16 @@ class BookmarkModel : public BookmarkUndoProvider,
+@@ -214,6 +238,16 @@ class BookmarkModel : public BookmarkUndoProvider,
                               const base::string16& title,
                               const GURL& url);
  
@@ -537,7 +561,7 @@ index 2a52eb1e2dbc54921704eb2527cf9baaeb5a61c2..dfda290ef3384254175fe1aadd12a224
    // Adds a url with a specific creation date and meta info.
    const BookmarkNode* AddURLWithCreationTimeAndMetaInfo(
        const BookmarkNode* parent,
-@@ -218,7 +252,12 @@ class BookmarkModel : public BookmarkUndoProvider,
+@@ -221,7 +255,12 @@ class BookmarkModel : public BookmarkUndoProvider,
        const base::string16& title,
        const GURL& url,
        const base::Time& creation_time,
@@ -551,7 +575,7 @@ index 2a52eb1e2dbc54921704eb2527cf9baaeb5a61c2..dfda290ef3384254175fe1aadd12a224
  
    // Sorts the children of |parent|, notifying observers by way of the
    // BookmarkNodeChildrenReordered method.
-@@ -429,6 +468,7 @@ class BookmarkModel : public BookmarkUndoProvider,
+@@ -432,6 +471,7 @@ class BookmarkModel : public BookmarkUndoProvider,
    BookmarkPermanentNode* bookmark_bar_node_;
    BookmarkPermanentNode* other_node_;
    BookmarkPermanentNode* mobile_node_;
@@ -560,10 +584,10 @@ index 2a52eb1e2dbc54921704eb2527cf9baaeb5a61c2..dfda290ef3384254175fe1aadd12a224
    // The maximum ID assigned to the bookmark nodes in the model.
    int64_t next_node_id_;
 diff --git a/components/bookmarks/browser/bookmark_model_unittest.cc b/components/bookmarks/browser/bookmark_model_unittest.cc
-index 551999a476cf9057590be7cf28b4dc840cea957e..e02d97c83ea52a909f915ef53a7236394fd8ed65 100644
+index bb5bd4073df3cf712d7213921863dc0c15f87401..49de00f77051649b9572a9a6eb6a3689f40db694 100644
 --- a/components/bookmarks/browser/bookmark_model_unittest.cc
 +++ b/components/bookmarks/browser/bookmark_model_unittest.cc
-@@ -485,9 +485,17 @@ TEST_F(BookmarkModelTest, InitialState) {
+@@ -484,9 +484,17 @@ TEST_F(BookmarkModelTest, InitialState) {
    EXPECT_EQ(0, mobile_node->child_count());
    EXPECT_EQ(BookmarkNode::MOBILE, mobile_node->type());
  
@@ -581,7 +605,7 @@ index 551999a476cf9057590be7cf28b4dc840cea957e..e02d97c83ea52a909f915ef53a723639
  }
  
  TEST_F(BookmarkModelTest, AddURL) {
-@@ -555,9 +563,11 @@ TEST_F(BookmarkModelTest, AddURLWithCreationTimeAndMetaInfo) {
+@@ -554,9 +562,11 @@ TEST_F(BookmarkModelTest, AddURLWithCreationTimeAndMetaInfo) {
    const Time time = Time::Now() - TimeDelta::FromDays(1);
    BookmarkNode::MetaInfoMap meta_info;
    meta_info["foo"] = "bar";
@@ -592,10 +616,10 @@ index 551999a476cf9057590be7cf28b4dc840cea957e..e02d97c83ea52a909f915ef53a723639
 +      root, 0, title, url, time, &meta_info,
 +      dummy, dummy, dummy);
    AssertObserverCount(1, 0, 0, 0, 0, 0, 0, 0, 0);
-   observer_details_.ExpectEquals(root, NULL, 0, -1);
+   observer_details_.ExpectEquals(root, nullptr, 0, -1);
  
 diff --git a/components/bookmarks/browser/bookmark_node.cc b/components/bookmarks/browser/bookmark_node.cc
-index 1977fcb5efd34fe154625a94380ff8aa53fb20b6..3a90565838de1952feb04d5f891bb02ed35a926e 100644
+index 5c2522a9826e9993d279ea7f421d7be771ff2c6d..7399229f571a19f3b911f67ff21a282d3c207d0d 100644
 --- a/components/bookmarks/browser/bookmark_node.cc
 +++ b/components/bookmarks/browser/bookmark_node.cc
 @@ -10,6 +10,8 @@
@@ -742,7 +766,7 @@ index c3d26e50e15e2eddb87aabc2b22f66e8c116e60a..6a473ebba818db0f3792f33e713c7735
    // node whose type is not URL.
    bool is_folder() const { return type_ != URL; }
 diff --git a/components/bookmarks/browser/bookmark_node_data.cc b/components/bookmarks/browser/bookmark_node_data.cc
-index e634fd3c7b86f200f60a7e363a17ff0fee7e5d19..44b4f43ceff2463bfee1318ee5ff7300351e9714 100644
+index 60327e113a6cbedb2538dd5c6098b10a2f9ab8c4..f1a1b880e973f04bb3dad8a291af54303f15f57a 100644
 --- a/components/bookmarks/browser/bookmark_node_data.cc
 +++ b/components/bookmarks/browser/bookmark_node_data.cc
 @@ -27,6 +27,11 @@ BookmarkNodeData::Element::Element(const BookmarkNode* node)
@@ -813,10 +837,10 @@ index cbad37cd9a973edc67bd1bb5db029597ead83cdd..eeaf81483e4188b31556f0c89fe4e52b
      std::vector<Element> children;
  
 diff --git a/components/bookmarks/browser/bookmark_storage.cc b/components/bookmarks/browser/bookmark_storage.cc
-index ed52b77c2fb0d85a6c90dd63613b107337f6cc4c..67c2046dddf23c2557bf2c4320ff119fecd1e1fd 100644
+index c32af8af931fd3d6330a6ee675d4af1fd15edeb7..d81daa045f7c2a3560362bc901e7b330e695d922 100644
 --- a/components/bookmarks/browser/bookmark_storage.cc
 +++ b/components/bookmarks/browser/bookmark_storage.cc
-@@ -71,7 +71,8 @@ void LoadCallback(const base::FilePath& path,
+@@ -72,7 +72,8 @@ void LoadCallback(const base::FilePath& path,
        BookmarkCodec codec;
        TimeTicks start_time = TimeTicks::Now();
        codec.Decode(details->bb_node(), details->other_folder_node(),
@@ -826,7 +850,7 @@ index ed52b77c2fb0d85a6c90dd63613b107337f6cc4c..67c2046dddf23c2557bf2c4320ff119f
        details->set_max_id(std::max(max_node_id, details->max_id()));
        details->set_computed_checksum(codec.computed_checksum());
        details->set_stored_checksum(codec.stored_checksum());
-@@ -104,6 +105,8 @@ void LoadCallback(const base::FilePath& path,
+@@ -105,6 +106,8 @@ void LoadCallback(const base::FilePath& path,
      AddBookmarksToIndex(details.get(), details->bb_node());
      AddBookmarksToIndex(details.get(), details->other_folder_node());
      AddBookmarksToIndex(details.get(), details->mobile_folder_node());
@@ -835,7 +859,7 @@ index ed52b77c2fb0d85a6c90dd63613b107337f6cc4c..67c2046dddf23c2557bf2c4320ff119f
      for (size_t i = 0; i < extra_nodes.size(); ++i)
        AddBookmarksToIndex(details.get(), extra_nodes[i].get());
      UMA_HISTOGRAM_TIMES("Bookmarks.CreateBookmarkIndexTime",
-@@ -123,12 +126,14 @@ BookmarkLoadDetails::BookmarkLoadDetails(
+@@ -124,12 +127,14 @@ BookmarkLoadDetails::BookmarkLoadDetails(
      BookmarkPermanentNode* bb_node,
      BookmarkPermanentNode* other_folder_node,
      BookmarkPermanentNode* mobile_folder_node,
@@ -884,7 +908,7 @@ index 6f86188d3fcc3b92161e009855942575add58712..e06786d6beaea30671fffe2264819f05
    BookmarkPermanentNodeList extra_nodes_;
    std::unique_ptr<TitledUrlIndex> index_;
 diff --git a/components/bookmarks/browser/bookmark_utils.cc b/components/bookmarks/browser/bookmark_utils.cc
-index 2f1bd29a657a4d8f2cdc47b8a88edf8caa73bcb1..8abbd4054c84bd0a4d7ec0a9b2ffeac331cc5ad0 100644
+index 8455e4920fc3cbee5c469af91b9016dce3c17dc7..600814cf781b11cb0b808d6ae70c47a74c512b92 100644
 --- a/components/bookmarks/browser/bookmark_utils.cc
 +++ b/components/bookmarks/browser/bookmark_utils.cc
 @@ -61,7 +61,12 @@ void CloneBookmarkNodeImpl(BookmarkModel* model,
@@ -1004,7 +1028,7 @@ index bbd6759b77089c1fa1b89469c2852191e7798384..34bef7741ce55cc609aa7b522d44bc6e
    virtual ~TitledUrlNode() {}
  };
 diff --git a/components/bookmarks/managed/managed_bookmark_util.cc b/components/bookmarks/managed/managed_bookmark_util.cc
-index d19d941e78d8e1bd25b189913f52fe69e154a5db..908d0754d89d2159d6eb5e76b32a58bad0df86b9 100644
+index bc54742ac77adc920887704d59b8cbf08a015d97..b57a1e062165aecc2adc0c2a2f4b5a94e0c00176 100644
 --- a/components/bookmarks/managed/managed_bookmark_util.cc
 +++ b/components/bookmarks/managed/managed_bookmark_util.cc
 @@ -14,7 +14,8 @@ bool IsPermanentNode(const BookmarkPermanentNode* node,
@@ -1018,7 +1042,7 @@ index d19d941e78d8e1bd25b189913f52fe69e154a5db..908d0754d89d2159d6eb5e76b32a58ba
    }
  
 diff --git a/components/browser_sync/profile_sync_components_factory_impl.cc b/components/browser_sync/profile_sync_components_factory_impl.cc
-index 2832a752c680b3642920a18fc31c27d06c007eb6..7b59663346bdc0d5f114b2920454beeb1620f812 100644
+index 9c4a83ab8e6bd05627b19827fcca27a55bfa74ea..a59e1473c36e35845ff9f0752e65f3cc731149cc 100644
 --- a/components/browser_sync/profile_sync_components_factory_impl.cc
 +++ b/components/browser_sync/profile_sync_components_factory_impl.cc
 @@ -50,6 +50,11 @@
@@ -1033,7 +1057,7 @@ index 2832a752c680b3642920a18fc31c27d06c007eb6..7b59663346bdc0d5f114b2920454beeb
  using base::FeatureList;
  using bookmarks::BookmarkModel;
  using sync_bookmarks::BookmarkChangeProcessor;
-@@ -65,8 +70,13 @@ using syncer::DeviceInfoDataTypeController;
+@@ -64,8 +69,13 @@ using syncer::DataTypeManagerObserver;
  using syncer::ModelTypeController;
  using syncer::ProxyDataTypeController;
  
@@ -1048,7 +1072,7 @@ index 2832a752c680b3642920a18fc31c27d06c007eb6..7b59663346bdc0d5f114b2920454beeb
  namespace {
  
  syncer::ModelTypeSet GetDisabledTypesFromCommandLine(
-@@ -215,6 +225,13 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
+@@ -206,6 +216,13 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
      }
    }
  
@@ -1062,7 +1086,7 @@ index 2832a752c680b3642920a18fc31c27d06c007eb6..7b59663346bdc0d5f114b2920454beeb
    // These features are enabled only if history is not disabled.
    if (!sync_client_->GetPrefService()->GetBoolean(history_disabled_pref_)) {
      // TypedUrl sync is enabled by default.  Register unless explicitly
-@@ -468,4 +485,19 @@ void ProfileSyncComponentsFactoryImpl::OverridePrefsForUssTest(bool use_uss) {
+@@ -460,4 +477,19 @@ void ProfileSyncComponentsFactoryImpl::OverridePrefsForUssTest(bool use_uss) {
  bool ProfileSyncComponentsFactoryImpl::
      override_prefs_controller_to_uss_for_test_ = false;
  
@@ -1083,7 +1107,7 @@ index 2832a752c680b3642920a18fc31c27d06c007eb6..7b59663346bdc0d5f114b2920454beeb
 +
  }  // namespace browser_sync
 diff --git a/components/browser_sync/profile_sync_components_factory_impl.h b/components/browser_sync/profile_sync_components_factory_impl.h
-index 9fc0538c5242b2f0b16ff631de764813a5c673a6..6991386e20ef5d789da24d898ca42160da743753 100644
+index 351e688f4f5ed6200210b28194b73074585f6f44..df6e6146789e5003aeca30964879dc5041fda405 100644
 --- a/components/browser_sync/profile_sync_components_factory_impl.h
 +++ b/components/browser_sync/profile_sync_components_factory_impl.h
 @@ -93,6 +93,10 @@ class ProfileSyncComponentsFactoryImpl
@@ -1098,10 +1122,10 @@ index 9fc0538c5242b2f0b16ff631de764813a5c673a6..6991386e20ef5d789da24d898ca42160
    // Register data types which are enabled on both desktop and mobile.
    // |disabled_types| and |enabled_types| correspond only to those types
 diff --git a/components/browser_sync/profile_sync_service.cc b/components/browser_sync/profile_sync_service.cc
-index b468810bb14d9ac827db7fdebacdc22181ec572c..1a6d2808c572d7fd582dd3194388076d6b2d0605 100644
+index 2a53fcb5014cce44477c06186b14442b2fa7ceb6..bd5aaddddf6d161d46337d2d08ae6e841e2c80ef 100644
 --- a/components/browser_sync/profile_sync_service.cc
 +++ b/components/browser_sync/profile_sync_service.cc
-@@ -1518,9 +1518,10 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
+@@ -1483,9 +1483,10 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
          syncer::user_selectable_type::READING_LIST,
  #endif
          syncer::user_selectable_type::PROXY_TABS,
@@ -1113,7 +1137,7 @@ index b468810bb14d9ac827db7fdebacdc22181ec572c..1a6d2808c572d7fd582dd3194388076d
                  "If adding a user selectable type, update "
                  "UserSelectableSyncType in user_selectable_sync_type.h and "
                  "histograms.xml.");
-@@ -2411,4 +2412,8 @@ void ProfileSyncService::OnSetupInProgressHandleDestroyed() {
+@@ -2359,4 +2360,8 @@ void ProfileSyncService::OnSetupInProgressHandleDestroyed() {
      ReconfigureDatatypeManager();
    NotifyObservers();
  }
@@ -1123,10 +1147,10 @@ index b468810bb14d9ac827db7fdebacdc22181ec572c..1a6d2808c572d7fd582dd3194388076d
 +}
  }  // namespace browser_sync
 diff --git a/components/browser_sync/profile_sync_service.h b/components/browser_sync/profile_sync_service.h
-index 58ad6d37a9e861b0d6530c14af11ebbe038357ee..de0b443a25363904690ff683b83a10e0fbc3a322 100644
+index 84f04cc01849ae7f78203d2d21857b4198b3d160..65140d5ee96964be647ab1aec93278bc8731b70b 100644
 --- a/components/browser_sync/profile_sync_service.h
 +++ b/components/browser_sync/profile_sync_service.h
-@@ -85,6 +85,10 @@ struct UpdateCounters;
+@@ -84,6 +84,10 @@ struct UpdateCounters;
  struct UserShare;
  }  // namespace syncer
  
@@ -1137,7 +1161,7 @@ index 58ad6d37a9e861b0d6530c14af11ebbe038357ee..de0b443a25363904690ff683b83a10e0
  namespace browser_sync {
  
  // ProfileSyncService is the layer between browser subsystems like bookmarks,
-@@ -588,6 +592,8 @@ class ProfileSyncService : public syncer::SyncServiceBase,
+@@ -584,6 +588,8 @@ class ProfileSyncService : public syncer::SyncServiceBase,
    syncer::WeakHandle<syncer::UnrecoverableErrorHandler>
    GetUnrecoverableErrorHandler() override;
  
@@ -1146,7 +1170,7 @@ index 58ad6d37a9e861b0d6530c14af11ebbe038357ee..de0b443a25363904690ff683b83a10e0
   private:
    enum UnrecoverableErrorReason {
      ERROR_REASON_UNSET,
-@@ -623,15 +629,18 @@ class ProfileSyncService : public syncer::SyncServiceBase,
+@@ -619,15 +625,18 @@ class ProfileSyncService : public syncer::SyncServiceBase,
    };
  
    friend class TestProfileSyncService;
@@ -1166,7 +1190,7 @@ index 58ad6d37a9e861b0d6530c14af11ebbe038357ee..de0b443a25363904690ff683b83a10e0
    // Helper method for managing encryption UI.
    bool IsEncryptedDatatypeEnabled() const;
  
-@@ -654,12 +663,14 @@ class ProfileSyncService : public syncer::SyncServiceBase,
+@@ -650,12 +659,14 @@ class ProfileSyncService : public syncer::SyncServiceBase,
    // Called when configuration is complete.
    void StartSyncingWithServer();
  
@@ -1183,7 +1207,7 @@ index 58ad6d37a9e861b0d6530c14af11ebbe038357ee..de0b443a25363904690ff683b83a10e0
    void UpdateLastSyncedTime();
  
 diff --git a/components/browser_sync/profile_sync_service_bookmark_unittest.cc b/components/browser_sync/profile_sync_service_bookmark_unittest.cc
-index 1554454e43c80532961a84b41df50b2bc37d8274..24dc405bc38dec8445b9840e478a34ce5ba6f73d 100644
+index c26a96e47c254e4f0aef415ff615f0cc832b5871..3f61ebacb3d7371a48194d40491c569c5f6e2300 100644
 --- a/components/browser_sync/profile_sync_service_bookmark_unittest.cc
 +++ b/components/browser_sync/profile_sync_service_bookmark_unittest.cc
 @@ -1768,11 +1768,12 @@ void ProfileSyncServiceBookmarkTestWithData::PopulateFromTestData(
@@ -1228,8 +1252,62 @@ index 18398d6db6029a12e25c7983aef9f6460a1ed125..959496e2425fc14ba0ce83947c5b665a
  }
  
  views::Widget* CreateBrowserModalDialogViews(views::DialogDelegate* dialog,
+diff --git a/components/crash/content/app/breakpad_linux.cc b/components/crash/content/app/breakpad_linux.cc
+index 42a50e8381c196b310024c82d69a1a529ead0ba6..ed13c3a445337495688c1b193c911bf6aa4d79ea 100644
+--- a/components/crash/content/app/breakpad_linux.cc
++++ b/components/crash/content/app/breakpad_linux.cc
+@@ -61,6 +61,8 @@
+ #endif
+ #include "third_party/lss/linux_syscall_support.h"
+ 
++#include "installer/vivaldi_crash_urls.h"
++
+ #if defined(ADDRESS_SANITIZER)
+ #include <ucontext.h>  // for getcontext().
+ #endif
+@@ -88,7 +90,7 @@ namespace breakpad {
+ namespace {
+ 
+ #if !defined(OS_CHROMEOS)
+-const char kUploadURL[] = "https://clients2.google.com/cr/report";
++const char kUploadURL[] = CRASH_REPORT_URL("/report");
+ #endif
+ 
+ bool g_is_crash_reporter_enabled = false;
+@@ -1824,7 +1826,8 @@ void HandleCrashDump(const BreakpadInfo& info) {
+ 
+   IGNORE_RET(sys_close(temp_file_fd));
+ 
+-#if defined(OS_ANDROID)
++// For now save the file in tmp (patricia@vivaldi.com)
++#if defined(OS_ANDROID) || defined(VIVALDI_BUILD)
+   if (info.filename) {
+     size_t filename_length = my_strlen(info.filename);
+ 
+diff --git a/components/crash/content/app/crashpad_win.cc b/components/crash/content/app/crashpad_win.cc
+index 3a33c9bb8e92e05feed4fcec486dcbac0fccbf38..486a11e1887333c3b2a7a481c99267a911512331 100644
+--- a/components/crash/content/app/crashpad_win.cc
++++ b/components/crash/content/app/crashpad_win.cc
+@@ -23,6 +23,8 @@
+ #include "third_party/crashpad/crashpad/client/crashpad_info.h"
+ #include "third_party/crashpad/crashpad/client/simulate_crash_win.h"
+ 
++#include "installer/vivaldi_crash_urls.h"
++
+ namespace crash_reporter {
+ namespace internal {
+ 
+@@ -81,7 +83,7 @@ base::FilePath PlatformCrashpadInitialization(
+     GetPlatformCrashpadAnnotations(&process_annotations);
+ 
+ #if defined(GOOGLE_CHROME_BUILD)
+-    std::string url = "https://clients2.google.com/cr/report";
++    std::string url = CRASH_REPORT_URL("/report");
+ #else
+     std::string url;
+ #endif
 diff --git a/components/crash/content/app/hard_error_handler_win.cc b/components/crash/content/app/hard_error_handler_win.cc
-index 735d3e8cdc19db4592232bb0d56ded58c38bd422..7bee47ecc28e712966572381d56f58f01182b1b5 100644
+index 11eca1c2904cf092b011ea2b23fdb8aeeb668085..344af34af933d187d2b71407550ef6220dd8df45 100644
 --- a/components/crash/content/app/hard_error_handler_win.cc
 +++ b/components/crash/content/app/hard_error_handler_win.cc
 @@ -62,7 +62,7 @@ void RaiseHardErrorMsg(DWORD nt_status,
@@ -1241,46 +1319,8 @@ index 735d3e8cdc19db4592232bb0d56ded58c38bd422..7bee47ecc28e712966572381d56f58f0
                 MB_OK | MB_SERVICE_NOTIFICATION);
    ::LocalFree(msg_template);
  }
-diff --git a/components/cronet/ios/BUILD.gn b/components/cronet/ios/BUILD.gn
-index b2b7eca86df72198a42e4b5e3fb27e6e50295126..e56bdf1eb5c295b693be75165ce65084286522c9 100644
---- a/components/cronet/ios/BUILD.gn
-+++ b/components/cronet/ios/BUILD.gn
-@@ -258,7 +258,7 @@ template("ios_static_framework") {
-     visibility = [ ":$_target_name" ]
-     sources = invoker.public_headers
-     outputs = [
--      "{{bundle_contents_dir}}/Headers/{{source_file_part}}",
-+      "{{bundle_root_dir}}/Headers/{{source_file_part}}",
-     ]
-   }
- 
-@@ -269,7 +269,7 @@ template("ios_static_framework") {
-     visibility = [ ":$_target_name" ]
-     sources = get_target_outputs(_static_library_target)
-     outputs = [
--      "{{bundle_executable_dir}}/$_framework_name",
-+      "{{bundle_root_dir}}/$_framework_name",
-     ]
-     public_deps = [
-       _static_library_target,
-@@ -278,11 +278,10 @@ template("ios_static_framework") {
- 
-   create_bundle(_target_name) {
-     product_type = "com.apple.product-type.framework"
--    bundle_root_dir = "$root_out_dir/Static/${_output_name}"
--    bundle_contents_dir = bundle_root_dir
--    bundle_executable_dir = bundle_contents_dir
--    bundle_resources_dir = bundle_contents_dir
--    bundle_plugins_dir = bundle_contents_dir
-+    bundle_root_dir = "$root_out_dir/Static/$_output_name"
-+    bundle_executable_dir = bundle_root_dir
-+    bundle_resources_dir = bundle_root_dir
-+    bundle_plugins_dir = bundle_root_dir
-     deps = [
-       ":$_framework_binary_target",
-       ":$_framework_headers_target",
 diff --git a/components/favicon/core/favicon_handler.cc b/components/favicon/core/favicon_handler.cc
-index 42b17daa0277b0f39f5f5eb47cbc786583c56a45..3a4d7f6d1411f8c64aa48491bde224f96d57e40d 100644
+index 0126530cb550185e083260805a71ffdbf7fc104c..4a932db884c8d043430454387864f7069231d0b4 100644
 --- a/components/favicon/core/favicon_handler.cc
 +++ b/components/favicon/core/favicon_handler.cc
 @@ -24,6 +24,8 @@
@@ -1292,17 +1332,17 @@ index 42b17daa0277b0f39f5f5eb47cbc786583c56a45..3a4d7f6d1411f8c64aa48491bde224f9
  namespace favicon {
  namespace {
  
-@@ -613,6 +615,10 @@ void FaviconHandler::OnFaviconDataForInitialURLFromFaviconService(
-     // navigations) because there is no guarantee that there is a mapping for
-     // the other page URLs (e.g. |last_page_url_| has a mapping because it's
-     // bookmarked but the rest don't).
+@@ -651,6 +653,10 @@ void FaviconHandler::OnFaviconDataForInitialURLFromFaviconService(
+     // url) we'll fetch later on. This way the user doesn't see a flash of the
+     // default favicon.
+     NotifyFaviconUpdated(favicon_bitmap_results);
 +  } else if(vivaldi::IsVivaldiRunning()) {
 +      const gfx::Image image;
 +      delegate_->OnFaviconUpdated(last_page_url_, handler_type_, GURL(), true,
 +                                  image);
    }
  
-   if (current_candidate())
+   if (candidates_received_)
 diff --git a/components/gcm_driver/gcm_channel_status_syncer.cc b/components/gcm_driver/gcm_channel_status_syncer.cc
 index cbe1ba2fd4dcb46a1aa6054be38874b1f903231b..6ebc492d93aca7faa11b6e30e02c388a4137ebe4 100644
 --- a/components/gcm_driver/gcm_channel_status_syncer.cc
@@ -1328,7 +1368,7 @@ index cbe1ba2fd4dcb46a1aa6054be38874b1f903231b..6ebc492d93aca7faa11b6e30e02c388a
    if (started_)
      return;
 diff --git a/components/google/core/browser/google_util.cc b/components/google/core/browser/google_util.cc
-index 845e22a633c5ceeacc1cbae42fa3343cea0eb256..fcb4d8671b69fd999d2cbbe53b21ea11073c504f 100644
+index 2820e033dbf0b1efb931d4e8264fd15a2c9b7fe5..441d3e125d42275e5fd0a2823bc076b7fce43860 100644
 --- a/components/google/core/browser/google_util.cc
 +++ b/components/google/core/browser/google_util.cc
 @@ -51,6 +51,11 @@ void StripTrailingDot(base::StringPiece* host) {
@@ -1353,10 +1393,10 @@ index 845e22a633c5ceeacc1cbae42fa3343cea0eb256..fcb4d8671b69fd999d2cbbe53b21ea11
  
  bool HasGoogleSearchQueryParam(base::StringPiece str) {
 diff --git a/components/google/core/browser/google_util.h b/components/google/core/browser/google_util.h
-index d4730ef29e666bd3e515607f3c132a0574b953a2..2fa1982f051127f67d56454726e9d1b8d6dca188 100644
+index de1f15d6b6d150e2af4c3113e40e093a8ebc5cc4..efdcae87f5be795b3d6822ba9453fdb11f6c9474 100644
 --- a/components/google/core/browser/google_util.h
 +++ b/components/google/core/browser/google_util.h
-@@ -121,6 +121,19 @@ bool IsYoutubeDomainUrl(const GURL& url,
+@@ -113,6 +113,19 @@ bool IsYoutubeDomainUrl(const GURL& url,
  // unregistering themselves.
  const std::vector<std::string>& GetGoogleRegistrableDomains();
  
@@ -1377,7 +1417,7 @@ index d4730ef29e666bd3e515607f3c132a0574b953a2..2fa1982f051127f67d56454726e9d1b8
  
  #endif  // COMPONENTS_GOOGLE_CORE_BROWSER_GOOGLE_UTIL_H_
 diff --git a/components/guest_view/browser/guest_view_base.cc b/components/guest_view/browser/guest_view_base.cc
-index 24ec4b67e72b1490f6572f4367e6233e57c0a373..b3ce1aa8335895ff36db890bf81afc995e942c30 100644
+index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9acdfc1cf 100644
 --- a/components/guest_view/browser/guest_view_base.cc
 +++ b/components/guest_view/browser/guest_view_base.cc
 @@ -29,6 +29,19 @@
@@ -1455,7 +1495,7 @@ index 24ec4b67e72b1490f6572f4367e6233e57c0a373..b3ce1aa8335895ff36db890bf81afc99
    return GetGuestViewManager()->CreateGuestWithWebContentsParams(
        GetViewType(), owner_web_contents(), create_params);
  }
-@@ -483,6 +518,9 @@ void GuestViewBase::Destroy(bool also_delete) {
+@@ -479,6 +514,9 @@ void GuestViewBase::Destroy(bool also_delete) {
    // may wish to access their openers.
    weak_ptr_factory_.InvalidateWeakPtrs();
  
@@ -1465,7 +1505,7 @@ index 24ec4b67e72b1490f6572f4367e6233e57c0a373..b3ce1aa8335895ff36db890bf81afc99
    // Give the content module an opportunity to perform some cleanup.
    guest_host_->WillDestroy();
    guest_host_ = nullptr;
-@@ -490,9 +528,25 @@ void GuestViewBase::Destroy(bool also_delete) {
+@@ -486,9 +524,25 @@ void GuestViewBase::Destroy(bool also_delete) {
    g_webcontents_guestview_map.Get().erase(web_contents());
    GetGuestViewManager()->RemoveGuest(guest_instance_id_);
    pending_events_.clear();
@@ -1491,7 +1531,7 @@ index 24ec4b67e72b1490f6572f4367e6233e57c0a373..b3ce1aa8335895ff36db890bf81afc99
  }
  
  void GuestViewBase::SetAttachParams(const base::DictionaryValue& params) {
-@@ -526,7 +580,8 @@ void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
+@@ -522,7 +576,8 @@ void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
      StopTrackingEmbedderZoomLevel();
  
    if (owner_web_contents_ != embedder_web_contents) {
@@ -1501,7 +1541,7 @@ index 24ec4b67e72b1490f6572f4367e6233e57c0a373..b3ce1aa8335895ff36db890bf81afc99
      owner_web_contents_ = embedder_web_contents;
      owner_contents_observer_ =
          base::MakeUnique<OwnerContentsObserver>(this, embedder_web_contents);
-@@ -576,7 +631,24 @@ void GuestViewBase::RenderViewReady() {
+@@ -572,7 +627,24 @@ void GuestViewBase::RenderViewReady() {
    GuestReady();
  }
  
@@ -1526,7 +1566,7 @@ index 24ec4b67e72b1490f6572f4367e6233e57c0a373..b3ce1aa8335895ff36db890bf81afc99
    Destroy(false);
  
    // Let the derived class know that its WebContents is in the process of
-@@ -727,6 +799,18 @@ content::SiteInstance* GuestViewBase::GetOwnerSiteInstance() {
+@@ -722,6 +794,18 @@ content::SiteInstance* GuestViewBase::GetOwnerSiteInstance() {
  
  void GuestViewBase::OnZoomChanged(
      const zoom::ZoomController::ZoomChangedEventData& data) {
@@ -1545,7 +1585,7 @@ index 24ec4b67e72b1490f6572f4367e6233e57c0a373..b3ce1aa8335895ff36db890bf81afc99
    if (data.web_contents == embedder_web_contents()) {
      // The embedder's zoom level has changed.
      auto* guest_zoom_controller =
-@@ -851,6 +935,18 @@ void GuestViewBase::SetGuestZoomLevelToMatchEmbedder() {
+@@ -846,6 +930,18 @@ void GuestViewBase::SetGuestZoomLevelToMatchEmbedder() {
    if (!embedder_zoom_controller)
      return;
  
@@ -1564,19 +1604,8 @@ index 24ec4b67e72b1490f6572f4367e6233e57c0a373..b3ce1aa8335895ff36db890bf81afc99
    zoom::ZoomController::FromWebContents(web_contents())
        ->SetZoomLevel(embedder_zoom_controller->GetZoomLevel());
  }
-@@ -872,7 +968,9 @@ void GuestViewBase::StartTrackingEmbedderZoomLevel() {
- }
- 
- void GuestViewBase::StopTrackingEmbedderZoomLevel() {
--  if (!attached() || !ZoomPropagatesFromEmbedderToGuest())
-+  // NOTE(arnar@vivaldi.com): Removed the !attached() condition
-+  // ZoomController oberserver were never removed for discarded tabs
-+  if (/*!attached() ||*/ !ZoomPropagatesFromEmbedderToGuest())
-     return;
- 
-   auto* embedder_zoom_controller =
 diff --git a/components/guest_view/browser/guest_view_base.h b/components/guest_view/browser/guest_view_base.h
-index 0fb03b86f0de78de9668fc865075836817d2d880..7bf3bed98d78b58490abfa9ccef981fb7bf72fb6 100644
+index ae27d9f7908e6ee6ccc348e4b13e80fd1a0655d6..61871182d00e3142e0c3f6e84726858f36bff80d 100644
 --- a/components/guest_view/browser/guest_view_base.h
 +++ b/components/guest_view/browser/guest_view_base.h
 @@ -20,8 +20,23 @@
@@ -1625,7 +1654,7 @@ index 0fb03b86f0de78de9668fc865075836817d2d880..7bf3bed98d78b58490abfa9ccef981fb
   private:
    friend class GuestViewMessageFilter;
  
-@@ -367,7 +390,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
+@@ -365,7 +388,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
    bool ShouldFocusPageAfterCrash() final;
    void UpdatePreferredSize(content::WebContents* web_contents,
                             const gfx::Size& pref_size) final;
@@ -1635,7 +1664,7 @@ index 0fb03b86f0de78de9668fc865075836817d2d880..7bf3bed98d78b58490abfa9ccef981fb
  
    // WebContentsObserver implementation.
 diff --git a/components/guest_view/browser/guest_view_manager.cc b/components/guest_view/browser/guest_view_manager.cc
-index 12b34750d3b1e87c9a218efd8e6774856f516ca2..c3b25da95a50a360cb0f105f76c35cbe3a986b53 100644
+index 0738b6917057019a9e006a3a34fcf6164017cb46..d2c9a99b721215e679eaa678112119c2a28ccef7 100644
 --- a/components/guest_view/browser/guest_view_manager.cc
 +++ b/components/guest_view/browser/guest_view_manager.cc
 @@ -23,6 +23,8 @@
@@ -1647,21 +1676,25 @@ index 12b34750d3b1e87c9a218efd8e6774856f516ca2..c3b25da95a50a360cb0f105f76c35cbe
  using content::BrowserContext;
  using content::RenderProcessHost;
  using content::SiteInstance;
-@@ -480,10 +482,13 @@ bool GuestViewManager::CanEmbedderAccessInstanceID(
+@@ -480,12 +482,15 @@ bool GuestViewManager::CanEmbedderAccessInstanceID(
             guest_view->GetOwnerSiteInstance()->GetProcess()->GetID();
    }
  
 -  // Other than MimeHandlerViewGuest, all other guest types are only permitted
 -  // to run in the main frame.
--  return embedder_render_process_id ==
--         guest_view->owner_web_contents()->GetRenderProcessHost()->GetID();
+-  return embedder_render_process_id == guest_view->owner_web_contents()
+-                                           ->GetMainFrame()
+-                                           ->GetProcess()
+-                                           ->GetID();
 +  // andre@vivaldi.com: This was changed because of the embedder/guest relation
 +  //                    with tabstrip guests and VivaldiViews.
 +  // TODO (gisli@vivaldi.com):  Should add check (below check or both embedders
 +  // are vivaldi windows).
 +  return vivaldi::IsVivaldiRunning() ||
-+      embedder_render_process_id ==
-+      guest_view->owner_web_contents()->GetRenderProcessHost()->GetID();
++         embedder_render_process_id == guest_view->owner_web_contents()
++                                       ->GetMainFrame()
++                                       ->GetProcess()
++                                       ->GetID();
  }
  
  GuestViewManager::ElementInstanceKey::ElementInstanceKey()
@@ -1748,10 +1781,10 @@ index 4d1e7a65079eb6aa0db9d340f660d0c387e76d15..1886cc82a82100b24f9bbe206ab586b0
    std::unique_ptr<GuestViewRequest> pending_response =
        std::move(pending_response_);
 diff --git a/components/history/core/browser/history_backend.cc b/components/history/core/browser/history_backend.cc
-index dec7e10fc0885103f011c4d61747b9ff0eccd9a4..278fa2a436c108f47514558d83efa3e7fe47f2b3 100644
+index dbb225f3545930ae5d9dde602e62174832220f97..7edc81d6b46a27e1e92e70b0de11329f8362823b 100644
 --- a/components/history/core/browser/history_backend.cc
 +++ b/components/history/core/browser/history_backend.cc
-@@ -95,9 +95,11 @@ const int kFaviconRefetchDays = 7;
+@@ -102,9 +102,11 @@ const int kFaviconRefetchDays = 7;
  // deleting some.
  const int kMaxRedirectCount = 32;
  
@@ -1762,9 +1795,9 @@ index dec7e10fc0885103f011c4d61747b9ff0eccd9a4..278fa2a436c108f47514558d83efa3e7
 -const int kExpireDaysThreshold = 90;
 +// const int kExpireDaysThreshold = 90;
  
- // Converts from PageUsageData to MostVisitedURL. |redirects| is a
- // list of redirects for this URL. Empty list means no redirects.
-@@ -415,6 +417,24 @@ TopHostsList HistoryBackend::TopHosts(size_t num_hosts) const {
+ QueuedHistoryDBTask::QueuedHistoryDBTask(
+     std::unique_ptr<HistoryDBTask> task,
+@@ -400,6 +402,24 @@ TopHostsList HistoryBackend::TopHosts(size_t num_hosts) const {
    return top_hosts;
  }
  
@@ -1789,7 +1822,7 @@ index dec7e10fc0885103f011c4d61747b9ff0eccd9a4..278fa2a436c108f47514558d83efa3e7
  OriginCountAndLastVisitMap HistoryBackend::GetCountsAndLastVisitForOrigins(
      const std::set<GURL>& origins) const {
    if (!db_)
-@@ -727,7 +747,8 @@ void HistoryBackend::InitImpl(
+@@ -719,7 +739,8 @@ void HistoryBackend::InitImpl(
    db_->GetStartDate(&first_recorded_time_);
  
    // Start expiring old stuff.
@@ -1799,7 +1832,7 @@ index dec7e10fc0885103f011c4d61747b9ff0eccd9a4..278fa2a436c108f47514558d83efa3e7
  
  #if defined(OS_ANDROID)
    if (backend_client_) {
-@@ -1230,6 +1251,27 @@ void HistoryBackend::RemoveDownloads(const std::set<uint32_t>& ids) {
+@@ -1233,6 +1254,27 @@ void HistoryBackend::RemoveDownloads(const std::set<uint32_t>& ids) {
    DCHECK_GE(ids.size(), num_downloads_deleted);
  }
  
@@ -1827,7 +1860,7 @@ index dec7e10fc0885103f011c4d61747b9ff0eccd9a4..278fa2a436c108f47514558d83efa3e7
  void HistoryBackend::QueryHistory(const base::string16& text_query,
                                    const QueryOptions& options,
                                    QueryResults* query_results) {
-@@ -2684,4 +2726,8 @@ bool HistoryBackend::ClearAllMainHistory(const URLRows& kept_urls) {
+@@ -2753,4 +2795,8 @@ bool HistoryBackend::ClearAllMainHistory(const URLRows& kept_urls) {
    return true;
  }
  
@@ -1837,10 +1870,10 @@ index dec7e10fc0885103f011c4d61747b9ff0eccd9a4..278fa2a436c108f47514558d83efa3e7
 +
  }  // namespace history
 diff --git a/components/history/core/browser/history_backend.h b/components/history/core/browser/history_backend.h
-index 1a698364b8c55712e2ff7d56fe4960ac296bc7bf..2979337dd17e846b23398b323a02589c39df7c17 100644
+index 5e162627a4f06c2e0d9b3205883775b6afbd9f29..9de4946ecb739b1b87337cd250c0f3909ec09e2b 100644
 --- a/components/history/core/browser/history_backend.h
 +++ b/components/history/core/browser/history_backend.h
-@@ -36,6 +36,8 @@
+@@ -38,6 +38,8 @@
  #include "components/history/core/browser/visit_tracker.h"
  #include "sql/init_status.h"
  
@@ -1873,7 +1906,7 @@ index 1a698364b8c55712e2ff7d56fe4960ac296bc7bf..2979337dd17e846b23398b323a02589c
  
    // Computes the most recent URL(s) that the given canonical URL has
    // redirected to. There may be more than one redirect in a row, so this
-@@ -493,6 +505,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
+@@ -502,6 +514,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
  
    base::Time GetFirstRecordedTimeForTest() { return first_recorded_time_; }
  
@@ -1933,10 +1966,10 @@ index 3af9c84c277395b2cce4891896fcac18a28b8ea9..4d98bf9230ba84de3f53a90ee3f99111
  
  }  // namespace history
 diff --git a/components/history/core/browser/history_service.cc b/components/history/core/browser/history_service.cc
-index 982a8b1f455f318cd8ed4aa815b6f884476bc043..2b933f5b6bdac6ca3de8dea2b713f9b5665bf750 100644
+index f613fe214efd57f2c70eb6b86263bbb8dd3c2ebf..a7156116ee43294a17712502c55a2fb30ee9b8f4 100644
 --- a/components/history/core/browser/history_service.cc
 +++ b/components/history/core/browser/history_service.cc
-@@ -197,6 +197,7 @@ HistoryService::HistoryService(std::unique_ptr<HistoryClient> history_client,
+@@ -198,6 +198,7 @@ HistoryService::HistoryService(std::unique_ptr<HistoryClient> history_client,
        history_client_(std::move(history_client)),
        visit_delegate_(std::move(visit_delegate)),
        backend_loaded_(false),
@@ -1944,7 +1977,7 @@ index 982a8b1f455f318cd8ed4aa815b6f884476bc043..2b933f5b6bdac6ca3de8dea2b713f9b5
        weak_ptr_factory_(this) {}
  
  HistoryService::~HistoryService() {
-@@ -244,6 +245,10 @@ TypedUrlSyncableService* HistoryService::GetTypedUrlSyncableService() const {
+@@ -245,6 +246,10 @@ TypedUrlSyncableService* HistoryService::GetTypedUrlSyncableService() const {
  
  void HistoryService::Shutdown() {
    DCHECK(thread_checker_.CalledOnValidThread());
@@ -1955,7 +1988,7 @@ index 982a8b1f455f318cd8ed4aa815b6f884476bc043..2b933f5b6bdac6ca3de8dea2b713f9b5
    Cleanup();
  }
  
-@@ -346,6 +351,29 @@ void HistoryService::TopHosts(size_t num_hosts,
+@@ -347,6 +352,29 @@ void HistoryService::TopHosts(size_t num_hosts,
        callback);
  }
  
@@ -1985,7 +2018,7 @@ index 982a8b1f455f318cd8ed4aa815b6f884476bc043..2b933f5b6bdac6ca3de8dea2b713f9b5
  void HistoryService::GetCountsAndLastVisitForOrigins(
      const std::set<GURL>& origins,
      const GetCountsAndLastVisitForOriginsCallback& callback) const {
-@@ -760,6 +788,23 @@ void HistoryService::RemoveDownloads(const std::set<uint32_t>& ids) {
+@@ -795,6 +823,23 @@ void HistoryService::RemoveDownloads(const std::set<uint32_t>& ids) {
                                             history_backend_, ids));
  }
  
@@ -2009,7 +2042,7 @@ index 982a8b1f455f318cd8ed4aa815b6f884476bc043..2b933f5b6bdac6ca3de8dea2b713f9b5
  base::CancelableTaskTracker::TaskId HistoryService::QueryHistory(
      const base::string16& text_query,
      const QueryOptions& options,
-@@ -925,6 +970,9 @@ bool HistoryService::Init(
+@@ -960,6 +1005,9 @@ bool HistoryService::Init(
                 base::Bind(&HistoryBackend::Init, history_backend_,
                            no_db, history_database_params));
  
@@ -2020,10 +2053,10 @@ index 982a8b1f455f318cd8ed4aa815b6f884476bc043..2b933f5b6bdac6ca3de8dea2b713f9b5
      return false;
  
 diff --git a/components/history/core/browser/history_service.h b/components/history/core/browser/history_service.h
-index 140bbd353afc2048e6785d94c991a866223d0393..95d7539fdade5601a04e7871f34b4e3047726519 100644
+index bf1702f2d0ac47369c70fa6b05790cfb4d18c653..8de28293fa42f4fb4a87b388b2940694c5b1d39f 100644
 --- a/components/history/core/browser/history_service.h
 +++ b/components/history/core/browser/history_service.h
-@@ -40,6 +40,8 @@
+@@ -41,6 +41,8 @@
  #include "sql/init_status.h"
  #include "ui/base/page_transition_types.h"
  
@@ -2032,7 +2065,7 @@ index 140bbd353afc2048e6785d94c991a866223d0393..95d7539fdade5601a04e7871f34b4e30
  class GURL;
  class HistoryQuickProviderTest;
  class HistoryURLProvider;
-@@ -163,6 +165,18 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
+@@ -164,6 +166,18 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
    virtual void TopHosts(size_t num_hosts,
                          const TopHostsCallback& callback) const;
  
@@ -2051,7 +2084,7 @@ index 140bbd353afc2048e6785d94c991a866223d0393..95d7539fdade5601a04e7871f34b4e30
    // Gets the counts and most recent visit date of URLs that belong to |origins|
    // in the history database.
    void GetCountsAndLastVisitForOrigins(
-@@ -266,6 +280,13 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
+@@ -267,6 +281,13 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
    // the results out of the passed in parameter and take ownership of them.
    typedef base::Callback<void(QueryResults*)> QueryHistoryCallback;
  
@@ -2065,7 +2098,7 @@ index 140bbd353afc2048e6785d94c991a866223d0393..95d7539fdade5601a04e7871f34b4e30
    // Queries all history with the given options (see QueryOptions in
    // history_types.h).  If empty, all results matching the given options
    // will be returned.
-@@ -857,6 +878,9 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
+@@ -871,6 +892,9 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
  
    DeleteDirectiveHandler delete_directive_handler_;
  
@@ -2076,10 +2109,10 @@ index 140bbd353afc2048e6785d94c991a866223d0393..95d7539fdade5601a04e7871f34b4e30
    base::WeakPtrFactory<HistoryService> weak_ptr_factory_;
  
 diff --git a/components/history/core/browser/history_types.h b/components/history/core/browser/history_types.h
-index 00b6cb00aa87ebe9d084bbf225afe9dbd327ff08..b8174ac757ed10f8fb4de2a7000b841cdb5bd744 100644
+index 4f9c2cd6c6c27cff439e80e874832bb85d9a621f..5e37124a24436d7e72bf48c0b937f12cd1670a7f 100644
 --- a/components/history/core/browser/history_types.h
 +++ b/components/history/core/browser/history_types.h
-@@ -56,6 +56,7 @@ enum VisitSource {
+@@ -55,6 +55,7 @@ enum VisitSource {
    SOURCE_FIREFOX_IMPORTED = 3,
    SOURCE_IE_IMPORTED = 4,
    SOURCE_SAFARI_IMPORTED = 5,
@@ -2124,7 +2157,7 @@ index 458899b753be1928876b245faebef95d555a66eb..5c79afdbf143befb26324068c6999317
    void NotifyTopSitesLoaded();
    void NotifyTopSitesChanged(const TopSitesObserver::ChangeReason reason);
 diff --git a/components/history/core/browser/top_sites_backend.cc b/components/history/core/browser/top_sites_backend.cc
-index aa107e9fc85342c70dd923f8f4a8461c4f3a040b..8ccf24bb9bfb332c43d34a292a25b34218fb86cf 100644
+index b71945d24573768ee943d05c0ae29e1536bc3e42..398aaf21ec20785d4d7a2532bbafaadc516871f8 100644
 --- a/components/history/core/browser/top_sites_backend.cc
 +++ b/components/history/core/browser/top_sites_backend.cc
 @@ -21,6 +21,8 @@
@@ -2136,14 +2169,14 @@ index aa107e9fc85342c70dd923f8f4a8461c4f3a040b..8ccf24bb9bfb332c43d34a292a25b342
  namespace history {
  
  TopSitesBackend::TopSitesBackend()
-@@ -144,10 +146,22 @@ void TopSitesBackend::SetPageThumbnailOnDBThread(const MostVisitedURL& url,
+@@ -137,10 +139,22 @@ void TopSitesBackend::SetPageThumbnailOnDBThread(const MostVisitedURL& url,
  
  void TopSitesBackend::ResetDatabaseOnDBThread(const base::FilePath& file_path) {
    DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
 +  if (vivaldi::IsVivaldiRunning()) {
 +    db_->DeleteDataExceptBookmarkThumbnails();
 +  } else {
-   db_.reset(NULL);
+   db_.reset(nullptr);
    sql::Connection::Delete(db_path_);
    db_.reset(new TopSitesDatabase());
    InitDBOnDBThread(db_path_);
@@ -2177,10 +2210,10 @@ index 620a76ac245aff1d726de1d6ebdace28864c2e37..f0ac6f16f5a7d5f2fe89e27a964457d6
    friend class base::RefCountedThreadSafe<TopSitesBackend>;
  
 diff --git a/components/history/core/browser/top_sites_database.cc b/components/history/core/browser/top_sites_database.cc
-index 435930053a2a3dcb25fa1318e834f6a898820d35..9ce629ff6ffd516544156bc8ceae0e5648f47720 100644
+index 46acde473a98d44fafeb8b03434d24361e066b80..6e6b119df29fd7abf177201fae7098194f9fd961 100644
 --- a/components/history/core/browser/top_sites_database.cc
 +++ b/components/history/core/browser/top_sites_database.cc
-@@ -18,11 +18,15 @@
+@@ -18,10 +18,14 @@
  #include "components/history/core/browser/history_types.h"
  #include "components/history/core/browser/top_sites.h"
  #include "components/history/core/common/thumbnail_score.h"
@@ -2188,7 +2221,6 @@ index 435930053a2a3dcb25fa1318e834f6a898820d35..9ce629ff6ffd516544156bc8ceae0e56
  #include "sql/connection.h"
  #include "sql/recovery.h"
  #include "sql/statement.h"
- #include "sql/transaction.h"
  #include "third_party/sqlite/sqlite3.h"
 +#include "base/time/time.h"
 +
@@ -2196,7 +2228,7 @@ index 435930053a2a3dcb25fa1318e834f6a898820d35..9ce629ff6ffd516544156bc8ceae0e56
  
  namespace history {
  
-@@ -379,6 +383,10 @@ bool TopSitesDatabase::InitImpl(const base::FilePath& db_name) {
+@@ -378,6 +382,10 @@ bool TopSitesDatabase::InitImpl(const base::FilePath& db_name) {
    if (!transaction.Commit())
      return false;
  
@@ -2207,7 +2239,7 @@ index 435930053a2a3dcb25fa1318e834f6a898820d35..9ce629ff6ffd516544156bc8ceae0e56
    return true;
  }
  
-@@ -685,4 +693,66 @@ sql::Connection* TopSitesDatabase::CreateDB(const base::FilePath& db_name) {
+@@ -694,4 +702,66 @@ sql::Connection* TopSitesDatabase::CreateDB(const base::FilePath& db_name) {
    return db.release();
  }
  
@@ -2275,12 +2307,12 @@ index 435930053a2a3dcb25fa1318e834f6a898820d35..9ce629ff6ffd516544156bc8ceae0e56
 +
  }  // namespace history
 diff --git a/components/history/core/browser/top_sites_database.h b/components/history/core/browser/top_sites_database.h
-index 3556db1d20ecf07ca542c6aeb4f9ee9e929d963c..dca4dada2bfa230b914b4e7730d76d837c6a32a1 100644
+index 981d2d31b592f5a914ae18695c28082ceeaddc2a..3593b3a5f20b09b18a8431a379d55cf98ca72c7f 100644
 --- a/components/history/core/browser/top_sites_database.h
 +++ b/components/history/core/browser/top_sites_database.h
-@@ -57,6 +57,15 @@ class TopSitesDatabase {
-   // Remove the record for this URL. Returns true iff removed successfully.
-   bool RemoveURL(const MostVisitedURL& url);
+@@ -49,6 +49,15 @@ class TopSitesDatabase {
+                         int new_rank,
+                         const Images& thumbnail);
  
 +  // Vivaldi:: Rebuilds the database, removing any free/deleted pages.
 +  void Vacuum();
@@ -2294,7 +2326,7 @@ index 3556db1d20ecf07ca542c6aeb4f9ee9e929d963c..dca4dada2bfa230b914b4e7730d76d83
   private:
    FRIEND_TEST_ALL_PREFIXES(TopSitesDatabaseTest, Version1);
    FRIEND_TEST_ALL_PREFIXES(TopSitesDatabaseTest, Version2);
-@@ -97,6 +106,9 @@ class TopSitesDatabase {
+@@ -107,6 +116,9 @@ class TopSitesDatabase {
    // invoke recovery code.
    bool InitImpl(const base::FilePath& db_name);
  
@@ -2305,10 +2337,10 @@ index 3556db1d20ecf07ca542c6aeb4f9ee9e929d963c..dca4dada2bfa230b914b4e7730d76d83
  
    std::unique_ptr<sql::Connection> db_;
 diff --git a/components/history/core/browser/top_sites_impl.cc b/components/history/core/browser/top_sites_impl.cc
-index aa7583270876241e5197ea2f3147b97c929d8a3b..c991c2a326baa82b9700a3364551d09bbb82fcc7 100644
+index 908fc22844a8a1d080ab18fcb182c603d44b49f8..ef4fb89267615add08fc0bd16b9366e9149b0ad2 100644
 --- a/components/history/core/browser/top_sites_impl.cc
 +++ b/components/history/core/browser/top_sites_impl.cc
-@@ -40,6 +40,10 @@
+@@ -41,6 +41,10 @@
  #include "ui/base/resource/resource_bundle.h"
  #include "ui/gfx/image/image_util.h"
  
@@ -2319,32 +2351,16 @@ index aa7583270876241e5197ea2f3147b97c929d8a3b..c991c2a326baa82b9700a3364551d09b
  namespace history {
  namespace {
  
-@@ -65,15 +69,21 @@ bool ForcedURLComparator(const MostVisitedURL& first,
-   return first.last_forced_time < second.last_forced_time;
- }
- 
-+// gisli@vivaldi.com:  Increased kNonForcedTopSitesNumber,
-+// kForcedTopSitesNumber and kMaxTempTopImages as we are using
-+// top sites as general storage for thumbnails (through
-+// the ThumbnailService).  When Chromium implements the
-+// ThumbnailService properly this change should be reverted.
-+
- // How many non-forced top sites to store in the cache.
--const size_t kNonForcedTopSitesNumber = 20;
-+static const size_t kNonForcedTopSitesNumber = 60;
- 
- // How many forced top sites to store in the cache.
--const size_t kForcedTopSitesNumber = 20;
-+static const size_t kForcedTopSitesNumber = 2000;
+@@ -83,7 +87,7 @@ bool DoTitlesDiffer(const MostVisitedURLList& old_list,
  
  // Max number of temporary images we'll cache. See comment above
  // temp_images_ for details.
 -const size_t kMaxTempTopImages = 8;
 +static const size_t kMaxTempTopImages = 60;
  
- const int kDaysOfHistory = 90;
- // Time from startup to first HistoryService query.
-@@ -97,6 +107,12 @@ const int kTopSitesImageQuality = 100;
+ // The delay for the first HistoryService query at startup.
+ constexpr base::TimeDelta kFirstDelayAtStartup =
+@@ -107,6 +111,12 @@ const int kTopSitesImageQuality = 100;
  // visited thumbnails.
  const char kMostVisitedURLsBlacklist[] = "ntp.most_visited_blacklist";
  
@@ -2357,7 +2373,7 @@ index aa7583270876241e5197ea2f3147b97c929d8a3b..c991c2a326baa82b9700a3364551d09b
  }  // namespace
  
  // Initially, histogram is not recorded.
-@@ -125,10 +141,12 @@ void TopSitesImpl::Init(const base::FilePath& db_name) {
+@@ -137,10 +147,12 @@ void TopSitesImpl::Init(const base::FilePath& db_name) {
    // unit tests that do not need the backend can run without a problem.
    backend_ = new TopSitesBackend();
    backend_->Init(db_name);
@@ -2370,7 +2386,7 @@ index aa7583270876241e5197ea2f3147b97c929d8a3b..c991c2a326baa82b9700a3364551d09b
  }
  
  bool TopSitesImpl::SetPageThumbnail(const GURL& url,
-@@ -570,10 +588,17 @@ bool TopSitesImpl::EncodeBitmap(const gfx::Image& bitmap,
+@@ -579,10 +591,17 @@ bool TopSitesImpl::EncodeBitmap(const gfx::Image& bitmap,
    if (bitmap.IsEmpty())
      return false;
    *bytes = new base::RefCountedBytes();
@@ -2388,7 +2404,7 @@ index aa7583270876241e5197ea2f3147b97c929d8a3b..c991c2a326baa82b9700a3364551d09b
  
    // As we're going to cache this data, make sure the vector is only as big as
    // it needs to be, as JPEGCodec::Encode() over-allocates data.capacity().
-@@ -619,6 +644,15 @@ int TopSitesImpl::GetRedirectDistanceForURL(const MostVisitedURL& most_visited,
+@@ -624,6 +643,15 @@ int TopSitesImpl::GetRedirectDistanceForURL(const MostVisitedURL& most_visited,
    return 0;
  }
  
@@ -2404,7 +2420,7 @@ index aa7583270876241e5197ea2f3147b97c929d8a3b..c991c2a326baa82b9700a3364551d09b
  bool TopSitesImpl::AddPrepopulatedPages(MostVisitedURLList* urls,
                                          size_t num_forced_urls) const {
    bool added = false;
-@@ -839,6 +873,11 @@ void TopSitesImpl::MoveStateToLoaded() {
+@@ -840,6 +868,11 @@ void TopSitesImpl::MoveStateToLoaded() {
    if (history_service_)
      history_service_observer_.Add(history_service_);
  
@@ -2416,7 +2432,7 @@ index aa7583270876241e5197ea2f3147b97c929d8a3b..c991c2a326baa82b9700a3364551d09b
    NotifyTopSitesLoaded();
  }
  
-@@ -922,4 +961,40 @@ void TopSitesImpl::OnURLsDeleted(HistoryService* history_service,
+@@ -920,4 +953,40 @@ void TopSitesImpl::OnURLsDeleted(HistoryService* history_service,
    StartQueryForMostVisited();
  }
  
@@ -2458,10 +2474,30 @@ index aa7583270876241e5197ea2f3147b97c929d8a3b..c991c2a326baa82b9700a3364551d09b
 +
  }  // namespace history
 diff --git a/components/history/core/browser/top_sites_impl.h b/components/history/core/browser/top_sites_impl.h
-index e8d10234207e021e39e2a5aefeccbb7ee559ebd2..1db556d73056a5e9f3bfa0851696f5e0dd87a355 100644
+index dc40668f6d199a03eb6b6b5387fee1feacbd80e1..241a7a291fb6a0c09f4b47873503004334e1bf7e 100644
 --- a/components/history/core/browser/top_sites_impl.h
 +++ b/components/history/core/browser/top_sites_impl.h
-@@ -90,6 +90,10 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
+@@ -59,11 +59,17 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
+   // callable multiple time and during the whole lifetime of TopSitesImpl.
+   using CanAddURLToHistoryFn = base::Callback<bool(const GURL&)>;
+ 
++  // gisli@vivaldi.com:  Increased kNonForcedTopSitesNumber,
++  // kForcedTopSitesNumber and kMaxTempTopImages as we are using
++  // top sites as general storage for thumbnails (through
++  // the ThumbnailService).  When Chromium implements the
++  // ThumbnailService properly this change should be reverted.
++
+   // How many non-forced top sites to store in the cache.
+-  static constexpr size_t kNonForcedTopSitesNumber = 10;
++  static constexpr size_t kNonForcedTopSitesNumber = 60;
+ 
+   // How many forced top sites to store in the cache.
+-  static constexpr size_t kForcedTopSitesNumber = 10;
++  static constexpr size_t kForcedTopSitesNumber = 2000;
+ 
+   TopSitesImpl(PrefService* pref_service,
+                HistoryService* history_service,
+@@ -99,6 +105,10 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
    bool loaded() const override;
    bool AddForcedURL(const GURL& url, const base::Time& time) override;
    void OnNavigationCommitted(const GURL& url) override;
@@ -2472,7 +2508,7 @@ index e8d10234207e021e39e2a5aefeccbb7ee559ebd2..1db556d73056a5e9f3bfa0851696f5e0
  
    // RefcountedKeyedService:
    void ShutdownOnUIThread() override;
-@@ -267,6 +271,11 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
+@@ -273,6 +283,11 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
                       const URLRows& deleted_rows,
                       const std::set<GURL>& favicon_urls) override;
  
@@ -2484,153 +2520,8 @@ index e8d10234207e021e39e2a5aefeccbb7ee559ebd2..1db556d73056a5e9f3bfa0851696f5e0
    // Ensures that non thread-safe methods are called on the correct thread.
    base::ThreadChecker thread_checker_;
  
-diff --git a/components/history/core/browser/top_sites_impl_unittest.cc b/components/history/core/browser/top_sites_impl_unittest.cc
-index 00d1e10793b777724d2e7ebb028853673eeb434b..40d16a6a357bfb969743f044e2ab1d196675e581 100644
---- a/components/history/core/browser/top_sites_impl_unittest.cc
-+++ b/components/history/core/browser/top_sites_impl_unittest.cc
-@@ -997,14 +997,20 @@ TEST_F(TopSitesImplTest, GetUpdateDelay) {
-     url_list[i].redirects.push_back(tmp_url);
-   }
-   SetTopSites(url_list);
--  EXPECT_EQ(20u, last_num_urls_changed());
-+  // gisli@vivaldi.com:  Changed expected value as we changed the some
-+  // constants in top_sites_impl.cc.  Note, this test will not test the limits
-+  // the same way it did before.
-+  EXPECT_EQ(20u+1, last_num_urls_changed());
-   SetLastNumUrlsChanged(0);
-   EXPECT_EQ(kExpectedUpdateDelayInMinute0Changed, GetUpdateDelay().InMinutes());
- 
-   SetLastNumUrlsChanged(3);
-   EXPECT_EQ(kExpectedUpdateDelayInMinute3Changed, GetUpdateDelay().InMinutes());
- 
--  SetLastNumUrlsChanged(20);
-+  // tomas@vivaldi.com - changed from 20 to 21 due to changes from Gisli above.
-+  SetLastNumUrlsChanged(20+1);
-+  // gisli@vivaldi.com:  Changed expected value as we changed the some
-+  // constants in top_sites_impl.cc.
-   EXPECT_EQ(kExpectedUpdateDelayInMinute20Changed,
-             GetUpdateDelay().InMinutes());
- }
-@@ -1379,7 +1385,11 @@ TEST_F(TopSitesImplTest, SetForcedTopSites) {
-   AppendForcedMostVisitedURL(&new_url_list, GURL("http://newforced/12"), 22000);
- 
-   // Setup a number non-forced URLs in both old and new list.
--  const size_t kNumNonForcedURLs = 20;  // Maximum number of non-forced URLs.
-+  // gisli@vivaldi.com:  Changed kNumNonForcedURLs to match changed
-+  // constants in top_sites_impl.cc.  Also changed serveral of the
-+  // expected values to match the contstants.  Note, that this test
-+  // might NOT test the limits of the url lists the same way it did before.
-+  const size_t kNumNonForcedURLs = 20+40;  // Maximum number of non-forced URLs.
-   for (size_t i = 0; i < kNumNonForcedURLs; ++i) {
-     std::ostringstream url;
-     url << "http://oldnonforced/" << i;
-@@ -1417,56 +1427,59 @@ TEST_F(TopSitesImplTest, SetForcedTopSites) {
-   querier.QueryAllTopSites(top_sites(), false, true);
- 
-   // We should have reached the maximum of 20 forced URLs.
--  ASSERT_EQ(20 + kNumNonForcedURLs, querier.urls().size());
-+  // gisli@vivaldi.com:  Changed the value to match
-+  // constants in top_sites_impl.cc.
-+  int viv_offset = 2;
-+  ASSERT_EQ(20 + viv_offset + kNumNonForcedURLs, querier.urls().size());
- 
-   // Check forced URLs. They follow the order of timestamps above, smaller
-   // timestamps since they were evicted.
--  EXPECT_EQ("http://newforced/1", querier.urls()[0].url.spec());
--  EXPECT_EQ(3000, querier.urls()[0].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://oldforced/1", querier.urls()[1].url.spec());
--  EXPECT_EQ(4000, querier.urls()[1].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/2", querier.urls()[2].url.spec());
--  EXPECT_EQ(5000, querier.urls()[2].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/3", querier.urls()[3].url.spec());
--  EXPECT_EQ(6000, querier.urls()[3].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://oldforced/2", querier.urls()[4].url.spec());
--  EXPECT_EQ(7000, querier.urls()[4].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/4", querier.urls()[5].url.spec());
--  EXPECT_EQ(8000, querier.urls()[5].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/5", querier.urls()[6].url.spec());
--  EXPECT_EQ(9000, querier.urls()[6].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://oldforced/3", querier.urls()[7].url.spec());
--  EXPECT_EQ(10000, querier.urls()[7].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://oldforced/4", querier.urls()[8].url.spec());
--  EXPECT_EQ(11000, querier.urls()[8].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://oldforced/5", querier.urls()[9].url.spec());
--  EXPECT_EQ(12000, querier.urls()[9].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://oldforced/6", querier.urls()[10].url.spec());
--  EXPECT_EQ(13000, querier.urls()[10].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/6", querier.urls()[11].url.spec());
--  EXPECT_EQ(14000, querier.urls()[11].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/7", querier.urls()[12].url.spec());
--  EXPECT_EQ(15000, querier.urls()[12].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/8", querier.urls()[13].url.spec());
--  EXPECT_EQ(16000, querier.urls()[13].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/9", querier.urls()[14].url.spec());
--  EXPECT_EQ(17000, querier.urls()[14].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://oldforced/7", querier.urls()[15].url.spec());
--  EXPECT_EQ(18000, querier.urls()[15].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/10", querier.urls()[16].url.spec());
--  EXPECT_EQ(19000, querier.urls()[16].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/11", querier.urls()[17].url.spec());
--  EXPECT_EQ(20000, querier.urls()[17].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://oldforced/8", querier.urls()[18].url.spec());
--  EXPECT_EQ(21000, querier.urls()[18].last_forced_time.ToJsTime());
--  EXPECT_EQ("http://newforced/12", querier.urls()[19].url.spec());
--  EXPECT_EQ(22000, querier.urls()[19].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/1", querier.urls()[0 + viv_offset].url.spec());
-+  EXPECT_EQ(3000, querier.urls()[0 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://oldforced/1", querier.urls()[1 + viv_offset].url.spec());
-+  EXPECT_EQ(4000, querier.urls()[1 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/2", querier.urls()[2 + viv_offset].url.spec());
-+  EXPECT_EQ(5000, querier.urls()[2 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/3", querier.urls()[3 + viv_offset].url.spec());
-+  EXPECT_EQ(6000, querier.urls()[3 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://oldforced/2", querier.urls()[4 + viv_offset].url.spec());
-+  EXPECT_EQ(7000, querier.urls()[4 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/4", querier.urls()[5 + viv_offset].url.spec());
-+  EXPECT_EQ(8000, querier.urls()[5 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/5", querier.urls()[6 + viv_offset].url.spec());
-+  EXPECT_EQ(9000, querier.urls()[6 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://oldforced/3", querier.urls()[7 + viv_offset].url.spec());
-+  EXPECT_EQ(10000, querier.urls()[7 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://oldforced/4", querier.urls()[8 + viv_offset].url.spec());
-+  EXPECT_EQ(11000, querier.urls()[8 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://oldforced/5", querier.urls()[9 + viv_offset].url.spec());
-+  EXPECT_EQ(12000, querier.urls()[9 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://oldforced/6", querier.urls()[10 + viv_offset].url.spec());
-+  EXPECT_EQ(13000, querier.urls()[10 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/6", querier.urls()[11 + viv_offset].url.spec());
-+  EXPECT_EQ(14000, querier.urls()[11 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/7", querier.urls()[12 + viv_offset].url.spec());
-+  EXPECT_EQ(15000, querier.urls()[12 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/8", querier.urls()[13 + viv_offset].url.spec());
-+  EXPECT_EQ(16000, querier.urls()[13 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/9", querier.urls()[14 + viv_offset].url.spec());
-+  EXPECT_EQ(17000, querier.urls()[14 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://oldforced/7", querier.urls()[15 + viv_offset].url.spec());
-+  EXPECT_EQ(18000, querier.urls()[15 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/10", querier.urls()[16 + viv_offset].url.spec());
-+  EXPECT_EQ(19000, querier.urls()[16 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/11", querier.urls()[17 + viv_offset].url.spec());
-+  EXPECT_EQ(20000, querier.urls()[17 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://oldforced/8", querier.urls()[18 + viv_offset].url.spec());
-+  EXPECT_EQ(21000, querier.urls()[18 + viv_offset].last_forced_time.ToJsTime());
-+  EXPECT_EQ("http://newforced/12", querier.urls()[19 + viv_offset].url.spec());
-+  EXPECT_EQ(22000, querier.urls()[19 + viv_offset].last_forced_time.ToJsTime());
- 
-   // Check first and last non-forced URLs.
--  EXPECT_EQ("http://newnonforced/0", querier.urls()[20].url.spec());
--  EXPECT_TRUE(querier.urls()[20].last_forced_time.is_null());
--  EXPECT_EQ("http://newnonforced/19", querier.urls()[39].url.spec());
--  EXPECT_TRUE(querier.urls()[39].last_forced_time.is_null());
-+  EXPECT_EQ("http://newnonforced/0", querier.urls()[20 + viv_offset].url.spec());
-+  EXPECT_TRUE(querier.urls()[20 + viv_offset].last_forced_time.is_null());
-+  EXPECT_EQ("http://newnonforced/19", querier.urls()[39 + viv_offset].url.spec());
-+  EXPECT_TRUE(querier.urls()[39 + viv_offset].last_forced_time.is_null());
- }
- 
- TEST_F(TopSitesImplTest, SetForcedTopSitesWithCollisions) {
 diff --git a/components/history/core/browser/url_database.cc b/components/history/core/browser/url_database.cc
-index 4d8c5df41720037b5d0d69fc241ed275da8c34bc..0a519ab3aac01ea6158c8529c9c117c7fb9f3320 100644
+index 1ef2f03f61c47f3925f25ddf3980de9623526b52..86aedec9c3436d8bdcabfc616b185eab3afbba21 100644
 --- a/components/history/core/browser/url_database.cc
 +++ b/components/history/core/browser/url_database.cc
 @@ -16,6 +16,8 @@
@@ -2642,7 +2533,7 @@ index 4d8c5df41720037b5d0d69fc241ed275da8c34bc..0a519ab3aac01ea6158c8529c9c117c7
  namespace history {
  
  const char URLDatabase::kURLRowFields[] = HISTORY_URL_ROW_FIELDS;
-@@ -355,6 +357,27 @@ bool URLDatabase::FindShortestURLFromBase(const std::string& base,
+@@ -365,6 +367,27 @@ bool URLDatabase::FindShortestURLFromBase(const std::string& base,
    return true;
  }
  
@@ -2670,7 +2561,7 @@ index 4d8c5df41720037b5d0d69fc241ed275da8c34bc..0a519ab3aac01ea6158c8529c9c117c7
  bool URLDatabase::GetTextMatches(const base::string16& query,
                                   URLRows* results) {
    return GetTextMatchesWithAlgorithm(
-@@ -366,6 +389,9 @@ bool URLDatabase::GetTextMatchesWithAlgorithm(
+@@ -376,6 +399,9 @@ bool URLDatabase::GetTextMatchesWithAlgorithm(
      query_parser::MatchingAlgorithm algorithm,
      URLRows* results) {
    query_parser::QueryNodeVector query_nodes;
@@ -2680,7 +2571,7 @@ index 4d8c5df41720037b5d0d69fc241ed275da8c34bc..0a519ab3aac01ea6158c8529c9c117c7
    query_parser_.ParseQueryNodes(query, algorithm, &query_nodes);
  
    results->clear();
-@@ -665,4 +691,6 @@ bool RowQualifiesAsSignificant(const URLRow& row,
+@@ -673,4 +699,6 @@ bool RowQualifiesAsSignificant(const URLRow& row,
           (row.last_visit() >= real_threshold);
  }
  
@@ -2688,10 +2579,10 @@ index 4d8c5df41720037b5d0d69fc241ed275da8c34bc..0a519ab3aac01ea6158c8529c9c117c7
 +
  }  // namespace history
 diff --git a/components/history/core/browser/url_database.h b/components/history/core/browser/url_database.h
-index 087e7864d689a9c560c4663a944bb8bc58b2705f..05ce603914143a40624f546dddfbc23662453503 100644
+index d3a964276210d04c1ddd9e009d61aacb542debb0..a109a56e1d5874679f82f926b79109a4ad4263a9 100644
 --- a/components/history/core/browser/url_database.h
 +++ b/components/history/core/browser/url_database.h
-@@ -185,6 +185,11 @@ class URLDatabase {
+@@ -186,6 +186,11 @@ class URLDatabase {
  
    // History search ------------------------------------------------------------
  
@@ -2703,7 +2594,7 @@ index 087e7864d689a9c560c4663a944bb8bc58b2705f..05ce603914143a40624f546dddfbc236
    // Performs a brute force search over the database to find any URLs or titles
    // which match the |query| string, using the default text matching algorithm.
    // Returns any matches in |results|.
-@@ -237,6 +242,7 @@ class URLDatabase {
+@@ -238,6 +243,7 @@ class URLDatabase {
    // the favicon couldn't be updated.
    bool MigrateFromVersion11ToVersion12();
  
@@ -2712,10 +2603,10 @@ index 087e7864d689a9c560c4663a944bb8bc58b2705f..05ce603914143a40624f546dddfbc236
    friend class VisitDatabase;
  
 diff --git a/components/history/core/browser/visit_database.cc b/components/history/core/browser/visit_database.cc
-index 3d99885247243a7947c720e6ef7a8d725ba0c615..f38dd0f992499362023903c52b8b9bd59b3f622c 100644
+index 0ef84afb0080e3b3e6b4cb41b5ce43f9cb82cc42..e2c769d01c843923baeaab62154a4df421e7c156 100644
 --- a/components/history/core/browser/visit_database.cc
 +++ b/components/history/core/browser/visit_database.cc
-@@ -606,4 +606,11 @@ bool VisitDatabase::MigrateVisitsWithoutDuration() {
+@@ -626,4 +626,11 @@ bool VisitDatabase::MigrateVisitsWithoutDuration() {
    return true;
  }
  
@@ -2728,10 +2619,10 @@ index 3d99885247243a7947c720e6ef7a8d725ba0c615..f38dd0f992499362023903c52b8b9bd5
 +
  }  // namespace history
 diff --git a/components/history/core/browser/visit_database.h b/components/history/core/browser/visit_database.h
-index 1bb743a8a022f1a31ce9cfbf5557a5b18cd6801d..38ad6bd76b5a3efc49a8b850d59047440cdfb90a 100644
+index ee950544f97062ccc94fb0c5f4c6e47de65c3100..0a7973bf60aae895326ce0d23eca77f15c9c2f62 100644
 --- a/components/history/core/browser/visit_database.h
 +++ b/components/history/core/browser/visit_database.h
-@@ -183,6 +183,9 @@ class VisitDatabase {
+@@ -188,6 +188,9 @@ class VisitDatabase {
    void GetVisitsSource(const VisitVector& visits,
                         VisitSourceMap* sources);
  
@@ -2742,7 +2633,7 @@ index 1bb743a8a022f1a31ce9cfbf5557a5b18cd6801d..38ad6bd76b5a3efc49a8b850d5904744
    // Returns the database for the functions in this interface.
    virtual sql::Connection& GetDB() = 0;
 diff --git a/components/history/core/browser/web_history_service.cc b/components/history/core/browser/web_history_service.cc
-index 199ed0e1621e76ea21653106310dadf4d859859c..3701837ad2fec1d64d0406f553f886affe0c02db 100644
+index b54c4f115b717ddfd2c9a94f07983346d18d53c2..454ddc6858944ad058563dcef67f3d92035d6450 100644
 --- a/components/history/core/browser/web_history_service.cc
 +++ b/components/history/core/browser/web_history_service.cc
 @@ -36,27 +36,29 @@
@@ -2782,7 +2673,7 @@ index 199ed0e1621e76ea21653106310dadf4d859859c..3701837ad2fec1d64d0406f553f886af
  const char kQueryOtherFormsOfBrowsingHistoryUrlSuffix[] = "/historystatus";
  
 diff --git a/components/history/core/common/thumbnail_score.cc b/components/history/core/common/thumbnail_score.cc
-index f8f339e5f1651fc6bba524d0472ec5e214e6362b..0469e4c94d9f067eb779893da0e6f6ae18506167 100644
+index f8f339e5f1651fc6bba524d0472ec5e214e6362b..c3286c4102abd16d048463408f776092ded68e43 100644
 --- a/components/history/core/common/thumbnail_score.cc
 +++ b/components/history/core/common/thumbnail_score.cc
 @@ -31,7 +31,8 @@ static int GetThumbnailType(const ThumbnailScore& score) {
@@ -2810,7 +2701,7 @@ index f8f339e5f1651fc6bba524d0472ec5e214e6362b..0469e4c94d9f067eb779893da0e6f6ae
                                 bool top,
                                 const Time& time)
 -    : boring_score(score),
-+      : force_update(false), 
++    : force_update(false),
 +      boring_score(score),
        good_clipping(clipping),
        at_top(top),
@@ -2947,24 +2838,11 @@ index e9424f280d69b364170a71cf9c0cefa994b6258b..34dba63838d52e3d6fbf2669c311497f
    if (prefs_->GetBoolean(prefs::kInvalidationServiceUseGCMChannel)) {
      // Use GCM channel if it was enabled via prefs.
      return true;
-diff --git a/components/metrics/proto/omnibox_event.proto b/components/metrics/proto/omnibox_event.proto
-index af81e42b2e1f04476a6e243a56106e6da622edfc..bfb3c26fa2faa4f973dd913c5cb4a8eeadd947ef 100644
---- a/components/metrics/proto/omnibox_event.proto
-+++ b/components/metrics/proto/omnibox_event.proto
-@@ -244,6 +244,8 @@ message OmniboxEventProto {
-       PHYSICAL_WEB            = 25; // A Physical Web nearby URL.
-       PHYSICAL_WEB_OVERFLOW   = 26; // An item representing multiple Physical
-                                     // Web nearby URLs.
-+ //     BOOKMARK_NICK = 10000;        // A bookmark whose nickname contains the input.
-+ //     BOOKMARK_DESCRIPTION = 1001;  // A bookmark whose description contains the input.
-     }
-     optional ResultType result_type = 2;
- 
 diff --git a/components/metrics/url_constants.cc b/components/metrics/url_constants.cc
-index 6b285923ff0637945be7258fa6d8aa314843a9af..8cb8e1416decf7be9cb8d26acd5e5214b2b0fe3b 100644
+index f60d33bfa16253ebc4d9e381b99c5e81e704814a..facd6d06155a555436666f176128cbe7b992d645 100644
 --- a/components/metrics/url_constants.cc
 +++ b/components/metrics/url_constants.cc
-@@ -4,12 +4,14 @@
+@@ -4,15 +4,17 @@
  
  #include "components/metrics/url_constants.h"
  
@@ -2976,16 +2854,20 @@ index 6b285923ff0637945be7258fa6d8aa314843a9af..8cb8e1416decf7be9cb8d26acd5e5214
 -    "https://clientservices.googleapis.com/uma/v2";
 +    SYNC_URL("/uma/v2");
  
+ const char kNewMetricsServerUrlInsecure[] =
+-    "http://clientservices.googleapis.com/uma/v2";
++    SYNC_URL("/uma/v2");
+ 
 -const char kOldMetricsServerUrl[] = "https://clients4.google.com/uma/v2";
 +const char kOldMetricsServerUrl[] = SYNC_URL("/uma/v2");
  
  const char kDefaultMetricsMimeType[] = "application/vnd.chrome.uma";
  
 diff --git a/components/omnibox/browser/zero_suggest_provider_unittest.cc b/components/omnibox/browser/zero_suggest_provider_unittest.cc
-index 1d3ac0bc74a6c4f40556d0afed92300f13adb67d..37e44c7d152ef10ab80403b8cea2cd24afa330ac 100644
+index 18edadbdcb13c3ff1c205d37ea0b8c453cb5b2b5..89a35f4cbe6b429e924b08ff77eaded802aa9ed7 100644
 --- a/components/omnibox/browser/zero_suggest_provider_unittest.cc
 +++ b/components/omnibox/browser/zero_suggest_provider_unittest.cc
-@@ -83,6 +83,10 @@ class FakeEmptyTopSites : public history::TopSites {
+@@ -86,6 +86,10 @@ class FakeEmptyTopSites : public history::TopSites {
    // RefcountedKeyedService:
    void ShutdownOnUIThread() override {}
  
@@ -3012,7 +2894,7 @@ index 9f9b7da6d44b161934d6055828eefd7f50280a62..b84c2c541b64ee9b2c0749f54568c450
  
  using testing::_;
 diff --git a/components/os_crypt/key_storage_libsecret.cc b/components/os_crypt/key_storage_libsecret.cc
-index ea034fd48c08de6f5f755fbffb962390ec8dd7b2..869316e619aaad9549736a22827974c3065db67b 100644
+index 37fd8bb397ae6728e3e8118771d3308c64f15496..70c254cbebcfc0f38c352abaff4b92cb42ccd3af 100644
 --- a/components/os_crypt/key_storage_libsecret.cc
 +++ b/components/os_crypt/key_storage_libsecret.cc
 @@ -9,6 +9,10 @@
@@ -3035,7 +2917,7 @@ index ea034fd48c08de6f5f755fbffb962390ec8dd7b2..869316e619aaad9549736a22827974c3
 +#error GOOGLE_CHROME_BUILD must be set for Vivaldi builds
 +#endif
 diff --git a/components/os_crypt/key_storage_linux.cc b/components/os_crypt/key_storage_linux.cc
-index 6c63c1ccca940683d9b1d56e32edd5b6474d6d3b..27f1092c6273e2d97abb85195dddb0844714b8a3 100644
+index ded176374a327825a5f138fc1ee2c645dcd48711..0ad3989b663d7e723ce103b948818e432d91c645 100644
 --- a/components/os_crypt/key_storage_linux.cc
 +++ b/components/os_crypt/key_storage_linux.cc
 @@ -20,6 +20,10 @@
@@ -3049,9 +2931,9 @@ index 6c63c1ccca940683d9b1d56e32edd5b6474d6d3b..27f1092c6273e2d97abb85195dddb084
  #if defined(GOOGLE_CHROME_BUILD)
  const char KeyStorageLinux::kFolderName[] = "Chrome Keys";
  const char KeyStorageLinux::kKey[] = "Chrome Safe Storage";
-@@ -90,3 +94,7 @@ std::unique_ptr<KeyStorageLinux> KeyStorageLinux::CreateService(
-   VLOG(1) << "OSCrypt did not initialize a backend.";
-   return nullptr;
+@@ -99,3 +103,7 @@ std::string KeyStorageLinux::GetKey() {
+   // thread.
+   return GetKeyImpl();
  }
 +
 +#ifndef GOOGLE_CHROME_BUILD
@@ -3254,8 +3136,38 @@ index f999d25654e1300bf7a5f239f7a7dc1f3fac57b7..f074657af8a5ba983e1af12b6b8a754e
 +void OSCrypt::ResetImportCache() {
 +  import_key_is_cached = false;
 +}
+diff --git a/components/password_manager/content/browser/content_password_manager_driver.cc b/components/password_manager/content/browser/content_password_manager_driver.cc
+index 9a9095896c197ae530a3078f2779a8b957a1dbf3..6e7ddef521fcef38fbd9aa6741ad50765f7522af 100644
+--- a/components/password_manager/content/browser/content_password_manager_driver.cc
++++ b/components/password_manager/content/browser/content_password_manager_driver.cc
+@@ -29,6 +29,9 @@
+ #include "net/cert/cert_status_flags.h"
+ #include "services/service_manager/public/cpp/interface_provider.h"
+ 
++#include "app/vivaldi_apptools.h"
++#include "content/public/browser/guest_mode.h"
++
+ namespace password_manager {
+ 
+ ContentPasswordManagerDriver::ContentPasswordManagerDriver(
+@@ -386,6 +389,15 @@ ContentPasswordManagerDriver::GetPasswordGenerationAgent() {
+ 
+ gfx::RectF ContentPasswordManagerDriver::TransformToRootCoordinates(
+     const gfx::RectF& bounds_in_frame_coordinates) {
++  if (vivaldi::IsVivaldiRunning()) {
++    // Same code in
++    // ContentAutofillDriver::TransformBoundingBoxToViewportCoordinates
++    // Both should be in sync.
++    if (!content::GuestMode::IsCrossProcessFrameGuest(
++        content::WebContents::FromRenderFrameHost(render_frame_host_))) {
++      return bounds_in_frame_coordinates;
++    }
++  }
+   content::RenderWidgetHostView* rwhv = render_frame_host_->GetView();
+   if (!rwhv)
+     return bounds_in_frame_coordinates;
 diff --git a/components/password_manager/core/browser/password_bubble_experiment.cc b/components/password_manager/core/browser/password_bubble_experiment.cc
-index 8e2a46e69d7c58075abbc0776e94a0883bb9e302..b5eb19541a2c4c7104600bd7253e7ae61cd2e551 100644
+index 3c446d45560fbe70366ca58f0220709c2580b9e2..3524ceca2a0ea62c2576fed94ef67fda9d7b2b13 100644
 --- a/components/password_manager/core/browser/password_bubble_experiment.cc
 +++ b/components/password_manager/core/browser/password_bubble_experiment.cc
 @@ -16,6 +16,8 @@
@@ -3267,7 +3179,7 @@ index 8e2a46e69d7c58075abbc0776e94a0883bb9e302..b5eb19541a2c4c7104600bd7253e7ae6
  namespace password_bubble_experiment {
  
  const char kSmartBubbleExperimentName[] = "PasswordSmartBubble";
-@@ -64,6 +66,8 @@ void TurnOffAutoSignin(PrefService* prefs) {
+@@ -60,6 +62,8 @@ void TurnOffAutoSignin(PrefService* prefs) {
  bool ShouldShowChromeSignInPasswordPromo(
      PrefService* prefs,
      const syncer::SyncService* sync_service) {
@@ -3276,27 +3188,11 @@ index 8e2a46e69d7c58075abbc0776e94a0883bb9e302..b5eb19541a2c4c7104600bd7253e7ae6
    if (!sync_service || !sync_service->IsSyncAllowed() ||
        sync_service->IsFirstSetupComplete())
      return false;
-diff --git a/components/policy/BUILD.gn b/components/policy/BUILD.gn
-index 8fc77e135f6339f7757c3a3694b526270f926c8e..35527ac91d12acca7952f80036c2510ec0b931ca 100644
---- a/components/policy/BUILD.gn
-+++ b/components/policy/BUILD.gn
-@@ -389,9 +389,8 @@ if (gen_policy_templates_android && is_android) {
-   }
- 
-   create_bundle("chrome_manifest_bundle") {
--    bundle_root_dir = "$root_out_dir/$chrome_mac_bundle_id.manifest"
--    bundle_contents_dir = "$bundle_root_dir/Contents"
--    bundle_resources_dir = "$bundle_contents_dir/Resources"
-+    bundle_root_dir = "$root_out_dir/$chrome_mac_bundle_id.manifest/Contents"
-+    bundle_resources_dir = "$bundle_root_dir/Resources"
- 
-     deps = [
-       ":manifest_bundle_data",
 diff --git a/components/policy/resources/policy_templates.json b/components/policy/resources/policy_templates.json
-index 6ea64701a948670fe495e8a168b5ee23025e424e..ade9f6c4940df8e39c8c859aca3805681f746ff6 100644
+index e75d8351d7601f97c51fe8d81ce05208cf548f8b..16c4add052842238ca97576570848c1aa193c521 100644
 --- a/components/policy/resources/policy_templates.json
 +++ b/components/policy/resources/policy_templates.json
-@@ -4880,10 +4880,11 @@
+@@ -5214,10 +5214,11 @@
        'schema': { 'type': 'boolean' },
        'supported_on': ['chrome.*:19-', 'chrome_os:19-'],
        'features': {
@@ -3310,7 +3206,7 @@ index 6ea64701a948670fe495e8a168b5ee23025e424e..ade9f6c4940df8e39c8c859aca380568
        'caption': '''Whether online OCSP/CRL checks are performed''',
        'tags': ['website-sharing'],
 diff --git a/components/policy/tools/generate_policy_source.py b/components/policy/tools/generate_policy_source.py
-index 040ace48b69c3cea6c2842f4531bd514e2e0a88e..bc54e148c7d0ca0e0ccc26cd15d20af1ffb9615a 100755
+index a92062f9b95763bbd4761aa3cf08e18e857eac2f..1b28a682d40472481fa099c1271609fc62bccd26 100755
 --- a/components/policy/tools/generate_policy_source.py
 +++ b/components/policy/tools/generate_policy_source.py
 @@ -22,6 +22,7 @@ import types
@@ -3321,7 +3217,7 @@ index 040ace48b69c3cea6c2842f4531bd514e2e0a88e..bc54e148c7d0ca0e0ccc26cd15d20af1
  CHROME_POLICY_KEY = 'SOFTWARE\\\\Policies\\\\Google\\\\Chrome'
  CHROMIUM_POLICY_KEY = 'SOFTWARE\\\\Policies\\\\Chromium'
  
-@@ -789,7 +790,10 @@ def _WritePolicyConstantSource(policies, os, f, risk_tags):
+@@ -783,7 +784,10 @@ def _WritePolicyConstantSource(policies, os, f, risk_tags):
    f.write('}  // namespace\n\n')
  
    if os == 'win':
@@ -3333,6 +3229,33 @@ index 040ace48b69c3cea6c2842f4531bd514e2e0a88e..bc54e148c7d0ca0e0ccc26cd15d20af1
              'const wchar_t kRegistryChromePolicyKey[] = '
              'L"' + CHROME_POLICY_KEY + '";\n'
              '#else\n'
+diff --git a/components/policy/tools/template_writers/writer_configuration.py b/components/policy/tools/template_writers/writer_configuration.py
+index 554ea309c82fecf4f5ceb7eccef46e420519fe74..e87a12cf3ead6a9c521737bb88d2b84a3a5fbc7a 100755
+--- a/components/policy/tools/template_writers/writer_configuration.py
++++ b/components/policy/tools/template_writers/writer_configuration.py
+@@ -108,6 +108,22 @@ def GetConfigurationForBuild(defines):
+       },
+       'linux_policy_path': '/etc/opt/chrome/policies/',
+     }
++  elif '_vivaldi' in defines:
++    config = {
++      'build': 'vivaldi',
++      'app_name': 'Vivaldi',
++      'frame_name': 'Vivaldi Frame',
++      'os_name': 'Chromium OS',
++      'webview_name': 'Vivaldi WebView',
++      'win_reg_mandatory_key_name': 'Software\\Policies\\Vivaldi',
++      'win_reg_recommended_key_name':
++          'Software\\Policies\\Vivaldi\\Recommended',
++      'win_mandatory_category_path': ['vivaldi'],
++      'win_recommended_category_path': ['vivaldi_recommended'],
++      'admx_namespace': 'Vivaldi.Policies.Vivaldi',
++      'admx_prefix': 'vivaldi',
++      'linux_policy_path': '/etc/vivaldi/policies/',
++    }
+   else:
+     raise Exception('Unknown build')
+   if 'version' in defines:
 diff --git a/components/renderer_context_menu/context_menu_content_type.cc b/components/renderer_context_menu/context_menu_content_type.cc
 index 95dae075636712eb8e0cda00ff7d710a5b957893..23f0a3a2becab0bf17fbcb998cf4cdba70375dba 100644
 --- a/components/renderer_context_menu/context_menu_content_type.cc
@@ -3347,10 +3270,10 @@ index 95dae075636712eb8e0cda00ff7d710a5b957893..23f0a3a2becab0bf17fbcb998cf4cdba
  using content::WebContents;
  
 diff --git a/components/renderer_context_menu/render_view_context_menu_base.cc b/components/renderer_context_menu/render_view_context_menu_base.cc
-index 709931ac8043233dbf0666f043d5da4fde584462..d0b21c16c9db20ce9d9b2e605b65c237c8a1bb95 100644
+index 562de5bb338beffea42542d611e62aaf38578769..dc4d2c1605a06af3e43f26ad03404a64fec99915 100644
 --- a/components/renderer_context_menu/render_view_context_menu_base.cc
 +++ b/components/renderer_context_menu/render_view_context_menu_base.cc
-@@ -385,6 +385,11 @@ void RenderViewContextMenuBase::OpenURLWithExtraHeaders(
+@@ -386,6 +386,11 @@ void RenderViewContextMenuBase::OpenURLWithExtraHeaders(
    open_url_params.source_render_process_id = render_process_id_;
    open_url_params.source_render_frame_id = render_frame_id_;
  
@@ -3363,7 +3286,7 @@ index 709931ac8043233dbf0666f043d5da4fde584462..d0b21c16c9db20ce9d9b2e605b65c237
  }
  
 diff --git a/components/renderer_context_menu/views/toolkit_delegate_views.cc b/components/renderer_context_menu/views/toolkit_delegate_views.cc
-index 1e5357c08dea2b7244cf6cd2b2faaf9f81879d30..59361769008557a028a3e3ffd0ef7e73184dd04d 100644
+index d9519705ff2fc9b03c01466f5c05b16dc3af6ff2..d882a5f94598a6c63523add96e10b0e0c49ad6ab 100644
 --- a/components/renderer_context_menu/views/toolkit_delegate_views.cc
 +++ b/components/renderer_context_menu/views/toolkit_delegate_views.cc
 @@ -34,6 +34,27 @@ void ToolkitDelegateViews::Init(ui::SimpleMenuModel* menu_model) {
@@ -3408,10 +3331,19 @@ index 9ee4d0f86cda15b743ec4e20ebc2bd0a14675d26..8317fb8424c5978e5ef0b279047455b2
    // ToolkitDelegate:
    void Init(ui::SimpleMenuModel* menu_model) override;
 diff --git a/components/search_engines/template_url_service.cc b/components/search_engines/template_url_service.cc
-index e64736ae1ed4d9923b0f532ed3aeb2ded16772c2..0264934967cfd173c8ee8e019d0f770ea4e1442c 100644
+index fd94cadbe8e50b32ec81382100072f400c844f66..9886dc07eed2ec0a19f3e62e2a23a1cc39b92712 100644
 --- a/components/search_engines/template_url_service.cc
 +++ b/components/search_engines/template_url_service.cc
-@@ -870,6 +870,11 @@ base::string16 TemplateURLService::GetKeywordShortName(
+@@ -42,6 +42,8 @@
+ #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+ #include "url/gurl.h"
+ 
++#include "app/vivaldi_apptools.h"
++
+ typedef SearchHostToURLsMap::TemplateURLSet TemplateURLSet;
+ typedef TemplateURLService::SyncDataMap SyncDataMap;
+ 
+@@ -777,6 +779,11 @@ base::string16 TemplateURLService::GetKeywordShortName(
  }
  
  void TemplateURLService::OnHistoryURLVisited(const URLVisitedDetails& details) {
@@ -3499,7 +3431,7 @@ index 0efb779e20c170d165e4c6368cc35901b6f5fd30..38e41b47faaa86145a322c629a1b0304
  
   protected:
 diff --git a/components/sessions/core/persistent_tab_restore_service.cc b/components/sessions/core/persistent_tab_restore_service.cc
-index c70d39d51ac389d02c08a2137a423ea44a5d4db0..9a3f80a9dffb77e89f5be175679acea4be1b6923 100644
+index 5e48e04323198883a362ff66fd11d7de17b7729b..6f7b5825d854f4e3038f2eb05b5b126755af257b 100644
 --- a/components/sessions/core/persistent_tab_restore_service.cc
 +++ b/components/sessions/core/persistent_tab_restore_service.cc
 @@ -26,6 +26,9 @@
@@ -3885,10 +3817,10 @@ index a537d4b718ad84f9223ae70eeb746069b5cf19c3..89cc351147c3c4edc272a5ec1f99c292
  
  void ProfileIdentityProvider::GoogleSigninSucceeded(
 diff --git a/components/signin/core/browser/profile_oauth2_token_service.h b/components/signin/core/browser/profile_oauth2_token_service.h
-index 3372a924c994847a7faa78d949f0655fdb0bcb05..69e1126c3602e65c7b57923beafadd7bf33c2da3 100644
+index a86b764bb397248fe2bfc60ef9f7671b7359cbde..ac5ce8a9a9fa869ae5e247ffb9f4455c1affe22d 100644
 --- a/components/signin/core/browser/profile_oauth2_token_service.h
 +++ b/components/signin/core/browser/profile_oauth2_token_service.h
-@@ -45,7 +45,7 @@ class ProfileOAuth2TokenService : public OAuth2TokenService,
+@@ -52,7 +52,7 @@ class ProfileOAuth2TokenService : public OAuth2TokenService,
    // The primary account is specified with the |primary_account_id| argument.
    // For a regular profile, the primary account id comes from SigninManager.
    // For a supervised user, the id comes from SupervisedUserService.
@@ -3898,10 +3830,10 @@ index 3372a924c994847a7faa78d949f0655fdb0bcb05..69e1126c3602e65c7b57923beafadd7b
    // Returns true iff all credentials have been loaded from disk.
    bool AreAllCredentialsLoaded();
 diff --git a/components/signin/core/browser/signin_manager.cc b/components/signin/core/browser/signin_manager.cc
-index 60f309fc6a483c49665aed487dbdc43e48585b0f..272d15fd71fdc849f0d8c08d004947339c876a4a 100644
+index 79fd6d5ae60c3d528ab4a1f325cf58e28c1ee1f2..f0d628b7ae2e64123b7acb8918066a9592b5ae38 100644
 --- a/components/signin/core/browser/signin_manager.cc
 +++ b/components/signin/core/browser/signin_manager.cc
-@@ -25,6 +25,8 @@
+@@ -26,6 +26,8 @@
  #include "google_apis/gaia/google_service_auth_error.h"
  #include "third_party/icu/source/i18n/unicode/regex.h"
  
@@ -3910,7 +3842,7 @@ index 60f309fc6a483c49665aed487dbdc43e48585b0f..272d15fd71fdc849f0d8c08d00494733
  using namespace signin_internals_util;
  
  SigninManager::SigninManager(SigninClient* client,
-@@ -254,6 +256,7 @@ void SigninManager::Initialize(PrefService* local_state) {
+@@ -283,6 +285,7 @@ void SigninManager::Initialize(PrefService* local_state) {
  }
  
  void SigninManager::Shutdown() {
@@ -3918,7 +3850,7 @@ index 60f309fc6a483c49665aed487dbdc43e48585b0f..272d15fd71fdc849f0d8c08d00494733
    account_tracker_service()->RemoveObserver(this);
    local_state_pref_registrar_.RemoveAll();
    SigninManagerBase::Shutdown();
-@@ -270,6 +273,9 @@ void SigninManager::OnGoogleServicesUsernamePatternChanged() {
+@@ -299,6 +302,9 @@ void SigninManager::OnGoogleServicesUsernamePatternChanged() {
  }
  
  bool SigninManager::IsSigninAllowed() const {
@@ -3929,25 +3861,23 @@ index 60f309fc6a483c49665aed487dbdc43e48585b0f..272d15fd71fdc849f0d8c08d00494733
  }
  
 diff --git a/components/signin/core/browser/signin_manager.h b/components/signin/core/browser/signin_manager.h
-index 7ec3c3f69cfd24a36a1a4020df899c77c9639bb4..2df5a41311525ee9942019ffcec3326dd5f47a9a 100644
+index 8408e0af898052d28f3be573e1fc5c5fafb09c91..2347544630e96ccc96f0a1ecd4f799c2182bba4f 100644
 --- a/components/signin/core/browser/signin_manager.h
 +++ b/components/signin/core/browser/signin_manager.h
-@@ -94,8 +94,8 @@ class SigninManager : public SigninManagerBase,
- 
-   // Sign a user out, removing the preference, erasing all keys
-   // associated with the user, and canceling all auth in progress.
--  virtual void SignOut(signin_metrics::ProfileSignout signout_source_metric,
--                       signin_metrics::SignoutDelete signout_delete_metric);
-+  void SignOut(signin_metrics::ProfileSignout signout_source_metric,
+@@ -101,7 +101,7 @@ class SigninManager : public SigninManagerBase,
+   // On desktop with DICE enabled, this will not remove all accounts from
+   // Chrome.
+   void SignOut(signin_metrics::ProfileSignout signout_source_metric,
+-               signin_metrics::SignoutDelete signout_delete_metric);
 +               signin_metrics::SignoutDelete signout_delete_metric) override;
  
-   // On platforms where SigninManager is responsible for dealing with
-   // invalid username policy updates, we need to check this during
+   // Signs a user out, removing the preference, erasing all keys
+   // associated with the authenticated user, and canceling all auth in progress.
 diff --git a/components/signin/core/browser/signin_manager_base.cc b/components/signin/core/browser/signin_manager_base.cc
-index bb6331147f3b6aa371000a7986937c42d29099ae..a7568055261cbffa921875098b9ae94e4154aaf0 100644
+index 1be1a2371450ef68f90ef4051c4ff89a946812a4..11ab2eebd5160dd93bfeb5ad187342112f43e227 100644
 --- a/components/signin/core/browser/signin_manager_base.cc
 +++ b/components/signin/core/browser/signin_manager_base.cc
-@@ -232,6 +232,10 @@ bool SigninManagerBase::AuthInProgress() const {
+@@ -244,6 +244,10 @@ bool SigninManagerBase::AuthInProgress() const {
    return false;
  }
  
@@ -3959,7 +3889,7 @@ index bb6331147f3b6aa371000a7986937c42d29099ae..a7568055261cbffa921875098b9ae94e
    on_shutdown_callback_list_.Notify();
  }
 diff --git a/components/signin/core/browser/signin_manager_base.h b/components/signin/core/browser/signin_manager_base.h
-index 690c209591f5c5a2ccd6f08414c5a44ab9154913..00cf7cac92b206ce711d2adef43fe4bf7d3966f9 100644
+index 7469f9aa49bdd48044471cdd3de9bd05af9e6aa9..294fce2ee442cfebd6ac6d1ff6878f1c956eff62 100644
 --- a/components/signin/core/browser/signin_manager_base.h
 +++ b/components/signin/core/browser/signin_manager_base.h
 @@ -36,6 +36,7 @@
@@ -3970,7 +3900,7 @@ index 690c209591f5c5a2ccd6f08414c5a44ab9154913..00cf7cac92b206ce711d2adef43fe4bf
  #include "google_apis/gaia/google_service_auth_error.h"
  
  class AccountTrackerService;
-@@ -146,6 +147,11 @@ class SigninManagerBase : public KeyedService {
+@@ -148,6 +149,11 @@ class SigninManagerBase : public KeyedService {
    // Returns true if there's a signin in progress.
    virtual bool AuthInProgress() const;
  
@@ -3983,10 +3913,10 @@ index 690c209591f5c5a2ccd6f08414c5a44ab9154913..00cf7cac92b206ce711d2adef43fe4bf
    void Shutdown() override;
  
 diff --git a/components/sync/base/data_type_histogram.h b/components/sync/base/data_type_histogram.h
-index 09cc6f3e0c41c868e2749e4bc19b5d8e8f6ec7c8..e1de9879693e7afbe01e432e130ec89226b500e8 100644
+index 6eda77f7bdd2a1850cd0a92ee5d0f827a7fe981c..95abaa3a739d79c0b0a393bb04307a8c7e842a6a 100644
 --- a/components/sync/base/data_type_histogram.h
 +++ b/components/sync/base/data_type_histogram.h
-@@ -167,6 +167,9 @@ void SyncRecordMemoryKbHistogram(const std::string& histogram_name_prefix,
+@@ -161,6 +161,9 @@ void SyncRecordMemoryKbHistogram(const std::string& histogram_name_prefix,
        case ::syncer::EXPERIMENTS:                              \
          PER_DATA_TYPE_MACRO("Experiments");                    \
          break;                                                 \
@@ -4095,7 +4025,7 @@ index ecbbf269220c34a492095c3f3950e7a58c378cb9..f153ebca0b57a78f2613dcf48875f5c0
  extern const char kSyncManaged[];
  extern const char kSyncSuppressStart[];
 diff --git a/components/sync/base/sync_prefs.cc b/components/sync/base/sync_prefs.cc
-index 04b3bd34e27ea61e8ee3c3c92edbdcea43777bb4..5a18141738f3f604f5803afc734da5d8804d56dc 100644
+index b252a0cead65d5e6022821529bfe0f14a2d9fe7f..49a208217a70fb3081b1bfe66446ed6c83f4f9d1 100644
 --- a/components/sync/base/sync_prefs.cc
 +++ b/components/sync/base/sync_prefs.cc
 @@ -337,6 +337,8 @@ const char* SyncPrefs::GetPrefNameForDataType(ModelType type) {
@@ -4108,7 +4038,7 @@ index 04b3bd34e27ea61e8ee3c3c92edbdcea43777bb4..5a18141738f3f604f5803afc734da5d8
    NOTREACHED() << "No pref mapping for type " << ModelTypeToString(type);
    return nullptr;
 diff --git a/components/sync/driver/generic_change_processor.cc b/components/sync/driver/generic_change_processor.cc
-index 06eb5aee5ebca88ea2de5b932f575654de210889..dfca0d641b350315af2f3d8e200ef84dd4972bbb 100644
+index d94410aaf11ed97fb10e6835caf9af0503eba59a..85b6e6317a33d787e4dbf424e1bbfad280e73a07 100644
 --- a/components/sync/driver/generic_change_processor.cc
 +++ b/components/sync/driver/generic_change_processor.cc
 @@ -272,6 +272,7 @@ SyncError GenericChangeProcessor::GetAllSyncDataReturnError(
@@ -4137,10 +4067,10 @@ index 42882d36b9cf9afb540d4df8d16ee4d7c891b4af..374fe4e698187b3ad6ce29b2b60f77cf
      return mock_attachment_service_;
    }
 diff --git a/components/sync/driver/glue/sync_backend_host_impl.cc b/components/sync/driver/glue/sync_backend_host_impl.cc
-index 57e638e38bfc8a823e038184659ce5df133d4547..6ef4c350987d9224c544101152954059c823901e 100644
+index 794abe9e5e987628949f36e3559ca52e721760e8..627d5eca01f2ef1f3d8843b00070cf9abc81a957 100644
 --- a/components/sync/driver/glue/sync_backend_host_impl.cc
 +++ b/components/sync/driver/glue/sync_backend_host_impl.cc
-@@ -449,6 +449,12 @@ void SyncBackendHostImpl::OnCookieJarChangedDoneOnFrontendLoop(
+@@ -451,6 +451,12 @@ void SyncBackendHostImpl::OnCookieJarChangedDoneOnFrontendLoop(
    callback.Run();
  }
  
@@ -4300,6 +4230,21 @@ index 77d8f33eefe7bfe7b5e00679fef9bcd8a82728a0..d00a1d2dbd65292d43ef0ef43dfd612a
   private:
    DISALLOW_COPY_AND_ASSIGN(SyncClient);
  };
+diff --git a/components/sync/driver/sync_service_crypto.cc b/components/sync/driver/sync_service_crypto.cc
+index 7e4e876ab2f3134c2710435de57a00848c87cbdd..b0dfc8ca9c9b293ba5e9e764f02107823ee80059 100644
+--- a/components/sync/driver/sync_service_crypto.cc
++++ b/components/sync/driver/sync_service_crypto.cc
+@@ -282,8 +282,9 @@ void SyncServiceCrypto::OnPassphraseAccepted() {
+ 
+   // Make sure the data types that depend on the passphrase are started at
+   // this time.
++  // Except if we haven't started the data type manager yet.
+   const ModelTypeSet types = get_preferred_types_.Run();
+-  if (data_type_manager_) {
++  if (data_type_manager_ && data_type_manager_->state() != DataTypeManager::STOPPED) {
+     // Re-enable any encrypted types if necessary.
+     data_type_manager_->Configure(types, CONFIGURE_REASON_CRYPTO);
+   }
 diff --git a/components/sync/driver/sync_util.cc b/components/sync/driver/sync_util.cc
 index 47d3c6dcb723e6c79aad2e5442cae626a276764f..2c38867c685fa68a09538c48b6a98d1cd9b3f930 100644
 --- a/components/sync/driver/sync_util.cc
@@ -4365,10 +4310,10 @@ index d28a390d143c108e047071a8dc4cbf1c29085b11..6c5c28167a1df5c5cbaff5a7830b0493
    DISALLOW_COPY_AND_ASSIGN(SyncEngine);
  };
 diff --git a/components/sync/engine_impl/commit_util.cc b/components/sync/engine_impl/commit_util.cc
-index a5b89f7005637a1043407d1e94855590fd1cfa81..137914014ee2970989401d843f5250e5887ba5db 100644
+index cd5b75e379435625e74079416edf3879ae3e25d9..d51462282069af5332db2175c69a3193da3bffae 100644
 --- a/components/sync/engine_impl/commit_util.cc
 +++ b/components/sync/engine_impl/commit_util.cc
-@@ -161,8 +161,9 @@ void BuildCommitItem(const syncable::Entry& meta_entry,
+@@ -163,8 +163,9 @@ void BuildCommitItem(const syncable::Entry& meta_entry,
  
    SetAttachmentIds(meta_entry, sync_entry);
  
@@ -4393,7 +4338,7 @@ index 22f20e2d3ba29a99a89ad7535ae4570a24affe32..658eb91e2c2fa011276500f550afdb65
      case FAVICON_IMAGES:
      case FAVICON_TRACKING:
 diff --git a/components/sync/engine_impl/loopback_server/loopback_server.cc b/components/sync/engine_impl/loopback_server/loopback_server.cc
-index 8b574632bf3504f7eb0a2e850f79748ab8a40acc..792c1579caa1774c5e677dea01445308b093c460 100644
+index 5d04917575671cf23f51abb4cf754a9a9e011174..1b4d6e4716608a698a30958318fa3c338e8fdbaf 100644
 --- a/components/sync/engine_impl/loopback_server/loopback_server.cc
 +++ b/components/sync/engine_impl/loopback_server/loopback_server.cc
 @@ -26,6 +26,8 @@
@@ -4451,8 +4396,8 @@ index 8b574632bf3504f7eb0a2e850f79748ab8a40acc..792c1579caa1774c5e677dea01445308
      }
    }
  
-@@ -337,6 +366,17 @@ string LoopbackServer::CommitEntity(
-     CHECK(iter != entities_.end());
+@@ -340,6 +369,17 @@ string LoopbackServer::CommitEntity(
+     DCHECK(iter != entities_.end());
      entity = PersistentPermanentEntity::CreateUpdatedNigoriEntity(
          client_entity, *iter->second);
 +  } else if (type == syncer::NOTES) {
@@ -4470,7 +4415,7 @@ index 8b574632bf3504f7eb0a2e850f79748ab8a40acc..792c1579caa1774c5e677dea01445308
      // TODO(pvalenzuela): Validate entity's parent ID.
      EntityMap::const_iterator iter = entities_.find(client_entity.id_string());
 diff --git a/components/sync/engine_impl/loopback_server/loopback_server.h b/components/sync/engine_impl/loopback_server/loopback_server.h
-index 0f5d5d0644f243cf1b900966fa149cdb88597048..0d5b5e6fde703e640501eac4757eb023f616dca9 100644
+index cecc8f2a541a65220c6d8f5a8bda59d3577cf9e9..331a32f4841ffe32ec875a6a6b557cbb5d78d554 100644
 --- a/components/sync/engine_impl/loopback_server/loopback_server.h
 +++ b/components/sync/engine_impl/loopback_server/loopback_server.h
 @@ -81,6 +81,8 @@ class LoopbackServer {
@@ -4483,7 +4428,7 @@ index 0f5d5d0644f243cf1b900966fa149cdb88597048..0d5b5e6fde703e640501eac4757eb023
    // Inserts the default permanent items in |entities_|.
    bool CreateDefaultPermanentItems();
 diff --git a/components/sync/engine_impl/loopback_server/loopback_server_entity.cc b/components/sync/engine_impl/loopback_server/loopback_server_entity.cc
-index 8bfb9d92a3b190e6b6db06047e76e06e910c5f11..d5835095a720b055ee3ee919a84666a210464b99 100644
+index 428ec8bf350ab6294f82fe4800ce8715770b7312..c97f34ab6a747df54a81c173154f3975dc385b0b 100644
 --- a/components/sync/engine_impl/loopback_server/loopback_server_entity.cc
 +++ b/components/sync/engine_impl/loopback_server/loopback_server_entity.cc
 @@ -21,6 +21,8 @@
@@ -4505,47 +4450,38 @@ index 8bfb9d92a3b190e6b6db06047e76e06e910c5f11..d5835095a720b055ee3ee919a84666a2
        return PersistentBookmarkEntity::CreateFromEntity(entity.entity());
      case sync_pb::LoopbackServerEntity_Type_UNIQUE:
 diff --git a/components/sync/engine_impl/loopback_server/loopback_server_unittest.cc b/components/sync/engine_impl/loopback_server/loopback_server_unittest.cc
-index 99b4ba5dcb06f9f967072a9f87fa25bfce4c5d95..d182506c367854f6633e225af5b363c7af59f448 100644
+index 298e7da794217a076697b0879693383e6512e728..35c6194bf8584ec8394150d4a25378dfaf630e27 100644
 --- a/components/sync/engine_impl/loopback_server/loopback_server_unittest.cc
 +++ b/components/sync/engine_impl/loopback_server/loopback_server_unittest.cc
-@@ -83,7 +83,7 @@ TEST_F(LoopbackServerTest, GetUpdateCommand) {
-   EXPECT_EQ(sync_pb::SyncEnums::SUCCESS, response.error_code());
-   ASSERT_TRUE(response.has_get_updates());
+@@ -156,7 +156,7 @@ TEST_F(LoopbackServerTest, GetUpdateCommand) {
+   ClientToServerResponse response =
+       GetUpdatesForType(EntitySpecifics::kBookmarkFieldNumber);
    // Expect to see the three top-level folders in this update already.
 -  EXPECT_EQ(3, response.get_updates().entries_size());
 +  EXPECT_EQ(3 + 1 /*trash-node*/, response.get_updates().entries_size());
  }
  
  TEST_F(LoopbackServerTest, ClearServerDataCommand) {
-@@ -133,7 +133,7 @@ TEST_F(LoopbackServerTest, LoadSavedState) {
-   EXPECT_EQ(sync_pb::SyncEnums::SUCCESS, response.error_code());
+@@ -234,7 +234,7 @@ TEST_F(LoopbackServerTest, LoadSavedState) {
+   EXPECT_EQ(SyncEnums::SUCCESS, response.error_code());
    ASSERT_TRUE(response.has_get_updates());
    // Expect to see the three top-level folders and the newly added bookmark!
 -  EXPECT_EQ(4, response.get_updates().entries_size());
 +  EXPECT_EQ(4 + 1 /*trash-node*/, response.get_updates().entries_size());
+   EXPECT_EQ(1U, ResponseToMap(response).count(id));
  }
  
- TEST_F(LoopbackServerTest, CommitCommandUpdate) {
-@@ -159,7 +159,7 @@ TEST_F(LoopbackServerTest, CommitCommandUpdate) {
-   EXPECT_EQ(sync_pb::SyncEnums::SUCCESS, response.error_code());
-   ASSERT_TRUE(response.has_get_updates());
-   // Expect to see the three top-level folders and the newly added bookmark!
--  EXPECT_EQ(4, response.get_updates().entries_size());
-+  EXPECT_EQ(4 + 1 /*trash-node*/, response.get_updates().entries_size());
- 
-   ClientToServerMessage commit_msg_2 = CreateCommitMessage();
-   auto* entry = commit_msg_2.mutable_commit()->mutable_entries()->Mutable(0);
-@@ -178,7 +178,7 @@ TEST_F(LoopbackServerTest, CommitCommandUpdate) {
-   EXPECT_EQ(sync_pb::SyncEnums::SUCCESS, response.error_code());
+@@ -249,7 +249,7 @@ TEST_F(LoopbackServerTest, CommitCommandUpdate) {
+       GetUpdatesForType(EntitySpecifics::kBookmarkFieldNumber);
    ASSERT_TRUE(response.has_get_updates());
    // Expect to see no fifth bookmark!
 -  EXPECT_EQ(4, response.get_updates().entries_size());
 +  EXPECT_EQ(4 + 1 /*trash-node*/, response.get_updates().entries_size());
+   EXPECT_EQ(kUrl2, ResponseToMap(response)[id].specifics().bookmark().url());
  }
  
- }  // namespace syncer
 diff --git a/components/sync/engine_impl/process_updates_util.cc b/components/sync/engine_impl/process_updates_util.cc
-index 37c1e3b39397c00e87a3585c5b13be4be4e2531b..b9b6a4eb0d2a02812de3be5ad577c8e16a29458d 100644
+index b802172df0d65a8ade7b586aada7e730ec4b5095..f66b4387853f62407c46ba62222b246bed53a189 100644
 --- a/components/sync/engine_impl/process_updates_util.cc
 +++ b/components/sync/engine_impl/process_updates_util.cc
 @@ -230,7 +230,9 @@ void ProcessUpdate(const sync_pb::SyncEntity& update,
@@ -4560,7 +4496,7 @@ index 37c1e3b39397c00e87a3585c5b13be4be4e2531b..b9b6a4eb0d2a02812de3be5ad577c8e1
        position_matches = GetUpdatePosition(update, update_tag)
                               .Equals(target_entry.GetServerUniquePosition());
 diff --git a/components/sync/engine_impl/syncer_proto_util.cc b/components/sync/engine_impl/syncer_proto_util.cc
-index 476ded98e016891f1ff40795c366b1ab8ffece3a..7c0e19f1777f715e7179f1b4fd1c64f070debf8b 100644
+index d6b5b4e2dfefff1d5fd8f7fca5b41c54a0945768..436ebc99dc1b7ef6bf479f21099ddf87565df26d 100644
 --- a/components/sync/engine_impl/syncer_proto_util.cc
 +++ b/components/sync/engine_impl/syncer_proto_util.cc
 @@ -522,7 +522,8 @@ bool SyncerProtoUtil::ShouldMaintainPosition(
@@ -4582,7 +4518,7 @@ index 476ded98e016891f1ff40795c366b1ab8ffece3a..7c0e19f1777f715e7179f1b4fd1c64f0
  }
  
 diff --git a/components/sync/engine_impl/syncer_util.cc b/components/sync/engine_impl/syncer_util.cc
-index 3d80bac15393224b99b70f1931d2d9b8411d9751..bad3aaf1c36dfece591526d5c9dd663e75a57edb 100644
+index ff37c9f546cf698422ea280c949bb636f8e41e88..e7833669e6512336ae1af6f2b4692cfd899341a9 100644
 --- a/components/sync/engine_impl/syncer_util.cc
 +++ b/components/sync/engine_impl/syncer_util.cc
 @@ -278,6 +278,18 @@ std::string GetUniqueBookmarkTagFromUpdate(const sync_pb::SyncEntity& update) {
@@ -4654,7 +4590,7 @@ index 3d80bac15393224b99b70f1931d2d9b8411d9751..bad3aaf1c36dfece591526d5c9dd663e
  
    // We only mark the entry as unapplied if its version is greater than the
 diff --git a/components/sync/engine_impl/syncer_util.h b/components/sync/engine_impl/syncer_util.h
-index 264fae1e18d31b56a4bffca754f3df25250bfd01..b9a643f0e03f21b86a75592c03c147a2792321bf 100644
+index 8333bbdb433922dfdc9866f9dde29b1ecd49dcbb..ffc4b6a12208339097561f615900f430baf22075 100644
 --- a/components/sync/engine_impl/syncer_util.h
 +++ b/components/sync/engine_impl/syncer_util.h
 @@ -66,6 +66,11 @@ UniquePosition GetUpdatePosition(const sync_pb::SyncEntity& update,
@@ -4757,10 +4693,10 @@ index 0000000000000000000000000000000000000000..d5febdae9c0d9807ed2399512090dee0
 +  optional VivaldiSpecialNotesType special_node_type = 7;
 +}
 diff --git a/components/sync/protocol/proto_enum_conversions.cc b/components/sync/protocol/proto_enum_conversions.cc
-index 937ebadb8b3cfff497746eff0bfb83525a637e28..e46e461d91bcbe213856394ea4c1f39cb4e2fd68 100644
+index e3271e5f799871d39067e538a3b58d3a71354ab5..b10eb17ccfb5e087682403c77a35f650396aedac 100644
 --- a/components/sync/protocol/proto_enum_conversions.cc
 +++ b/components/sync/protocol/proto_enum_conversions.cc
-@@ -492,6 +492,32 @@ const char* ProtoEnumToString(
+@@ -504,6 +504,32 @@ const char* ProtoEnumToString(
    return "";
  }
  
@@ -4794,10 +4730,10 @@ index 937ebadb8b3cfff497746eff0bfb83525a637e28..e46e461d91bcbe213856394ea4c1f39c
  #undef ENUM_CASE
  
 diff --git a/components/sync/protocol/proto_enum_conversions.h b/components/sync/protocol/proto_enum_conversions.h
-index 25c2509e885160739af9a1d4d1bb6289af693c2f..6e9426dc7a15d4ed6ec837a866aad1789c8687f1 100644
+index 668f7ed7d78af93bfce3f3e8990c4ee32ec3e722..b39a29a08a0478e58a5502b7039085e2bf45727d 100644
 --- a/components/sync/protocol/proto_enum_conversions.h
 +++ b/components/sync/protocol/proto_enum_conversions.h
-@@ -100,6 +100,14 @@ const char* ProtoEnumToString(
+@@ -103,6 +103,14 @@ const char* ProtoEnumToString(
  const char* ProtoEnumToString(
      sync_pb::WifiCredentialSpecifics::SecurityClass security_class);
  
@@ -4870,7 +4806,7 @@ index 02a7700afba6e1546487b825a4d9a50fab93c2ac..32bf9679ea240544e6f94d075353ce0c
  #undef SET_FIELD
  
 diff --git a/components/sync/protocol/proto_visitors.h b/components/sync/protocol/proto_visitors.h
-index 5e94aa671770232a75b5798c4955a04891f449ca..c1c60fa0f32a6f17887a2149a2e8a1ae2e56a9f6 100644
+index bc2b605981d9adb7437be6708a92daf18207c413..b1a8ab111c6f8280106b76a557a1d1f76972b993 100644
 --- a/components/sync/protocol/proto_visitors.h
 +++ b/components/sync/protocol/proto_visitors.h
 @@ -37,6 +37,8 @@
@@ -4882,7 +4818,7 @@ index 5e94aa671770232a75b5798c4955a04891f449ca..c1c60fa0f32a6f17887a2149a2e8a1ae
  // This file implements VisitProtoFields() functions for sync protos.
  //
  // VisitProtoFields(visitor, proto) calls |visitor| for each field in
-@@ -210,6 +212,8 @@ VISIT_PROTO_FIELDS(const sync_pb::BookmarkSpecifics& proto) {
+@@ -212,6 +214,8 @@ VISIT_PROTO_FIELDS(const sync_pb::BookmarkSpecifics& proto) {
    VISIT(creation_time_us);
    VISIT(icon_url);
    VISIT_REP(meta_info);
@@ -4891,7 +4827,7 @@ index 5e94aa671770232a75b5798c4955a04891f449ca..c1c60fa0f32a6f17887a2149a2e8a1ae
  }
  
  VISIT_PROTO_FIELDS(const sync_pb::ChromiumExtensionsActivity& proto) {
-@@ -415,6 +419,7 @@ VISIT_PROTO_FIELDS(const sync_pb::EntitySpecifics& proto) {
+@@ -417,6 +421,7 @@ VISIT_PROTO_FIELDS(const sync_pb::EntitySpecifics& proto) {
    VISIT(user_event);
    VISIT(wallet_metadata);
    VISIT(wifi_credential);
@@ -4899,7 +4835,7 @@ index 5e94aa671770232a75b5798c4955a04891f449ca..c1c60fa0f32a6f17887a2149a2e8a1ae
  }
  
  VISIT_PROTO_FIELDS(const sync_pb::ExperimentsSpecifics& proto) {
-@@ -971,6 +976,25 @@ VISIT_PROTO_FIELDS(const sync_pb::WifiCredentialSpecifics& proto) {
+@@ -978,6 +983,25 @@ VISIT_PROTO_FIELDS(const sync_pb::WifiCredentialSpecifics& proto) {
    VISIT_BYTES(passphrase);
  }
  
@@ -4936,7 +4872,7 @@ index 5b58e1a9e3ba133047f8e8ed983a808f6136f6dd..24bac0fb5856750ba6640fac5fec5851
 +  "//components/sync/protocol/notes_specifics.proto",
  ]
 diff --git a/components/sync/protocol/session_specifics.proto b/components/sync/protocol/session_specifics.proto
-index b90213ebb85d026ed9c71d437ef6c2bb1e9ceb7e..5cab7bd72c16b80b7032387626ea117d0fe97d9f 100644
+index 0428b09e538d40ce7b89499b9ea72f0e110a6199..fca1f46eeb135572071e88ca28a609f508671ad6 100644
 --- a/components/sync/protocol/session_specifics.proto
 +++ b/components/sync/protocol/session_specifics.proto
 @@ -80,6 +80,9 @@ message SessionTab {
@@ -4970,10 +4906,10 @@ index 49a2d70de5587892d512b8cef71d5921fcc08c76..66152af3d2cf4b178ba46fe52efa9e69
    optional WalletMetadataSpecifics wallet_metadata = 330441;
    optional ArcPackageSpecifics arc_package = 340906;
 diff --git a/components/sync/syncable/base_node.cc b/components/sync/syncable/base_node.cc
-index 9e64f49541a01a23ea331ce546b93cf224db2b5e..a1e417f5c8acd6f6e19c6a9af3beb97892295077 100644
+index e69125fb38ec9b12617a2948fd3bf2913d70245d..556bbd0e84ece9b4a5be5ca15197feb53e7baced 100644
 --- a/components/sync/syncable/base_node.cc
 +++ b/components/sync/syncable/base_node.cc
-@@ -83,6 +83,19 @@ bool BaseNode::DecryptIfNecessary() {
+@@ -81,6 +81,19 @@ bool BaseNode::DecryptIfNecessary() {
        unencrypted_data_.CopyFrom(specifics);
        unencrypted_data_.mutable_bookmark()->set_title(server_legal_title);
      }
@@ -4993,7 +4929,7 @@ index 9e64f49541a01a23ea331ce546b93cf224db2b5e..a1e417f5c8acd6f6e19c6a9af3beb978
      return true;
    }
  
-@@ -131,6 +144,20 @@ const sync_pb::EntitySpecifics& BaseNode::GetUnencryptedSpecifics(
+@@ -129,6 +142,20 @@ const sync_pb::EntitySpecifics& BaseNode::GetUnencryptedSpecifics(
          DCHECK_EQ(GetModelTypeFromSpecifics(unencrypted_data_), BOOKMARKS);
          return unencrypted_data_;
        }
@@ -5014,7 +4950,7 @@ index 9e64f49541a01a23ea331ce546b93cf224db2b5e..a1e417f5c8acd6f6e19c6a9af3beb978
      } else {
        DCHECK_EQ(GetModelTypeFromSpecifics(unencrypted_data_), UNSPECIFIED);
        return specifics;
-@@ -172,6 +199,10 @@ std::string BaseNode::GetTitle() const {
+@@ -170,6 +197,10 @@ std::string BaseNode::GetTitle() const {
        GetEntry()->GetSpecifics().has_encrypted()) {
      // Special case for legacy bookmarks dealing with encryption.
      ServerNameToSyncAPIName(GetBookmarkSpecifics().title(), &result);
@@ -5025,7 +4961,7 @@ index 9e64f49541a01a23ea331ce546b93cf224db2b5e..a1e417f5c8acd6f6e19c6a9af3beb978
    } else {
      ServerNameToSyncAPIName(GetEntry()->GetNonUniqueName(), &result);
    }
-@@ -234,6 +265,11 @@ const sync_pb::BookmarkSpecifics& BaseNode::GetBookmarkSpecifics() const {
+@@ -232,6 +263,11 @@ const sync_pb::BookmarkSpecifics& BaseNode::GetBookmarkSpecifics() const {
    return GetEntitySpecifics().bookmark();
  }
  
@@ -5061,7 +4997,7 @@ index fc3a7654b2c9f89982e2fff71d6e333e29be127a..c92c9ae7e174c090fc34e70b428de54e
    // data.  Can only be called if GetModelType() == NIGORI.
    const sync_pb::NigoriSpecifics& GetNigoriSpecifics() const;
 diff --git a/components/sync/syncable/directory.cc b/components/sync/syncable/directory.cc
-index 5b98d9de885f270246f320cb640e9f4f9f016598..6e037d26bff38c87038293baad18572dffef02bc 100644
+index 37852d3067aaf31c573971f08c60a7ab8f8b4df9..ad61c606f9bdf5f7ab4724374342ab390c7c2e00 100644
 --- a/components/sync/syncable/directory.cc
 +++ b/components/sync/syncable/directory.cc
 @@ -823,6 +823,7 @@ bool Directory::ResetVersionsForType(BaseWriteTransaction* trans,
@@ -5244,7 +5180,7 @@ index fbaac415d706c6305d4fa2a43e72bf89b9f5cdaf..264b96a3e2fa28d84a5ab29340646219
  };
  
 diff --git a/components/sync/syncable/model_neutral_mutable_entry.cc b/components/sync/syncable/model_neutral_mutable_entry.cc
-index e1dff83f130a468912e90821a2fb2a86ae102883..0d3910009c64d751c9f9fc2166603b9ceb97d908 100644
+index 8ad181f2c71aa8336d1ec6964f41cf1b614c9ef7..b743ea04d93234719ef314b38326be84e7abf1d3 100644
 --- a/components/sync/syncable/model_neutral_mutable_entry.cc
 +++ b/components/sync/syncable/model_neutral_mutable_entry.cc
 @@ -336,6 +336,29 @@ void ModelNeutralMutableEntry::PutUniqueBookmarkTag(const std::string& tag) {
@@ -5290,7 +5226,7 @@ index a844c0b1fa804b0f367fa1ad753d2a2b9b3d39c6..1e4691e17228aef04600797431a4cf2c
    void PutBaseServerSpecifics(const sync_pb::EntitySpecifics& value);
    void PutServerUniquePosition(const UniquePosition& value);
 diff --git a/components/sync/syncable/model_type.cc b/components/sync/syncable/model_type.cc
-index d97d6b8be2ab28c0e493dcc438615af70fa48c6e..07839bcf04960a5e782ff3bbdc6d6913f02ec0c8 100644
+index e67fdaceccf43dbeb534c638ff3d4f6a34fe014e..58f870450509386b445a74d7e0b04e0f98cbb5f9 100644
 --- a/components/sync/syncable/model_type.cc
 +++ b/components/sync/syncable/model_type.cc
 @@ -140,6 +140,8 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
@@ -5340,7 +5276,7 @@ index d97d6b8be2ab28c0e493dcc438615af70fa48c6e..07839bcf04960a5e782ff3bbdc6d6913
                  "If adding an unencryptable type, remove from "
                  "encryptable_user_types below.");
    ModelTypeSet encryptable_user_types = UserTypes();
-@@ -586,6 +594,8 @@ ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
+@@ -588,6 +596,8 @@ ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
  std::string ModelTypeToRootTag(ModelType type) {
    if (IsProxyType(type))
      return std::string();
@@ -5349,7 +5285,7 @@ index d97d6b8be2ab28c0e493dcc438615af70fa48c6e..07839bcf04960a5e782ff3bbdc6d6913
    if (IsRealDataType(type))
      return "google_chrome_" + std::string(kModelTypeInfoMap[type].root_tag);
    NOTREACHED() << "No known extension for model type.";
-@@ -635,7 +645,7 @@ bool IsActOnceDataType(ModelType model_type) {
+@@ -637,7 +647,7 @@ bool IsActOnceDataType(ModelType model_type) {
  }
  
  bool IsTypeWithServerGeneratedRoot(ModelType model_type) {
@@ -5358,7 +5294,7 @@ index d97d6b8be2ab28c0e493dcc438615af70fa48c6e..07839bcf04960a5e782ff3bbdc6d6913
  }
  
  bool IsTypeWithClientGeneratedRoot(ModelType model_type) {
-@@ -645,11 +655,11 @@ bool IsTypeWithClientGeneratedRoot(ModelType model_type) {
+@@ -647,11 +657,11 @@ bool IsTypeWithClientGeneratedRoot(ModelType model_type) {
  
  bool TypeSupportsHierarchy(ModelType model_type) {
    // TODO(stanisc): crbug/438313: Should this also include TOP_LEVEL_FOLDER?
@@ -5397,7 +5333,7 @@ index f2a6bb91b355de9b9eafb0d2f6bfc569a34f4a88..26d2eb9dcdc0cee91cb71f145099eb43
        EXPECT_TRUE(base::StartsWith(root_tag, "google_chrome_",
                                     base::CompareCase::INSENSITIVE_ASCII));
 diff --git a/components/sync/syncable/mutable_entry.cc b/components/sync/syncable/mutable_entry.cc
-index 2baa3dfa2145b57d51ff2c7bad9ad21df538bd53..149e2850b67014e93c38bfd8d5c6e994b1b24dde 100644
+index a59918431f6d39d702d8270f9f2bc5673afc29cd..375ce82345fe426545af2ab0d30b7cd6a9ac4eeb 100644
 --- a/components/sync/syncable/mutable_entry.cc
 +++ b/components/sync/syncable/mutable_entry.cc
 @@ -29,6 +29,7 @@ MutableEntry::MutableEntry(WriteTransaction* trans,
@@ -5422,7 +5358,7 @@ index 2baa3dfa2145b57d51ff2c7bad9ad21df538bd53..149e2850b67014e93c38bfd8d5c6e994
      DCHECK(!ShouldMaintainPosition());
    }
 diff --git a/components/sync/syncable/nigori_util.cc b/components/sync/syncable/nigori_util.cc
-index dab4b7d39c886f1f1a7d895b142c1a9d51eff35a..bf0e6a52e6e9fff7597c5d3def513e0dd68fce75 100644
+index a3aac7bdd3612b68ca0fbea9fe3d0eff0e13a067..023435de1d02a423b0a805bb6df5dd069cfb9f2b 100644
 --- a/components/sync/syncable/nigori_util.cc
 +++ b/components/sync/syncable/nigori_util.cc
 @@ -225,6 +225,13 @@ bool UpdateEntryWithEncryption(BaseTransaction* const trans,
@@ -5515,7 +5451,7 @@ index 164e8286bf53dbe088533e31c32ec9487609cd66..3b713d0a062288ae8a142478b32bfa6a
    // Returns transaction version of the last transaction where this node has
    // been modified.
 diff --git a/components/sync/syncable/syncable_delete_journal.cc b/components/sync/syncable/syncable_delete_journal.cc
-index 7414abd88628c86c709e261fa7a504f8b5acaf67..7265aca3a95b44b8423ff5a47df308b1d4df44b9 100644
+index 6aae156b33ba22e20bfe2b6586a0c59cedeb4022..7b2b2627d723de189ea04a30d63596aaaab054a8 100644
 --- a/components/sync/syncable/syncable_delete_journal.cc
 +++ b/components/sync/syncable/syncable_delete_journal.cc
 @@ -133,6 +133,7 @@ void DeleteJournal::AddJournalBatch(BaseTransaction* trans,
@@ -5548,7 +5484,7 @@ index db64a81c322c08dc661462f9ca8bc63e42ec9417..20f480f636017690dde53ce927d3611e
        break;
    }
 diff --git a/components/sync/syncable/write_node.cc b/components/sync/syncable/write_node.cc
-index 0c98bb8a9de63fb5f2d98cc69538bdaf59eeafa1..90e1612b635df45ab71e23497ce253d58b2ed60a 100644
+index 1cda993f5455c6c11adc19c90cb415863518ee30..8f99ad8f576d89fc03d670c5e53e8c59ddee9394 100644
 --- a/components/sync/syncable/write_node.cc
 +++ b/components/sync/syncable/write_node.cc
 @@ -62,6 +62,10 @@ void WriteNode::SetTitle(const std::string& title) {
@@ -5562,7 +5498,19 @@ index 0c98bb8a9de63fb5f2d98cc69538bdaf59eeafa1..90e1612b635df45ab71e23497ce253d5
    } else {
      // Non-bookmarks and legacy bookmarks (those with no title in their
      // specifics) store their title in NON_UNIQUE_NAME. Non-legacy bookmarks
-@@ -111,6 +115,12 @@ void WriteNode::SetBookmarkSpecifics(
+@@ -81,6 +85,11 @@ void WriteNode::SetTitle(const std::string& title) {
+     specifics.mutable_bookmark()->set_title(new_legal_title);
+     SetEntitySpecifics(specifics);  // Does it's own encryption checking.
+     title_matches = false;
++  } else if (GetModelType() == NOTES &&
++      specifics.notes().subject() != new_legal_title) {
++    specifics.mutable_notes()->set_subject(new_legal_title);
++    SetEntitySpecifics(specifics);  // Does it's own encryption checking.
++    title_matches = false;
+   }
+ 
+   // If the title matches and the NON_UNIQUE_NAME is properly overwritten as
+@@ -111,6 +120,12 @@ void WriteNode::SetBookmarkSpecifics(
    SetEntitySpecifics(entity_specifics);
  }
  
@@ -5575,7 +5523,7 @@ index 0c98bb8a9de63fb5f2d98cc69538bdaf59eeafa1..90e1612b635df45ab71e23497ce253d5
  void WriteNode::SetNigoriSpecifics(const sync_pb::NigoriSpecifics& new_value) {
    sync_pb::EntitySpecifics entity_specifics;
    entity_specifics.mutable_nigori()->CopyFrom(new_value);
-@@ -262,8 +272,9 @@ BaseNode::InitByLookupResult WriteNode::InitTypeRoot(ModelType type) {
+@@ -266,8 +281,9 @@ BaseNode::InitByLookupResult WriteNode::InitTypeRoot(ModelType type) {
  
  // Create a new node with default properties, and bind this WriteNode to it.
  // Return true on success.
@@ -5587,7 +5535,7 @@ index 0c98bb8a9de63fb5f2d98cc69538bdaf59eeafa1..90e1612b635df45ab71e23497ce253d5
    DCHECK(!entry_) << "Init called twice";
    // |predecessor| must be a child of |parent| or null.
    if (predecessor && predecessor->GetParentId() != parent.GetId()) {
-@@ -280,7 +291,7 @@ bool WriteNode::InitBookmarkByCreation(const BaseNode& parent,
+@@ -284,7 +300,7 @@ bool WriteNode::InitBookmarkByCreation(const BaseNode& parent,
  
    entry_ =
        new syncable::MutableEntry(transaction_->GetWrappedWriteTrans(),
@@ -5686,7 +5634,7 @@ index 0fe0c17d724b90ffb6657c0cf4540349ce35a1d8..527e78221e62a78c610a7780664b72b0
   private:
    // An identifier used when creating entities. This value is used similarly to
 diff --git a/components/sync/test/fake_server/fake_server.cc b/components/sync/test/fake_server/fake_server.cc
-index 19c5c8f0acd0a5f4fca54237de803cb97feecbd4..6ddfffe687b3f7d5fd0ef3cf3b77373de5dcf29d 100644
+index e494b7e1ac849575dcbfc32f124b5f0e946d43f7..6a5a2d5916aa77790cc9fb5d6885f6a205c10cdc 100644
 --- a/components/sync/test/fake_server/fake_server.cc
 +++ b/components/sync/test/fake_server/fake_server.cc
 @@ -21,6 +21,8 @@
@@ -5699,10 +5647,10 @@ index 19c5c8f0acd0a5f4fca54237de803cb97feecbd4..6ddfffe687b3f7d5fd0ef3cf3b77373d
  using std::vector;
  using syncer::GetModelType;
 diff --git a/components/sync/tools/sync_client.cc b/components/sync/tools/sync_client.cc
-index 916bd843f68a6e7a7271c9915143de51fbe31d1c..0573b03119e5aaced3645cc858138c600aedd0da 100644
+index 84ca4eea5c4bd3edbe51590cb79635e939d54075..e249b5f1fe96275951552171e997dbcc8ae4f89e 100644
 --- a/components/sync/tools/sync_client.cc
 +++ b/components/sync/tools/sync_client.cc
-@@ -376,6 +376,7 @@ int SyncClientMain(int argc, char* argv[]) {
+@@ -377,6 +377,7 @@ int SyncClientMain(int argc, char* argv[]) {
    model_types.Put(DICTIONARY);
    model_types.Put(FAVICON_IMAGES);
    model_types.Put(FAVICON_TRACKING);
@@ -5757,10 +5705,10 @@ index e6f19913fb2df7e8da1677aedba4c2be19d0a1d4..21e99db5f54d8dfec2607ef53f3630d8
  
    def __init__(self):
 diff --git a/components/sync_bookmarks/bookmark_change_processor.cc b/components/sync_bookmarks/bookmark_change_processor.cc
-index 63930d1d69058581c8e83a302b015749ac44d4d5..717a026fd15c8953d3c49b3baa1a5892396fad62 100644
+index 0898ac26dcf84f8622dbe2e21c3460843c4314d2..e88f4dff851ab1d45468d67d3c22b70941e21ec8 100644
 --- a/components/sync_bookmarks/bookmark_change_processor.cc
 +++ b/components/sync_bookmarks/bookmark_change_processor.cc
-@@ -776,8 +776,15 @@ void BookmarkChangeProcessor::UpdateBookmarkWithSyncData(
+@@ -777,8 +777,15 @@ void BookmarkChangeProcessor::UpdateBookmarkWithSyncData(
          node,
          base::Time::FromInternalValue(specifics.creation_time_us()));
    }
@@ -5776,7 +5724,7 @@ index 63930d1d69058581c8e83a302b015749ac44d4d5..717a026fd15c8953d3c49b3baa1a5892
  }
  
  // static
-@@ -831,12 +838,29 @@ const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
+@@ -832,12 +839,29 @@ const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
      const int64_t create_time_internal = specifics.creation_time_us();
      base::Time create_time = (create_time_internal == 0) ?
          base::Time::Now() : base::Time::FromInternalValue(create_time_internal);
@@ -5807,7 +5755,7 @@ index 63930d1d69058581c8e83a302b015749ac44d4d5..717a026fd15c8953d3c49b3baa1a5892
  
    return node;
  }
-@@ -924,6 +948,11 @@ void BookmarkChangeProcessor::SetSyncNodeMetaInfo(
+@@ -914,6 +938,11 @@ void BookmarkChangeProcessor::SetSyncNodeMetaInfo(
    if (meta_info_map) {
      for (BookmarkNode::MetaInfoMap::const_iterator it = meta_info_map->begin();
          it != meta_info_map->end(); ++it) {
@@ -5820,7 +5768,7 @@ index 63930d1d69058581c8e83a302b015749ac44d4d5..717a026fd15c8953d3c49b3baa1a5892
        meta_info->set_key(it->first);
        meta_info->set_value(it->second);
 diff --git a/components/sync_bookmarks/bookmark_model_associator.cc b/components/sync_bookmarks/bookmark_model_associator.cc
-index a490d4deced304ce57bfb4471c41dbd0b78b77f2..a3ce1f68f29db900f66f44f627023a7a75f71fcd 100644
+index 22814046d1c811d85c3e8a77916955c6c5385e79..74dbb116d96d61ac85f71006a09e7f6a647237ca 100644
 --- a/components/sync_bookmarks/bookmark_model_associator.cc
 +++ b/components/sync_bookmarks/bookmark_model_associator.cc
 @@ -61,6 +61,7 @@ namespace sync_bookmarks {
@@ -5831,7 +5779,7 @@ index a490d4deced304ce57bfb4471c41dbd0b78b77f2..a3ce1f68f29db900f66f44f627023a7a
  
  // Maximum number of bytes to allow in a title (must match sync's internal
  // limits; see write_node.cc).
-@@ -414,10 +415,17 @@ bool BookmarkModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
+@@ -408,10 +409,17 @@ bool BookmarkModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
      has_mobile_folder = false;
    }
  
@@ -5849,7 +5797,7 @@ index a490d4deced304ce57bfb4471c41dbd0b78b77f2..a3ce1f68f29db900f66f44f627023a7a
        (has_mobile_folder && mobile_bookmarks_node.HasChildren());
    return true;
  }
-@@ -493,6 +501,14 @@ syncer::SyncError BookmarkModelAssociator::AssociatePermanentFolders(
+@@ -487,6 +495,14 @@ syncer::SyncError BookmarkModelAssociator::AssociatePermanentFolders(
          FROM_HERE, "Mobile bookmarks node not found", model_type());
    }
  
@@ -5864,7 +5812,7 @@ index a490d4deced304ce57bfb4471c41dbd0b78b77f2..a3ce1f68f29db900f66f44f627023a7a
    // Note: the root node may have additional extra nodes. Currently none of
    // them are meant to sync.
    int64_t bookmark_bar_sync_id =
-@@ -510,12 +526,22 @@ syncer::SyncError BookmarkModelAssociator::AssociatePermanentFolders(
+@@ -504,12 +520,22 @@ syncer::SyncError BookmarkModelAssociator::AssociatePermanentFolders(
    if (mobile_bookmarks_sync_id != syncer::kInvalidId)
      context->AddBookmarkRoot(bookmark_model_->mobile_node());
  
@@ -5888,10 +5836,10 @@ index a490d4deced304ce57bfb4471c41dbd0b78b77f2..a3ce1f68f29db900f66f44f627023a7a
    return syncer::SyncError();
  }
 diff --git a/components/sync_sessions/sessions_sync_manager.cc b/components/sync_sessions/sessions_sync_manager.cc
-index 6720b52023201fb8d096a05a2d47763d3664329d..4911465722403e7fd2f5ce49471883e79c329487 100644
+index efa9b68cb85b5410ac15b2e396aeb9b5f8a332a7..2e8ee387ae820be90f9d984b998ac84b516fdb09 100644
 --- a/components/sync_sessions/sessions_sync_manager.cc
 +++ b/components/sync_sessions/sessions_sync_manager.cc
-@@ -1225,6 +1225,7 @@ void SessionsSyncManager::SetSessionTabFromDelegate(
+@@ -1227,6 +1227,7 @@ void SessionsSyncManager::SetSessionTabFromDelegate(
    session_tab->extension_app_id = tab_delegate.GetExtensionAppId();
    session_tab->user_agent_override.clear();
    session_tab->timestamp = mtime;
@@ -6032,11 +5980,11 @@ index 6232e359ef20f93fc9ba574bdf6e57c858044be6..ab2c4c0065384dcf96073ad4301fe079
  
  #endif  // COMPONENTS_VERSION_INFO_VERSION_INFO_VALUES_H_
 diff --git a/components/viz/service/gl/gpu_service_impl.cc b/components/viz/service/gl/gpu_service_impl.cc
-index e3df58b4e723afc26ff786ed81d20bdeee4489ca..5b73355d2950726c24221f07960da3dc4978acf9 100644
+index 0fdea8a949e1eacb6d834e705152e6d79eb786c0..82fa7e3fb9bd59a2b7f087958431201fe4416018 100644
 --- a/components/viz/service/gl/gpu_service_impl.cc
 +++ b/components/viz/service/gl/gpu_service_impl.cc
-@@ -51,6 +51,10 @@
- #include "media/gpu/content_video_view_overlay_allocator.h"
+@@ -62,6 +62,10 @@
+ #include "gpu/ipc/service/direct_composition_surface_win.h"
  #endif
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
@@ -6046,7 +5994,7 @@ index e3df58b4e723afc26ff786ed81d20bdeee4489ca..5b73355d2950726c24221f07960da3dc
  namespace viz {
  
  namespace {
-@@ -121,6 +125,11 @@ GpuServiceImpl::~GpuServiceImpl() {
+@@ -137,6 +141,11 @@ GpuServiceImpl::~GpuServiceImpl() {
      wait.Wait();
    }
    media_gpu_channel_manager_.reset();
@@ -6058,7 +6006,7 @@ index e3df58b4e723afc26ff786ed81d20bdeee4489ca..5b73355d2950726c24221f07960da3dc
    gpu_channel_manager_.reset();
    owned_sync_point_manager_.reset();
  
-@@ -199,6 +208,12 @@ void GpuServiceImpl::InitializeWithHost(
+@@ -210,6 +219,12 @@ void GpuServiceImpl::InitializeWithHost(
  
    media_gpu_channel_manager_.reset(
        new media::MediaGpuChannelManager(gpu_channel_manager_.get()));
@@ -6071,7 +6019,7 @@ index e3df58b4e723afc26ff786ed81d20bdeee4489ca..5b73355d2950726c24221f07960da3dc
    if (watchdog_thread())
      watchdog_thread()->AddPowerObserver();
  }
-@@ -390,6 +405,11 @@ void GpuServiceImpl::DidCreateOffscreenContext(const GURL& active_url) {
+@@ -493,6 +508,11 @@ void GpuServiceImpl::DidCreateOffscreenContext(const GURL& active_url) {
  void GpuServiceImpl::DidDestroyChannel(int client_id) {
    DCHECK(main_runner_->BelongsToCurrentThread());
    media_gpu_channel_manager_->RemoveChannel(client_id);
@@ -6083,7 +6031,7 @@ index e3df58b4e723afc26ff786ed81d20bdeee4489ca..5b73355d2950726c24221f07960da3dc
    (*gpu_host_)->DidDestroyChannel(client_id);
  }
  
-@@ -456,6 +476,10 @@ void GpuServiceImpl::EstablishGpuChannel(int32_t client_id,
+@@ -559,6 +579,10 @@ void GpuServiceImpl::EstablishGpuChannel(int32_t client_id,
  
    media_gpu_channel_manager_->AddChannel(client_id);
  
@@ -6095,10 +6043,10 @@ index e3df58b4e723afc26ff786ed81d20bdeee4489ca..5b73355d2950726c24221f07960da3dc
  }
  
 diff --git a/components/viz/service/gl/gpu_service_impl.h b/components/viz/service/gl/gpu_service_impl.h
-index 7d1d968944af4c72af4d902a33e1aa3c2fc8131d..88cb471796f9bbe338e255aa46c63f2c04cf2732 100644
+index 3e26b06006d6facf8f284cd3e817bd9493b24e60..0cb2a5609bfab89cebcf061554442b282c05f5b1 100644
 --- a/components/viz/service/gl/gpu_service_impl.h
 +++ b/components/viz/service/gl/gpu_service_impl.h
-@@ -33,6 +33,9 @@ class GpuMemoryBufferFactory;
+@@ -39,6 +39,9 @@ class GpuMemoryBufferFactory;
  class GpuWatchdogThread;
  class Scheduler;
  class SyncPointManager;
@@ -6108,7 +6056,7 @@ index 7d1d968944af4c72af4d902a33e1aa3c2fc8131d..88cb471796f9bbe338e255aa46c63f2c
  }  // namespace gpu
  
  namespace media {
-@@ -179,6 +182,11 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
+@@ -206,6 +209,11 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl : public gpu::GpuChannelManagerDelegate,
    std::unique_ptr<gpu::GpuChannelManager> gpu_channel_manager_;
    std::unique_ptr<media::MediaGpuChannelManager> media_gpu_channel_manager_;
  
@@ -6121,7 +6069,7 @@ index 7d1d968944af4c72af4d902a33e1aa3c2fc8131d..88cb471796f9bbe338e255aa46c63f2c
    // external sources.
    std::unique_ptr<gpu::SyncPointManager> owned_sync_point_manager_;
 diff --git a/components/viz/service/surfaces/surface.h b/components/viz/service/surfaces/surface.h
-index 5544f2fa7b24d2a1ac322aec5bb75a678a0ec96f..4ea006e57ca424c2c8dfac8d6a2ef63feb988b25 100644
+index 5cca455b361af265609753e989b0b6efca42331a..371361979cd213bac4850f04d1d81d5e13a27375 100644
 --- a/components/viz/service/surfaces/surface.h
 +++ b/components/viz/service/surfaces/surface.h
 @@ -27,10 +27,6 @@
@@ -6144,10 +6092,10 @@ index 5544f2fa7b24d2a1ac322aec5bb75a678a0ec96f..4ea006e57ca424c2c8dfac8d6a2ef63f
  // A Surface is a representation of a sequence of CompositorFrames with a
  // common set of properties uniquely identified by a SurfaceId. In particular,
 diff --git a/components/viz/service/surfaces/surface_manager.cc b/components/viz/service/surfaces/surface_manager.cc
-index 5cd9715c251ac1d14187f0e1b498420888c25797..a29f4248d3feecd71681fee42d13b1b4d653efa9 100644
+index cf1478de54f695474fdc6dbeee500bdbb0ed9df9..7c922e2f142aa5511ee3d0b8b0023c592b243c19 100644
 --- a/components/viz/service/surfaces/surface_manager.cc
 +++ b/components/viz/service/surfaces/surface_manager.cc
-@@ -24,6 +24,8 @@
+@@ -25,6 +25,8 @@
  #include <sstream>
  #endif
  
@@ -6156,7 +6104,7 @@ index 5cd9715c251ac1d14187f0e1b498420888c25797..a29f4248d3feecd71681fee42d13b1b4
  namespace viz {
  namespace {
  
-@@ -98,6 +100,22 @@ Surface* SurfaceManager::CreateSurface(
+@@ -99,6 +101,22 @@ Surface* SurfaceManager::CreateSurface(
    // If no surface with this SurfaceId exists, simply create the surface
    // and return.
    auto it = surface_map_.find(surface_info.id());
@@ -6180,10 +6128,10 @@ index 5cd9715c251ac1d14187f0e1b498420888c25797..a29f4248d3feecd71681fee42d13b1b4
      surface_map_[surface_info.id()] =
          base::MakeUnique<Surface>(surface_info, this, surface_client,
 diff --git a/components/zoom/zoom_controller.cc b/components/zoom/zoom_controller.cc
-index 0242a3510bc6fd5b5accbdc610ff510c56b418c5..3a4940569798b3dbd012b96cf9af3e76cbd9c05a 100644
+index eb5732cdde1985124949ee176edd826d174d097c..b060d57f679d7feaf73dc2a871d5615aba17f739 100644
 --- a/components/zoom/zoom_controller.cc
 +++ b/components/zoom/zoom_controller.cc
-@@ -17,6 +17,13 @@
+@@ -19,6 +19,13 @@
  #include "content/public/common/page_zoom.h"
  #include "net/base/url_util.h"
  
@@ -6196,17 +6144,18 @@ index 0242a3510bc6fd5b5accbdc610ff510c56b418c5..3a4940569798b3dbd012b96cf9af3e76
 +
  DEFINE_WEB_CONTENTS_USER_DATA_KEY(zoom::ZoomController);
  
- namespace zoom {
-@@ -149,6 +156,25 @@ bool ZoomController::SetZoomLevelByClient(
-     zoom_map->SetTemporaryZoomLevel(render_process_id, render_view_id,
-                                     zoom_level);
+ using content::BrowserThread;
+@@ -163,6 +170,26 @@ bool ZoomController::SetZoomLevelByClient(
+       zoom_map->UsesTemporaryZoomLevel(process_id, view_id)) {
+     zoom_map->SetTemporaryZoomLevel(process_id, view_id, zoom_level);
    } else {
 +#if BUILDFLAG(ENABLE_EXTENSIONS)
 +    if (vivaldi::IsVivaldiRunning()) {
 +      bool tabZoom = vivaldi::isTabZoomEnabled(web_contents());
 +      std::string host = net::GetHostOrSpecFromURL(web_contents()->GetURL());
 +      if (tabZoom && !vivaldi::IsVivaldiApp(host)) {
-+        int render_process_id = web_contents()->GetRenderProcessHost()->GetID();
++        int render_process_id = web_contents()->GetMainFrame()
++                                              ->GetProcess()->GetID();
 +        int render_view_id =
 +            web_contents()->GetRenderViewHost()->GetRoutingID();
 +        zoom_map->SetTemporaryZoomLevel(render_process_id, render_view_id,
@@ -6221,5 +6170,5 @@ index 0242a3510bc6fd5b5accbdc610ff510c56b418c5..3a4940569798b3dbd012b96cf9af3e76
 +    }
 +#endif
      if (!entry) {
-       last_client_ = NULL;
+       last_client_ = nullptr;
        // If we exit without triggering an update, we should clear event_data_,
