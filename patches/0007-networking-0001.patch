@@ -1,8 +1,8 @@
 diff --git a/net/http/transport_security_state.cc b/net/http/transport_security_state.cc
-index b8d57e4546f5018c2ba91e103e7433ad076a9e99..bde0f3c9118327c08c7ac010bb584d06eba7b0e7 100644
+index a433afd0217830b49ddb3381ad55afeae2381840..1ba82c52519ff1f913333c8b4b09a180fb472216 100644
 --- a/net/http/transport_security_state.cc
 +++ b/net/http/transport_security_state.cc
-@@ -744,7 +744,7 @@ TransportSecurityState::TransportSecurityState()
+@@ -758,7 +758,7 @@ TransportSecurityState::TransportSecurityState()
        sent_expect_ct_reports_cache_(kMaxReportCacheEntries) {
  // Static pinning is only enabled for official builds to make sure that
  // others don't end up with pins that cannot be easily updated.
@@ -11,60 +11,8 @@ index b8d57e4546f5018c2ba91e103e7433ad076a9e99..bde0f3c9118327c08c7ac010bb584d06
    enable_static_pins_ = false;
    enable_static_expect_ct_ = false;
  #endif
-diff --git a/net/quic/core/quic_stream_sequencer_buffer.cc b/net/quic/core/quic_stream_sequencer_buffer.cc
-index 3706d38805cf661ea74d1f69da35456079a815be..46defd0605fe926cc7e0d84ff533fe5126f7a66c 100644
---- a/net/quic/core/quic_stream_sequencer_buffer.cc
-+++ b/net/quic/core/quic_stream_sequencer_buffer.cc
-@@ -102,7 +102,10 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
-     ++current_gap;
-   }
- 
--  DCHECK(current_gap != gaps_.end());
-+  if (current_gap == gaps_.end()) {
-+    *error_details = "Received stream data outside of maximum range.";
-+    return QUIC_INTERNAL_ERROR;
-+  }
- 
-   // "duplication": might duplicate with data alread filled,but also might
-   // overlap across different QuicStringPiece objects already written.
-@@ -138,7 +141,8 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
-   }
- 
-   // Write beyond the current range this buffer is covering.
--  if (offset + size > total_bytes_read_ + max_buffer_capacity_bytes_) {
-+  if (offset + size > total_bytes_read_ + max_buffer_capacity_bytes_ ||
-+      offset + size < offset) {
-     *error_details = "Received data beyond available range.";
-     return QUIC_INTERNAL_ERROR;
-   }
-diff --git a/net/quic/core/quic_stream_sequencer_buffer_test.cc b/net/quic/core/quic_stream_sequencer_buffer_test.cc
-index 88c9a0c391b5bdb95c89e4e4a8aa8c86b59c07ae..344ca583d839a78f3b905897072fba37c29204e6 100644
---- a/net/quic/core/quic_stream_sequencer_buffer_test.cc
-+++ b/net/quic/core/quic_stream_sequencer_buffer_test.cc
-@@ -297,6 +297,21 @@ TEST_F(QuicStreamSequencerBufferTest, OnStreamDataBeyondCapacity) {
-                                   clock_.ApproximateNow(), &written,
-                                   &error_details_));
-   EXPECT_TRUE(helper_->CheckBufferInvariants());
-+
-+  // Disallow current_gap != gaps_.end()
-+  EXPECT_EQ(QUIC_INTERNAL_ERROR,
-+            buffer_->OnStreamData(static_cast<QuicStreamOffset>(-1), source,
-+                                  clock_.ApproximateNow(), &written,
-+                                  &error_details_));
-+  EXPECT_TRUE(helper_->CheckBufferInvariants());
-+
-+  // Disallow offset + size overflow
-+  source = "bbb";
-+  EXPECT_EQ(QUIC_INTERNAL_ERROR,
-+            buffer_->OnStreamData(static_cast<QuicStreamOffset>(-2), source,
-+                                  clock_.ApproximateNow(), &written,
-+                                  &error_details_));
-+  EXPECT_TRUE(helper_->CheckBufferInvariants());
-   EXPECT_EQ(0u, buffer_->BytesBuffered());
- }
- 
 diff --git a/net/ssl/ssl_config.cc b/net/ssl/ssl_config.cc
-index 89f81335f0582ea626292a1a7e822bb0175ccd13..efcfc3d51db1e6cf61afaf90f44f8f228a837261 100644
+index a460ebe038f6d512cb8da3c575141a0039851d68..3857278850ab423f0c136a5ae07c388d56daaabc 100644
 --- a/net/ssl/ssl_config.cc
 +++ b/net/ssl/ssl_config.cc
 @@ -6,6 +6,8 @@
@@ -76,7 +24,7 @@ index 89f81335f0582ea626292a1a7e822bb0175ccd13..efcfc3d51db1e6cf61afaf90f44f8f22
  namespace net {
  
  const uint16_t kDefaultSSLVersionMin = SSL_PROTOCOL_VERSION_TLS1;
-@@ -23,7 +25,7 @@ SSLConfig::CertAndStatus::CertAndStatus(const CertAndStatus& other)
+@@ -22,7 +24,7 @@ SSLConfig::CertAndStatus::CertAndStatus(const CertAndStatus& other) = default;
  SSLConfig::CertAndStatus::~CertAndStatus() = default;
  
  SSLConfig::SSLConfig()
@@ -86,10 +34,10 @@ index 89f81335f0582ea626292a1a7e822bb0175ccd13..efcfc3d51db1e6cf61afaf90f44f8f22
        sha1_local_anchors_enabled(true),
        common_name_fallback_local_anchors_enabled(true),
 diff --git a/net/test/embedded_test_server/embedded_test_server.cc b/net/test/embedded_test_server/embedded_test_server.cc
-index df705db89c363508041e35585be5b5899fa36474..3409761611841cabf792fb1f47746aae5fda3df1 100644
+index de416f22aed61545158089a30b9c54af6cc643cd..ac08ee4b0bacf42467179b1ced2ee62d8b053539 100644
 --- a/net/test/embedded_test_server/embedded_test_server.cc
 +++ b/net/test/embedded_test_server/embedded_test_server.cc
-@@ -297,7 +297,8 @@ scoped_refptr<X509Certificate> EmbeddedTestServer::GetCertificate() const {
+@@ -296,7 +296,8 @@ scoped_refptr<X509Certificate> EmbeddedTestServer::GetCertificate() const {
  
  void EmbeddedTestServer::ServeFilesFromDirectory(
      const base::FilePath& directory) {
@@ -100,7 +48,7 @@ index df705db89c363508041e35585be5b5899fa36474..3409761611841cabf792fb1f47746aae
  
  void EmbeddedTestServer::ServeFilesFromSourceDirectory(
 diff --git a/services/service_manager/embedder/main.cc b/services/service_manager/embedder/main.cc
-index 87ac6f053947b2d583db94cb7427f68d902f3b60..ea2792e4cbe1eb7d0845985300cc8d65ab3404e7 100644
+index 08ea94a11772017ff760ec88ba4835eea0231df2..9b84c25893b2dd4b9206bac6a696f2633c645433 100644
 --- a/services/service_manager/embedder/main.cc
 +++ b/services/service_manager/embedder/main.cc
 @@ -76,7 +76,7 @@ namespace {
@@ -113,54 +61,54 @@ index 87ac6f053947b2d583db94cb7427f68d902f3b60..ea2792e4cbe1eb7d0845985300cc8d65
  class ServiceProcessLauncherDelegateImpl
      : public service_manager::ServiceProcessLauncherDelegate {
 diff --git a/services/ui/public/cpp/gpu/gpu.cc b/services/ui/public/cpp/gpu/gpu.cc
-index fefcc03d17ab9439fe14f474196dafeccfee57c2..94ebc7ae28feab5f8a791749261feaa41317f9f2 100644
+index 35e067f35162e85a0fc82512b929094e0384d242..f0f75bc4e27a20bab288ca2de7aba828aeddcfe0 100644
 --- a/services/ui/public/cpp/gpu/gpu.cc
 +++ b/services/ui/public/cpp/gpu/gpu.cc
-@@ -147,6 +147,10 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync() {
+@@ -259,6 +259,10 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync(
    return gpu_channel_;
  }
  
 +void Gpu::SetForceAllowAccessToGpu(bool enable) {
-+  gpu_->SetForceAllowAccessToGpu(enable);
++  (*gpu_)->SetForceAllowAccessToGpu(enable);
 +}
 +
  gpu::GpuMemoryBufferManager* Gpu::GetGpuMemoryBufferManager() {
    return gpu_memory_buffer_manager_.get();
  }
 diff --git a/services/ui/public/cpp/gpu/gpu.h b/services/ui/public/cpp/gpu/gpu.h
-index c4908079823ca2b86dfe5e050843afcc7d735fa6..db4503d72edb095e3ff0c1f95c37b643f767c7d4 100644
+index 933d0dc67bbeb0e8db177c130a565501265472e0..4e2341a5f4c5fba52fb7b9f13fcaa3821345112c 100644
 --- a/services/ui/public/cpp/gpu/gpu.h
 +++ b/services/ui/public/cpp/gpu/gpu.h
-@@ -53,6 +53,7 @@ class Gpu : public gpu::GpuChannelHostFactory,
-   void EstablishGpuChannel(
+@@ -50,6 +50,7 @@ class Gpu : public gpu::GpuChannelEstablishFactory {
        const gpu::GpuChannelEstablishedCallback& callback) override;
-   scoped_refptr<gpu::GpuChannelHost> EstablishGpuChannelSync() override;
+   scoped_refptr<gpu::GpuChannelHost> EstablishGpuChannelSync(
+       bool* connection_error) override;
 +  void SetForceAllowAccessToGpu(bool enable) override;
    gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
  
-  private:
+   void LoseChannel();
 diff --git a/services/ui/public/interfaces/gpu.mojom b/services/ui/public/interfaces/gpu.mojom
-index 420cb0167721b6d009858375d6d5753de259b843..442253dc986a0a21957336243dbd49c0aa53dd9b 100644
+index f0806bbaf2515ec58261d802adbdd200b1b72b71..0e218d327d7012d17bb2dcfb5f6228e5fe83a0b2 100644
 --- a/services/ui/public/interfaces/gpu.mojom
 +++ b/services/ui/public/interfaces/gpu.mojom
-@@ -20,6 +20,8 @@ interface Gpu {
-                             handle<message_pipe>? channel_handle,
-                             gpu.mojom.GpuInfo gpu_info);
+@@ -21,6 +21,8 @@ interface Gpu {
+                             gpu.mojom.GpuInfo gpu_info,
+                             gpu.mojom.GpuFeatureInfo gpu_feature_info);
  
 +  SetForceAllowAccessToGpu(bool enable);
 +
    // Creates a new JpegDecodeAccelerator and binds it to |jda|.
-   CreateJpegDecodeAccelerator(media.mojom.GpuJpegDecodeAccelerator& jda);
+   CreateJpegDecodeAccelerator(media.mojom.JpegDecodeAccelerator& jda);
  
 diff --git a/services/ui/ws/gpu_client.h b/services/ui/ws/gpu_client.h
-index 32e283d25e211da55aae53080d44a3807b746a44..2c12315e6dfd8818a9dd53ef2c9ead772e6692d3 100644
+index 9887a5f1b1329ad63250f7b19e3bb93ef00c0b85..089262f10188dada21ee74be3acd8ef45064c256 100644
 --- a/services/ui/ws/gpu_client.h
 +++ b/services/ui/ws/gpu_client.h
-@@ -44,6 +44,7 @@ class GpuClient : public mojom::Gpu {
+@@ -46,6 +46,7 @@ class GpuClient : public mojom::Gpu {
    // mojom::Gpu overrides:
    void EstablishGpuChannel(
        const EstablishGpuChannelCallback& callback) override;
 +  void SetForceAllowAccessToGpu(bool enable) override {}
    void CreateJpegDecodeAccelerator(
-       media::mojom::GpuJpegDecodeAcceleratorRequest jda_request) override;
+       media::mojom::JpegDecodeAcceleratorRequest jda_request) override;
    void CreateVideoEncodeAcceleratorProvider(
