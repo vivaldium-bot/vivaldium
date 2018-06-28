@@ -1,8 +1,190 @@
+diff --git a/net/disk_cache/backend_unittest.cc b/net/disk_cache/backend_unittest.cc
+index 6bd72f90fdd070942ee2d80cd77107e634de348e..33b698b1b896a263e9b68afcbc1e06851a109c03 100644
+--- a/net/disk_cache/backend_unittest.cc
++++ b/net/disk_cache/backend_unittest.cc
+@@ -1916,6 +1916,45 @@ TEST_F(DiskCacheBackendTest, DoomAllSparse) {
+   EXPECT_EQ(0, cache_->GetEntryCount());
+ }
+ 
++// This test is for https://crbug.com/827492.
++TEST_F(DiskCacheBackendTest, InMemorySparseEvict) {
++  const int kMaxSize = 512;
++
++  SetMaxSize(kMaxSize);
++  SetMemoryOnlyMode();
++  InitCache();
++
++  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(64));
++  CacheTestFillBuffer(buffer->data(), 64, false /* no_nulls */);
++
++  std::vector<disk_cache::ScopedEntryPtr> entries;
++
++  disk_cache::Entry* entry = nullptr;
++  // Create a bunch of entries
++  for (size_t i = 0; i < 14; i++) {
++    std::string name = "http://www." + std::to_string(i) + ".com/";
++    ASSERT_THAT(CreateEntry(name, &entry), IsOk());
++    entries.push_back(disk_cache::ScopedEntryPtr(entry));
++  }
++
++  // Create several sparse entries and fill with enough data to
++  // pass eviction threshold
++  ASSERT_EQ(64, WriteSparseData(entries[0].get(), 0, buffer.get(), 64));
++  ASSERT_EQ(net::ERR_FAILED,
++            WriteSparseData(entries[0].get(), 10000, buffer.get(), 4));
++  ASSERT_EQ(63, WriteSparseData(entries[1].get(), 0, buffer.get(), 63));
++  ASSERT_EQ(64, WriteSparseData(entries[2].get(), 0, buffer.get(), 64));
++  ASSERT_EQ(64, WriteSparseData(entries[3].get(), 0, buffer.get(), 64));
++
++  // Close all the entries, leaving a populated LRU list
++  // with all entries having refcount 0 (doom implies deletion)
++  entries.clear();
++
++  // Create a new entry, triggering buggy eviction
++  ASSERT_THAT(CreateEntry("http://www.14.com/", &entry), IsOk());
++  entry->Close();
++}
++
+ void DiskCacheBackendTest::BackendDoomBetween() {
+   InitCache();
+ 
+@@ -4215,3 +4254,36 @@ TEST_F(DiskCacheBackendTest, SimpleLastModified) {
+   EXPECT_LE(reopen_entry1->GetLastModified(), entry1_timestamp);
+   reopen_entry1->Close();
+ }
++
++TEST_F(DiskCacheBackendTest, SparseEvict) {
++  const int kMaxSize = 512;
++
++  SetMaxSize(kMaxSize);
++  InitCache();
++
++  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(64));
++  CacheTestFillBuffer(buffer->data(), 64, false);
++
++  disk_cache::Entry* entry0 = nullptr;
++  ASSERT_THAT(CreateEntry("http://www.0.com/", &entry0), IsOk());
++
++  disk_cache::Entry* entry1 = nullptr;
++  ASSERT_THAT(CreateEntry("http://www.1.com/", &entry1), IsOk());
++
++  disk_cache::Entry* entry2 = nullptr;
++  // This strange looking domain name affects cache trim order
++  // due to hashing
++  ASSERT_THAT(CreateEntry("http://www.15360.com/", &entry2), IsOk());
++
++  // Write sparse data to put us over the eviction threshold
++  ASSERT_EQ(64, WriteSparseData(entry0, 0, buffer.get(), 64));
++  ASSERT_EQ(1, WriteSparseData(entry0, 67108923, buffer.get(), 1));
++  ASSERT_EQ(1, WriteSparseData(entry1, 53, buffer.get(), 1));
++  ASSERT_EQ(1, WriteSparseData(entry2, 0, buffer.get(), 1));
++
++  // Closing these in a special order should not lead to buggy reentrant
++  // eviction.
++  entry1->Close();
++  entry2->Close();
++  entry0->Close();
++}
+diff --git a/net/disk_cache/blockfile/backend_impl.cc b/net/disk_cache/blockfile/backend_impl.cc
+index ec1f9559418f1a68f7d88183c84b7ed609dbb29a..601f46ac889e93d6d8e88b9ddf7503643864dcfc 100644
+--- a/net/disk_cache/blockfile/backend_impl.cc
++++ b/net/disk_cache/blockfile/backend_impl.cc
+@@ -168,6 +168,7 @@ BackendImpl::BackendImpl(
+       new_eviction_(false),
+       first_timer_(true),
+       user_load_(false),
++      consider_evicting_at_op_end_(false),
+       net_log_(net_log),
+       done_(base::WaitableEvent::ResetPolicy::MANUAL,
+             base::WaitableEvent::InitialState::NOT_SIGNALED),
+@@ -195,6 +196,7 @@ BackendImpl::BackendImpl(
+       new_eviction_(false),
+       first_timer_(true),
+       user_load_(false),
++      consider_evicting_at_op_end_(false),
+       net_log_(net_log),
+       done_(base::WaitableEvent::ResetPolicy::MANUAL,
+             base::WaitableEvent::InitialState::NOT_SIGNALED),
+@@ -913,9 +915,16 @@ void BackendImpl::OnEntryDestroyBegin(Addr address) {
+ 
+ void BackendImpl::OnEntryDestroyEnd() {
+   DecreaseNumRefs();
+-  if (data_->header.num_bytes > max_size_ && !read_only_ &&
+-      (up_ticks_ > kTrimDelay || user_flags_ & kNoRandom))
+-    eviction_.TrimCache(false);
++  consider_evicting_at_op_end_ = true;
++}
++
++void BackendImpl::OnSyncBackendOpComplete() {
++  if (consider_evicting_at_op_end_) {
++    if (data_->header.num_bytes > max_size_ && !read_only_ &&
++        (up_ticks_ > kTrimDelay || user_flags_ & kNoRandom))
++      eviction_.TrimCache(false);
++    consider_evicting_at_op_end_ = false;
++  }
+ }
+ 
+ EntryImpl* BackendImpl::GetOpenEntry(CacheRankingsBlock* rankings) const {
+diff --git a/net/disk_cache/blockfile/backend_impl.h b/net/disk_cache/blockfile/backend_impl.h
+index 324f4f8195e314489a0e746a37d731ab63adc3b7..26b4ab27fbbf15f31ba845278446ed1e570a4bb5 100644
+--- a/net/disk_cache/blockfile/backend_impl.h
++++ b/net/disk_cache/blockfile/backend_impl.h
+@@ -89,6 +89,9 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
+   void SyncEndEnumeration(std::unique_ptr<Rankings::Iterator> iterator);
+   void SyncOnExternalCacheHit(const std::string& key);
+ 
++  // Called at end of any backend operation on the background thread.
++  void OnSyncBackendOpComplete();
++
+   // Open or create an entry for the given |key| or |iter|.
+   scoped_refptr<EntryImpl> OpenEntryImpl(const std::string& key);
+   scoped_refptr<EntryImpl> CreateEntryImpl(const std::string& key);
+@@ -418,6 +421,9 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
+   bool first_timer_;  // True if the timer has not been called.
+   bool user_load_;  // True if we see a high load coming from the caller.
+ 
++  // True if we should consider doing eviction at end of current operation.
++  bool consider_evicting_at_op_end_;
++
+   net::NetLog* net_log_;
+ 
+   Stats stats_;  // Usage statistics.
+diff --git a/net/disk_cache/blockfile/in_flight_backend_io.cc b/net/disk_cache/blockfile/in_flight_backend_io.cc
+index 2ea9b819ecf2b1221a7f3be4f59761008d0adb5b..fc2037811ec02c6167c6d03fef644f13b7f6c478 100644
+--- a/net/disk_cache/blockfile/in_flight_backend_io.cc
++++ b/net/disk_cache/blockfile/in_flight_backend_io.cc
+@@ -310,6 +310,7 @@ void BackendIO::ExecuteBackendOperation() {
+   }
+   DCHECK_NE(net::ERR_IO_PENDING, result_);
+   NotifyController();
++  backend_->OnSyncBackendOpComplete();
+ }
+ 
+ // Runs on the background thread.
+diff --git a/net/disk_cache/memory/mem_backend_impl.cc b/net/disk_cache/memory/mem_backend_impl.cc
+index f9061507892d00b8c2dfee8c812c6ca74642f3c1..f5efad19b8a53a19184e83a9e57c901b9e73b931 100644
+--- a/net/disk_cache/memory/mem_backend_impl.cc
++++ b/net/disk_cache/memory/mem_backend_impl.cc
+@@ -332,7 +332,13 @@ void MemBackendImpl::EvictIfNeeded() {
+   base::LinkNode<MemEntryImpl>* entry = lru_list_.head();
+   while (current_size_ > target_size && entry != lru_list_.end()) {
+     MemEntryImpl* to_doom = entry->value();
+-    entry = entry->next();
++
++    do {
++      entry = entry->next();
++      // It's possible that entry now points to a child of to_doom, and the
++      // parent is about to be deleted. Skip past any child entries.
++    } while (entry != lru_list_.end() && entry->value()->parent() == to_doom);
++
+     if (!to_doom->InUse())
+       to_doom->Doom();
+   }
 diff --git a/net/http/transport_security_state.cc b/net/http/transport_security_state.cc
-index a433afd0217830b49ddb3381ad55afeae2381840..1ba82c52519ff1f913333c8b4b09a180fb472216 100644
+index 6eaa321ef4b8d5d743cab4448ed695ac1a02fabf..c7d7a4af8c1ba250fc26b7cb46badbe5e0ae351a 100644
 --- a/net/http/transport_security_state.cc
 +++ b/net/http/transport_security_state.cc
-@@ -758,7 +758,7 @@ TransportSecurityState::TransportSecurityState()
+@@ -757,7 +757,7 @@ TransportSecurityState::TransportSecurityState()
        sent_expect_ct_reports_cache_(kMaxReportCacheEntries) {
  // Static pinning is only enabled for official builds to make sure that
  // others don't end up with pins that cannot be easily updated.
@@ -12,7 +194,7 @@ index a433afd0217830b49ddb3381ad55afeae2381840..1ba82c52519ff1f913333c8b4b09a180
    enable_static_expect_ct_ = false;
  #endif
 diff --git a/net/ssl/ssl_config.cc b/net/ssl/ssl_config.cc
-index a460ebe038f6d512cb8da3c575141a0039851d68..3857278850ab423f0c136a5ae07c388d56daaabc 100644
+index 72d63d83a28b62ac38216622571860abbcc99553..7e097383286d9014c4efc77ce538e2f673b2b60e 100644
 --- a/net/ssl/ssl_config.cc
 +++ b/net/ssl/ssl_config.cc
 @@ -6,6 +6,8 @@
@@ -34,10 +216,10 @@ index a460ebe038f6d512cb8da3c575141a0039851d68..3857278850ab423f0c136a5ae07c388d
        sha1_local_anchors_enabled(true),
        common_name_fallback_local_anchors_enabled(true),
 diff --git a/net/test/embedded_test_server/embedded_test_server.cc b/net/test/embedded_test_server/embedded_test_server.cc
-index de416f22aed61545158089a30b9c54af6cc643cd..ac08ee4b0bacf42467179b1ced2ee62d8b053539 100644
+index 5caf5c5985780c0cdba13642ad19b57b6f26ac7b..b25f87f9770dc01c7d56b1147ebf502b4c9adc16 100644
 --- a/net/test/embedded_test_server/embedded_test_server.cc
 +++ b/net/test/embedded_test_server/embedded_test_server.cc
-@@ -296,7 +296,8 @@ scoped_refptr<X509Certificate> EmbeddedTestServer::GetCertificate() const {
+@@ -300,7 +300,8 @@ scoped_refptr<X509Certificate> EmbeddedTestServer::GetCertificate() const {
  
  void EmbeddedTestServer::ServeFilesFromDirectory(
      const base::FilePath& directory) {
@@ -47,6 +229,32 @@ index de416f22aed61545158089a30b9c54af6cc643cd..ac08ee4b0bacf42467179b1ced2ee62d
  }
  
  void EmbeddedTestServer::ServeFilesFromSourceDirectory(
+diff --git a/services/network/public/cpp/resource_response_info.h b/services/network/public/cpp/resource_response_info.h
+index 66d5da34fdc9b9cb62c2e3574021c11485a5a2c7..fca7c7b5cd11ae422358bfc36037c702b5f3b475 100644
+--- a/services/network/public/cpp/resource_response_info.h
++++ b/services/network/public/cpp/resource_response_info.h
+@@ -111,9 +111,9 @@ struct ResourceResponseInfo {
+   // True if the response was fetched by a ServiceWorker.
+   bool was_fetched_via_service_worker;
+ 
+-  // True when the request whoes mode is |CORS| or |CORS-with-forced-preflight|
++  // True when a request whose mode is |CORS| or |CORS-with-forced-preflight|
+   // is sent to a ServiceWorker but FetchEvent.respondWith is not called. So the
+-  // renderer have to resend the request with skip service worker flag
++  // renderer has to resend the request with skip service worker flag
+   // considering the CORS preflight logic.
+   bool was_fallback_required_by_service_worker;
+ 
+@@ -121,7 +121,8 @@ struct ResourceResponseInfo {
+   // ServiceWorkerResponseInfo::url_list_via_service_worker().
+   std::vector<GURL> url_list_via_service_worker;
+ 
+-  // The type of the response which was fetched by the ServiceWorker.
++  // The type of the response, if it was returned by a service worker. This is
++  // kDefault if the response was not returned by a service worker.
+   mojom::FetchResponseType response_type_via_service_worker;
+ 
+   // The time immediately before starting ServiceWorker. If the response is not
 diff --git a/services/service_manager/embedder/main.cc b/services/service_manager/embedder/main.cc
 index 08ea94a11772017ff760ec88ba4835eea0231df2..9b84c25893b2dd4b9206bac6a696f2633c645433 100644
 --- a/services/service_manager/embedder/main.cc
@@ -61,54 +269,79 @@ index 08ea94a11772017ff760ec88ba4835eea0231df2..9b84c25893b2dd4b9206bac6a696f263
  class ServiceProcessLauncherDelegateImpl
      : public service_manager::ServiceProcessLauncherDelegate {
 diff --git a/services/ui/public/cpp/gpu/gpu.cc b/services/ui/public/cpp/gpu/gpu.cc
-index 35e067f35162e85a0fc82512b929094e0384d242..f0f75bc4e27a20bab288ca2de7aba828aeddcfe0 100644
+index 9370d3fa80c6cc35768aff4c44dbe8d559c7c641..6ee1795c3885c90dea28cb6554ac349b7ff8fb31 100644
 --- a/services/ui/public/cpp/gpu/gpu.cc
 +++ b/services/ui/public/cpp/gpu/gpu.cc
-@@ -259,6 +259,10 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync(
+@@ -74,6 +74,12 @@ class Gpu::GpuPtrIO {
+     gpu_ptr_->CreateVideoEncodeAcceleratorProvider(std::move(request));
+   }
+ 
++  // FEATURE_FORCE_ACCESS_TO_GPU
++  void SetForceAllowAccessToGpu(bool enable) {
++    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++    gpu_ptr_->SetForceAllowAccessToGpu(enable);
++  }
++
+  private:
+   void ConnectionError();
+   void OnEstablishedGpuChannel(int client_id,
+@@ -352,6 +358,15 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync() {
    return gpu_channel_;
  }
  
++// FEATURE_FORCE_ACCESS_TO_GPU
 +void Gpu::SetForceAllowAccessToGpu(bool enable) {
-+  (*gpu_)->SetForceAllowAccessToGpu(enable);
++  DCHECK(main_task_runner_->BelongsToCurrentThread());
++  io_task_runner_->PostTask(
++      FROM_HERE,
++      base::BindOnce(&GpuPtrIO::SetForceAllowAccessToGpu,
++                     base::Unretained(gpu_.get()), enable));
 +}
 +
  gpu::GpuMemoryBufferManager* Gpu::GetGpuMemoryBufferManager() {
    return gpu_memory_buffer_manager_.get();
  }
 diff --git a/services/ui/public/cpp/gpu/gpu.h b/services/ui/public/cpp/gpu/gpu.h
-index 933d0dc67bbeb0e8db177c130a565501265472e0..4e2341a5f4c5fba52fb7b9f13fcaa3821345112c 100644
+index 1e2f1c55dc7ff3ca792d851ed14fa2e5e3258cc7..1b45ebaf449754a6e04a51f4d870f446c89fdae4 100644
 --- a/services/ui/public/cpp/gpu/gpu.h
 +++ b/services/ui/public/cpp/gpu/gpu.h
-@@ -50,6 +50,7 @@ class Gpu : public gpu::GpuChannelEstablishFactory {
-       const gpu::GpuChannelEstablishedCallback& callback) override;
-   scoped_refptr<gpu::GpuChannelHost> EstablishGpuChannelSync(
-       bool* connection_error) override;
+@@ -49,6 +49,10 @@ class Gpu : public gpu::GpuChannelEstablishFactory {
+   void EstablishGpuChannel(
+       gpu::GpuChannelEstablishedCallback callback) override;
+   scoped_refptr<gpu::GpuChannelHost> EstablishGpuChannelSync() override;
++
++  // FEATURE_FORCE_ACCESS_TO_GPU
 +  void SetForceAllowAccessToGpu(bool enable) override;
++
    gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
  
    void LoseChannel();
 diff --git a/services/ui/public/interfaces/gpu.mojom b/services/ui/public/interfaces/gpu.mojom
-index f0806bbaf2515ec58261d802adbdd200b1b72b71..0e218d327d7012d17bb2dcfb5f6228e5fe83a0b2 100644
+index f0806bbaf2515ec58261d802adbdd200b1b72b71..4a890d21f00a8db32e3c37ce8fa16e3a0c3dc8d6 100644
 --- a/services/ui/public/interfaces/gpu.mojom
 +++ b/services/ui/public/interfaces/gpu.mojom
-@@ -21,6 +21,8 @@ interface Gpu {
+@@ -21,6 +21,9 @@ interface Gpu {
                              gpu.mojom.GpuInfo gpu_info,
                              gpu.mojom.GpuFeatureInfo gpu_feature_info);
  
++  // FEATURE_FORCE_ACCESS_TO_GPU
 +  SetForceAllowAccessToGpu(bool enable);
 +
    // Creates a new JpegDecodeAccelerator and binds it to |jda|.
    CreateJpegDecodeAccelerator(media.mojom.JpegDecodeAccelerator& jda);
  
 diff --git a/services/ui/ws/gpu_client.h b/services/ui/ws/gpu_client.h
-index 9887a5f1b1329ad63250f7b19e3bb93ef00c0b85..089262f10188dada21ee74be3acd8ef45064c256 100644
+index 9887a5f1b1329ad63250f7b19e3bb93ef00c0b85..ba4746544a00176a184fdbc7433e293dd6624038 100644
 --- a/services/ui/ws/gpu_client.h
 +++ b/services/ui/ws/gpu_client.h
-@@ -46,6 +46,7 @@ class GpuClient : public mojom::Gpu {
+@@ -46,6 +46,10 @@ class GpuClient : public mojom::Gpu {
    // mojom::Gpu overrides:
    void EstablishGpuChannel(
        const EstablishGpuChannelCallback& callback) override;
++
++  // FEATURE_FORCE_ACCESS_TO_GPU
 +  void SetForceAllowAccessToGpu(bool enable) override {}
++
    void CreateJpegDecodeAccelerator(
        media::mojom::JpegDecodeAcceleratorRequest jda_request) override;
    void CreateVideoEncodeAcceleratorProvider(
