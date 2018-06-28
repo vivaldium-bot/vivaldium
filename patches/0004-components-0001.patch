@@ -1,5 +1,5 @@
 diff --git a/components/autofill/content/browser/content_autofill_driver.cc b/components/autofill/content/browser/content_autofill_driver.cc
-index e7ce37455adb9c43afe8dcd281401f2763962924..d34d02054e4416a36f5c711900a137d119e550c6 100644
+index 71f4284a9f840ee1def9fc8ca81ca4b4c5eb544f..5d72de7dd2697c62c36873d73b95ac0b1358d194 100644
 --- a/components/autofill/content/browser/content_autofill_driver.cc
 +++ b/components/autofill/content/browser/content_autofill_driver.cc
 @@ -27,6 +27,9 @@
@@ -12,7 +12,7 @@ index e7ce37455adb9c43afe8dcd281401f2763962924..d34d02054e4416a36f5c711900a137d1
  namespace autofill {
  
  ContentAutofillDriver::ContentAutofillDriver(
-@@ -162,6 +165,14 @@ void ContentAutofillDriver::PopupHidden() {
+@@ -163,6 +166,14 @@ void ContentAutofillDriver::PopupHidden() {
  
  gfx::RectF ContentAutofillDriver::TransformBoundingBoxToViewportCoordinates(
      const gfx::RectF& bounding_box) {
@@ -27,23 +27,72 @@ index e7ce37455adb9c43afe8dcd281401f2763962924..d34d02054e4416a36f5c711900a137d1
    content::RenderWidgetHostView* view = render_frame_host_->GetView();
    if (!view)
      return bounding_box;
-diff --git a/components/autofill/content/renderer/autofill_agent.cc b/components/autofill/content/renderer/autofill_agent.cc
-index 726783400394a22bf8b6aa2ca53a8f582c0c37bb..cef161b7efc7c01572ecb98a528cc09a6c864613 100644
---- a/components/autofill/content/renderer/autofill_agent.cc
-+++ b/components/autofill/content/renderer/autofill_agent.cc
-@@ -329,7 +329,6 @@ void AutofillAgent::FireHostSubmitEvents(const FormData& form_data,
+diff --git a/components/autofill/core/browser/autofill_manager.cc b/components/autofill/core/browser/autofill_manager.cc
+index 50180a1c2c9d3e240e11b4b3a0c6678065ca1c57..dc8cf218f66f48341ca63142df5f1edc0ad9cb0a 100644
+--- a/components/autofill/core/browser/autofill_manager.cc
++++ b/components/autofill/core/browser/autofill_manager.cc
+@@ -237,6 +237,7 @@ void AutofillManager::RegisterProfilePrefs(
+   registry->RegisterIntegerPref(
+       prefs::kAutofillLastVersionDisusedCreditCardsDeleted, 0);
+   registry->RegisterBooleanPref(prefs::kAutofillCreditCardEnabled, true);
++  registry->RegisterBooleanPref(prefs::kAutofillOrphanRowsRemoved, false);
  }
  
- void AutofillAgent::Shutdown() {
--  binding_.Close();
-   weak_ptr_factory_.InvalidateWeakPtrs();
- }
- 
+ void AutofillManager::SetExternalDelegate(AutofillExternalDelegate* delegate) {
 diff --git a/components/autofill/core/browser/personal_data_manager.cc b/components/autofill/core/browser/personal_data_manager.cc
-index 302334a550e476335f2c43384cb7f3a898575ea2..12f43e66d1fac43470c4ba6c5b6a0f7c042744a3 100644
+index 327f2cbb0c0402fbf98559ec7e565e57b38c0bdf..f32dc42daabef43c5be65e489fe5860ff3a6502a 100644
 --- a/components/autofill/core/browser/personal_data_manager.cc
 +++ b/components/autofill/core/browser/personal_data_manager.cc
-@@ -1237,9 +1237,16 @@ const std::string& PersonalDataManager::GetDefaultCountryCodeForNewAddress()
+@@ -413,20 +413,14 @@ void PersonalDataManager::OnSyncServiceInitialized(
+   // If the sync service is not enabled for autofill address profiles then run
+   // address cleanup/startup code here. Otherwise, defer until after sync has
+   // started.
+-  if (!IsSyncEnabledFor(sync_service, syncer::AUTOFILL_PROFILE)) {
+-    ApplyProfileUseDatesFix();  // One-time fix, otherwise NOP.
+-    ApplyDedupingRoutine();     // Once per major version, otherwise NOP.
+-    DeleteDisusedAddresses();   // Once per major version, otherwise NOP.
+-    CreateTestAddresses();      // Once per user profile startup.
+-  }
++  if (!IsSyncEnabledFor(sync_service, syncer::AUTOFILL_PROFILE))
++    ApplyAddressFixesAndCleanups();
+ 
+   // Similarly, if the sync service is not enabled for autofill credit cards
+   // then run credit card address cleanup/startup code here. Otherwise, defer
+   // until after sync has started.
+-  if (!IsSyncEnabledFor(sync_service, syncer::AUTOFILL_WALLET_DATA)) {
+-    DeleteDisusedCreditCards();  // Once per major version, otherwise NOP.
+-    CreateTestCreditCards();     // Once per user profile startup.
+-  }
++  if (!IsSyncEnabledFor(sync_service, syncer::AUTOFILL_WALLET_DATA))
++    ApplyCardFixesAndCleanups();
+ }
+ 
+ void PersonalDataManager::OnWebDataServiceRequestDone(
+@@ -496,19 +490,13 @@ void PersonalDataManager::AutofillMultipleChanged() {
+ void PersonalDataManager::SyncStarted(syncer::ModelType model_type) {
+   // Run deferred autofill address profile startup code.
+   // See: OnSyncServiceInitialized
+-  if (model_type == syncer::AUTOFILL_PROFILE) {
+-    ApplyProfileUseDatesFix();  // One-time fix, otherwise NOP.
+-    ApplyDedupingRoutine();     // Once per major version, otherwise NOP.
+-    DeleteDisusedAddresses();   // Once per major version, otherwise NOP.
+-    CreateTestAddresses();      // Once per user profile startup.
+-  }
++  if (model_type == syncer::AUTOFILL_PROFILE)
++    ApplyAddressFixesAndCleanups();
+ 
+   // Run deferred credit card startup code.
+   // See: OnSyncServiceInitialized
+-  if (model_type == syncer::AUTOFILL_WALLET_DATA) {
+-    DeleteDisusedCreditCards();  // Once per major version, otherwise NOP.
+-    CreateTestCreditCards();     // Once per user profile startup.
+-  }
++  if (model_type == syncer::AUTOFILL_WALLET_DATA)
++    ApplyCardFixesAndCleanups();
+ }
+ 
+ void PersonalDataManager::AddObserver(PersonalDataManagerObserver* observer) {
+@@ -1245,9 +1233,16 @@ const std::string& PersonalDataManager::GetDefaultCountryCodeForNewAddress()
    if (default_country_code_.empty())
      default_country_code_ = MostCommonCountryCodeFromProfiles();
  
@@ -60,8 +109,727 @@ index 302334a550e476335f2c43384cb7f3a898575ea2..12f43e66d1fac43470c4ba6c5b6a0f7c
  
    // Failing that, guess based on locale.
    if (default_country_code_.empty())
+@@ -1660,6 +1655,20 @@ void PersonalDataManager::ApplyProfileUseDatesFix() {
+     SetProfiles(&profiles);
+ }
+ 
++void PersonalDataManager::RemoveOrphanAutofillTableRows() {
++  // Don't run if the fix has already been applied.
++  if (pref_service_->GetBoolean(prefs::kAutofillOrphanRowsRemoved))
++    return;
++
++  if (!database_)
++    return;
++
++  database_->RemoveOrphanAutofillTableRows();
++
++  // Set the pref so that this fix is never run again.
++  pref_service_->SetBoolean(prefs::kAutofillOrphanRowsRemoved, true);
++}
++
+ bool PersonalDataManager::ApplyDedupingRoutine() {
+   if (!is_autofill_profile_cleanup_pending_)
+     return false;
+@@ -2005,7 +2014,7 @@ std::string PersonalDataManager::MergeServerAddressesIntoProfiles(
+   return guid;
+ }
+ 
+-void PersonalDataManager::CreateTestAddresses() {
++void PersonalDataManager::MaybeCreateTestAddresses() {
+   if (has_created_test_addresses_)
+     return;
+ 
+@@ -2018,7 +2027,7 @@ void PersonalDataManager::CreateTestAddresses() {
+   AddProfile(CreateDisusedDeletableTestAddress(app_locale_));
+ }
+ 
+-void PersonalDataManager::CreateTestCreditCards() {
++void PersonalDataManager::MaybeCreateTestCreditCards() {
+   if (has_created_test_credit_cards_)
+     return;
+ 
+@@ -2156,4 +2165,17 @@ bool PersonalDataManager::DeleteDisusedAddresses() {
+   return true;
+ }
+ 
++void PersonalDataManager::ApplyAddressFixesAndCleanups() {
++  ApplyProfileUseDatesFix();        // One-time fix, otherwise NOP.
++  RemoveOrphanAutofillTableRows();  // One-time fix, otherwise NOP.
++  ApplyDedupingRoutine();           // Once per major version, otherwise NOP.
++  DeleteDisusedAddresses();         // Once per major version, otherwise NOP.
++  MaybeCreateTestAddresses();       // Once per user profile startup.
++}
++
++void PersonalDataManager::ApplyCardFixesAndCleanups() {
++  DeleteDisusedCreditCards();    // Once per major version, otherwise NOP.
++  MaybeCreateTestCreditCards();  // Once per user profile startup.
++}
++
+ }  // namespace autofill
+diff --git a/components/autofill/core/browser/personal_data_manager.h b/components/autofill/core/browser/personal_data_manager.h
+index ce8f498aa671f3abf01e11c07dc5629e1c15957c..42fa8ea8b933e84d5524441ac3194330ea021ab1 100644
+--- a/components/autofill/core/browser/personal_data_manager.h
++++ b/components/autofill/core/browser/personal_data_manager.h
+@@ -488,6 +488,10 @@ class PersonalDataManager : public KeyedService,
+   // whether the routine was run.
+   void ApplyProfileUseDatesFix();
+ 
++  // Runs the routine that removes the orphan rows in the autofill tables if
++  // it's never been done.
++  void RemoveOrphanAutofillTableRows();
++
+   // Applies the deduping routine once per major version if the feature is
+   // enabled. Calls DedupeProfiles with the content of |web_profiles_| as a
+   // parameter. Removes the profiles to delete from the database and updates the
+@@ -566,12 +570,18 @@ class PersonalDataManager : public KeyedService,
+   // If the AutofillCreateDataForTest feature is enabled, this helper creates
+   // autofill address data that would otherwise be difficult to create
+   // manually using the UI.
+-  void CreateTestAddresses();
++  void MaybeCreateTestAddresses();
+ 
+   // If the AutofillCreateDataForTest feature is enabled, this helper creates
+   // autofill credit card data that would otherwise be difficult to create
+   // manually using the UI.
+-  void CreateTestCreditCards();
++  void MaybeCreateTestCreditCards();
++
++  // Applies various fixes and cleanups on autofill addresses.
++  void ApplyAddressFixesAndCleanups();
++
++  // Applies various fixes and cleanups on autofill credit cards.
++  void ApplyCardFixesAndCleanups();
+ 
+   const std::string app_locale_;
+ 
+diff --git a/components/autofill/core/browser/webdata/autofill_table.cc b/components/autofill/core/browser/webdata/autofill_table.cc
+index bd5c3f9a4ce4397439cdc3243dfe35c73dd7d9a3..31cbe830a10024004356d0703359f566452789ec 100644
+--- a/components/autofill/core/browser/webdata/autofill_table.cc
++++ b/components/autofill/core/browser/webdata/autofill_table.cc
+@@ -1578,6 +1578,12 @@ bool AutofillTable::RemoveAutofillDataModifiedBetween(
+   if (!s_profiles_get.Succeeded())
+     return false;
+ 
++  // Remove the profile pieces.
++  for (const std::string& guid : *profile_guids) {
++    if (!RemoveAutofillProfilePieces(guid, db_))
++      return false;
++  }
++
+   // Remove Autofill profiles in the time range.
+   sql::Statement s_profiles(db_->GetUniqueStatement(
+       "DELETE FROM autofill_profiles "
+@@ -1848,6 +1854,31 @@ bool AutofillTable::ClearModelTypeState(syncer::ModelType model_type) {
+   return s.Run();
+ }
+ 
++bool AutofillTable::RemoveOrphanAutofillTableRows() {
++  // Get all the orphan guids.
++  std::set<std::string> orphan_guids;
++  sql::Statement s_orphan_profile_pieces_get(db_->GetUniqueStatement(
++      "SELECT guid FROM (SELECT guid FROM autofill_profile_names UNION SELECT "
++      "guid FROM autofill_profile_emails UNION SELECT guid FROM "
++      "autofill_profile_phones) WHERE guid NOT IN (SELECT guid FROM "
++      "autofill_profiles)"));
++
++  // Put the orphan guids in a set.
++  while (s_orphan_profile_pieces_get.Step())
++    orphan_guids.insert(s_orphan_profile_pieces_get.ColumnString(0));
++
++  if (!s_orphan_profile_pieces_get.Succeeded())
++    return false;
++
++  // Remove the profile pieces for the orphan guids.
++  for (const std::string& guid : orphan_guids) {
++    if (!RemoveAutofillProfilePieces(guid, db_))
++      return false;
++  }
++
++  return true;
++}
++
+ bool AutofillTable::InitMainTable() {
+   if (!db_->DoesTableExist("autofill")) {
+     if (!db_->Execute("CREATE TABLE autofill ("
+diff --git a/components/autofill/core/browser/webdata/autofill_table.h b/components/autofill/core/browser/webdata/autofill_table.h
+index 28c783dc40f6f1c4446537f6fc481b505326aa0d..2d720be9adaeb16606f1502711bf17e88fcebdd0 100644
+--- a/components/autofill/core/browser/webdata/autofill_table.h
++++ b/components/autofill/core/browser/webdata/autofill_table.h
+@@ -451,6 +451,12 @@ class AutofillTable : public WebDatabaseTable,
+       const sync_pb::ModelTypeState& model_type_state) override;
+   bool ClearModelTypeState(syncer::ModelType model_type) override;
+ 
++  // Removes the orphan rows in the autofill_profile_names,
++  // autofill_profile_emails and autofill_profile_phones table that were not
++  // removed in the previous implementation of
++  // RemoveAutofillDataModifiedBetween(see crbug.com/836737).
++  bool RemoveOrphanAutofillTableRows();
++
+   // Table migration functions. NB: These do not and should not rely on other
+   // functions in this class. The implementation of a function such as
+   // GetCreditCard may change over time, but MigrateToVersionXX should never
+diff --git a/components/autofill/core/browser/webdata/autofill_table_unittest.cc b/components/autofill/core/browser/webdata/autofill_table_unittest.cc
+index abcd0a4fe901c530827ede0bd601d109dd2099f1..fed5711f60c6c2c06890d056dba258954c45f972 100644
+--- a/components/autofill/core/browser/webdata/autofill_table_unittest.cc
++++ b/components/autofill/core/browser/webdata/autofill_table_unittest.cc
+@@ -1345,16 +1345,52 @@ TEST_F(AutofillTableTest, RemoveAutofillDataModifiedBetween) {
+   ASSERT_TRUE(db_->GetSQLConnection()->Execute(
+       "INSERT INTO autofill_profiles (guid, date_modified) "
+       "VALUES('00000000-0000-0000-0000-000000000000', 11);"
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000000', 'John Jones');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000000', 'john@jones.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000000', '111-111-1111');"
+       "INSERT INTO autofill_profiles (guid, date_modified) "
+       "VALUES('00000000-0000-0000-0000-000000000001', 21);"
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000001', 'John Jones2');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000001', 'john@jones2.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000001', '222-222-2222');"
+       "INSERT INTO autofill_profiles (guid, date_modified) "
+       "VALUES('00000000-0000-0000-0000-000000000002', 31);"
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000002', 'John Jones3');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000002', 'john@jones3.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000002', '333-333-3333');"
+       "INSERT INTO autofill_profiles (guid, date_modified) "
+       "VALUES('00000000-0000-0000-0000-000000000003', 41);"
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000003', 'John Jones4');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000003', 'john@jones4.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000003', '444-444-4444');"
+       "INSERT INTO autofill_profiles (guid, date_modified) "
+       "VALUES('00000000-0000-0000-0000-000000000004', 51);"
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000004', 'John Jones5');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000004', 'john@jones5.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000004', '555-555-5555');"
+       "INSERT INTO autofill_profiles (guid, date_modified) "
+       "VALUES('00000000-0000-0000-0000-000000000005', 61);"
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000005', 'John Jones6');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000005', 'john@jones6.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000005', '666-666-6666');"
+       "INSERT INTO credit_cards (guid, date_modified) "
+       "VALUES('00000000-0000-0000-0000-000000000006', 17);"
+       "INSERT INTO credit_cards (guid, date_modified) "
+@@ -1374,9 +1410,13 @@ TEST_F(AutofillTableTest, RemoveAutofillDataModifiedBetween) {
+   table_->RemoveAutofillDataModifiedBetween(
+       Time::FromTimeT(17), Time::FromTimeT(41),
+       &profile_guids, &credit_card_guids);
++
++  // Two profiles should have been removed.
+   ASSERT_EQ(2UL, profile_guids.size());
+   EXPECT_EQ("00000000-0000-0000-0000-000000000001", profile_guids[0]);
+   EXPECT_EQ("00000000-0000-0000-0000-000000000002", profile_guids[1]);
++
++  // Make sure that only the expected profiles are still present.
+   sql::Statement s_autofill_profiles_bounded(
+       db_->GetSQLConnection()->GetUniqueStatement(
+           "SELECT date_modified FROM autofill_profiles"));
+@@ -1390,10 +1430,63 @@ TEST_F(AutofillTableTest, RemoveAutofillDataModifiedBetween) {
+   ASSERT_TRUE(s_autofill_profiles_bounded.Step());
+   EXPECT_EQ(61, s_autofill_profiles_bounded.ColumnInt64(0));
+   EXPECT_FALSE(s_autofill_profiles_bounded.Step());
++
++  // Make sure that only the expected profile names are still present.
++  sql::Statement s_autofill_profile_names_bounded(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT full_name FROM autofill_profile_names"));
++  ASSERT_TRUE(s_autofill_profile_names_bounded.is_valid());
++  ASSERT_TRUE(s_autofill_profile_names_bounded.Step());
++  EXPECT_EQ("John Jones", s_autofill_profile_names_bounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_names_bounded.Step());
++  EXPECT_EQ("John Jones4", s_autofill_profile_names_bounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_names_bounded.Step());
++  EXPECT_EQ("John Jones5", s_autofill_profile_names_bounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_names_bounded.Step());
++  EXPECT_EQ("John Jones6", s_autofill_profile_names_bounded.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profile_names_bounded.Step());
++
++  // Make sure that only the expected profile emails are still present.
++  sql::Statement s_autofill_profile_emails_bounded(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT email FROM autofill_profile_emails"));
++  ASSERT_TRUE(s_autofill_profile_emails_bounded.is_valid());
++  ASSERT_TRUE(s_autofill_profile_emails_bounded.Step());
++  EXPECT_EQ("john@jones.com",
++            s_autofill_profile_emails_bounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_emails_bounded.Step());
++  EXPECT_EQ("john@jones4.com",
++            s_autofill_profile_emails_bounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_emails_bounded.Step());
++  EXPECT_EQ("john@jones5.com",
++            s_autofill_profile_emails_bounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_emails_bounded.Step());
++  EXPECT_EQ("john@jones6.com",
++            s_autofill_profile_emails_bounded.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profile_emails_bounded.Step());
++
++  // Make sure the expected profile phone numbers are still present.
++  sql::Statement s_autofill_profile_phones_bounded(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT number FROM autofill_profile_phones"));
++  ASSERT_TRUE(s_autofill_profile_phones_bounded.is_valid());
++  ASSERT_TRUE(s_autofill_profile_phones_bounded.Step());
++  EXPECT_EQ("111-111-1111", s_autofill_profile_phones_bounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_phones_bounded.Step());
++  EXPECT_EQ("444-444-4444", s_autofill_profile_phones_bounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_phones_bounded.Step());
++  EXPECT_EQ("555-555-5555", s_autofill_profile_phones_bounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_phones_bounded.Step());
++  EXPECT_EQ("666-666-6666", s_autofill_profile_phones_bounded.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profile_phones_bounded.Step());
++
++  // Three cards should have been removed.
+   ASSERT_EQ(3UL, credit_card_guids.size());
+   EXPECT_EQ("00000000-0000-0000-0000-000000000006", credit_card_guids[0]);
+   EXPECT_EQ("00000000-0000-0000-0000-000000000007", credit_card_guids[1]);
+   EXPECT_EQ("00000000-0000-0000-0000-000000000008", credit_card_guids[2]);
++
++  // Make sure the expected profiles are still present.
+   sql::Statement s_credit_cards_bounded(
+       db_->GetSQLConnection()->GetUniqueStatement(
+           "SELECT date_modified FROM credit_cards"));
+@@ -1413,6 +1506,8 @@ TEST_F(AutofillTableTest, RemoveAutofillDataModifiedBetween) {
+   ASSERT_EQ(2UL, profile_guids.size());
+   EXPECT_EQ("00000000-0000-0000-0000-000000000004", profile_guids[0]);
+   EXPECT_EQ("00000000-0000-0000-0000-000000000005", profile_guids[1]);
++
++  // Make sure that only the expected profile names are still present.
+   sql::Statement s_autofill_profiles_unbounded(
+       db_->GetSQLConnection()->GetUniqueStatement(
+           "SELECT date_modified FROM autofill_profiles"));
+@@ -1422,9 +1517,50 @@ TEST_F(AutofillTableTest, RemoveAutofillDataModifiedBetween) {
+   ASSERT_TRUE(s_autofill_profiles_unbounded.Step());
+   EXPECT_EQ(41, s_autofill_profiles_unbounded.ColumnInt64(0));
+   EXPECT_FALSE(s_autofill_profiles_unbounded.Step());
++
++  // Make sure that only the expected profile names are still present.
++  sql::Statement s_autofill_profile_names_unbounded(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT full_name FROM autofill_profile_names"));
++  ASSERT_TRUE(s_autofill_profile_names_unbounded.is_valid());
++  ASSERT_TRUE(s_autofill_profile_names_unbounded.Step());
++  EXPECT_EQ("John Jones", s_autofill_profile_names_unbounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_names_unbounded.Step());
++  EXPECT_EQ("John Jones4", s_autofill_profile_names_unbounded.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profile_names_unbounded.Step());
++
++  // Make sure that only the expected profile emails are still present.
++  sql::Statement s_autofill_profile_emails_unbounded(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT email FROM autofill_profile_emails"));
++  ASSERT_TRUE(s_autofill_profile_emails_unbounded.is_valid());
++  ASSERT_TRUE(s_autofill_profile_emails_unbounded.Step());
++  EXPECT_EQ("john@jones.com",
++            s_autofill_profile_emails_unbounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_emails_unbounded.Step());
++  EXPECT_EQ("john@jones4.com",
++            s_autofill_profile_emails_unbounded.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profile_emails_unbounded.Step());
++
++  // Make sure the expected profile phone numbers are still present.
++  sql::Statement s_autofill_profile_phones_unbounded(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT number FROM autofill_profile_phones"));
++  ASSERT_TRUE(s_autofill_profile_phones_unbounded.is_valid());
++  ASSERT_TRUE(s_autofill_profile_phones_unbounded.Step());
++  EXPECT_EQ("111-111-1111",
++            s_autofill_profile_phones_unbounded.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_phones_unbounded.Step());
++  EXPECT_EQ("444-444-4444",
++            s_autofill_profile_phones_unbounded.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profile_phones_unbounded.Step());
++
++  // Two cards should have been removed.
+   ASSERT_EQ(2UL, credit_card_guids.size());
+   EXPECT_EQ("00000000-0000-0000-0000-000000000010", credit_card_guids[0]);
+   EXPECT_EQ("00000000-0000-0000-0000-000000000011", credit_card_guids[1]);
++
++  // Make sure the remaining card is the expected one.
+   sql::Statement s_credit_cards_unbounded(
+       db_->GetSQLConnection()->GetUniqueStatement(
+           "SELECT date_modified FROM credit_cards"));
+@@ -1437,16 +1573,45 @@ TEST_F(AutofillTableTest, RemoveAutofillDataModifiedBetween) {
+   table_->RemoveAutofillDataModifiedBetween(
+       Time(), Time(),
+       &profile_guids, &credit_card_guids);
++
++  // Two profiles should have been removed.
+   ASSERT_EQ(2UL, profile_guids.size());
+   EXPECT_EQ("00000000-0000-0000-0000-000000000000", profile_guids[0]);
+   EXPECT_EQ("00000000-0000-0000-0000-000000000003", profile_guids[1]);
++
++  // Make sure there are no profiles remaining.
+   sql::Statement s_autofill_profiles_empty(
+       db_->GetSQLConnection()->GetUniqueStatement(
+           "SELECT date_modified FROM autofill_profiles"));
+   ASSERT_TRUE(s_autofill_profiles_empty.is_valid());
+   EXPECT_FALSE(s_autofill_profiles_empty.Step());
++
++  // Make sure there are no profile names remaining.
++  sql::Statement s_autofill_profile_names_empty(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT full_name FROM autofill_profile_names"));
++  ASSERT_TRUE(s_autofill_profile_names_empty.is_valid());
++  EXPECT_FALSE(s_autofill_profile_names_empty.Step());
++
++  // Make sure there are no profile emails remaining.
++  sql::Statement s_autofill_profile_emails_empty(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT email FROM autofill_profile_emails"));
++  ASSERT_TRUE(s_autofill_profile_emails_empty.is_valid());
++  EXPECT_FALSE(s_autofill_profile_emails_empty.Step());
++
++  // Make sure there are no profile phones remaining.
++  sql::Statement s_autofill_profile_phones_empty(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT number FROM autofill_profile_phones"));
++  ASSERT_TRUE(s_autofill_profile_phones_empty.is_valid());
++  EXPECT_FALSE(s_autofill_profile_phones_empty.Step());
++
++  // One credit card should have been deleted.
+   ASSERT_EQ(1UL, credit_card_guids.size());
+   EXPECT_EQ("00000000-0000-0000-0000-000000000009", credit_card_guids[0]);
++
++  // There should be no cards left.
+   sql::Statement s_credit_cards_empty(
+       db_->GetSQLConnection()->GetUniqueStatement(
+           "SELECT date_modified FROM credit_cards"));
+@@ -2272,4 +2437,153 @@ TEST_F(AutofillTableTest, AutofillCorruptModelTypeState) {
+   EXPECT_FALSE(table_->GetAllSyncMetadata(syncer::AUTOFILL, &metadata_batch));
+ }
+ 
++TEST_F(AutofillTableTest, RemoveOrphanAutofillTableRows) {
++  // Populate the different tables.
++  ASSERT_TRUE(db_->GetSQLConnection()->Execute(
++      // Add a profile in all the tables
++      "INSERT INTO autofill_profiles (guid, date_modified) "
++      "VALUES('00000000-0000-0000-0000-000000000000', 11);"
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000000', 'John Jones');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000000', 'john@jones.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000000', '111-111-1111');"
++
++      // Add a profile in profiles, names and emails tables.
++      "INSERT INTO autofill_profiles (guid, date_modified) "
++      "VALUES('00000000-0000-0000-0000-000000000001', 21);"
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000001', 'John Jones2');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000001', 'john@jones2.com');"
++
++      // Add a profile in profiles, names and phones tables.
++      "INSERT INTO autofill_profiles (guid, date_modified) "
++      "VALUES('00000000-0000-0000-0000-000000000002', 31);"
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000002', 'John Jones3');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000002', '333-333-3333');"
++
++      // Add a profile in profiles, emails and phones tables.
++      "INSERT INTO autofill_profiles (guid, date_modified) "
++      "VALUES('00000000-0000-0000-0000-000000000003', 41);"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000003', 'john@jones4.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000003', '444-444-4444');"
++
++      // Add a orphan profile in names, emails and phones tables.
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000004', 'John Jones5');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000004', 'john@jones5.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000004', '555-555-5555');"
++
++      // Add a orphan profile in names and emails tables.
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000005', 'John Jones6');"
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000005', 'john@jones6.com');"
++
++      // Add a orphan profile in names and phones tables.
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000006', 'John Jones7');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000006', '777-777-7777');"
++
++      // Add a orphan profile in emails and phones tables.
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000007', 'john@jones8.com');"
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000007', '999-999-9999');"
++
++      // Add a orphan profile in the names table.
++      "INSERT INTO autofill_profile_names (guid, full_name) "
++      "VALUES('00000000-0000-0000-0000-000000000008', 'John Jones9');"
++
++      // Add a orphan profile in the emails table.
++      "INSERT INTO autofill_profile_emails (guid, email) "
++      "VALUES('00000000-0000-0000-0000-000000000009', 'john@jones10.com');"
++
++      // Add a orphan profile in the phones table.
++      "INSERT INTO autofill_profile_phones (guid, number) "
++      "VALUES('00000000-0000-0000-0000-000000000010', '101-010-1010');"));
++
++  ASSERT_TRUE(table_->RemoveOrphanAutofillTableRows());
++
++  // Make sure that all the rows in the autofill_profiles table are still
++  // present.
++  sql::Statement s_autofill_profiles(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT guid FROM autofill_profiles"));
++  ASSERT_TRUE(s_autofill_profiles.is_valid());
++  ASSERT_TRUE(s_autofill_profiles.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000000",
++            s_autofill_profiles.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profiles.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000001",
++            s_autofill_profiles.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profiles.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000002",
++            s_autofill_profiles.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profiles.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000003",
++            s_autofill_profiles.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profiles.Step());
++
++  // Make sure that only the rows present in the autofill_profiles table are
++  // present in the autofill_profile_names table.
++  sql::Statement s_autofill_profile_names(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT guid FROM autofill_profile_names"));
++  ASSERT_TRUE(s_autofill_profile_names.is_valid());
++  ASSERT_TRUE(s_autofill_profile_names.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000000",
++            s_autofill_profile_names.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_names.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000001",
++            s_autofill_profile_names.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_names.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000002",
++            s_autofill_profile_names.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profile_names.Step());
++
++  // Make sure that only the rows present in the autofill_profiles table are
++  // present in the autofill_profile_emails table.
++  sql::Statement s_autofill_profile_emails(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT guid FROM autofill_profile_emails"));
++  ASSERT_TRUE(s_autofill_profile_emails.is_valid());
++  ASSERT_TRUE(s_autofill_profile_emails.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000000",
++            s_autofill_profile_emails.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_emails.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000001",
++            s_autofill_profile_emails.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_emails.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000003",
++            s_autofill_profile_emails.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profile_emails.Step());
++
++  // Make sure that only the rows present in the autofill_profiles table are
++  // present in the autofill_profile_phones table.
++  sql::Statement s_autofill_profile_phones(
++      db_->GetSQLConnection()->GetUniqueStatement(
++          "SELECT guid FROM autofill_profile_phones"));
++  ASSERT_TRUE(s_autofill_profile_phones.is_valid());
++  ASSERT_TRUE(s_autofill_profile_phones.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000000",
++            s_autofill_profile_phones.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_phones.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000002",
++            s_autofill_profile_phones.ColumnString(0));
++  ASSERT_TRUE(s_autofill_profile_phones.Step());
++  EXPECT_EQ("00000000-0000-0000-0000-000000000003",
++            s_autofill_profile_phones.ColumnString(0));
++  EXPECT_FALSE(s_autofill_profile_phones.Step());
++}
++
+ }  // namespace autofill
+diff --git a/components/autofill/core/browser/webdata/autofill_webdata.h b/components/autofill/core/browser/webdata/autofill_webdata.h
+index 07fe5002a2f4461256a4bf7d30d2f3b2390f1ad2..fc715a0aa31d4b372a384e19c54c28d93aa6486f 100644
+--- a/components/autofill/core/browser/webdata/autofill_webdata.h
++++ b/components/autofill/core/browser/webdata/autofill_webdata.h
+@@ -126,6 +126,10 @@ class AutofillWebData {
+   // the database.
+   virtual void RemoveOriginURLsModifiedBetween(
+       const base::Time& delete_begin, const base::Time& delete_end) = 0;
++
++  // Removes the orphan rows in the autofill_profile_names,
++  // autofill_profile_emails and autofill_profile_phones tables.
++  virtual void RemoveOrphanAutofillTableRows() = 0;
+ };
+ 
+ }  // namespace autofill
+diff --git a/components/autofill/core/browser/webdata/autofill_webdata_backend_impl.cc b/components/autofill/core/browser/webdata/autofill_webdata_backend_impl.cc
+index 7a6f5536f43cbe005cc0dfde1c8152478b054e18..9b4936744f255a828a8a75b010db80e3cd7b81ed 100644
+--- a/components/autofill/core/browser/webdata/autofill_webdata_backend_impl.cc
++++ b/components/autofill/core/browser/webdata/autofill_webdata_backend_impl.cc
+@@ -502,4 +502,13 @@ WebDatabase::State AutofillWebDataBackendImpl::RemoveExpiredFormElementsImpl(
+   return WebDatabase::COMMIT_NOT_NEEDED;
+ }
+ 
++WebDatabase::State AutofillWebDataBackendImpl::RemoveOrphanAutofillTableRows(
++    WebDatabase* db) {
++  DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
++  if (AutofillTable::FromWebDatabase(db)->RemoveOrphanAutofillTableRows()) {
++    return WebDatabase::COMMIT_NEEDED;
++  }
++  return WebDatabase::COMMIT_NOT_NEEDED;
++}
++
+ }  // namespace autofill
+diff --git a/components/autofill/core/browser/webdata/autofill_webdata_backend_impl.h b/components/autofill/core/browser/webdata/autofill_webdata_backend_impl.h
+index 3720bd72214ff5c6e0e280108c5ce9f0455aa9ff..35bccf405bd0063d665f8636772f501c0e57f1ba 100644
+--- a/components/autofill/core/browser/webdata/autofill_webdata_backend_impl.h
++++ b/components/autofill/core/browser/webdata/autofill_webdata_backend_impl.h
+@@ -179,6 +179,10 @@ class AutofillWebDataBackendImpl
+       const base::Time& delete_end,
+       WebDatabase* db);
+ 
++  // Removes the orphan rows in the autofill_profile_names,
++  // autofill_profile_emails and autofill_profile_phones tables.
++  WebDatabase::State RemoveOrphanAutofillTableRows(WebDatabase* db);
++
+  protected:
+   ~AutofillWebDataBackendImpl() override;
+ 
+diff --git a/components/autofill/core/browser/webdata/autofill_webdata_service.cc b/components/autofill/core/browser/webdata/autofill_webdata_service.cc
+index 2752366cbe6267059a13c3a03bd58e138702759c..f81b0b5f6f300056119288e5c8bd408b8cc3a104 100644
+--- a/components/autofill/core/browser/webdata/autofill_webdata_service.cc
++++ b/components/autofill/core/browser/webdata/autofill_webdata_service.cc
+@@ -251,6 +251,13 @@ void AutofillWebDataService::RemoveOriginURLsModifiedBetween(
+            autofill_backend_, delete_begin, delete_end));
+ }
+ 
++void AutofillWebDataService::RemoveOrphanAutofillTableRows() {
++  wdbs_->ScheduleDBTask(
++      FROM_HERE,
++      Bind(&AutofillWebDataBackendImpl::RemoveOrphanAutofillTableRows,
++           autofill_backend_));
++}
++
+ void AutofillWebDataService::AddObserver(
+     AutofillWebDataServiceObserverOnDBSequence* observer) {
+   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
+diff --git a/components/autofill/core/browser/webdata/autofill_webdata_service.h b/components/autofill/core/browser/webdata/autofill_webdata_service.h
+index f6d265b36ec5e208972307e840824c3fd625a102..fe42a7e9972956bbce733667f985b4b76fa1c64b 100644
+--- a/components/autofill/core/browser/webdata/autofill_webdata_service.h
++++ b/components/autofill/core/browser/webdata/autofill_webdata_service.h
+@@ -108,6 +108,8 @@ class AutofillWebDataService : public AutofillWebData,
+   void RemoveOriginURLsModifiedBetween(const base::Time& delete_begin,
+                                        const base::Time& delete_end) override;
+ 
++  void RemoveOrphanAutofillTableRows() override;
++
+   void AddObserver(AutofillWebDataServiceObserverOnDBSequence* observer);
+   void RemoveObserver(AutofillWebDataServiceObserverOnDBSequence* observer);
+ 
+diff --git a/components/autofill/core/common/autofill_pref_names.cc b/components/autofill/core/common/autofill_pref_names.cc
+index ec4976a8f53b973cb8483c7c692a11cf716f7c5d..c24d617110fcc70ed561e76e2c1b3b7258171782 100644
+--- a/components/autofill/core/common/autofill_pref_names.cc
++++ b/components/autofill/core/common/autofill_pref_names.cc
+@@ -7,10 +7,21 @@
+ namespace autofill {
+ namespace prefs {
+ 
++// Integer that is set to the last choice user made when prompted for saving a
++// credit card. The prompt is for user's consent in saving the card in the
++// server for signed in users and saving the card locally for non signed-in
++// users.
++const char kAutofillAcceptSaveCreditCardPromptState[] =
++    "autofill.accept_save_credit_card_prompt_state";
++
+ // Integer that is set to the billing customer number fetched from priority
+ // preference.
+ const char kAutofillBillingCustomerNumber[] = "billing_customer_number";
+ 
++// Boolean that is true if Autofill is enabled and allowed to save credit card
++// data.
++const char kAutofillCreditCardEnabled[] = "autofill.credit_card_enabled";
++
+ // Number of times the credit card signin promo has been shown.
+ const char kAutofillCreditCardSigninPromoImpressionCount[] =
+     "autofill.credit_card_signin_promo_impression_count";
+@@ -18,14 +29,6 @@ const char kAutofillCreditCardSigninPromoImpressionCount[] =
+ // Boolean that is true if Autofill is enabled and allowed to save profile data.
+ const char kAutofillEnabled[] = "autofill.enabled";
+ 
+-// Boolean that is true if Autofill address profiles were fixed regarding their
+-// bad use dates.
+-const char kAutofillProfileUseDatesFixed[] = "autofill.profile_use_dates_fixed";
+-
+-// Boolean that's true when Wallet card and address import is enabled by the
+-// user.
+-const char kAutofillWalletImportEnabled[] = "autofill.wallet_import_enabled";
+-
+ // Integer that is set to the last version where the profile deduping routine
+ // was run. This routine will be run once per version.
+ const char kAutofillLastVersionDeduped[] = "autofill.last_version_deduped";
+@@ -40,21 +43,21 @@ const char kAutofillLastVersionDisusedAddressesDeleted[] =
+ const char kAutofillLastVersionDisusedCreditCardsDeleted[] =
+     "autofill.last_version_disused_credit_cards_deleted";
+ 
++// Boolean that is true if the orphan rows in the autofill table were removed.
++const char kAutofillOrphanRowsRemoved[] = "autofill.orphan_rows_removed";
++
++// Boolean that is true if Autofill address profiles were fixed regarding their
++// bad use dates.
++const char kAutofillProfileUseDatesFixed[] = "autofill.profile_use_dates_fixed";
++
++// Boolean that's true when Wallet card and address import is enabled by the
++// user.
++const char kAutofillWalletImportEnabled[] = "autofill.wallet_import_enabled";
++
+ // Boolean that is set to the last choice user made when prompted for saving an
+ // unmasked server card locally.
+ const char kAutofillWalletImportStorageCheckboxState[] =
+     "autofill.wallet_import_storage_checkbox_state";
+ 
+-// Integer that is set to the last choice user made when prompted for saving a
+-// credit card. The prompt is for user's consent in saving the card in the
+-// server for signed in users and saving the card locally for non signed-in
+-// users.
+-const char kAutofillAcceptSaveCreditCardPromptState[] =
+-    "autofill.accept_save_credit_card_prompt_state";
+-
+-// Boolean that is true if Autofill is enabled and allowed to save credit card
+-// data.
+-const char kAutofillCreditCardEnabled[] = "autofill.credit_card_enabled";
+-
+ }  // namespace prefs
+ }  // namespace autofill
+diff --git a/components/autofill/core/common/autofill_pref_names.h b/components/autofill/core/common/autofill_pref_names.h
+index 43c0bdae17416ac0a1f81b30e23d3c73cf7b5a5c..53fd3530e313f4debd6e68dca217642b72075775 100644
+--- a/components/autofill/core/common/autofill_pref_names.h
++++ b/components/autofill/core/common/autofill_pref_names.h
+@@ -19,6 +19,7 @@ extern const char kAutofillEnabled[];
+ extern const char kAutofillLastVersionDeduped[];
+ extern const char kAutofillLastVersionDisusedAddressesDeleted[];
+ extern const char kAutofillLastVersionDisusedCreditCardsDeleted[];
++extern const char kAutofillOrphanRowsRemoved[];
+ extern const char kAutofillProfileUseDatesFixed[];
+ extern const char kAutofillWalletImportEnabled[];
+ extern const char kAutofillWalletImportStorageCheckboxState[];
 diff --git a/components/bookmarks/browser/bookmark_codec.cc b/components/bookmarks/browser/bookmark_codec.cc
-index 75735b9bb7ca6777879db65654f1046341acbe12..c80b53cb3f6cc7d8b58e633df1f88204a7dca5c1 100644
+index 37d68f45d99e4f62cc61a0cbc31266e8f75901ca..b844287579d7a845fe7a549ebfc969307929df26 100644
 --- a/components/bookmarks/browser/bookmark_codec.cc
 +++ b/components/bookmarks/browser/bookmark_codec.cc
 @@ -19,6 +19,8 @@
@@ -251,10 +1019,10 @@ index ff14a3f78c515ab03b861f47ca0fe344f29a4fe4..bf289cc4b36718a28fb5524ed9cd9ac5
                                  value);
      model->set_next_node_id(max_id);
 diff --git a/components/bookmarks/browser/bookmark_model.cc b/components/bookmarks/browser/bookmark_model.cc
-index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa9617f30cb6 100644
+index c4b76b9d652cc351c2da60c40542870925ebc79f..1b49023f0ebb7eccc3d663693d3d5191f883459b 100644
 --- a/components/bookmarks/browser/bookmark_model.cc
 +++ b/components/bookmarks/browser/bookmark_model.cc
-@@ -31,6 +31,10 @@
+@@ -30,6 +30,10 @@
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/gfx/favicon_size.h"
  
@@ -265,7 +1033,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
  using base::Time;
  
  namespace bookmarks {
-@@ -117,6 +121,7 @@ BookmarkModel::BookmarkModel(std::unique_ptr<BookmarkClient> client)
+@@ -116,6 +120,7 @@ BookmarkModel::BookmarkModel(std::unique_ptr<BookmarkClient> client)
        bookmark_bar_node_(nullptr),
        other_node_(nullptr),
        mobile_node_(nullptr),
@@ -273,7 +1041,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
        next_node_id_(1),
        observers_(base::ObserverListPolicy::EXISTING_ONLY),
        loaded_signal_(base::WaitableEvent::ResetPolicy::MANUAL,
-@@ -412,6 +417,9 @@ void BookmarkModel::SetNodeMetaInfo(const BookmarkNode* node,
+@@ -411,6 +416,9 @@ void BookmarkModel::SetNodeMetaInfo(const BookmarkNode* node,
  
    for (BookmarkModelObserver& observer : observers_)
      observer.BookmarkMetaInfoChanged(this, node);
@@ -283,7 +1051,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
  }
  
  void BookmarkModel::SetNodeMetaInfoMap(
-@@ -579,16 +587,32 @@ void BookmarkModel::BlockTillLoaded() {
+@@ -578,16 +586,32 @@ void BookmarkModel::BlockTillLoaded() {
    loaded_signal_.Wait();
  }
  
@@ -322,8 +1090,8 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
    if (!loaded_ || is_root_node(parent) || !IsValidIndex(parent, index, true)) {
      // Can't add to the root.
      NOTREACHED();
-@@ -599,20 +623,65 @@ const BookmarkNode* BookmarkModel::AddFolderWithMetaInfo(
-       base::MakeUnique<BookmarkNode>(generate_next_node_id(), GURL());
+@@ -598,20 +622,65 @@ const BookmarkNode* BookmarkModel::AddFolderWithMetaInfo(
+       std::make_unique<BookmarkNode>(generate_next_node_id(), GURL());
    new_node->set_date_folder_modified(Time::Now());
    // Folders shouldn't have line breaks in their titles.
 -  new_node->SetTitle(title);
@@ -391,7 +1159,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
  }
  
  const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
-@@ -621,7 +690,12 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
+@@ -620,7 +689,12 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
      const base::string16& title,
      const GURL& url,
      const Time& creation_time,
@@ -405,7 +1173,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
    if (!loaded_ || !url.is_valid() || is_root_node(parent) ||
        !IsValidIndex(parent, index, true)) {
      NOTREACHED();
-@@ -640,6 +714,16 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
+@@ -639,6 +713,16 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTimeAndMetaInfo(
    if (meta_info)
      new_node->SetMetaInfoMap(*meta_info);
  
@@ -422,7 +1190,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
    return AddNode(AsMutable(parent), index, std::move(new_node));
  }
  
-@@ -756,6 +840,8 @@ const BookmarkPermanentNode* BookmarkModel::PermanentNode(
+@@ -755,6 +839,8 @@ const BookmarkPermanentNode* BookmarkModel::PermanentNode(
        return other_node_;
      case BookmarkNode::MOBILE:
        return mobile_node_;
@@ -431,7 +1199,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
      default:
        NOTREACHED();
        return nullptr;
-@@ -831,11 +917,14 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
+@@ -830,11 +916,14 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
        details->owned_other_folder_node();
    std::unique_ptr<BookmarkPermanentNode> owned_mobile_folder_node =
        details->owned_mobile_folder_node();
@@ -446,7 +1214,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
  
    // Get any extra nodes and take ownership of them at the |root_|.
    std::vector<std::unique_ptr<BookmarkPermanentNode>> extra_nodes =
-@@ -848,6 +937,8 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
+@@ -847,6 +936,8 @@ void BookmarkModel::DoneLoading(std::unique_ptr<BookmarkLoadDetails> details) {
    root_children.push_back(std::move(owned_bb_node));
    root_children.push_back(std::move(owned_other_folder_node));
    root_children.push_back(std::move(owned_mobile_folder_node));
@@ -455,7 +1223,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
    std::move(extra_nodes.begin(), extra_nodes.end(),
              std::back_inserter(root_children));
  
-@@ -986,6 +1077,7 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
+@@ -985,6 +1076,7 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
      BookmarkNode::Type type) {
    DCHECK(type == BookmarkNode::BOOKMARK_BAR ||
           type == BookmarkNode::OTHER_NODE ||
@@ -463,7 +1231,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
           type == BookmarkNode::MOBILE);
    BookmarkPermanentNode* node =
        new BookmarkPermanentNode(generate_next_node_id());
-@@ -1003,6 +1095,9 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
+@@ -1002,6 +1094,9 @@ BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
      case BookmarkNode::MOBILE:
        title_id = IDS_BOOKMARK_BAR_MOBILE_FOLDER_NAME;
        break;
@@ -473,7 +1241,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
      default:
        NOTREACHED();
        title_id = IDS_BOOKMARK_BAR_FOLDER_NAME;
-@@ -1087,10 +1182,14 @@ std::unique_ptr<BookmarkLoadDetails> BookmarkModel::CreateLoadDetails() {
+@@ -1086,10 +1181,14 @@ std::unique_ptr<BookmarkLoadDetails> BookmarkModel::CreateLoadDetails() {
        CreatePermanentNode(BookmarkNode::OTHER_NODE);
    BookmarkPermanentNode* mobile_node =
        CreatePermanentNode(BookmarkNode::MOBILE);
@@ -482,7 +1250,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
 +          CreatePermanentNode(BookmarkNode::TRASH):
 +          NULL);
    std::unique_ptr<TitledUrlNodeSorter> node_sorter =
-       base::MakeUnique<TypedCountSorter>(client_.get());
+       std::make_unique<TypedCountSorter>(client_.get());
    return std::unique_ptr<BookmarkLoadDetails>(new BookmarkLoadDetails(
 -      bb_node, other_node, mobile_node, client_->GetLoadExtraNodesCallback(),
 +      bb_node, other_node, mobile_node, trash_node, client_->GetLoadExtraNodesCallback(),
@@ -490,7 +1258,7 @@ index 01ea4198a2a74a3887ceaa2d94ada340f47034b8..718957b2585de0497a062d24e1f6fa96
  }
  
 diff --git a/components/bookmarks/browser/bookmark_model.h b/components/bookmarks/browser/bookmark_model.h
-index dc54a7f8ebda7036f3cd79165858c540b5287389..e390b64f8a9875f8466b9396ba5f3e326306fa65 100644
+index b555ba10fa254195e5ccbfb7564c61131fd25501..d7be561a20bd507e7f19566aac9615d3ccf6c31d 100644
 --- a/components/bookmarks/browser/bookmark_model.h
 +++ b/components/bookmarks/browser/bookmark_model.h
 @@ -104,6 +104,9 @@ class BookmarkModel : public BookmarkUndoProvider,
@@ -503,7 +1271,7 @@ index dc54a7f8ebda7036f3cd79165858c540b5287389..e390b64f8a9875f8466b9396ba5f3e32
    bool is_root_node(const BookmarkNode* node) const { return node == &root_; }
  
    // Returns whether the given |node| is one of the permanent nodes - root node,
-@@ -196,17 +199,38 @@ class BookmarkModel : public BookmarkUndoProvider,
+@@ -199,17 +202,38 @@ class BookmarkModel : public BookmarkUndoProvider,
    // the main thread.
    void BlockTillLoaded();
  
@@ -544,7 +1312,7 @@ index dc54a7f8ebda7036f3cd79165858c540b5287389..e390b64f8a9875f8466b9396ba5f3e32
  
    // Adds a url at the specified position.
    const BookmarkNode* AddURL(const BookmarkNode* parent,
-@@ -214,6 +238,16 @@ class BookmarkModel : public BookmarkUndoProvider,
+@@ -217,6 +241,16 @@ class BookmarkModel : public BookmarkUndoProvider,
                               const base::string16& title,
                               const GURL& url);
  
@@ -561,7 +1329,7 @@ index dc54a7f8ebda7036f3cd79165858c540b5287389..e390b64f8a9875f8466b9396ba5f3e32
    // Adds a url with a specific creation date and meta info.
    const BookmarkNode* AddURLWithCreationTimeAndMetaInfo(
        const BookmarkNode* parent,
-@@ -221,7 +255,12 @@ class BookmarkModel : public BookmarkUndoProvider,
+@@ -224,7 +258,12 @@ class BookmarkModel : public BookmarkUndoProvider,
        const base::string16& title,
        const GURL& url,
        const base::Time& creation_time,
@@ -575,7 +1343,7 @@ index dc54a7f8ebda7036f3cd79165858c540b5287389..e390b64f8a9875f8466b9396ba5f3e32
  
    // Sorts the children of |parent|, notifying observers by way of the
    // BookmarkNodeChildrenReordered method.
-@@ -432,6 +471,7 @@ class BookmarkModel : public BookmarkUndoProvider,
+@@ -435,6 +474,7 @@ class BookmarkModel : public BookmarkUndoProvider,
    BookmarkPermanentNode* bookmark_bar_node_;
    BookmarkPermanentNode* other_node_;
    BookmarkPermanentNode* mobile_node_;
@@ -584,10 +1352,10 @@ index dc54a7f8ebda7036f3cd79165858c540b5287389..e390b64f8a9875f8466b9396ba5f3e32
    // The maximum ID assigned to the bookmark nodes in the model.
    int64_t next_node_id_;
 diff --git a/components/bookmarks/browser/bookmark_model_unittest.cc b/components/bookmarks/browser/bookmark_model_unittest.cc
-index bb5bd4073df3cf712d7213921863dc0c15f87401..49de00f77051649b9572a9a6eb6a3689f40db694 100644
+index 4fe226c12a9777a5c3b43cfa82ad8e090a13ec8f..7b9c0b04d52477bda6656c3eaad54c9202d0d6b5 100644
 --- a/components/bookmarks/browser/bookmark_model_unittest.cc
 +++ b/components/bookmarks/browser/bookmark_model_unittest.cc
-@@ -484,9 +484,17 @@ TEST_F(BookmarkModelTest, InitialState) {
+@@ -483,9 +483,17 @@ TEST_F(BookmarkModelTest, InitialState) {
    EXPECT_EQ(0, mobile_node->child_count());
    EXPECT_EQ(BookmarkNode::MOBILE, mobile_node->type());
  
@@ -605,7 +1373,7 @@ index bb5bd4073df3cf712d7213921863dc0c15f87401..49de00f77051649b9572a9a6eb6a3689
  }
  
  TEST_F(BookmarkModelTest, AddURL) {
-@@ -554,9 +562,11 @@ TEST_F(BookmarkModelTest, AddURLWithCreationTimeAndMetaInfo) {
+@@ -553,9 +561,11 @@ TEST_F(BookmarkModelTest, AddURLWithCreationTimeAndMetaInfo) {
    const Time time = Time::Now() - TimeDelta::FromDays(1);
    BookmarkNode::MetaInfoMap meta_info;
    meta_info["foo"] = "bar";
@@ -719,10 +1487,10 @@ index 5c2522a9826e9993d279ea7f421d7be771ff2c6d..7399229f571a19f3b911f67ff21a282d
                                 const std::string& value) {
    if (!meta_info_map_)
 diff --git a/components/bookmarks/browser/bookmark_node.h b/components/bookmarks/browser/bookmark_node.h
-index c3d26e50e15e2eddb87aabc2b22f66e8c116e60a..6a473ebba818db0f3792f33e713c7735a7a76aeb 100644
+index 7576f6c09ae4d1ac769f124d1bd64c436e830607..07144b3cff8a14e98645d75bb084bfb62cec14d1 100644
 --- a/components/bookmarks/browser/bookmark_node.h
 +++ b/components/bookmarks/browser/bookmark_node.h
-@@ -26,7 +26,7 @@ class BookmarkModel;
+@@ -25,7 +25,7 @@ class BookmarkModel;
  // BookmarkNode ---------------------------------------------------------------
  
  // BookmarkNode contains information about a starred entry: title, URL, favicon,
@@ -731,7 +1499,7 @@ index c3d26e50e15e2eddb87aabc2b22f66e8c116e60a..6a473ebba818db0f3792f33e713c7735
  class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
   public:
    enum Type {
-@@ -34,7 +34,8 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
+@@ -33,7 +33,8 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
      FOLDER,
      BOOKMARK_BAR,
      OTHER_NODE,
@@ -741,7 +1509,7 @@ index c3d26e50e15e2eddb87aabc2b22f66e8c116e60a..6a473ebba818db0f3792f33e713c7735
    };
  
    enum FaviconState {
-@@ -88,6 +89,23 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
+@@ -87,6 +88,23 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode>, public TitledUrlNode {
      date_folder_modified_ = date;
    }
  
@@ -908,7 +1676,7 @@ index 6f86188d3fcc3b92161e009855942575add58712..e06786d6beaea30671fffe2264819f05
    BookmarkPermanentNodeList extra_nodes_;
    std::unique_ptr<TitledUrlIndex> index_;
 diff --git a/components/bookmarks/browser/bookmark_utils.cc b/components/bookmarks/browser/bookmark_utils.cc
-index 8455e4920fc3cbee5c469af91b9016dce3c17dc7..600814cf781b11cb0b808d6ae70c47a74c512b92 100644
+index dd4346fabd9be239cbd95ea32f50a536c8e3bad7..21ed73ceadd4f9c44901f6a362b23c79487c389c 100644
 --- a/components/bookmarks/browser/bookmark_utils.cc
 +++ b/components/bookmarks/browser/bookmark_utils.cc
 @@ -61,7 +61,12 @@ void CloneBookmarkNodeImpl(BookmarkModel* model,
@@ -1122,7 +1890,7 @@ index 351e688f4f5ed6200210b28194b73074585f6f44..df6e6146789e5003aeca30964879dc50
    // Register data types which are enabled on both desktop and mobile.
    // |disabled_types| and |enabled_types| correspond only to those types
 diff --git a/components/browser_sync/profile_sync_service.cc b/components/browser_sync/profile_sync_service.cc
-index 2a53fcb5014cce44477c06186b14442b2fa7ceb6..bd5aaddddf6d161d46337d2d08ae6e841e2c80ef 100644
+index f76497cfab64f77dca2dfdce07d01cb2c82087a6..1937cd9915015691e5b4c9da5cba9309b61b7efa 100644
 --- a/components/browser_sync/profile_sync_service.cc
 +++ b/components/browser_sync/profile_sync_service.cc
 @@ -1483,9 +1483,10 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
@@ -1137,7 +1905,7 @@ index 2a53fcb5014cce44477c06186b14442b2fa7ceb6..bd5aaddddf6d161d46337d2d08ae6e84
                  "If adding a user selectable type, update "
                  "UserSelectableSyncType in user_selectable_sync_type.h and "
                  "histograms.xml.");
-@@ -2359,4 +2360,8 @@ void ProfileSyncService::OnSetupInProgressHandleDestroyed() {
+@@ -2352,4 +2353,8 @@ void ProfileSyncService::OnSetupInProgressHandleDestroyed() {
      ReconfigureDatatypeManager();
    NotifyObservers();
  }
@@ -1147,7 +1915,7 @@ index 2a53fcb5014cce44477c06186b14442b2fa7ceb6..bd5aaddddf6d161d46337d2d08ae6e84
 +}
  }  // namespace browser_sync
 diff --git a/components/browser_sync/profile_sync_service.h b/components/browser_sync/profile_sync_service.h
-index 84f04cc01849ae7f78203d2d21857b4198b3d160..65140d5ee96964be647ab1aec93278bc8731b70b 100644
+index d63cd92f61def64da05b1b6bd18595a397976254..3655bf51862f67317c796ad0f10e11259b284929 100644
 --- a/components/browser_sync/profile_sync_service.h
 +++ b/components/browser_sync/profile_sync_service.h
 @@ -84,6 +84,10 @@ struct UpdateCounters;
@@ -1206,6 +1974,19 @@ index 84f04cc01849ae7f78203d2d21857b4198b3d160..65140d5ee96964be647ab1aec93278bc
    // Sets the last synced time to the current time.
    void UpdateLastSyncedTime();
  
+diff --git a/components/browser_sync/profile_sync_service_autofill_unittest.cc b/components/browser_sync/profile_sync_service_autofill_unittest.cc
+index 19652a16e8a3831e288848803394bb9b8f8aad33..a44b712d5e4e7155ae7da5292c00b13ab4e1855f 100644
+--- a/components/browser_sync/profile_sync_service_autofill_unittest.cc
++++ b/components/browser_sync/profile_sync_service_autofill_unittest.cc
+@@ -109,6 +109,8 @@ void RegisterAutofillPrefs(user_prefs::PrefRegistrySyncable* registry) {
+                                 atoi(version_info::GetVersionNumber().c_str()));
+   registry->RegisterDoublePref(autofill::prefs::kAutofillBillingCustomerNumber,
+                                0.0);
++  registry->RegisterBooleanPref(autofill::prefs::kAutofillOrphanRowsRemoved,
++                                true);
+ }
+ 
+ void RunAndSignal(const base::Closure& cb, WaitableEvent* event) {
 diff --git a/components/browser_sync/profile_sync_service_bookmark_unittest.cc b/components/browser_sync/profile_sync_service_bookmark_unittest.cc
 index c26a96e47c254e4f0aef415ff615f0cc832b5871..3f61ebacb3d7371a48194d40491c569c5f6e2300 100644
 --- a/components/browser_sync/profile_sync_service_bookmark_unittest.cc
@@ -1253,10 +2034,10 @@ index 18398d6db6029a12e25c7983aef9f6460a1ed125..959496e2425fc14ba0ce83947c5b665a
  
  views::Widget* CreateBrowserModalDialogViews(views::DialogDelegate* dialog,
 diff --git a/components/crash/content/app/breakpad_linux.cc b/components/crash/content/app/breakpad_linux.cc
-index 42a50e8381c196b310024c82d69a1a529ead0ba6..ed13c3a445337495688c1b193c911bf6aa4d79ea 100644
+index c72cd3622b86d29a66f2e003cd4331e99a0aa68c..f5b80eb1166ef69f58228752c8afb817e88aef7f 100644
 --- a/components/crash/content/app/breakpad_linux.cc
 +++ b/components/crash/content/app/breakpad_linux.cc
-@@ -61,6 +61,8 @@
+@@ -60,6 +60,8 @@
  #endif
  #include "third_party/lss/linux_syscall_support.h"
  
@@ -1265,7 +2046,7 @@ index 42a50e8381c196b310024c82d69a1a529ead0ba6..ed13c3a445337495688c1b193c911bf6
  #if defined(ADDRESS_SANITIZER)
  #include <ucontext.h>  // for getcontext().
  #endif
-@@ -88,7 +90,7 @@ namespace breakpad {
+@@ -87,7 +89,7 @@ namespace breakpad {
  namespace {
  
  #if !defined(OS_CHROMEOS)
@@ -1274,7 +2055,7 @@ index 42a50e8381c196b310024c82d69a1a529ead0ba6..ed13c3a445337495688c1b193c911bf6
  #endif
  
  bool g_is_crash_reporter_enabled = false;
-@@ -1824,7 +1826,8 @@ void HandleCrashDump(const BreakpadInfo& info) {
+@@ -1809,7 +1811,8 @@ void HandleCrashDump(const BreakpadInfo& info) {
  
    IGNORE_RET(sys_close(temp_file_fd));
  
@@ -1285,7 +2066,7 @@ index 42a50e8381c196b310024c82d69a1a529ead0ba6..ed13c3a445337495688c1b193c911bf6
      size_t filename_length = my_strlen(info.filename);
  
 diff --git a/components/crash/content/app/crashpad_win.cc b/components/crash/content/app/crashpad_win.cc
-index 3a33c9bb8e92e05feed4fcec486dcbac0fccbf38..486a11e1887333c3b2a7a481c99267a911512331 100644
+index a5d1afc409f4186f2cb93a40c30fa8329e1622fa..e12551a50c6cc0f39c239ee13a2ab59d2b53b3be 100644
 --- a/components/crash/content/app/crashpad_win.cc
 +++ b/components/crash/content/app/crashpad_win.cc
 @@ -23,6 +23,8 @@
@@ -1320,10 +2101,10 @@ index 11eca1c2904cf092b011ea2b23fdb8aeeb668085..344af34af933d187d2b71407550ef622
    ::LocalFree(msg_template);
  }
 diff --git a/components/favicon/core/favicon_handler.cc b/components/favicon/core/favicon_handler.cc
-index 0126530cb550185e083260805a71ffdbf7fc104c..4a932db884c8d043430454387864f7069231d0b4 100644
+index 1e7cd5b5a8029745eb9166c520d89297a1a6c5c2..49324660f473eb4cf233ddb2a06cc9a13ebf4094 100644
 --- a/components/favicon/core/favicon_handler.cc
 +++ b/components/favicon/core/favicon_handler.cc
-@@ -24,6 +24,8 @@
+@@ -25,6 +25,8 @@
  #include "ui/gfx/image/image_skia.h"
  #include "ui/gfx/image/image_util.h"
  
@@ -1332,7 +2113,7 @@ index 0126530cb550185e083260805a71ffdbf7fc104c..4a932db884c8d043430454387864f706
  namespace favicon {
  namespace {
  
-@@ -651,6 +653,10 @@ void FaviconHandler::OnFaviconDataForInitialURLFromFaviconService(
+@@ -592,6 +594,10 @@ void FaviconHandler::OnFaviconDataForInitialURLFromFaviconService(
      // url) we'll fetch later on. This way the user doesn't see a flash of the
      // default favicon.
      NotifyFaviconUpdated(favicon_bitmap_results);
@@ -1344,7 +2125,7 @@ index 0126530cb550185e083260805a71ffdbf7fc104c..4a932db884c8d043430454387864f706
  
    if (candidates_received_)
 diff --git a/components/gcm_driver/gcm_channel_status_syncer.cc b/components/gcm_driver/gcm_channel_status_syncer.cc
-index cbe1ba2fd4dcb46a1aa6054be38874b1f903231b..6ebc492d93aca7faa11b6e30e02c388a4137ebe4 100644
+index 6ef1f13c2834ccae30fa2ec2ac13831cfda84d5d..59617eed22d6e56e235e4449b17e3078c9817405 100644
 --- a/components/gcm_driver/gcm_channel_status_syncer.cc
 +++ b/components/gcm_driver/gcm_channel_status_syncer.cc
 @@ -20,6 +20,8 @@
@@ -1417,7 +2198,7 @@ index de1f15d6b6d150e2af4c3113e40e093a8ebc5cc4..efdcae87f5be795b3d6822ba9453fdb1
  
  #endif  // COMPONENTS_GOOGLE_CORE_BROWSER_GOOGLE_UTIL_H_
 diff --git a/components/guest_view/browser/guest_view_base.cc b/components/guest_view/browser/guest_view_base.cc
-index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9acdfc1cf 100644
+index 9a4a5613f9e072d35d8b965b5454060601d9f524..0691dd06e45fb52bdd7b6c551538503b8625b46a 100644
 --- a/components/guest_view/browser/guest_view_base.cc
 +++ b/components/guest_view/browser/guest_view_base.cc
 @@ -29,6 +29,19 @@
@@ -1440,7 +2221,17 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
  using content::WebContents;
  
  namespace guest_view {
-@@ -184,7 +197,12 @@ GuestViewBase::GuestViewBase(WebContents* owner_web_contents)
+@@ -112,7 +125,8 @@ class GuestViewBase::OwnerContentsObserver : public WebContentsObserver {
+     if (destroyed_)
+       return;
+ 
+-    guest_->web_contents()->SetPageScale(page_scale_factor);
++    if (guest_->web_contents())
++      guest_->web_contents()->SetPageScale(page_scale_factor);
+   }
+ 
+   void DidUpdateAudioMutingState(bool muted) override {
+@@ -184,7 +198,12 @@ GuestViewBase::GuestViewBase(WebContents* owner_web_contents)
    SetOwnerHost();
  }
  
@@ -1454,7 +2245,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
  
  void GuestViewBase::Init(const base::DictionaryValue& create_params,
                           const WebContentsCreatedCallback& callback) {
-@@ -224,6 +242,10 @@ void GuestViewBase::InitWithWebContents(
+@@ -224,6 +243,10 @@ void GuestViewBase::InitWithWebContents(
    // ZoomController::DidFinishNavigation has completed.
    zoom::ZoomController::CreateForWebContents(guest_web_contents);
  
@@ -1465,7 +2256,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
    // At this point, we have just created the guest WebContents, we need to add
    // an observer to the owner WebContents. This observer will be responsible
    // for destroying the guest WebContents if the owner goes away.
-@@ -273,8 +295,18 @@ void GuestViewBase::DispatchOnResizeEvent(const gfx::Size& old_size,
+@@ -273,8 +296,18 @@ void GuestViewBase::DispatchOnResizeEvent(const gfx::Size& old_size,
  }
  
  gfx::Size GuestViewBase::GetDefaultSize() const {
@@ -1485,7 +2276,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
  
    // Full page plugins default to the size of the owner's viewport.
    return owner_web_contents()
-@@ -399,6 +431,9 @@ GuestViewManager* GuestViewBase::GetGuestViewManager() {
+@@ -399,6 +432,9 @@ GuestViewManager* GuestViewBase::GetGuestViewManager() {
  
  WebContents* GuestViewBase::CreateNewGuestWindow(
      const WebContents::CreateParams& create_params) {
@@ -1495,7 +2286,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
    return GetGuestViewManager()->CreateGuestWithWebContentsParams(
        GetViewType(), owner_web_contents(), create_params);
  }
-@@ -479,6 +514,9 @@ void GuestViewBase::Destroy(bool also_delete) {
+@@ -479,6 +515,9 @@ void GuestViewBase::Destroy(bool also_delete) {
    // may wish to access their openers.
    weak_ptr_factory_.InvalidateWeakPtrs();
  
@@ -1505,7 +2296,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
    // Give the content module an opportunity to perform some cleanup.
    guest_host_->WillDestroy();
    guest_host_ = nullptr;
-@@ -486,9 +524,25 @@ void GuestViewBase::Destroy(bool also_delete) {
+@@ -486,9 +525,25 @@ void GuestViewBase::Destroy(bool also_delete) {
    g_webcontents_guestview_map.Get().erase(web_contents());
    GetGuestViewManager()->RemoveGuest(guest_instance_id_);
    pending_events_.clear();
@@ -1531,7 +2322,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
  }
  
  void GuestViewBase::SetAttachParams(const base::DictionaryValue& params) {
-@@ -522,7 +576,8 @@ void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
+@@ -531,7 +586,8 @@ void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
      StopTrackingEmbedderZoomLevel();
  
    if (owner_web_contents_ != embedder_web_contents) {
@@ -1541,7 +2332,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
      owner_web_contents_ = embedder_web_contents;
      owner_contents_observer_ =
          base::MakeUnique<OwnerContentsObserver>(this, embedder_web_contents);
-@@ -572,7 +627,24 @@ void GuestViewBase::RenderViewReady() {
+@@ -584,7 +640,24 @@ void GuestViewBase::RenderViewReady() {
    GuestReady();
  }
  
@@ -1566,7 +2357,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
    Destroy(false);
  
    // Let the derived class know that its WebContents is in the process of
-@@ -722,6 +794,18 @@ content::SiteInstance* GuestViewBase::GetOwnerSiteInstance() {
+@@ -734,6 +807,18 @@ content::SiteInstance* GuestViewBase::GetOwnerSiteInstance() {
  
  void GuestViewBase::OnZoomChanged(
      const zoom::ZoomController::ZoomChangedEventData& data) {
@@ -1585,7 +2376,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
    if (data.web_contents == embedder_web_contents()) {
      // The embedder's zoom level has changed.
      auto* guest_zoom_controller =
-@@ -846,6 +930,18 @@ void GuestViewBase::SetGuestZoomLevelToMatchEmbedder() {
+@@ -858,6 +943,18 @@ void GuestViewBase::SetGuestZoomLevelToMatchEmbedder() {
    if (!embedder_zoom_controller)
      return;
  
@@ -1605,7 +2396,7 @@ index e4bf5148ebe8abfdf1fb98a486cbfd973e82eab4..aebf954744c78f32374047a9f5c384e9
        ->SetZoomLevel(embedder_zoom_controller->GetZoomLevel());
  }
 diff --git a/components/guest_view/browser/guest_view_base.h b/components/guest_view/browser/guest_view_base.h
-index ae27d9f7908e6ee6ccc348e4b13e80fd1a0655d6..61871182d00e3142e0c3f6e84726858f36bff80d 100644
+index da1748a87d0e2cc4efed512bfdd9c09b0092ff5a..0ae8998ef0cfd94ce8bbd2c1d2a898fe151eceed 100644
 --- a/components/guest_view/browser/guest_view_base.h
 +++ b/components/guest_view/browser/guest_view_base.h
 @@ -20,8 +20,23 @@
@@ -1781,10 +2572,10 @@ index 4d1e7a65079eb6aa0db9d340f660d0c387e76d15..1886cc82a82100b24f9bbe206ab586b0
    std::unique_ptr<GuestViewRequest> pending_response =
        std::move(pending_response_);
 diff --git a/components/history/core/browser/history_backend.cc b/components/history/core/browser/history_backend.cc
-index dbb225f3545930ae5d9dde602e62174832220f97..7edc81d6b46a27e1e92e70b0de11329f8362823b 100644
+index 79cdaab3db09ea1881c65f840819be4caa51944b..0a4f38fe9cce0d25967e44d6c8f3372b8a767cbb 100644
 --- a/components/history/core/browser/history_backend.cc
 +++ b/components/history/core/browser/history_backend.cc
-@@ -102,9 +102,11 @@ const int kFaviconRefetchDays = 7;
+@@ -94,9 +94,11 @@ const int kFaviconRefetchDays = 7;
  // deleting some.
  const int kMaxRedirectCount = 32;
  
@@ -1797,7 +2588,7 @@ index dbb225f3545930ae5d9dde602e62174832220f97..7edc81d6b46a27e1e92e70b0de11329f
  
  QueuedHistoryDBTask::QueuedHistoryDBTask(
      std::unique_ptr<HistoryDBTask> task,
-@@ -400,6 +402,24 @@ TopHostsList HistoryBackend::TopHosts(size_t num_hosts) const {
+@@ -392,6 +394,24 @@ TopHostsList HistoryBackend::TopHosts(size_t num_hosts) const {
    return top_hosts;
  }
  
@@ -1822,7 +2613,7 @@ index dbb225f3545930ae5d9dde602e62174832220f97..7edc81d6b46a27e1e92e70b0de11329f
  OriginCountAndLastVisitMap HistoryBackend::GetCountsAndLastVisitForOrigins(
      const std::set<GURL>& origins) const {
    if (!db_)
-@@ -719,7 +739,8 @@ void HistoryBackend::InitImpl(
+@@ -707,7 +727,8 @@ void HistoryBackend::InitImpl(
    db_->GetStartDate(&first_recorded_time_);
  
    // Start expiring old stuff.
@@ -1832,7 +2623,7 @@ index dbb225f3545930ae5d9dde602e62174832220f97..7edc81d6b46a27e1e92e70b0de11329f
  
  #if defined(OS_ANDROID)
    if (backend_client_) {
-@@ -1233,6 +1254,27 @@ void HistoryBackend::RemoveDownloads(const std::set<uint32_t>& ids) {
+@@ -1221,6 +1242,27 @@ void HistoryBackend::RemoveDownloads(const std::set<uint32_t>& ids) {
    DCHECK_GE(ids.size(), num_downloads_deleted);
  }
  
@@ -1860,7 +2651,7 @@ index dbb225f3545930ae5d9dde602e62174832220f97..7edc81d6b46a27e1e92e70b0de11329f
  void HistoryBackend::QueryHistory(const base::string16& text_query,
                                    const QueryOptions& options,
                                    QueryResults* query_results) {
-@@ -2753,4 +2795,8 @@ bool HistoryBackend::ClearAllMainHistory(const URLRows& kept_urls) {
+@@ -2745,4 +2787,8 @@ bool HistoryBackend::ClearAllMainHistory(const URLRows& kept_urls) {
    return true;
  }
  
@@ -1870,10 +2661,10 @@ index dbb225f3545930ae5d9dde602e62174832220f97..7edc81d6b46a27e1e92e70b0de11329f
 +
  }  // namespace history
 diff --git a/components/history/core/browser/history_backend.h b/components/history/core/browser/history_backend.h
-index 5e162627a4f06c2e0d9b3205883775b6afbd9f29..9de4946ecb739b1b87337cd250c0f3909ec09e2b 100644
+index 35898bbd3fd9baacdfaa767f0dbebbe30d72a364..70c1daafe308c9ac4dbe8f87a6ff4a83c05dc147 100644
 --- a/components/history/core/browser/history_backend.h
 +++ b/components/history/core/browser/history_backend.h
-@@ -38,6 +38,8 @@
+@@ -37,6 +37,8 @@
  #include "components/history/core/browser/visit_tracker.h"
  #include "sql/init_status.h"
  
@@ -1882,7 +2673,7 @@ index 5e162627a4f06c2e0d9b3205883775b6afbd9f29..9de4946ecb739b1b87337cd250c0f390
  class SkBitmap;
  class TestingProfile;
  
-@@ -213,6 +215,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
+@@ -210,6 +212,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
    // generating internal metrics.
    TopHostsList TopHosts(size_t num_hosts) const;
  
@@ -1895,7 +2686,7 @@ index 5e162627a4f06c2e0d9b3205883775b6afbd9f29..9de4946ecb739b1b87337cd250c0f390
    // Gets the counts and last last time of URLs that belong to |origins| in the
    // history database. Origins that are not in the history database will be in
    // the map with a count and time of 0.
-@@ -250,6 +258,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
+@@ -247,6 +255,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
    void QueryHistory(const base::string16& text_query,
                      const QueryOptions& options,
                      QueryResults* query_results);
@@ -1906,7 +2697,7 @@ index 5e162627a4f06c2e0d9b3205883775b6afbd9f29..9de4946ecb739b1b87337cd250c0f390
  
    // Computes the most recent URL(s) that the given canonical URL has
    // redirected to. There may be more than one redirect in a row, so this
-@@ -502,6 +514,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
+@@ -500,6 +512,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
  
    base::Time GetFirstRecordedTimeForTest() { return first_recorded_time_; }
  
@@ -1966,7 +2757,7 @@ index 3af9c84c277395b2cce4891896fcac18a28b8ea9..4d98bf9230ba84de3f53a90ee3f99111
  
  }  // namespace history
 diff --git a/components/history/core/browser/history_service.cc b/components/history/core/browser/history_service.cc
-index f613fe214efd57f2c70eb6b86263bbb8dd3c2ebf..a7156116ee43294a17712502c55a2fb30ee9b8f4 100644
+index 606bec34910119088c302db12129343b862856b0..6fd2410c3940230e90d109003caf5f115322c043 100644
 --- a/components/history/core/browser/history_service.cc
 +++ b/components/history/core/browser/history_service.cc
 @@ -198,6 +198,7 @@ HistoryService::HistoryService(std::unique_ptr<HistoryClient> history_client,
@@ -2018,7 +2809,7 @@ index f613fe214efd57f2c70eb6b86263bbb8dd3c2ebf..a7156116ee43294a17712502c55a2fb3
  void HistoryService::GetCountsAndLastVisitForOrigins(
      const std::set<GURL>& origins,
      const GetCountsAndLastVisitForOriginsCallback& callback) const {
-@@ -795,6 +823,23 @@ void HistoryService::RemoveDownloads(const std::set<uint32_t>& ids) {
+@@ -796,6 +824,23 @@ void HistoryService::RemoveDownloads(const std::set<uint32_t>& ids) {
                                             history_backend_, ids));
  }
  
@@ -2042,7 +2833,7 @@ index f613fe214efd57f2c70eb6b86263bbb8dd3c2ebf..a7156116ee43294a17712502c55a2fb3
  base::CancelableTaskTracker::TaskId HistoryService::QueryHistory(
      const base::string16& text_query,
      const QueryOptions& options,
-@@ -960,6 +1005,9 @@ bool HistoryService::Init(
+@@ -961,6 +1006,9 @@ bool HistoryService::Init(
                 base::Bind(&HistoryBackend::Init, history_backend_,
                            no_db, history_database_params));
  
@@ -2053,7 +2844,7 @@ index f613fe214efd57f2c70eb6b86263bbb8dd3c2ebf..a7156116ee43294a17712502c55a2fb3
      return false;
  
 diff --git a/components/history/core/browser/history_service.h b/components/history/core/browser/history_service.h
-index bf1702f2d0ac47369c70fa6b05790cfb4d18c653..8de28293fa42f4fb4a87b388b2940694c5b1d39f 100644
+index 43d8f53fbec8ff0338e68e06ec386c5172b81d08..e6f3996d86b3803f34fadbf76cfd59dea27f9719 100644
 --- a/components/history/core/browser/history_service.h
 +++ b/components/history/core/browser/history_service.h
 @@ -41,6 +41,8 @@
@@ -2098,7 +2889,7 @@ index bf1702f2d0ac47369c70fa6b05790cfb4d18c653..8de28293fa42f4fb4a87b388b2940694
    // Queries all history with the given options (see QueryOptions in
    // history_types.h).  If empty, all results matching the given options
    // will be returned.
-@@ -871,6 +892,9 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
+@@ -877,6 +898,9 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
  
    DeleteDirectiveHandler delete_directive_handler_;
  
@@ -2633,10 +3424,10 @@ index ee950544f97062ccc94fb0c5f4c6e47de65c3100..0a7973bf60aae895326ce0d23eca77f1
    // Returns the database for the functions in this interface.
    virtual sql::Connection& GetDB() = 0;
 diff --git a/components/history/core/browser/web_history_service.cc b/components/history/core/browser/web_history_service.cc
-index b54c4f115b717ddfd2c9a94f07983346d18d53c2..454ddc6858944ad058563dcef67f3d92035d6450 100644
+index 6a6ae16bbd1590090f9b47126b484257422e96df..57a66a76b08ba9d7423f8e36c2622e688c6ef02f 100644
 --- a/components/history/core/browser/web_history_service.cc
 +++ b/components/history/core/browser/web_history_service.cc
-@@ -36,27 +36,29 @@
+@@ -35,27 +35,29 @@
  #include "ui/base/device_form_factor.h"
  #include "url/gurl.h"
  
@@ -2741,7 +3532,7 @@ index 2e7dfffdeb437f8e325a15807c9261688ed7de8d..8e55ab251e0d565a4628b4bb46b833b3
    // percentage of pixels that are the most common luma. Higher boring
    // scores indicate that a higher percentage of a bitmap are all the
 diff --git a/components/history/core/test/fake_web_history_service.cc b/components/history/core/test/fake_web_history_service.cc
-index ac422700bdfc3d1cbd031d3c47850c116c7cc887..e1c421428ed6e28122ffdd47b7e9aa9871d1ebff 100644
+index 3d68226806b032b93f16631711ae48a2653b1fd3..ad460719dc291f8d08433af5d228e60f485a23d8 100644
 --- a/components/history/core/test/fake_web_history_service.cc
 +++ b/components/history/core/test/fake_web_history_service.cc
 @@ -20,6 +20,8 @@
@@ -2863,8 +3654,37 @@ index f60d33bfa16253ebc4d9e381b99c5e81e704814a..facd6d06155a555436666f176128cbe7
  
  const char kDefaultMetricsMimeType[] = "application/vnd.chrome.uma";
  
+diff --git a/components/nacl/renderer/ppb_nacl_private_impl.cc b/components/nacl/renderer/ppb_nacl_private_impl.cc
+index 6cb400575a57187fb748954b881616c47e6b4a5f..62dd8cae60400a9d75ae92a86434256318101a85 100644
+--- a/components/nacl/renderer/ppb_nacl_private_impl.cc
++++ b/components/nacl/renderer/ppb_nacl_private_impl.cc
+@@ -343,6 +343,12 @@ blink::WebURLRequest CreateWebURLRequest(const blink::WebDocument& document,
+         network::mojom::FetchCredentialsMode::kOmit);
+   }
+ 
++  // Plug-ins should not load via service workers as plug-ins may have their own
++  // origin checking logic that may get confused if service workers respond with
++  // resources from another origin.
++  // https://w3c.github.io/ServiceWorker/#implementer-concerns
++  request.SetServiceWorkerMode(blink::WebURLRequest::ServiceWorkerMode::kNone);
++
+   return request;
+ }
+ 
+@@ -1034,6 +1040,11 @@ void DownloadManifestToBuffer(PP_Instance instance,
+       CreateAssociatedURLLoader(document, gurl));
+   blink::WebURLRequest request = CreateWebURLRequest(document, gurl);
+ 
++  // Requests from plug-ins must skip service workers, see the comment in
++  // CreateWebURLRequest.
++  DCHECK_EQ(request.GetServiceWorkerMode(),
++            blink::WebURLRequest::ServiceWorkerMode::kNone);
++
+   // ManifestDownloader deletes itself after invoking the callback.
+   ManifestDownloader* manifest_downloader = new ManifestDownloader(
+       std::move(url_loader), load_manager->is_installed(),
 diff --git a/components/omnibox/browser/zero_suggest_provider_unittest.cc b/components/omnibox/browser/zero_suggest_provider_unittest.cc
-index 18edadbdcb13c3ff1c205d37ea0b8c453cb5b2b5..89a35f4cbe6b429e924b08ff77eaded802aa9ed7 100644
+index 662b9bcda9d8b091956115e4a603034ea8dfe5ee..0bed132664dea6d95348be5820c9877342907323 100644
 --- a/components/omnibox/browser/zero_suggest_provider_unittest.cc
 +++ b/components/omnibox/browser/zero_suggest_provider_unittest.cc
 @@ -86,6 +86,10 @@ class FakeEmptyTopSites : public history::TopSites {
@@ -2894,7 +3714,7 @@ index 9f9b7da6d44b161934d6055828eefd7f50280a62..b84c2c541b64ee9b2c0749f54568c450
  
  using testing::_;
 diff --git a/components/os_crypt/key_storage_libsecret.cc b/components/os_crypt/key_storage_libsecret.cc
-index 37fd8bb397ae6728e3e8118771d3308c64f15496..70c254cbebcfc0f38c352abaff4b92cb42ccd3af 100644
+index a1b5b975bc89c4891643adab17ce0b00ba2a8032..4925d6c6ef86c00f0ebcc6b7041c5a0ebb8fcfee 100644
 --- a/components/os_crypt/key_storage_libsecret.cc
 +++ b/components/os_crypt/key_storage_libsecret.cc
 @@ -9,6 +9,10 @@
@@ -2908,7 +3728,7 @@ index 37fd8bb397ae6728e3e8118771d3308c64f15496..70c254cbebcfc0f38c352abaff4b92cb
  namespace {
  
  #if defined(GOOGLE_CHROME_BUILD)
-@@ -158,3 +162,7 @@ std::string KeyStorageLibsecret::Migrate() {
+@@ -151,3 +155,7 @@ std::string KeyStorageLibsecret::Migrate() {
  
    return password;
  }
@@ -2917,10 +3737,10 @@ index 37fd8bb397ae6728e3e8118771d3308c64f15496..70c254cbebcfc0f38c352abaff4b92cb
 +#error GOOGLE_CHROME_BUILD must be set for Vivaldi builds
 +#endif
 diff --git a/components/os_crypt/key_storage_linux.cc b/components/os_crypt/key_storage_linux.cc
-index ded176374a327825a5f138fc1ee2c645dcd48711..0ad3989b663d7e723ce103b948818e432d91c645 100644
+index 9e6f0f27535fdf52a23b5a734c108196ae0b728c..cc673ae9dfeb5eb01c893bf4e4395f7430329a9c 100644
 --- a/components/os_crypt/key_storage_linux.cc
 +++ b/components/os_crypt/key_storage_linux.cc
-@@ -20,6 +20,10 @@
+@@ -25,6 +25,10 @@
  #include "components/os_crypt/key_storage_kwallet.h"
  #endif
  
@@ -2931,9 +3751,9 @@ index ded176374a327825a5f138fc1ee2c645dcd48711..0ad3989b663d7e723ce103b948818e43
  #if defined(GOOGLE_CHROME_BUILD)
  const char KeyStorageLinux::kFolderName[] = "Chrome Keys";
  const char KeyStorageLinux::kKey[] = "Chrome Safe Storage";
-@@ -99,3 +103,7 @@ std::string KeyStorageLinux::GetKey() {
-   // thread.
-   return GetKeyImpl();
+@@ -157,3 +161,7 @@ void KeyStorageLinux::BlockOnInitThenSignal(base::WaitableEvent* on_inited,
+   *success = Init();
+   on_inited->Signal();
  }
 +
 +#ifndef GOOGLE_CHROME_BUILD
@@ -3189,10 +4009,10 @@ index 3c446d45560fbe70366ca58f0220709c2580b9e2..3524ceca2a0ea62c2576fed94ef67fda
        sync_service->IsFirstSetupComplete())
      return false;
 diff --git a/components/policy/resources/policy_templates.json b/components/policy/resources/policy_templates.json
-index e75d8351d7601f97c51fe8d81ce05208cf548f8b..16c4add052842238ca97576570848c1aa193c521 100644
+index e52bc74e6cb96a93e07e00510ce3140337adaf2a..31cd01d657a1a5b3a91ee21de0940a8b3bb8be18 100644
 --- a/components/policy/resources/policy_templates.json
 +++ b/components/policy/resources/policy_templates.json
-@@ -5214,10 +5214,11 @@
+@@ -5212,10 +5212,11 @@
        'schema': { 'type': 'boolean' },
        'supported_on': ['chrome.*:19-', 'chrome_os:19-'],
        'features': {
@@ -3206,7 +4026,7 @@ index e75d8351d7601f97c51fe8d81ce05208cf548f8b..16c4add052842238ca97576570848c1a
        'caption': '''Whether online OCSP/CRL checks are performed''',
        'tags': ['website-sharing'],
 diff --git a/components/policy/tools/generate_policy_source.py b/components/policy/tools/generate_policy_source.py
-index a92062f9b95763bbd4761aa3cf08e18e857eac2f..1b28a682d40472481fa099c1271609fc62bccd26 100755
+index 990391eb9f1dc0103e43a41343547499c1974e22..4809cffad02e053ba2f5ee44597fda56fff66b7b 100755
 --- a/components/policy/tools/generate_policy_source.py
 +++ b/components/policy/tools/generate_policy_source.py
 @@ -22,6 +22,7 @@ import types
@@ -3286,10 +4106,10 @@ index 562de5bb338beffea42542d611e62aaf38578769..dc4d2c1605a06af3e43f26ad03404a64
  }
  
 diff --git a/components/renderer_context_menu/views/toolkit_delegate_views.cc b/components/renderer_context_menu/views/toolkit_delegate_views.cc
-index d9519705ff2fc9b03c01466f5c05b16dc3af6ff2..d882a5f94598a6c63523add96e10b0e0c49ad6ab 100644
+index d9519705ff2fc9b03c01466f5c05b16dc3af6ff2..f14ae09ed717145a2a142e18830e5bd922223968 100644
 --- a/components/renderer_context_menu/views/toolkit_delegate_views.cc
 +++ b/components/renderer_context_menu/views/toolkit_delegate_views.cc
-@@ -34,6 +34,27 @@ void ToolkitDelegateViews::Init(ui::SimpleMenuModel* menu_model) {
+@@ -34,6 +34,32 @@ void ToolkitDelegateViews::Init(ui::SimpleMenuModel* menu_model) {
        views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU));
  }
  
@@ -3314,27 +4134,86 @@ index d9519705ff2fc9b03c01466f5c05b16dc3af6ff2..d882a5f94598a6c63523add96e10b0e0
 +  return menu_view_;
 +}
 +
++void ToolkitDelegateViews::VivaldiUpdateMenu(views::MenuItemView* view,
++                                             ui::SimpleMenuModel* menu_model) {
++  menu_adapter_->VivaldiUpdateMenu(view, menu_model);
++}
++
  void ToolkitDelegateViews::Cancel() {
    DCHECK(menu_runner_.get());
    menu_runner_->Cancel();
 diff --git a/components/renderer_context_menu/views/toolkit_delegate_views.h b/components/renderer_context_menu/views/toolkit_delegate_views.h
-index 9ee4d0f86cda15b743ec4e20ebc2bd0a14675d26..8317fb8424c5978e5ef0b279047455b250ee8e71 100644
+index 9ee4d0f86cda15b743ec4e20ebc2bd0a14675d26..e2c4d4188f7f16ace5a0e3742a383fd314fe4ae7 100644
 --- a/components/renderer_context_menu/views/toolkit_delegate_views.h
 +++ b/components/renderer_context_menu/views/toolkit_delegate_views.h
-@@ -35,6 +35,8 @@ class ToolkitDelegateViews : public RenderViewContextMenuBase::ToolkitDelegate {
+@@ -35,6 +35,10 @@ class ToolkitDelegateViews : public RenderViewContextMenuBase::ToolkitDelegate {
                   const gfx::Point& point,
                   ui::MenuSourceType type);
  
 +  views::MenuItemView* VivaldiInit(ui::SimpleMenuModel* menu_model);
++  void VivaldiUpdateMenu(views::MenuItemView* view,
++                         ui::SimpleMenuModel* menu_model);
 +
   private:
    // ToolkitDelegate:
    void Init(ui::SimpleMenuModel* menu_model) override;
+diff --git a/components/safe_browsing/common/safe_browsing_prefs.cc b/components/safe_browsing/common/safe_browsing_prefs.cc
+index 525dde34256e391270884680462e5f438f1c58e9..712f886ac426d27f50c60e133ff2d8a41d643321 100644
+--- a/components/safe_browsing/common/safe_browsing_prefs.cc
++++ b/components/safe_browsing/common/safe_browsing_prefs.cc
+@@ -11,6 +11,8 @@
+ #include "components/prefs/pref_registry_simple.h"
+ #include "components/prefs/pref_service.h"
+ 
++#include "app/vivaldi_apptools.h"
++
+ namespace {
+ 
+ // Name of the Scout Transition UMA metric.
+@@ -159,7 +161,7 @@ const char kSafeBrowsingUnhandledSyncPasswordReuses[] =
+ namespace safe_browsing {
+ 
+ const base::Feature kCanShowScoutOptIn{"CanShowScoutOptIn",
+-                                       base::FEATURE_ENABLED_BY_DEFAULT};
++                                       base::FEATURE_DISABLED_BY_DEFAULT};
+ 
+ std::string ChooseOptInTextPreference(
+     const PrefService& prefs,
+@@ -269,14 +271,20 @@ void InitializeSafeBrowsingPrefs(PrefService* prefs) {
+ }
+ 
+ bool IsExtendedReportingOptInAllowed(const PrefService& prefs) {
++  if (vivaldi::IsVivaldiRunning())
++    return false;
+   return prefs.GetBoolean(prefs::kSafeBrowsingExtendedReportingOptInAllowed);
+ }
+ 
+ bool IsExtendedReportingEnabled(const PrefService& prefs) {
++  if (vivaldi::IsVivaldiRunning())
++    return false;
+   return prefs.GetBoolean(GetExtendedReportingPrefName(prefs));
+ }
+ 
+ bool IsScout(const PrefService& prefs) {
++  if (vivaldi::IsVivaldiRunning())
++    return false;
+   return GetExtendedReportingPrefName(prefs) ==
+          prefs::kSafeBrowsingScoutReportingEnabled;
+ }
+@@ -334,7 +342,7 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
+   registry->RegisterBooleanPref(
+       prefs::kSafeBrowsingSawInterstitialScoutReporting, false);
+   registry->RegisterBooleanPref(
+-      prefs::kSafeBrowsingExtendedReportingOptInAllowed, true);
++      prefs::kSafeBrowsingExtendedReportingOptInAllowed, !vivaldi::IsVivaldiRunning());
+   registry->RegisterBooleanPref(
+       prefs::kSafeBrowsingEnabled, true,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 diff --git a/components/search_engines/template_url_service.cc b/components/search_engines/template_url_service.cc
-index fd94cadbe8e50b32ec81382100072f400c844f66..9886dc07eed2ec0a19f3e62e2a23a1cc39b92712 100644
+index c85d04dad4768d078746b7767d1a96173826f9e7..99f4fdb491ca5ff234a008aeb65a3639f57dd5c0 100644
 --- a/components/search_engines/template_url_service.cc
 +++ b/components/search_engines/template_url_service.cc
-@@ -42,6 +42,8 @@
+@@ -41,6 +41,8 @@
  #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
  #include "url/gurl.h"
  
@@ -3343,7 +4222,7 @@ index fd94cadbe8e50b32ec81382100072f400c844f66..9886dc07eed2ec0a19f3e62e2a23a1cc
  typedef SearchHostToURLsMap::TemplateURLSet TemplateURLSet;
  typedef TemplateURLService::SyncDataMap SyncDataMap;
  
-@@ -777,6 +779,11 @@ base::string16 TemplateURLService::GetKeywordShortName(
+@@ -776,6 +778,11 @@ base::string16 TemplateURLService::GetKeywordShortName(
  }
  
  void TemplateURLService::OnHistoryURLVisited(const URLVisitedDetails& details) {
@@ -3356,10 +4235,10 @@ index fd94cadbe8e50b32ec81382100072f400c844f66..9886dc07eed2ec0a19f3e62e2a23a1cc
      visits_to_add_.push_back(details);
    else
 diff --git a/components/sessions/content/content_live_tab.cc b/components/sessions/content/content_live_tab.cc
-index 3e970b7387e6be2cb83df8133ff05e24762fe1b6..78f8258250557ca803470cb85fc850eb127f2aed 100644
+index 12a860031d73bd10460b2c6efa1b248a47f66ef5..dc958e52d83806d9ca831152bedaaea15cefcdc6 100644
 --- a/components/sessions/content/content_live_tab.cc
 +++ b/components/sessions/content/content_live_tab.cc
-@@ -66,4 +66,8 @@ const std::string& ContentLiveTab::GetUserAgentOverride() const {
+@@ -68,4 +68,8 @@ const std::string& ContentLiveTab::GetUserAgentOverride() const {
    return web_contents()->GetUserAgentOverride();
  }
  
@@ -3396,7 +4275,7 @@ index 490219941e381b4913c2fc331747ef28bd3911af..bb8fa8d87b0048e008b7efb881e5bfec
  
  }  // namespace sessions
 diff --git a/components/sessions/core/live_tab_context.h b/components/sessions/core/live_tab_context.h
-index 0efb779e20c170d165e4c6368cc35901b6f5fd30..38e41b47faaa86145a322c629a1b03046d79b13e 100644
+index 0efb779e20c170d165e4c6368cc35901b6f5fd30..7211d6e4ea7f2f4450fe39490693b9ed7e5be837 100644
 --- a/components/sessions/core/live_tab_context.h
 +++ b/components/sessions/core/live_tab_context.h
 @@ -33,6 +33,10 @@ class SESSIONS_EXPORT LiveTabContext {
@@ -3410,31 +4289,49 @@ index 0efb779e20c170d165e4c6368cc35901b6f5fd30..38e41b47faaa86145a322c629a1b0304
    virtual LiveTab* GetLiveTabAt(int index) const = 0;
    virtual LiveTab* GetActiveLiveTab() const = 0;
    virtual bool IsTabPinned(int index) const = 0;
-@@ -52,7 +56,8 @@ class SESSIONS_EXPORT LiveTabContext {
+@@ -52,7 +56,18 @@ class SESSIONS_EXPORT LiveTabContext {
        bool pin,
        bool from_last_session,
        const PlatformSpecificTabData* tab_platform_data,
 -      const std::string& user_agent_override) = 0;
-+      const std::string& user_agent_override,
-+      const std::string& ext_data) = 0;
++      const std::string& user_agent_override);
++  virtual LiveTab* AddRestoredTab(
++    const std::vector<SerializedNavigationEntry>& navigations,
++    int tab_index,
++    int selected_navigation,
++    const std::string& extension_app_id,
++    bool select,
++    bool pin,
++    bool from_last_session,
++    const PlatformSpecificTabData* tab_platform_data,
++    const std::string& user_agent_override,
++    const std::string& ext_data);
  
    // Note: |tab_platform_data| may be null (e.g., if |from_last_session| is
    // true, as this data is not persisted, or if the platform does not provide
-@@ -63,7 +68,8 @@ class SESSIONS_EXPORT LiveTabContext {
+@@ -63,7 +78,16 @@ class SESSIONS_EXPORT LiveTabContext {
        bool from_last_session,
        const std::string& extension_app_id,
        const PlatformSpecificTabData* tab_platform_data,
 -      const std::string& user_agent_override) = 0;
-+      const std::string& user_agent_override,
-+      const std::string& ext_data) = 0;
++      const std::string& user_agent_override);
++  virtual LiveTab* ReplaceRestoredTab(
++    const std::vector<SerializedNavigationEntry>& navigations,
++    int selected_navigation,
++    bool from_last_session,
++    const std::string& extension_app_id,
++    const PlatformSpecificTabData* tab_platform_data,
++    const std::string& user_agent_override,
++    const std::string& ext_data);
++
    virtual void CloseTab() = 0;
  
   protected:
 diff --git a/components/sessions/core/persistent_tab_restore_service.cc b/components/sessions/core/persistent_tab_restore_service.cc
-index 5e48e04323198883a362ff66fd11d7de17b7729b..6f7b5825d854f4e3038f2eb05b5b126755af257b 100644
+index d07439909d4ee9f8660c7d1cfcb083bc43c0f81a..67ea165b5c420bc2924c45d38e9321db43891962 100644
 --- a/components/sessions/core/persistent_tab_restore_service.cc
 +++ b/components/sessions/core/persistent_tab_restore_service.cc
-@@ -26,6 +26,9 @@
+@@ -25,6 +25,9 @@
  #include "components/sessions/core/session_command.h"
  #include "components/sessions/core/session_constants.h"
  
@@ -3444,7 +4341,7 @@ index 5e48e04323198883a362ff66fd11d7de17b7729b..6f7b5825d854f4e3038f2eb05b5b1267
  namespace sessions {
  
  namespace {
-@@ -105,9 +108,16 @@ const SessionCommand::id_type kCommandSetWindowAppName = 7;
+@@ -104,9 +107,16 @@ const SessionCommand::id_type kCommandSetWindowAppName = 7;
  const SessionCommand::id_type kCommandSetTabUserAgentOverride = 8;
  const SessionCommand::id_type kCommandWindow = 9;
  
@@ -3462,39 +4359,7 @@ index 5e48e04323198883a362ff66fd11d7de17b7729b..6f7b5825d854f4e3038f2eb05b5b1267
  
  const size_t kMaxEntries = TabRestoreServiceHelper::kMaxEntries;
  
-@@ -431,6 +441,10 @@ class PersistentTabRestoreService::Delegate
-   void OnGotPreviousSession(std::vector<std::unique_ptr<SessionWindow>> windows,
-                             SessionID::id_type ignored_active_window);
- 
-+  void OnGotPreviousSessionActive(
-+                            std::vector<std::unique_ptr<SessionWindow>> windows,
-+                            SessionID::id_type ignored_active_window);
-+
-   // Converts a SessionWindow into a Window, returning true on success. We use 0
-   // as the timestamp here since we do not know when the window/tab was closed.
-   static bool ConvertSessionWindowToWindow(SessionWindow* session_window,
-@@ -441,6 +455,11 @@ class PersistentTabRestoreService::Delegate
-   // observers are notified.
-   void LoadStateChanged();
- 
-+  // gisli@vivaldi.com:  Added previous_active_entries count.
-+  int previous_active_entries_count() {
-+    return previous_active_entries_count_;
-+  }
-+
-  private:
-   // The associated client.
-   TabRestoreServiceClient* client_;
-@@ -463,12 +482,18 @@ class PersistentTabRestoreService::Delegate
-   // LoadStateChanged is invoked, which adds these entries to entries_.
-   std::vector<std::unique_ptr<Entry>> staging_entries_;
- 
-+  // gisli@vivaldi.com:  Added previouos active entries for restore.
-+  int previous_active_entries_count_;
-+
-   // Used when loading previous tabs/session and open tabs/session.
-   base::CancelableTaskTracker cancelable_task_tracker_;
- 
+@@ -468,6 +478,9 @@ class PersistentTabRestoreService::Delegate
    DISALLOW_COPY_AND_ASSIGN(Delegate);
  };
  
@@ -3504,23 +4369,7 @@ index 5e48e04323198883a362ff66fd11d7de17b7729b..6f7b5825d854f4e3038f2eb05b5b1267
  PersistentTabRestoreService::Delegate::Delegate(TabRestoreServiceClient* client)
      : client_(client),
        base_session_service_(
-@@ -587,6 +612,15 @@ void PersistentTabRestoreService::Delegate::LoadTabsFromLastSession() {
-   base_session_service_->ScheduleGetLastSessionCommands(
-       base::Bind(&Delegate::OnGotLastSessionCommands, base::Unretained(this)),
-       &cancelable_task_tracker_);
-+
-+  if(vivaldi::IsVivaldiRunning() && client_->HasLastSession()) {
-+    // gisli@vivaldi.com:  Add this call to get the number of active tabs
-+    // at last session close.
-+    client_->GetLastSession(
-+          base::Bind(&Delegate::OnGotPreviousSessionActive,
-+                     base::Unretained(this)),
-+          &cancelable_task_tracker_);
-+  }
- }
- 
- void PersistentTabRestoreService::Delegate::DeleteLastSession() {
-@@ -638,6 +672,8 @@ void PersistentTabRestoreService::Delegate::ScheduleCommandsForWindow(
+@@ -637,6 +650,8 @@ void PersistentTabRestoreService::Delegate::ScheduleCommandsForWindow(
          kCommandSetWindowAppName, window.id, window.app_name));
    }
  
@@ -3529,7 +4378,7 @@ index 5e48e04323198883a362ff66fd11d7de17b7729b..6f7b5825d854f4e3038f2eb05b5b1267
    for (size_t i = 0; i < window.tabs.size(); ++i) {
      int selected_index = GetSelectedNavigationIndexToPersist(*window.tabs[i]);
      if (selected_index != -1)
-@@ -680,6 +716,8 @@ void PersistentTabRestoreService::Delegate::ScheduleCommandsForTab(
+@@ -679,6 +694,8 @@ void PersistentTabRestoreService::Delegate::ScheduleCommandsForTab(
          kCommandSetExtensionAppID, tab.id, tab.extension_app_id));
    }
  
@@ -3538,7 +4387,7 @@ index 5e48e04323198883a362ff66fd11d7de17b7729b..6f7b5825d854f4e3038f2eb05b5b1267
    if (!tab.user_agent_override.empty()) {
      base_session_service_->ScheduleCommand(CreateSetTabUserAgentOverrideCommand(
          kCommandSetTabUserAgentOverride, tab.id, tab.user_agent_override));
-@@ -970,6 +1008,9 @@ void PersistentTabRestoreService::Delegate::CreateEntriesFromCommands(
+@@ -969,6 +986,9 @@ void PersistentTabRestoreService::Delegate::CreateEntriesFromCommands(
          break;
        }
  
@@ -3548,15 +4397,15 @@ index 5e48e04323198883a362ff66fd11d7de17b7729b..6f7b5825d854f4e3038f2eb05b5b1267
        default:
          // Unknown type, usually indicates corruption of file. Ignore it.
          return;
-@@ -1012,6 +1053,7 @@ bool PersistentTabRestoreService::Delegate::ConvertSessionWindowToWindow(
+@@ -1011,6 +1031,7 @@ bool PersistentTabRestoreService::Delegate::ConvertSessionWindowToWindow(
      SessionWindow* session_window,
      Window* window) {
    for (size_t i = 0; i < session_window->tabs.size(); ++i) {
 +    window->ext_data = session_window->ext_data;
      if (!session_window->tabs[i]->navigations.empty()) {
-       window->tabs.push_back(base::MakeUnique<Tab>());
+       window->tabs.push_back(std::make_unique<Tab>());
        Tab& tab = *window->tabs.back();
-@@ -1021,6 +1063,7 @@ bool PersistentTabRestoreService::Delegate::ConvertSessionWindowToWindow(
+@@ -1020,6 +1041,7 @@ bool PersistentTabRestoreService::Delegate::ConvertSessionWindowToWindow(
            session_window->tabs[i]->current_navigation_index;
        tab.extension_app_id = session_window->tabs[i]->extension_app_id;
        tab.timestamp = base::Time();
@@ -3565,7 +4414,7 @@ index 5e48e04323198883a362ff66fd11d7de17b7729b..6f7b5825d854f4e3038f2eb05b5b1267
    }
    if (window->tabs.empty())
 diff --git a/components/sessions/core/session_service_commands.cc b/components/sessions/core/session_service_commands.cc
-index 790a5001f0321f9641e71a01bac40bd2565512d3..2fd5738b762eba58fb7a2c0e9a528da295722d58 100644
+index e78449f01fb5193dba2107110faa021198692d22..c6c90dec41d0e85110db1679bec108168de2b56d 100644
 --- a/components/sessions/core/session_service_commands.cc
 +++ b/components/sessions/core/session_service_commands.cc
 @@ -17,6 +17,8 @@
@@ -3688,59 +4537,39 @@ index 47bd4048c33a019d87653ed56860ba78b2222f9b..fe391fe5a4dee1256af71b51efaf1967
  
    typedef std::list<std::unique_ptr<Entry>> Entries;
 diff --git a/components/sessions/core/tab_restore_service_client.h b/components/sessions/core/tab_restore_service_client.h
-index 60cdc1eaf3267e101aa7ae104fe0b4dd1348594d..ab72de1a3cc373ee17a428f4b4d71a39db8eb3c9 100644
+index 60cdc1eaf3267e101aa7ae104fe0b4dd1348594d..9280cacc2276c0dd61fc720d21a295951506faf1 100644
 --- a/components/sessions/core/tab_restore_service_client.h
 +++ b/components/sessions/core/tab_restore_service_client.h
-@@ -44,11 +44,14 @@ class SESSIONS_EXPORT TabRestoreServiceClient {
-   // Creates a LiveTabContext instance that is associated with |app_name|. May
-   // return nullptr (e.g., if the embedder does not support LiveTabContext
-   // functionality).
-+  // NOTE(andre@vivaldi.com) : We added ext_data to be able to restore a browser
-+  // window with the saved ext_data.
-   virtual LiveTabContext* CreateLiveTabContext(
+@@ -48,7 +48,15 @@ class SESSIONS_EXPORT TabRestoreServiceClient {
        const std::string& app_name,
        const gfx::Rect& bounds,
        ui::WindowShowState show_state,
 -      const std::string& workspace) = 0;
-+      const std::string& workspace,
-+      const std::string& ext_data) = 0;
++      const std::string& workspace);
++  // NOTE(andre@vivaldi.com) : We added ext_data to be able to restore a browser
++  // window with the saved ext_data.
++  virtual LiveTabContext* CreateLiveTabContext(
++    const std::string& app_name,
++    const gfx::Rect& bounds,
++    ui::WindowShowState show_state,
++    const std::string& workspace,
++    const std::string& ext_data);
  
    // Returns the LiveTabContext instance that is associated with
    // |tab|, or null if there is no such instance.
 diff --git a/components/sessions/core/tab_restore_service_helper.cc b/components/sessions/core/tab_restore_service_helper.cc
-index 01a089a5e49c04967fc43b55f195fc115ed7772b..564089d300ff569fa34fe629984e10ba31f7d224 100644
+index a18f3bc1000ce21daab2d4e10a82ea6b92251062..a7c1e65b4bbf23864d307d10638410bfd73850b4 100644
 --- a/components/sessions/core/tab_restore_service_helper.cc
 +++ b/components/sessions/core/tab_restore_service_helper.cc
-@@ -26,6 +26,8 @@
- #include "components/sessions/core/tab_restore_service_client.h"
- #include "components/sessions/core/tab_restore_service_observer.h"
- 
-+#include "app/vivaldi_apptools.h"
-+
- namespace sessions {
- 
- // TabRestoreServiceHelper::Observer -------------------------------------------
-@@ -107,6 +109,7 @@ void TabRestoreServiceHelper::BrowserClosing(LiveTabContext* context) {
+@@ -107,6 +107,7 @@ void TabRestoreServiceHelper::BrowserClosing(LiveTabContext* context) {
    window->bounds = context->GetRestoredBounds();
    window->show_state = context->GetRestoredState();
    window->workspace = context->GetWorkspace();
 +  window->ext_data = context->GetExtData();
  
    for (int tab_index = 0; tab_index < context->GetTabCount(); ++tab_index) {
-     auto tab = base::MakeUnique<Tab>();
-@@ -118,7 +121,10 @@ void TabRestoreServiceHelper::BrowserClosing(LiveTabContext* context) {
-     }
-   }
- 
--  if (window->tabs.size() == 1 && window->app_name.empty()) {
-+  // gisli@vivaldi.com:  For vivaldi we want the singleton windows  intact.
-+  //                     Will handle it in the UI.
-+  if (window->tabs.size() == 1 && window->app_name.empty() &&
-+    !vivaldi::IsVivaldiRunning()) {
-     // Short-circuit creating a Window if only 1 tab was present. This fixes
-     // http://crbug.com/56744.
-     AddEntry(std::move(window->tabs[0]), true, true);
-@@ -208,7 +214,8 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
+     auto tab = std::make_unique<Tab>();
+@@ -208,7 +209,8 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
        if (!restoring_tab_in_window) {
          context =
              client_->CreateLiveTabContext(window.app_name, window.bounds,
@@ -3750,7 +4579,7 @@ index 01a089a5e49c04967fc43b55f195fc115ed7772b..564089d300ff569fa34fe629984e10ba
          for (size_t tab_i = 0; tab_i < window.tabs.size(); ++tab_i) {
            const Tab& tab = *window.tabs[tab_i];
            LiveTab* restored_tab = context->AddRestoredTab(
-@@ -216,7 +223,7 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
+@@ -216,7 +218,7 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
                tab.current_navigation_index, tab.extension_app_id,
                static_cast<int>(tab_i) == window.selected_tab_index, tab.pinned,
                tab.from_last_session, tab.platform_data.get(),
@@ -3759,7 +4588,7 @@ index 01a089a5e49c04967fc43b55f195fc115ed7772b..564089d300ff569fa34fe629984e10ba
            if (restored_tab) {
              client_->OnTabRestored(
                  tab.navigations.at(tab.current_navigation_index).virtual_url());
-@@ -433,6 +440,8 @@ void TabRestoreServiceHelper::PopulateTab(Tab* tab,
+@@ -433,6 +435,8 @@ void TabRestoreServiceHelper::PopulateTab(Tab* tab,
  
    tab->user_agent_override = live_tab->GetUserAgentOverride();
  
@@ -3768,7 +4597,7 @@ index 01a089a5e49c04967fc43b55f195fc115ed7772b..564089d300ff569fa34fe629984e10ba
    tab->platform_data = live_tab->GetPlatformSpecificTabData();
  
    // Delegate may be NULL during unit tests.
-@@ -451,7 +460,8 @@ LiveTabContext* TabRestoreServiceHelper::RestoreTab(
+@@ -451,7 +455,8 @@ LiveTabContext* TabRestoreServiceHelper::RestoreTab(
    if (disposition == WindowOpenDisposition::CURRENT_TAB && context) {
      restored_tab = context->ReplaceRestoredTab(
          tab.navigations, tab.current_navigation_index, tab.from_last_session,
@@ -3778,17 +4607,7 @@ index 01a089a5e49c04967fc43b55f195fc115ed7772b..564089d300ff569fa34fe629984e10ba
    } else {
      // We only respect the tab's original browser if there's no disposition.
      if (disposition == WindowOpenDisposition::UNKNOWN && tab.browser_id) {
-@@ -467,7 +477,8 @@ LiveTabContext* TabRestoreServiceHelper::RestoreTab(
-       tab_index = tab.tabstrip_index;
-     } else {
-       context = client_->CreateLiveTabContext(
--          std::string(), gfx::Rect(), ui::SHOW_STATE_NORMAL, std::string());
-+          std::string(), gfx::Rect(), ui::SHOW_STATE_NORMAL, std::string(),
-+          std::string());
-       if (tab.browser_id)
-         UpdateTabBrowserIDs(tab.browser_id, context->GetSessionID().id());
-     }
-@@ -484,7 +495,7 @@ LiveTabContext* TabRestoreServiceHelper::RestoreTab(
+@@ -484,7 +489,7 @@ LiveTabContext* TabRestoreServiceHelper::RestoreTab(
          tab.extension_app_id,
          disposition != WindowOpenDisposition::NEW_BACKGROUND_TAB, tab.pinned,
          tab.from_last_session, tab.platform_data.get(),
@@ -3830,7 +4649,7 @@ index a86b764bb397248fe2bfc60ef9f7671b7359cbde..ac5ce8a9a9fa869ae5e247ffb9f4455c
    // Returns true iff all credentials have been loaded from disk.
    bool AreAllCredentialsLoaded();
 diff --git a/components/signin/core/browser/signin_manager.cc b/components/signin/core/browser/signin_manager.cc
-index 79fd6d5ae60c3d528ab4a1f325cf58e28c1ee1f2..f0d628b7ae2e64123b7acb8918066a9592b5ae38 100644
+index ac3697257f4870c25e8418673686714bfb45e152..6841cf17f2cfb7a77902c7069929f4c821cfdf9d 100644
 --- a/components/signin/core/browser/signin_manager.cc
 +++ b/components/signin/core/browser/signin_manager.cc
 @@ -26,6 +26,8 @@
@@ -3842,7 +4661,7 @@ index 79fd6d5ae60c3d528ab4a1f325cf58e28c1ee1f2..f0d628b7ae2e64123b7acb8918066a95
  using namespace signin_internals_util;
  
  SigninManager::SigninManager(SigninClient* client,
-@@ -283,6 +285,7 @@ void SigninManager::Initialize(PrefService* local_state) {
+@@ -286,6 +288,7 @@ void SigninManager::Initialize(PrefService* local_state) {
  }
  
  void SigninManager::Shutdown() {
@@ -3850,7 +4669,7 @@ index 79fd6d5ae60c3d528ab4a1f325cf58e28c1ee1f2..f0d628b7ae2e64123b7acb8918066a95
    account_tracker_service()->RemoveObserver(this);
    local_state_pref_registrar_.RemoveAll();
    SigninManagerBase::Shutdown();
-@@ -299,6 +302,9 @@ void SigninManager::OnGoogleServicesUsernamePatternChanged() {
+@@ -302,6 +305,9 @@ void SigninManager::OnGoogleServicesUsernamePatternChanged() {
  }
  
  bool SigninManager::IsSigninAllowed() const {
@@ -3874,10 +4693,10 @@ index 8408e0af898052d28f3be573e1fc5c5fafb09c91..2347544630e96ccc96f0a1ecd4f799c2
    // Signs a user out, removing the preference, erasing all keys
    // associated with the authenticated user, and canceling all auth in progress.
 diff --git a/components/signin/core/browser/signin_manager_base.cc b/components/signin/core/browser/signin_manager_base.cc
-index 1be1a2371450ef68f90ef4051c4ff89a946812a4..11ab2eebd5160dd93bfeb5ad187342112f43e227 100644
+index faf843c92e15fe2c75512b1339d06a34a80c1324..70d838da606aecc1efaa03146356714385b3c0cb 100644
 --- a/components/signin/core/browser/signin_manager_base.cc
 +++ b/components/signin/core/browser/signin_manager_base.cc
-@@ -244,6 +244,10 @@ bool SigninManagerBase::AuthInProgress() const {
+@@ -240,6 +240,10 @@ bool SigninManagerBase::AuthInProgress() const {
    return false;
  }
  
@@ -3889,7 +4708,7 @@ index 1be1a2371450ef68f90ef4051c4ff89a946812a4..11ab2eebd5160dd93bfeb5ad18734211
    on_shutdown_callback_list_.Notify();
  }
 diff --git a/components/signin/core/browser/signin_manager_base.h b/components/signin/core/browser/signin_manager_base.h
-index 7469f9aa49bdd48044471cdd3de9bd05af9e6aa9..294fce2ee442cfebd6ac6d1ff6878f1c956eff62 100644
+index a14e609329b2322316ad361564b4f95fb4e9720d..10d2d507ead892fffb8a62f06d62ede8803b5837 100644
 --- a/components/signin/core/browser/signin_manager_base.h
 +++ b/components/signin/core/browser/signin_manager_base.h
 @@ -36,6 +36,7 @@
@@ -3900,7 +4719,7 @@ index 7469f9aa49bdd48044471cdd3de9bd05af9e6aa9..294fce2ee442cfebd6ac6d1ff6878f1c
  #include "google_apis/gaia/google_service_auth_error.h"
  
  class AccountTrackerService;
-@@ -148,6 +149,11 @@ class SigninManagerBase : public KeyedService {
+@@ -154,6 +155,11 @@ class SigninManagerBase : public KeyedService {
    // Returns true if there's a signin in progress.
    virtual bool AuthInProgress() const;
  
@@ -4037,8 +4856,23 @@ index b252a0cead65d5e6022821529bfe0f14a2d9fe7f..49a208217a70fb3081b1bfe66446ed6c
    }
    NOTREACHED() << "No pref mapping for type " << ModelTypeToString(type);
    return nullptr;
+diff --git a/components/sync/device_info/device_info_sync_bridge.cc b/components/sync/device_info/device_info_sync_bridge.cc
+index 21d1cae6c61150dcf7be88fd56b3e1bee3cd4af0..6bd0ebe228323d68f6b0f6583cfcbf9823b9e1f0 100644
+--- a/components/sync/device_info/device_info_sync_bridge.cc
++++ b/components/sync/device_info/device_info_sync_bridge.cc
+@@ -174,7 +174,9 @@ base::Optional<ModelError> DeviceInfoSyncBridge::ApplySyncChanges(
+       local_device_info_provider_->GetLocalDeviceInfo();
+   // If our dependency was yanked out from beneath us, we cannot correctly
+   // handle this request, and all our data will be deleted soon.
+-  if (local_info == nullptr) {
++  // However, we can still handle the request if it only has metadata changes.
++  // This ensures we properly clears metadata on shutdown.
++  if (local_info == nullptr && !entity_changes.empty()) {
+     return {};
+   }
+ 
 diff --git a/components/sync/driver/generic_change_processor.cc b/components/sync/driver/generic_change_processor.cc
-index d94410aaf11ed97fb10e6835caf9af0503eba59a..85b6e6317a33d787e4dbf424e1bbfad280e73a07 100644
+index 6fda063f6c870f7f08943e18fc56c65c1e9b6c38..7b3873681edb98307735e652f97e0280c182d257 100644
 --- a/components/sync/driver/generic_change_processor.cc
 +++ b/components/sync/driver/generic_change_processor.cc
 @@ -272,6 +272,7 @@ SyncError GenericChangeProcessor::GetAllSyncDataReturnError(
@@ -4067,10 +4901,10 @@ index 42882d36b9cf9afb540d4df8d16ee4d7c891b4af..374fe4e698187b3ad6ce29b2b60f77cf
      return mock_attachment_service_;
    }
 diff --git a/components/sync/driver/glue/sync_backend_host_impl.cc b/components/sync/driver/glue/sync_backend_host_impl.cc
-index 794abe9e5e987628949f36e3559ca52e721760e8..627d5eca01f2ef1f3d8843b00070cf9abc81a957 100644
+index ccd29569893a4483599017ecabbf1c110b44997f..9326e62aedf37a6c6cd7f9ab43254c54cb30e8df 100644
 --- a/components/sync/driver/glue/sync_backend_host_impl.cc
 +++ b/components/sync/driver/glue/sync_backend_host_impl.cc
-@@ -451,6 +451,12 @@ void SyncBackendHostImpl::OnCookieJarChangedDoneOnFrontendLoop(
+@@ -444,6 +444,12 @@ void SyncBackendHostImpl::OnCookieJarChangedDoneOnFrontendLoop(
    callback.Run();
  }
  
@@ -4084,10 +4918,10 @@ index 794abe9e5e987628949f36e3559ca52e721760e8..627d5eca01f2ef1f3d8843b00070cf9a
  
  #undef SDVLOG
 diff --git a/components/sync/driver/glue/sync_backend_host_impl.h b/components/sync/driver/glue/sync_backend_host_impl.h
-index 169eb2fcb8eaf18a607f99477065ec7d6da4f254..29953a08803bf5814d584e4db01c8e5421847ef1 100644
+index 45813a9d003a0a9cf8b3f94c5bfae5880b5985c9..4a6e058a37558279f1ae33f792b0cd3a9e73a8a0 100644
 --- a/components/sync/driver/glue/sync_backend_host_impl.h
 +++ b/components/sync/driver/glue/sync_backend_host_impl.h
-@@ -156,6 +156,10 @@ class SyncBackendHostImpl : public SyncEngine, public InvalidationHandler {
+@@ -155,6 +155,10 @@ class SyncBackendHostImpl : public SyncEngine, public InvalidationHandler {
  
    SyncEngineHost* host() { return host_; }
  
@@ -4246,7 +5080,7 @@ index 7e4e876ab2f3134c2710435de57a00848c87cbdd..b0dfc8ca9c9b293ba5e9e764f0210782
      data_type_manager_->Configure(types, CONFIGURE_REASON_CRYPTO);
    }
 diff --git a/components/sync/driver/sync_util.cc b/components/sync/driver/sync_util.cc
-index 47d3c6dcb723e6c79aad2e5442cae626a276764f..2c38867c685fa68a09538c48b6a98d1cd9b3f930 100644
+index 47d3c6dcb723e6c79aad2e5442cae626a276764f..631001f51bc51ed9042711153979749bca22c0c5 100644
 --- a/components/sync/driver/sync_util.cc
 +++ b/components/sync/driver/sync_util.cc
 @@ -10,6 +10,8 @@
@@ -4271,6 +5105,18 @@ index 47d3c6dcb723e6c79aad2e5442cae626a276764f..2c38867c685fa68a09538c48b6a98d1c
  
  std::string FormatUserAgentForSync(const std::string& system,
                                     version_info::Channel channel) {
+@@ -78,8 +79,9 @@ GURL GetSyncServiceURL(const base::CommandLine& command_line,
+   // will go to the standard sync servers.
+   GURL result(internal::kSyncDevServerUrl);
+ 
+-  if (channel == version_info::Channel::STABLE ||
+-      channel == version_info::Channel::BETA) {
++  if ((channel == version_info::Channel::STABLE ||
++       channel == version_info::Channel::BETA) &&
++      version_info::IsOfficialBuild()) {
+     result = GURL(internal::kSyncServerUrl);
+   }
+ 
 diff --git a/components/sync/driver/user_selectable_sync_type.h b/components/sync/driver/user_selectable_sync_type.h
 index 60ddbbb748f8f80eb1a0ef58f345d2de9bc615c7..6bf7639be0c0585219aa393d023896ee6422e18f 100644
 --- a/components/sync/driver/user_selectable_sync_type.h
@@ -4287,7 +5133,7 @@ index 60ddbbb748f8f80eb1a0ef58f345d2de9bc615c7..6bf7639be0c0585219aa393d023896ee
  
  }  // namespace user_selectable_type
 diff --git a/components/sync/engine/sync_engine.h b/components/sync/engine/sync_engine.h
-index d28a390d143c108e047071a8dc4cbf1c29085b11..6c5c28167a1df5c5cbaff5a7830b0493502685ba 100644
+index e7d7484b3c9251680293b37b44cd1791ff16307b..e9d1853e03dc623a9de6753fcf9e78ca7c2d55f0 100644
 --- a/components/sync/engine/sync_engine.h
 +++ b/components/sync/engine/sync_engine.h
 @@ -35,6 +35,7 @@ class HttpPostProviderFactory;
@@ -4298,7 +5144,7 @@ index d28a390d143c108e047071a8dc4cbf1c29085b11..6c5c28167a1df5c5cbaff5a7830b0493
  
  // The interface into the sync engine, which is the part of sync that performs
  // communication between model types and the sync server. In prod the engine
-@@ -189,6 +190,10 @@ class SyncEngine : public ModelTypeConfigurer {
+@@ -186,6 +187,10 @@ class SyncEngine : public ModelTypeConfigurer {
                                    bool empty_jar,
                                    const base::Closure& callback) = 0;
  
@@ -4326,7 +5172,7 @@ index cd5b75e379435625e74079416edf3879ae3e25d9..d51462282069af5332db2175c69a3193
        sync_entry->set_deleted(true);
      } else {
 diff --git a/components/sync/engine_impl/cycle/nudge_tracker.cc b/components/sync/engine_impl/cycle/nudge_tracker.cc
-index 22f20e2d3ba29a99a89ad7535ae4570a24affe32..658eb91e2c2fa011276500f550afdb657a784ad8 100644
+index 40d26e50611826e17a4f0bf6372804f3cf182e99..d1947d8fd2b452a0e29cc884d917d291858f476b 100644
 --- a/components/sync/engine_impl/cycle/nudge_tracker.cc
 +++ b/components/sync/engine_impl/cycle/nudge_tracker.cc
 @@ -29,6 +29,7 @@ base::TimeDelta GetDefaultDelayForType(ModelType model_type,
@@ -4495,6 +5341,19 @@ index b802172df0d65a8ade7b586aada7e730ec4b5095..f66b4387853f62407c46ba62222b246b
      if (UniquePosition::IsValidSuffix(update_tag)) {
        position_matches = GetUpdatePosition(update, update_tag)
                               .Equals(target_entry.GetServerUniquePosition());
+diff --git a/components/sync/engine_impl/sync_scheduler_impl.cc b/components/sync/engine_impl/sync_scheduler_impl.cc
+index 011670bc06e5f1f6a7bdc20a43c8faa8421fd53c..5f19a458eaa29e8600f6e051403cfd08fafa977e 100644
+--- a/components/sync/engine_impl/sync_scheduler_impl.cc
++++ b/components/sync/engine_impl/sync_scheduler_impl.cc
+@@ -282,7 +282,7 @@ void SyncSchedulerImpl::ScheduleClearServerData(const ClearParams& params) {
+   DCHECK(started_) << "Scheduler must be running to clear.";
+ 
+   pending_clear_params_ = std::make_unique<ClearParams>(params);
+-  TrySyncCycleJob();
++  TryCanaryJob();
+ }
+ 
+ bool SyncSchedulerImpl::CanRunJobNow(JobPriority priority) {
 diff --git a/components/sync/engine_impl/syncer_proto_util.cc b/components/sync/engine_impl/syncer_proto_util.cc
 index d6b5b4e2dfefff1d5fd8f7fca5b41c54a0945768..436ebc99dc1b7ef6bf479f21099ddf87565df26d 100644
 --- a/components/sync/engine_impl/syncer_proto_util.cc
@@ -4648,10 +5507,10 @@ index 93517bc21db93e7b75faa2df8b48c2edee09cce1..1fe48b7c3a39320a62c92783c58d8f11
  }
 diff --git a/components/sync/protocol/notes_specifics.proto b/components/sync/protocol/notes_specifics.proto
 new file mode 100644
-index 0000000000000000000000000000000000000000..d5febdae9c0d9807ed2399512090dee09a29d29f
+index 0000000000000000000000000000000000000000..68425ba7bdf1f0c08f8ae8a382bc2c97189218c2
 --- /dev/null
 +++ b/components/sync/protocol/notes_specifics.proto
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,45 @@
 +// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -4668,10 +5527,14 @@ index 0000000000000000000000000000000000000000..d5febdae9c0d9807ed2399512090dee0
 +package sync_pb;
 +
 +// Corresponds to a single attachment itemt for a notes entry.
-+message NotesAttachment {
++message NotesAttachmentDeprecated {
 +  optional string filename = 1;
 +  optional string content_type = 2;
 +  optional bytes content = 3;
++}
++
++message NoteAttachment {
++  optional string checksum = 1;
 +}
 +
 +// Properties of bookmark sync objects.
@@ -4687,16 +5550,17 @@ index 0000000000000000000000000000000000000000..d5febdae9c0d9807ed2399512090dee0
 +  // Corresponds to Notes_Entry::date_added() and is the internal value from
 +  // base::Time.
 +  optional int64 creation_time_us = 4;
-+  // DEPRECATED: unused field, removed
-+  optional NotesAttachment icon_deprecated = 5  [deprecated=true];
-+  repeated NotesAttachment attachments = 6;
++  // DEPRECATED: unused fields, removed
++  optional NotesAttachmentDeprecated icon_deprecated = 5  [deprecated=true];
++  repeated NotesAttachmentDeprecated attachments_deprecated = 6  [deprecated=true];
 +  optional VivaldiSpecialNotesType special_node_type = 7;
++  repeated NoteAttachment attachments = 8;
 +}
 diff --git a/components/sync/protocol/proto_enum_conversions.cc b/components/sync/protocol/proto_enum_conversions.cc
-index e3271e5f799871d39067e538a3b58d3a71354ab5..b10eb17ccfb5e087682403c77a35f650396aedac 100644
+index 0952e0864603d82eff9ffa7fc99926b917fdf592..674c168934278a797f1e88f53bb1b3f6b19b77b4 100644
 --- a/components/sync/protocol/proto_enum_conversions.cc
 +++ b/components/sync/protocol/proto_enum_conversions.cc
-@@ -504,6 +504,32 @@ const char* ProtoEnumToString(
+@@ -505,6 +505,32 @@ const char* ProtoEnumToString(
    return "";
  }
  
@@ -4749,14 +5613,15 @@ index 668f7ed7d78af93bfce3f3e8990c4ee32ec3e722..b39a29a08a0478e58a5502b7039085e2
  
  #endif  // COMPONENTS_SYNC_PROTOCOL_PROTO_ENUM_CONVERSIONS_H_
 diff --git a/components/sync/protocol/proto_value_conversions.cc b/components/sync/protocol/proto_value_conversions.cc
-index 7b47f7b0b8531531a3a7c8b5b1a8fcc0455586b8..6864facfb965141410cae50f51b38618c5110274 100644
+index 7b47f7b0b8531531a3a7c8b5b1a8fcc0455586b8..d44b0f24f2d1074bf7485ea0068546fb531080ab 100644
 --- a/components/sync/protocol/proto_value_conversions.cc
 +++ b/components/sync/protocol/proto_value_conversions.cc
-@@ -360,6 +360,9 @@ IMPLEMENT_PROTO_TO_VALUE_INCLUDE_SPECIFICS(ClientToServerMessage)
+@@ -360,6 +360,10 @@ IMPLEMENT_PROTO_TO_VALUE_INCLUDE_SPECIFICS(ClientToServerMessage)
  IMPLEMENT_PROTO_TO_VALUE_INCLUDE_SPECIFICS(ClientToServerResponse)
  IMPLEMENT_PROTO_TO_VALUE_INCLUDE_SPECIFICS(SyncEntity)
  
-+IMPLEMENT_PROTO_TO_VALUE(NotesAttachment)
++IMPLEMENT_PROTO_TO_VALUE(NoteAttachment)
++IMPLEMENT_PROTO_TO_VALUE(NotesAttachmentDeprecated)
 +IMPLEMENT_PROTO_TO_VALUE(NotesSpecifics)
 +
  #undef IMPLEMENT_PROTO_TO_VALUE
@@ -4806,7 +5671,7 @@ index 02a7700afba6e1546487b825a4d9a50fab93c2ac..32bf9679ea240544e6f94d075353ce0c
  #undef SET_FIELD
  
 diff --git a/components/sync/protocol/proto_visitors.h b/components/sync/protocol/proto_visitors.h
-index bc2b605981d9adb7437be6708a92daf18207c413..b1a8ab111c6f8280106b76a557a1d1f76972b993 100644
+index 6838e9a57e61ec23498431bb8f9f9a1276d88a8c..7980821397b266b126c39905561109c6a6ac3109 100644
 --- a/components/sync/protocol/proto_visitors.h
 +++ b/components/sync/protocol/proto_visitors.h
 @@ -37,6 +37,8 @@
@@ -4835,16 +5700,22 @@ index bc2b605981d9adb7437be6708a92daf18207c413..b1a8ab111c6f8280106b76a557a1d1f7
  }
  
  VISIT_PROTO_FIELDS(const sync_pb::ExperimentsSpecifics& proto) {
-@@ -978,6 +983,25 @@ VISIT_PROTO_FIELDS(const sync_pb::WifiCredentialSpecifics& proto) {
+@@ -979,6 +984,32 @@ VISIT_PROTO_FIELDS(const sync_pb::WifiCredentialSpecifics& proto) {
    VISIT_BYTES(passphrase);
  }
  
 +// Vivaldi specific
 +template <class V>
-+void VisitProtoFields(V& visitor, const sync_pb::NotesAttachment& proto) {
++void VisitProtoFields(V& visitor,
++                      const sync_pb::NotesAttachmentDeprecated& proto) {
 +  VISIT(filename);
 +  VISIT(content_type);
 +  VISIT(content);
++}
++
++template <class V>
++void VisitProtoFields(V& visitor, const sync_pb::NoteAttachment& proto) {
++  VISIT(checksum);
 +}
 +
 +template <class V>
@@ -4854,8 +5725,9 @@ index bc2b605981d9adb7437be6708a92daf18207c413..b1a8ab111c6f8280106b76a557a1d1f7
 +  VISIT(content);
 +  VISIT(creation_time_us);
 +  VISIT(icon_deprecated);
-+  VISIT_REP(attachments);
++  VISIT_REP(attachments_deprecated);
 +  VISIT_ENUM(special_node_type);
++  VISIT_REP(attachments);
 +}
 +
  }  // namespace syncer
@@ -4872,7 +5744,7 @@ index 5b58e1a9e3ba133047f8e8ed983a808f6136f6dd..24bac0fb5856750ba6640fac5fec5851
 +  "//components/sync/protocol/notes_specifics.proto",
  ]
 diff --git a/components/sync/protocol/session_specifics.proto b/components/sync/protocol/session_specifics.proto
-index 0428b09e538d40ce7b89499b9ea72f0e110a6199..fca1f46eeb135572071e88ca28a609f508671ad6 100644
+index ced390af2696800c69d172c9fda6f3a21779a2ad..4840b79a5d38725a6643c8a6bf82cdeac8bb4e10 100644
 --- a/components/sync/protocol/session_specifics.proto
 +++ b/components/sync/protocol/session_specifics.proto
 @@ -80,6 +80,9 @@ message SessionTab {
@@ -5836,10 +6708,10 @@ index 22814046d1c811d85c3e8a77916955c6c5385e79..74dbb116d96d61ac85f71006a09e7f6a
    return syncer::SyncError();
  }
 diff --git a/components/sync_sessions/sessions_sync_manager.cc b/components/sync_sessions/sessions_sync_manager.cc
-index efa9b68cb85b5410ac15b2e396aeb9b5f8a332a7..2e8ee387ae820be90f9d984b998ac84b516fdb09 100644
+index 9972d4725cf1decf8838ac312329c09adc5ba1de..73ccacc20f563d4a2f4f5b66cf7e5385143bfea0 100644
 --- a/components/sync_sessions/sessions_sync_manager.cc
 +++ b/components/sync_sessions/sessions_sync_manager.cc
-@@ -1227,6 +1227,7 @@ void SessionsSyncManager::SetSessionTabFromDelegate(
+@@ -1234,6 +1234,7 @@ void SessionsSyncManager::SetSessionTabFromDelegate(
    session_tab->extension_app_id = tab_delegate.GetExtensionAppId();
    session_tab->user_agent_override.clear();
    session_tab->timestamp = mtime;
@@ -5931,10 +6803,10 @@ index 4335b3955de9b903f858dd5cd11e411f7d21ff4f..9e58cfe89b0c60ddd78cb58d99d98ded
           (scheme1 == kChromeUIScheme && scheme2 == url::kAboutScheme);
  }
 diff --git a/components/variations/variations_url_constants.cc b/components/variations/variations_url_constants.cc
-index b233bb6435cd36f1a93038658daea286823e01fa..88cebf26921f26059ad82ea1d438c772bc083dd0 100644
+index d97573e63c50637953f55e98ddcefd9584c8e0d6..b258cc0829d64f3803b3a3832b8191becd1b05d7 100644
 --- a/components/variations/variations_url_constants.cc
 +++ b/components/variations/variations_url_constants.cc
-@@ -4,10 +4,12 @@
+@@ -4,11 +4,13 @@
  
  #include "components/variations/variations_url_constants.h"
  
@@ -5947,7 +6819,8 @@ index b233bb6435cd36f1a93038658daea286823e01fa..88cebf26921f26059ad82ea1d438c772
 -    "https://clientservices.googleapis.com/chrome-variations/seed";
 +    SYNC_URL("/chrome-variations/seed");
  
- }  // namespace variations
+ const char kDefaultInsecureServerUrl[] =
+     "http://clientservices.googleapis.com/chrome-variations/seed";
 diff --git a/components/version_info/version_info.cc b/components/version_info/version_info.cc
 index 0b28f1523900552b7decc2f7c195d1d2d53f2b9c..0a9095cc1e24ac9dd380271b1a744f3f8865c50d 100644
 --- a/components/version_info/version_info.cc
@@ -5979,11 +6852,44 @@ index 6232e359ef20f93fc9ba574bdf6e57c858044be6..ab2c4c0065384dcf96073ad4301fe079
  #define IS_OFFICIAL_BUILD @OFFICIAL_BUILD@
  
  #endif  // COMPONENTS_VERSION_INFO_VERSION_INFO_VALUES_H_
+diff --git a/components/viz/common/features.cc b/components/viz/common/features.cc
+index b983d6f5a7ac07eaade26a982f24e762c92d2e23..ced798877bfa9c65b7e983dee2a4ba47a5573687 100644
+--- a/components/viz/common/features.cc
++++ b/components/viz/common/features.cc
+@@ -11,7 +11,7 @@ namespace features {
+ 
+ #if defined(USE_AURA)
+ const base::Feature kEnableSurfaceSynchronization{
+-    "SurfaceSynchronization", base::FEATURE_ENABLED_BY_DEFAULT};
++    "SurfaceSynchronization", base::FEATURE_DISABLED_BY_DEFAULT};
+ #else
+ const base::Feature kEnableSurfaceSynchronization{
+     "SurfaceSynchronization", base::FEATURE_DISABLED_BY_DEFAULT};
+diff --git a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
+index 20b29c9417febdf56ae45e83db7252b741255ec6..60aebd9ad31d20ff1952a9a172f7c26b1abb956b 100644
+--- a/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
++++ b/components/viz/service/frame_sinks/compositor_frame_sink_support.cc
+@@ -229,6 +229,15 @@ bool CompositorFrameSinkSupport::SubmitCompositorFrame(
+          local_surface_id.child_sequence_number() >
+              current_local_surface_id.child_sequence_number());
+ 
++    if (!monotonically_increasing_id) {
++      // NOTE(andre@vivaldi.com) : We can end up here when moving WebContents
++      // between windows. |current_local_surface_id| will be higher or equal
++      // than the new. The surface-info is updated after this.
++      monotonically_increasing_id =
++          current_local_surface_id.parent_sequence_number() >=
++          local_surface_id.parent_sequence_number();
++    }
++
+     if (!surface_info.is_valid() || !monotonically_increasing_id) {
+       TRACE_EVENT_INSTANT0("viz", "Surface Invariants Violation",
+                            TRACE_EVENT_SCOPE_THREAD);
 diff --git a/components/viz/service/gl/gpu_service_impl.cc b/components/viz/service/gl/gpu_service_impl.cc
-index 0fdea8a949e1eacb6d834e705152e6d79eb786c0..82fa7e3fb9bd59a2b7f087958431201fe4416018 100644
+index b16932501210c364eb47579366a4341bd278715b..028c4d22fda70c57e3fa841ec64d4a6fbbb5b215 100644
 --- a/components/viz/service/gl/gpu_service_impl.cc
 +++ b/components/viz/service/gl/gpu_service_impl.cc
-@@ -62,6 +62,10 @@
+@@ -63,6 +63,10 @@
  #include "gpu/ipc/service/direct_composition_surface_win.h"
  #endif
  
@@ -5994,7 +6900,7 @@ index 0fdea8a949e1eacb6d834e705152e6d79eb786c0..82fa7e3fb9bd59a2b7f087958431201f
  namespace viz {
  
  namespace {
-@@ -137,6 +141,11 @@ GpuServiceImpl::~GpuServiceImpl() {
+@@ -138,6 +142,11 @@ GpuServiceImpl::~GpuServiceImpl() {
      wait.Wait();
    }
    media_gpu_channel_manager_.reset();
@@ -6006,7 +6912,7 @@ index 0fdea8a949e1eacb6d834e705152e6d79eb786c0..82fa7e3fb9bd59a2b7f087958431201f
    gpu_channel_manager_.reset();
    owned_sync_point_manager_.reset();
  
-@@ -210,6 +219,12 @@ void GpuServiceImpl::InitializeWithHost(
+@@ -213,6 +222,12 @@ void GpuServiceImpl::InitializeWithHost(
  
    media_gpu_channel_manager_.reset(
        new media::MediaGpuChannelManager(gpu_channel_manager_.get()));
@@ -6019,7 +6925,7 @@ index 0fdea8a949e1eacb6d834e705152e6d79eb786c0..82fa7e3fb9bd59a2b7f087958431201f
    if (watchdog_thread())
      watchdog_thread()->AddPowerObserver();
  }
-@@ -493,6 +508,11 @@ void GpuServiceImpl::DidCreateOffscreenContext(const GURL& active_url) {
+@@ -496,6 +511,11 @@ void GpuServiceImpl::DidCreateOffscreenContext(const GURL& active_url) {
  void GpuServiceImpl::DidDestroyChannel(int client_id) {
    DCHECK(main_runner_->BelongsToCurrentThread());
    media_gpu_channel_manager_->RemoveChannel(client_id);
@@ -6031,7 +6937,7 @@ index 0fdea8a949e1eacb6d834e705152e6d79eb786c0..82fa7e3fb9bd59a2b7f087958431201f
    (*gpu_host_)->DidDestroyChannel(client_id);
  }
  
-@@ -559,6 +579,10 @@ void GpuServiceImpl::EstablishGpuChannel(int32_t client_id,
+@@ -562,6 +582,10 @@ void GpuServiceImpl::EstablishGpuChannel(int32_t client_id,
  
    media_gpu_channel_manager_->AddChannel(client_id);
  
@@ -6043,7 +6949,7 @@ index 0fdea8a949e1eacb6d834e705152e6d79eb786c0..82fa7e3fb9bd59a2b7f087958431201f
  }
  
 diff --git a/components/viz/service/gl/gpu_service_impl.h b/components/viz/service/gl/gpu_service_impl.h
-index 3e26b06006d6facf8f284cd3e817bd9493b24e60..0cb2a5609bfab89cebcf061554442b282c05f5b1 100644
+index ffe6c8cbef350f6af14b305369496d34279d6776..a08c0bea3057cd7ace4c3b8a4da567d3b6869d39 100644
 --- a/components/viz/service/gl/gpu_service_impl.h
 +++ b/components/viz/service/gl/gpu_service_impl.h
 @@ -39,6 +39,9 @@ class GpuMemoryBufferFactory;
@@ -6068,8 +6974,32 @@ index 3e26b06006d6facf8f284cd3e817bd9493b24e60..0cb2a5609bfab89cebcf061554442b28
    // On some platforms (e.g. android webview), the SyncPointManager comes from
    // external sources.
    std::unique_ptr<gpu::SyncPointManager> owned_sync_point_manager_;
+diff --git a/components/viz/service/surfaces/surface.cc b/components/viz/service/surfaces/surface.cc
+index beccc683e774c8a9d916a8876decdbb4b8eac794..f3f2a016f5eb9374c35b1ee41d0c9ba26f0f09a3 100644
+--- a/components/viz/service/surfaces/surface.cc
++++ b/components/viz/service/surfaces/surface.cc
+@@ -97,7 +97,18 @@ void Surface::RejectCompositorFramesToFallbackSurfaces() {
+     auto it = std::find_if(
+         activation_dependencies.begin(), activation_dependencies.end(),
+         [surface_id](const SurfaceId& dependency) {
+-          return dependency.frame_sink_id() == surface_id.frame_sink_id();
++          // NOTE(andre@vivaldi.com) : At this point in Vivaldi we might have
++          // had a navigation and Frame-creation where we have changed the
++          // WebContentsView to a guest (see
++          // WebContentsImpl::ReCreateViewasGuest) while the surface wasn't
++          // active. When we now have produced new Frames and the activation
++          // dependencies has been updated in UpdateActivationDependencies the
++          // previous surface is now not active, but it will share the framesink
++          // with |this|.We must check that the localsurfaceid is the same
++          // otherwise the surface will be locked.
++          return (dependency.local_surface_id() ==
++                    surface_id.local_surface_id() &&
++                  dependency.frame_sink_id() == surface_id.frame_sink_id());
+         });
+     bool is_fallback_surface = it != activation_dependencies.end();
+     if (!is_fallback_surface)
 diff --git a/components/viz/service/surfaces/surface.h b/components/viz/service/surfaces/surface.h
-index 5cca455b361af265609753e989b0b6efca42331a..371361979cd213bac4850f04d1d81d5e13a27375 100644
+index 637aa862450e95363b57a114734cb5653c55e3fa..5225e0403aaf5ca5814f300fb0da80d5e8f4fe06 100644
 --- a/components/viz/service/surfaces/surface.h
 +++ b/components/viz/service/surfaces/surface.h
 @@ -27,10 +27,6 @@
@@ -6092,10 +7022,10 @@ index 5cca455b361af265609753e989b0b6efca42331a..371361979cd213bac4850f04d1d81d5e
  // A Surface is a representation of a sequence of CompositorFrames with a
  // common set of properties uniquely identified by a SurfaceId. In particular,
 diff --git a/components/viz/service/surfaces/surface_manager.cc b/components/viz/service/surfaces/surface_manager.cc
-index cf1478de54f695474fdc6dbeee500bdbb0ed9df9..7c922e2f142aa5511ee3d0b8b0023c592b243c19 100644
+index f8f667e52f01b5f86f410f75f862ee8f5e03ec24..b59dc49e2179d8ebed0e340e22996c16a7349eb8 100644
 --- a/components/viz/service/surfaces/surface_manager.cc
 +++ b/components/viz/service/surfaces/surface_manager.cc
-@@ -25,6 +25,8 @@
+@@ -26,6 +26,8 @@
  #include <sstream>
  #endif
  
@@ -6104,7 +7034,7 @@ index cf1478de54f695474fdc6dbeee500bdbb0ed9df9..7c922e2f142aa5511ee3d0b8b0023c59
  namespace viz {
  namespace {
  
-@@ -99,6 +101,22 @@ Surface* SurfaceManager::CreateSurface(
+@@ -120,6 +122,22 @@ Surface* SurfaceManager::CreateSurface(
    // If no surface with this SurfaceId exists, simply create the surface
    // and return.
    auto it = surface_map_.find(surface_info.id());
@@ -6126,7 +7056,20 @@ index cf1478de54f695474fdc6dbeee500bdbb0ed9df9..7c922e2f142aa5511ee3d0b8b0023c59
 +  }
    if (it == surface_map_.end()) {
      surface_map_[surface_info.id()] =
-         base::MakeUnique<Surface>(surface_info, this, surface_client,
+         std::make_unique<Surface>(surface_info, this, surface_client,
+diff --git a/components/web_cache/browser/web_cache_manager.cc b/components/web_cache/browser/web_cache_manager.cc
+index 77b1c1ee3bace724428ab3eed4c1dfda1da7752d..b9941575c24de4c2d88344ace6f88f26269192df 100644
+--- a/components/web_cache/browser/web_cache_manager.cc
++++ b/components/web_cache/browser/web_cache_manager.cc
+@@ -334,6 +334,8 @@ void WebCacheManager::ClearRendererCache(
+     if (host) {
+       // Find the WebCachePtr by renderer process id.
+       auto it = web_cache_services_.find(*iter);
++      if (it == web_cache_services_.end())
++        continue;
+       DCHECK(it != web_cache_services_.end());
+       const mojom::WebCachePtr& service = it->second;
+       DCHECK(service);
 diff --git a/components/zoom/zoom_controller.cc b/components/zoom/zoom_controller.cc
 index eb5732cdde1985124949ee176edd826d174d097c..b060d57f679d7feaf73dc2a871d5615aba17f739 100644
 --- a/components/zoom/zoom_controller.cc
