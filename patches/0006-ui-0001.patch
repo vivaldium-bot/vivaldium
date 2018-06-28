@@ -1,5 +1,5 @@
 diff --git a/ui/aura/client/drag_drop_client.cc b/ui/aura/client/drag_drop_client.cc
-index f7dc619d5907c6f615a79ffc4166d62baf7c31cf..9d7374cc2b54d79be153f31fce95b25fb048e313 100644
+index c3549b665dccd02a084f99ae081e88bd160f6e36..32739a1ae0ba222d0714688a966083ad13d6b3cb 100644
 --- a/ui/aura/client/drag_drop_client.cc
 +++ b/ui/aura/client/drag_drop_client.cc
 @@ -27,5 +27,29 @@ DragDropClient* GetDragDropClient(Window* root_window) {
@@ -54,18 +54,18 @@ index 8e9634807d3fcf3e29d8324b6b8f3f8ed774dd72..e7766b04c395dc6c77ea3f184f979abd
    // Called when a drag and drop session is cancelled.
    virtual void DragCancel() = 0;
 diff --git a/ui/base/BUILD.gn b/ui/base/BUILD.gn
-index ab3fe0c422fd8031932a4247dbc3b3a31e34810e..572e81608cd9805b2db67d7066964bd68475cdde 100644
+index 14011a657ff3fbcf43f41eb16231eb45e545fad4..dd8b82143865ea1d0e2a8c54e10c5ca51003516d 100644
 --- a/ui/base/BUILD.gn
 +++ b/ui/base/BUILD.gn
-@@ -1017,7 +1017,7 @@ test("ui_base_unittests") {
-   }
- }
- 
--if (is_mac) {
-+if (is_mac && !is_vivaldi) {
-   mac_framework_bundle("ui_unittests_framework") {
-     testonly = true
-     deps = [
+@@ -141,6 +141,8 @@ component("base") {
+     "cocoa/remote_layer_api.mm",
+     "cocoa/scoped_cg_context_smooth_fonts.h",
+     "cocoa/scoped_cg_context_smooth_fonts.mm",
++    "cocoa/secure_password_input.h",
++    "cocoa/secure_password_input.mm",
+     "cocoa/three_part_image.h",
+     "cocoa/three_part_image.mm",
+     "cocoa/tool_tip_base_view.h",
 diff --git a/ui/base/accelerators/accelerator.cc b/ui/base/accelerators/accelerator.cc
 index 0694f7433df5fe487bdfb2b2ff1643674247d13d..238477431ed91e563c06931c97d6afae75452ef7 100644
 --- a/ui/base/accelerators/accelerator.cc
@@ -120,10 +120,10 @@ index 0694f7433df5fe487bdfb2b2ff1643674247d13d..238477431ed91e563c06931c97d6afae
    if (IsCmdDown()) {
  #if defined(OS_MACOSX)
 diff --git a/ui/base/base_window.h b/ui/base/base_window.h
-index 5ba8480da3979e0b5ad1d36680d7f0c71a3a9458..ef51d7c20a4f69b7312360872cfce32d91e334de 100644
+index f6af762c1306f228e461fe29bd27056e5aa55069..92ac7e67c00ea4e6f74bc3dc7fe873bf12e9a57c 100644
 --- a/ui/base/base_window.h
 +++ b/ui/base/base_window.h
-@@ -90,6 +90,9 @@ class UI_BASE_EXPORT BaseWindow {
+@@ -100,6 +100,9 @@ class UI_BASE_EXPORT BaseWindow {
    // If set to true, the window will stay on top of other windows which do not
    // have this flag enabled.
    virtual void SetAlwaysOnTop(bool always_on_top) = 0;
@@ -133,11 +133,115 @@ index 5ba8480da3979e0b5ad1d36680d7f0c71a3a9458..ef51d7c20a4f69b7312360872cfce32d
  };
  
  }  // namespace ui
+diff --git a/ui/base/cocoa/secure_password_input.h b/ui/base/cocoa/secure_password_input.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..ca90d3964a5df4ecd1d7b56eb84b1ccf812434c8
+--- /dev/null
++++ b/ui/base/cocoa/secure_password_input.h
+@@ -0,0 +1,29 @@
++// Copyright 2018 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_BASE_COCOA_SECURE_PASSWORD_INPUT_H_
++#define UI_BASE_COCOA_SECURE_PASSWORD_INPUT_H_
++
++#include "base/macros.h"
++#include "ui/base/ui_base_export.h"
++
++namespace ui {
++
++// Enables the secure password input mode while in scope.
++class UI_BASE_EXPORT ScopedPasswordInputEnabler {
++ public:
++  ScopedPasswordInputEnabler();
++  ~ScopedPasswordInputEnabler();
++
++  // Returns true if the password input mode is currently enabled. Useful for
++  // unit tests.
++  static bool IsPasswordInputEnabled();
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(ScopedPasswordInputEnabler);
++};
++
++}  // namespace ui
++
++#endif  // UI_BASE_COCOA_SECURE_PASSWORD_INPUT_H_
+diff --git a/ui/base/cocoa/secure_password_input.mm b/ui/base/cocoa/secure_password_input.mm
+new file mode 100644
+index 0000000000000000000000000000000000000000..d0345336d4c13f89693329d447d76ad5c70e412a
+--- /dev/null
++++ b/ui/base/cocoa/secure_password_input.mm
+@@ -0,0 +1,63 @@
++// Copyright 2018 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#import "ui/base/cocoa/secure_password_input.h"
++
++#import <Carbon/Carbon.h>
++
++#include "base/logging.h"
++
++namespace {
++
++// Used to protect from out-of-order calls to enabling/disabling functions.
++int g_password_input_counter = 0;
++
++// SetPasswordInputEnabled() is copied from
++// enableSecureTextInput() and disableSecureTextInput() functions in
++// third_party/WebKit/WebCore/platform/SecureTextInput.cpp
++//
++// The following technote describes proper EnableSecureEventInput() usage:
++// https://developer.apple.com/library/content/technotes/tn2150/_index.html
++void SetPasswordInputEnabled(bool enabled) {
++  if (enabled) {
++    DCHECK(!IsSecureEventInputEnabled());
++    EnableSecureEventInput();
++
++    CFArrayRef inputSources = TISCreateASCIICapableInputSourceList();
++    TSMSetDocumentProperty(0, kTSMDocumentEnabledInputSourcesPropertyTag,
++                           sizeof(CFArrayRef), &inputSources);
++    CFRelease(inputSources);
++  } else {
++    DCHECK(IsSecureEventInputEnabled());
++    TSMRemoveDocumentProperty(0, kTSMDocumentEnabledInputSourcesPropertyTag);
++
++    DisableSecureEventInput();
++  }
++}
++
++}  // namespace
++
++namespace ui {
++
++ScopedPasswordInputEnabler::ScopedPasswordInputEnabler() {
++  if (!g_password_input_counter) {
++    SetPasswordInputEnabled(true);
++  }
++  ++g_password_input_counter;
++}
++
++ScopedPasswordInputEnabler::~ScopedPasswordInputEnabler() {
++  --g_password_input_counter;
++  DCHECK_LE(0, g_password_input_counter);
++  if (!g_password_input_counter) {
++    SetPasswordInputEnabled(false);
++  }
++}
++
++// static
++bool ScopedPasswordInputEnabler::IsPasswordInputEnabled() {
++  return g_password_input_counter > 0;
++}
++
++}  // namespace ui
 diff --git a/ui/base/dragdrop/drop_target_win.cc b/ui/base/dragdrop/drop_target_win.cc
-index 0370e2bc52d1ee10f58d3c3447dce4b31012a5dc..8445b974ad8b31fdfd79dd7ff02db4d8e5a2bba6 100644
+index 5dddafa3591db395e010e5daa6ec94978355c6dd..b59264aff3dae5246bce0bc1e3a56895551c3167 100644
 --- a/ui/base/dragdrop/drop_target_win.cc
 +++ b/ui/base/dragdrop/drop_target_win.cc
-@@ -57,6 +57,12 @@ HRESULT DropTargetWin::DragEnter(IDataObject* data_object,
+@@ -58,6 +58,12 @@ HRESULT DropTargetWin::DragEnter(IDataObject* data_object,
  HRESULT DropTargetWin::DragOver(DWORD key_state,
                                  POINTL cursor_position,
                                  DWORD* effect) {
@@ -292,7 +396,7 @@ index 3cf1847860a56e0898aaae68cbabfc1e35536c7d..06e9f0ef0b9eff278686c81ff27efbae
    }
  }
 diff --git a/ui/events/blink/input_handler_proxy.cc b/ui/events/blink/input_handler_proxy.cc
-index b8f266e3686487b1c3595d6aa318082dd6a3d6e3..049811a90751b54fc2568d79023412e519e73671 100644
+index ba36cfb0d5d6608390175118c55ad4aeefcdbb04..581a58554c491fb0077cff524640632897bd92e2 100644
 --- a/ui/events/blink/input_handler_proxy.cc
 +++ b/ui/events/blink/input_handler_proxy.cc
 @@ -33,6 +33,8 @@
@@ -304,7 +408,7 @@ index b8f266e3686487b1c3595d6aa318082dd6a3d6e3..049811a90751b54fc2568d79023412e5
  using blink::WebFloatPoint;
  using blink::WebFloatSize;
  using blink::WebGestureEvent;
-@@ -637,7 +639,25 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleMouseWheel(
+@@ -650,7 +652,25 @@ InputHandlerProxy::EventDisposition InputHandlerProxy::HandleMouseWheel(
            cc::EventListenerClass::kMouseWheel);
    switch (properties) {
      case cc::EventListenerProperties::kPassive:
@@ -330,212 +434,11 @@ index b8f266e3686487b1c3595d6aa318082dd6a3d6e3..049811a90751b54fc2568d79023412e5
        break;
      case cc::EventListenerProperties::kBlockingAndPassive:
      case cc::EventListenerProperties::kBlocking:
-diff --git a/ui/gfx/ipc/skia/gfx_skia_param_traits.cc b/ui/gfx/ipc/skia/gfx_skia_param_traits.cc
-index ead0d23554b9d4581838c83c42912a54a3001e02..dc58b2a48e1de3bdddccefd6c645ecf67e1e6feb 100644
---- a/ui/gfx/ipc/skia/gfx_skia_param_traits.cc
-+++ b/ui/gfx/ipc/skia/gfx_skia_param_traits.cc
-@@ -7,57 +7,64 @@
- #include <string>
- 
- #include "base/pickle.h"
-+#include "ipc/ipc_message_utils.h"
- #include "third_party/skia/include/core/SkBitmap.h"
- #include "third_party/skia/include/core/SkImageInfo.h"
-+#include "ui/gfx/ipc/skia/gfx_skia_param_traits_macros.h"
- #include "ui/gfx/transform.h"
- 
--namespace {
--
--struct SkBitmap_Data {
--  // The color type for the bitmap (bits per pixel, etc).
--  SkColorType color_type;
-+// Generate param traits write methods.
-+#include "ipc/param_traits_write_macros.h"
-+namespace IPC {
-+#undef UI_GFX_IPC_SKIA_GFX_SKIA_PARAM_TRAITS_MACROS_H_
-+#include "ui/gfx/ipc/skia/gfx_skia_param_traits_macros.h"
-+}  // namespace IPC
- 
--  // The alpha type for the bitmap (opaque, premul, unpremul).
--  SkAlphaType alpha_type;
-+// Generate param traits read methods.
-+#include "ipc/param_traits_read_macros.h"
-+namespace IPC {
-+#undef UI_GFX_IPC_SKIA_GFX_SKIA_PARAM_TRAITS_MACROS_H_
-+#include "ui/gfx/ipc/skia/gfx_skia_param_traits_macros.h"
-+}  // namespace IPC
- 
--  // The width of the bitmap in pixels.
--  uint32_t width;
-+// Generate param traits log methods.
-+#include "ipc/param_traits_log_macros.h"
-+namespace IPC {
-+#undef UI_GFX_IPC_SKIA_GFX_SKIA_PARAM_TRAITS_MACROS_H_
-+#include "ui/gfx/ipc/skia/gfx_skia_param_traits_macros.h"
-+}  // namespace IPC
- 
--  // The height of the bitmap in pixels.
--  uint32_t height;
-+namespace IPC {
- 
--  void InitSkBitmapDataForTransfer(const SkBitmap& bitmap) {
--    const SkImageInfo& info = bitmap.info();
--    color_type = info.colorType();
--    alpha_type = info.alphaType();
--    width = info.width();
--    height = info.height();
--  }
-+void ParamTraits<SkImageInfo>::Write(base::Pickle* m, const SkImageInfo& p) {
-+  WriteParam(m, p.colorType());
-+  WriteParam(m, p.alphaType());
-+  WriteParam(m, p.width());
-+  WriteParam(m, p.height());
-+}
- 
--  // Returns whether |bitmap| successfully initialized.
--  bool InitSkBitmapFromData(SkBitmap* bitmap,
--                            const char* pixels,
--                            size_t pixels_size) const {
--    if (!bitmap->tryAllocPixels(
--            SkImageInfo::Make(width, height, color_type, alpha_type)))
--      return false;
--    if (pixels_size != bitmap->computeByteSize())
--      return false;
--    memcpy(bitmap->getPixels(), pixels, pixels_size);
--    return true;
-+bool ParamTraits<SkImageInfo>::Read(const base::Pickle* m,
-+                                    base::PickleIterator* iter,
-+                                    SkImageInfo* r) {
-+  SkColorType color_type;
-+  SkAlphaType alpha_type;
-+  uint32_t width;
-+  uint32_t height;
-+  if (!ReadParam(m, iter, &color_type) || !ReadParam(m, iter, &alpha_type) ||
-+      !ReadParam(m, iter, &width) || !ReadParam(m, iter, &height)) {
-+    return false;
-   }
--};
- 
--}  // namespace
-+  *r = SkImageInfo::Make(width, height, color_type, alpha_type);
-+  return true;
-+}
- 
--namespace IPC {
-+void ParamTraits<SkImageInfo>::Log(const SkImageInfo& p, std::string* l) {
-+  l->append("<SkImageInfo>");
-+}
- 
- void ParamTraits<SkBitmap>::Write(base::Pickle* m, const SkBitmap& p) {
--  size_t fixed_size = sizeof(SkBitmap_Data);
--  SkBitmap_Data bmp_data;
--  bmp_data.InitSkBitmapDataForTransfer(p);
--  m->WriteData(reinterpret_cast<const char*>(&bmp_data),
--               static_cast<int>(fixed_size));
-+  WriteParam(m, p.info());
-   size_t pixel_size = p.computeByteSize();
-   m->WriteData(reinterpret_cast<const char*>(p.getPixels()),
-                static_cast<int>(pixel_size));
-@@ -66,28 +73,28 @@ void ParamTraits<SkBitmap>::Write(base::Pickle* m, const SkBitmap& p) {
- bool ParamTraits<SkBitmap>::Read(const base::Pickle* m,
-                                  base::PickleIterator* iter,
-                                  SkBitmap* r) {
--  const char* fixed_data;
--  int fixed_data_size = 0;
--  if (!iter->ReadData(&fixed_data, &fixed_data_size) ||
--     (fixed_data_size <= 0)) {
-+  SkImageInfo image_info;
-+  if (!ReadParam(m, iter, &image_info))
-     return false;
--  }
--  if (fixed_data_size != sizeof(SkBitmap_Data))
--    return false;  // Message is malformed.
- 
--  const char* variable_data;
--  int variable_data_size = 0;
--  if (!iter->ReadData(&variable_data, &variable_data_size) ||
--     (variable_data_size < 0)) {
-+  const char* bitmap_data;
-+  int bitmap_data_size = 0;
-+  if (!iter->ReadData(&bitmap_data, &bitmap_data_size))
-     return false;
--  }
--  const SkBitmap_Data* bmp_data =
--      reinterpret_cast<const SkBitmap_Data*>(fixed_data);
--  return bmp_data->InitSkBitmapFromData(r, variable_data, variable_data_size);
-+  // ReadData() only returns true if bitmap_data_size >= 0.
-+
-+  if (!r->tryAllocPixels(image_info))
-+    return false;
-+
-+  if (static_cast<size_t>(bitmap_data_size) != r->computeByteSize())
-+    return false;
-+  memcpy(r->getPixels(), bitmap_data, bitmap_data_size);
-+  return true;
- }
- 
- void ParamTraits<SkBitmap>::Log(const SkBitmap& p, std::string* l) {
-   l->append("<SkBitmap>");
-+  LogParam(p.info(), l);
- }
- 
- void ParamTraits<gfx::Transform>::Write(base::Pickle* m, const param_type& p) {
-diff --git a/ui/gfx/ipc/skia/gfx_skia_param_traits.h b/ui/gfx/ipc/skia/gfx_skia_param_traits.h
-index d3acc9308656956fc96d0b363ce6344a5d423464..3b0d4a82cd3bffa3944b296f0768ba3a0f206a55 100644
---- a/ui/gfx/ipc/skia/gfx_skia_param_traits.h
-+++ b/ui/gfx/ipc/skia/gfx_skia_param_traits.h
-@@ -12,6 +12,7 @@
- #include "ui/gfx/ipc/skia/gfx_skia_ipc_export.h"
- 
- class SkBitmap;
-+struct SkImageInfo;
- 
- namespace base {
- class Pickle;
-@@ -24,6 +25,16 @@ class Transform;
- 
- namespace IPC {
- 
-+template <>
-+struct GFX_SKIA_IPC_EXPORT ParamTraits<SkImageInfo> {
-+  using param_type = SkImageInfo;
-+  static void Write(base::Pickle* m, const param_type& p);
-+  static bool Read(const base::Pickle* m,
-+                   base::PickleIterator* iter,
-+                   param_type* r);
-+  static void Log(const param_type& p, std::string* l);
-+};
-+
- template <>
- struct GFX_SKIA_IPC_EXPORT ParamTraits<SkBitmap> {
-   using param_type = SkBitmap;
-diff --git a/ui/gfx/ipc/skia/gfx_skia_param_traits_macros.h b/ui/gfx/ipc/skia/gfx_skia_param_traits_macros.h
-new file mode 100644
-index 0000000000000000000000000000000000000000..e48af3f0aabbf0550c59454107a4bfc2425d5bd8
---- /dev/null
-+++ b/ui/gfx/ipc/skia/gfx_skia_param_traits_macros.h
-@@ -0,0 +1,16 @@
-+// Copyright 2018 The Chromium Authors. All rights reserved.
-+// Use of this source code is governed by a BSD-style license that can be
-+// found in the LICENSE file.
-+
-+#ifndef UI_GFX_IPC_SKIA_GFX_SKIA_PARAM_TRAITS_MACROS_H_
-+#define UI_GFX_IPC_SKIA_GFX_SKIA_PARAM_TRAITS_MACROS_H_
-+
-+#include <stdint.h>
-+
-+#include "ipc/ipc_message_macros.h"
-+#include "third_party/skia/include/core/SkImageInfo.h"
-+
-+IPC_ENUM_TRAITS_VALIDATE(SkColorType, kLastEnum_SkColorType);
-+IPC_ENUM_TRAITS_VALIDATE(SkAlphaType, kLastEnum_SkAlphaType);
-+
-+#endif  // UI_GFX_IPC_SKIA_GFX_SKIA_PARAM_TRAITS_MACROS_H_
 diff --git a/ui/message_center/views/notification_view.cc b/ui/message_center/views/notification_view.cc
-index b86b8bf0c079ded7d3a720d3b1ae82b8efae270b..6e3f51b1fbce240f99232fd2b630cd2f59696d27 100644
+index 8b34638444c5e5a4365ea49b3180ccb16f692acb..8b2043d33c5ca169b1c9b86ed89d453734ac31ad 100644
 --- a/ui/message_center/views/notification_view.cc
 +++ b/ui/message_center/views/notification_view.cc
-@@ -284,8 +284,11 @@ void NotificationView::Layout() {
+@@ -280,8 +280,11 @@ void NotificationView::Layout() {
    // Top views.
    int top_height = top_view_->GetHeightForWidth(content_width);
    top_view_->SetBounds(insets.left(), insets.top(), content_width, top_height);
@@ -548,11 +451,34 @@ index b86b8bf0c079ded7d3a720d3b1ae82b8efae270b..6e3f51b1fbce240f99232fd2b630cd2f
    // Icon.
    icon_view_->SetBounds(insets.left(), insets.top(), kNotificationIconSize,
                          kNotificationIconSize);
+diff --git a/ui/shell_dialogs/select_file_dialog_mac.mm b/ui/shell_dialogs/select_file_dialog_mac.mm
+index e408e2158c98f96887bfb22fedb4f348c5369b1f..33f2661ea904870a96ae97d21a67dc9681399c57 100644
+--- a/ui/shell_dialogs/select_file_dialog_mac.mm
++++ b/ui/shell_dialogs/select_file_dialog_mac.mm
+@@ -429,6 +429,18 @@ SelectFileDialog* CreateSelectFileDialog(
+   return [url isFileURL];
+ }
+ 
++- (BOOL)panel:(id)sender validateURL:(NSURL*)url error:(NSError**)outError {
++  // Refuse to accept users closing the dialog with a key repeat, since the key
++  // may have been first pressed while the user was looking at insecure content.
++  // See https://crbug.com/637098.
++  if ([[NSApp currentEvent] type] == NSKeyDown &&
++      [[NSApp currentEvent] isARepeat]) {
++    return NO;
++  }
++
++  return YES;
++}
++
+ @end
+ 
+ @implementation ExtensionDropdownHandler
 diff --git a/ui/shell_dialogs/select_file_dialog_win.cc b/ui/shell_dialogs/select_file_dialog_win.cc
-index c3332f260f9c02e5df94e814d481059eaddfb7b8..fc7ea3a71a88ba512e5bcd89077e7b84b1087e91 100644
+index be73a0677dbde4a30d198a97a0491f5cc9d9ef7d..8cdea0bac9e5cb974d7e8e805e92a5568b04b4da 100644
 --- a/ui/shell_dialogs/select_file_dialog_win.cc
 +++ b/ui/shell_dialogs/select_file_dialog_win.cc
-@@ -588,6 +588,10 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
+@@ -611,6 +611,10 @@ bool SelectFileDialogImpl::RunOpenFileDialog(
      else
        ofn.SetInitialSelection(path->DirName(), path->BaseName());
    }
@@ -564,10 +490,10 @@ index c3332f260f9c02e5df94e814d481059eaddfb7b8..fc7ea3a71a88ba512e5bcd89077e7b84
    if (!filter.empty())
      ofn.GetOPENFILENAME()->lpstrFilter = filter.c_str();
 diff --git a/ui/views/bubble/bubble_dialog_delegate.cc b/ui/views/bubble/bubble_dialog_delegate.cc
-index 6347c2606c6ccd7af23d99257dd1657e4a31d892..8ebb433c1033f48f1e8a9df6e78f875e82f8b637 100644
+index aa98ca418f73b45bdfeef566b40f8c8b02c59b30..d5d49c068bad5f6d3269862200b46e50e3d8e3c4 100644
 --- a/ui/views/bubble/bubble_dialog_delegate.cc
 +++ b/ui/views/bubble/bubble_dialog_delegate.cc
-@@ -26,6 +26,8 @@
+@@ -27,6 +27,8 @@
  #include "ui/base/win/shell.h"
  #endif
  
@@ -576,7 +502,7 @@ index 6347c2606c6ccd7af23d99257dd1657e4a31d892..8ebb433c1033f48f1e8a9df6e78f875e
  namespace views {
  
  namespace {
-@@ -77,8 +79,17 @@ Widget* BubbleDialogDelegateView::CreateBubble(
+@@ -78,8 +80,17 @@ Widget* BubbleDialogDelegateView::CreateBubble(
    // the parent frame and let DWM handle compositing.  If not, then we don't
    // want to allow the bubble to extend the frame because it will be clipped.
    bubble_delegate->set_adjust_if_offscreen(ui::win::IsAeroGlassEnabled());
@@ -624,6 +550,50 @@ index 1a056eb2404d87d0fe686182a342e4878d9b9193..c8da8a3c3f34094b4ee74222c504112a
    // Only used for testing.
    static void TurnOffMenuSelectionHoldForTest();
  
+diff --git a/ui/views/controls/menu/menu_model_adapter.cc b/ui/views/controls/menu/menu_model_adapter.cc
+index 06a9d3cfda9b6fdd3f6d315fd62e22504e9cc574..b7299cd2242487841d1d94be40c916c304df6675 100644
+--- a/ui/views/controls/menu/menu_model_adapter.cc
++++ b/ui/views/controls/menu/menu_model_adapter.cc
+@@ -49,6 +49,26 @@ void MenuModelAdapter::BuildMenu(MenuItemView* menu) {
+   menu->ChildrenChanged();
+ }
+ 
++void MenuModelAdapter::VivaldiUpdateMenu(MenuItemView* menu,
++                                         ui::MenuModel* model) {
++  // Clear the menu.
++  if (menu->HasSubmenu()) {
++    const int subitem_count = menu->GetSubmenu()->child_count();
++    for (int i = 0; i < subitem_count; ++i)
++      menu->RemoveMenuItemAt(0);
++  }
++
++  // Leave entries in the map if the menu is being shown.  This
++  // allows the map to find the menu model of submenus being closed
++  // so ui::MenuModel::MenuClosed() can be called.
++  if (!menu->GetMenuController())
++    menu_map_.clear();
++  menu_map_[menu] = model;
++
++  // Repopulate the menu.
++  BuildMenuImpl(menu, model);
++}
++
+ MenuItemView* MenuModelAdapter::CreateMenu() {
+   MenuItemView* item = new MenuItemView(this);
+   BuildMenu(item);
+diff --git a/ui/views/controls/menu/menu_model_adapter.h b/ui/views/controls/menu/menu_model_adapter.h
+index 0ac493c3c6a0ce46afe5cfba347c413cf970301e..bf98321e181803710c51acb8d7fc5e1be894f4f6 100644
+--- a/ui/views/controls/menu/menu_model_adapter.h
++++ b/ui/views/controls/menu/menu_model_adapter.h
+@@ -33,6 +33,8 @@ class VIEWS_EXPORT MenuModelAdapter : public MenuDelegate {
+   // (including submenus).
+   virtual void BuildMenu(MenuItemView* menu);
+ 
++  void VivaldiUpdateMenu(MenuItemView* menu, ui::MenuModel* model);
++
+   // Convenience for creating and populating a menu. The caller owns the
+   // returned MenuItemView.
+   MenuItemView* CreateMenu();
 diff --git a/ui/views/controls/menu/menu_runner_impl.cc b/ui/views/controls/menu/menu_runner_impl.cc
 index 0004fe4a546bf447419454f73d48809c3e48e512..926f895611ae7bfa7298310a01ba2375595c1df5 100644
 --- a/ui/views/controls/menu/menu_runner_impl.cc
@@ -646,6 +616,121 @@ index 0004fe4a546bf447419454f73d48809c3e48e512..926f895611ae7bfa7298310a01ba2375
  #if defined(OS_WIN)
    show_mnemonics |= ui::win::IsAltPressed();
  #elif defined(USE_X11)
+diff --git a/ui/views/controls/textfield/textfield.cc b/ui/views/controls/textfield/textfield.cc
+index 7be7cbfa1a61f0d40578e52d9d55c7ed1aaa3720..b1a77a28fd7e3b0ff3b548197189d377b711e69f 100644
+--- a/ui/views/controls/textfield/textfield.cc
++++ b/ui/views/controls/textfield/textfield.cc
+@@ -73,6 +73,10 @@
+ #include "ui/wm/core/ime_util_chromeos.h"
+ #endif
+ 
++#if defined(OS_MACOSX)
++#include "ui/base/cocoa/secure_password_input.h"
++#endif
++
+ namespace views {
+ 
+ namespace {
+@@ -1030,6 +1034,11 @@ void Textfield::OnPaint(gfx::Canvas* canvas) {
+ }
+ 
+ void Textfield::OnFocus() {
++#if defined(OS_MACOSX)
++  if (text_input_type_ == ui::TEXT_INPUT_TYPE_PASSWORD)
++    password_input_enabler_.reset(new ui::ScopedPasswordInputEnabler());
++#endif  // defined(OS_MACOSX)
++
+   GetRenderText()->set_focused(true);
+   if (ShouldShowCursor()) {
+     UpdateCursorViewPosition();
+@@ -1073,6 +1082,10 @@ void Textfield::OnBlur() {
+     FocusRing::Uninstall(this);
+   SchedulePaint();
+   View::OnBlur();
++
++#if defined(OS_MACOSX)
++  password_input_enabler_.reset();
++#endif  // defined(OS_MACOSX)
+ }
+ 
+ gfx::Point Textfield::GetKeyboardContextMenuLocation() {
+diff --git a/ui/views/controls/textfield/textfield.h b/ui/views/controls/textfield/textfield.h
+index 1c36080fcf68d7cb344da5fd2543ab3ad39e13ba..2c9da38ebebe7a6efa087dded47ef21fac9233f9 100644
+--- a/ui/views/controls/textfield/textfield.h
++++ b/ui/views/controls/textfield/textfield.h
+@@ -16,6 +16,7 @@
+ #include "base/memory/weak_ptr.h"
+ #include "base/strings/string16.h"
+ #include "base/time/time.h"
++#include "build/build_config.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/base/ime/text_input_client.h"
+ #include "ui/base/ime/text_input_type.h"
+@@ -38,6 +39,12 @@ namespace base {
+ class TimeDelta;
+ }
+ 
++#if defined(OS_MACOSX)
++namespace ui {
++class ScopedPasswordInputEnabler;
++}
++#endif  // defined(OS_MACOSX)
++
+ namespace views {
+ 
+ class MenuRunner;
+@@ -556,6 +563,11 @@ class VIEWS_EXPORT Textfield : public View,
+   // View containing the text cursor.
+   View cursor_view_;
+ 
++#if defined(OS_MACOSX)
++  // Used to track active password input sessions.
++  std::unique_ptr<ui::ScopedPasswordInputEnabler> password_input_enabler_;
++#endif  // defined(OS_MACOSX)
++
+   // Used to bind callback functions to this object.
+   base::WeakPtrFactory<Textfield> weak_ptr_factory_;
+ 
+diff --git a/ui/views/controls/textfield/textfield_unittest.cc b/ui/views/controls/textfield/textfield_unittest.cc
+index 4ee16e762840792aba8c29a401c2712e61ddac75..f1f5da720583c9a8293f940f444cdfa9f0989cad 100644
+--- a/ui/views/controls/textfield/textfield_unittest.cc
++++ b/ui/views/controls/textfield/textfield_unittest.cc
+@@ -67,6 +67,10 @@
+ #include "ui/wm/core/ime_util_chromeos.h"
+ #endif
+ 
++#if defined(OS_MACOSX)
++#include "ui/base/cocoa/secure_password_input.h"
++#endif
++
+ using base::ASCIIToUTF16;
+ using base::UTF8ToUTF16;
+ using base::WideToUTF16;
+@@ -3400,4 +3404,24 @@ TEST_F(TextfieldTest, SendingDeletePreservesShiftFlag) {
+   EXPECT_EQ(ui::EF_SHIFT_DOWN, textfield_->event_flags());
+ }
+ 
++#if defined(OS_MACOSX)
++TEST_F(TextfieldTest, SecurePasswordInput) {
++  InitTextfield();
++  ASSERT_FALSE(ui::ScopedPasswordInputEnabler::IsPasswordInputEnabled());
++
++  // Shouldn't enable secure input if it's not a password textfield.
++  textfield_->OnFocus();
++  EXPECT_FALSE(ui::ScopedPasswordInputEnabler::IsPasswordInputEnabled());
++
++  textfield_->SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
++
++  // Single matched calls immediately update IsPasswordInputEnabled().
++  textfield_->OnFocus();
++  EXPECT_TRUE(ui::ScopedPasswordInputEnabler::IsPasswordInputEnabled());
++
++  textfield_->OnBlur();
++  EXPECT_FALSE(ui::ScopedPasswordInputEnabler::IsPasswordInputEnabled());
++}
++#endif  // defined(OS_MACOSX)
++
+ }  // namespace views
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc b/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
 index 55dcdf780ebcbb604dc9d066859756b65befa8b8..6e4013a9fcf2b882e485abc4e9c1f51177978a39 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.cc
@@ -697,7 +782,7 @@ index 37c90c1e7fe452054eff348a3301db48d8f91273..c1bfc1ba8e15151876dd84bb87c23c0b
    bool IsDragDropInProgress() override;
    void AddObserver(aura::client::DragDropClientObserver* observer) override;
 diff --git a/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc b/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc
-index 0871f4348a1259e2a305438bac3329507b797ee4..58dcb15e2657f4bd933e43fdf81720a4cefeeff4 100644
+index 2800896f01fc61259ccf63107b35d14a39d98bab..7ed7f86b20b9f2db50938e50163866966f9a14cc 100644
 --- a/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc
 +++ b/ui/views/widget/desktop_aura/desktop_drag_drop_client_win.cc
 @@ -12,6 +12,9 @@
@@ -710,7 +795,7 @@ index 0871f4348a1259e2a305438bac3329507b797ee4..58dcb15e2657f4bd933e43fdf81720a4
  namespace views {
  
  DesktopDragDropClientWin::DesktopDragDropClientWin(
-@@ -34,13 +37,19 @@ int DesktopDragDropClientWin::StartDragAndDrop(
+@@ -35,13 +38,19 @@ int DesktopDragDropClientWin::StartDragAndDrop(
      aura::Window* source_window,
      const gfx::Point& screen_location,
      int operation,
@@ -731,7 +816,7 @@ index 0871f4348a1259e2a305438bac3329507b797ee4..58dcb15e2657f4bd933e43fdf81720a4
    Microsoft::WRL::ComPtr<ui::DragSourceWin> drag_source_copy = drag_source_;
    drag_source_copy->set_data(&data);
    ui::OSExchangeDataProviderWin::GetDataObjectImpl(data)
-@@ -59,6 +68,8 @@ int DesktopDragDropClientWin::StartDragAndDrop(
+@@ -60,6 +69,8 @@ int DesktopDragDropClientWin::StartDragAndDrop(
    if (alive)
      drag_drop_in_progress_ = false;
  
@@ -788,7 +873,7 @@ index 17464aafc7829104361848118dc47909bc69e296..4fd279838d6edde87a5b417a877fbf38
    return GetPrimaryDisplay();
  }
 diff --git a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
-index b802ad497cf25a028b494d25885808f67e7b8c2a..4353349791111c92fba20bfb60f649dbf46aff2f 100644
+index deaf9cbc13ccdcb0a0dc5a04a5c5a160b27d1f5b..8000e8795f549c0540e2085c78b97973857337c9 100644
 --- a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
 +++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
 @@ -61,6 +61,8 @@
@@ -797,10 +882,10 @@ index b802ad497cf25a028b494d25885808f67e7b8c2a..4353349791111c92fba20bfb60f649db
  
 +#include "ui/views/widget/widget_delegate.h"
 +
- DECLARE_UI_CLASS_PROPERTY_TYPE(views::DesktopWindowTreeHostX11*);
+ DEFINE_UI_CLASS_PROPERTY_TYPE(views::DesktopWindowTreeHostX11*);
  
  namespace views {
-@@ -1332,6 +1334,15 @@ void DesktopWindowTreeHostX11::InitX11Window(
+@@ -1341,6 +1343,15 @@ void DesktopWindowTreeHostX11::InitX11Window(
    swa.background_pixmap = x11::None;
    swa.bit_gravity = NorthWestGravity;
  
@@ -816,7 +901,7 @@ index b802ad497cf25a028b494d25885808f67e7b8c2a..4353349791111c92fba20bfb60f649db
    ::Atom window_type;
    switch (params.type) {
      case Widget::InitParams::TYPE_MENU:
-@@ -1763,6 +1774,22 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
+@@ -1753,6 +1764,22 @@ void DesktopWindowTreeHostX11::DispatchMouseEvent(ui::MouseEvent* event) {
    if (event->IsAnyButton() || event->IsMouseWheelEvent())
      FlashFrame(false);
  
@@ -840,7 +925,7 @@ index b802ad497cf25a028b494d25885808f67e7b8c2a..4353349791111c92fba20bfb60f649db
      SendEventToSink(event);
    } else {
 diff --git a/ui/views/widget/native_widget_aura.cc b/ui/views/widget/native_widget_aura.cc
-index c363d7e383ede0b2f9d872096ddd5e8b6975886b..42dbf227aeb264e823eef3187b28bebd7a943f4d 100644
+index 8797bf889fbc6529b89ccdda9a9b54dd18ed640a..2c65de71689c01b9fabd07718fb82a4adf55b6e4 100644
 --- a/ui/views/widget/native_widget_aura.cc
 +++ b/ui/views/widget/native_widget_aura.cc
 @@ -1167,6 +1167,8 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
@@ -915,21 +1000,8 @@ index bd4d8a7a1de290efe33f61084d1640e85e1badd2..b2a9249b38d29dc54ea0a69fd4271aba
    // Returns the window's name identifier. Used to identify this window for
    // state restoration.
    virtual std::string GetWindowName() const;
-diff --git a/ui/views/widget/widget_hwnd_utils.cc b/ui/views/widget/widget_hwnd_utils.cc
-index 163e4b54b033c904237190867d81efef01f3c6bc..0f595a7fc23abbab8e925a087b2cd77244c2d88a 100644
---- a/ui/views/widget/widget_hwnd_utils.cc
-+++ b/ui/views/widget/widget_hwnd_utils.cc
-@@ -93,7 +93,7 @@ void CalculateWindowStylesFromInitParams(
- 
-       // See layered window comment below.
-       if (is_translucent)
--        *style &= ~(WS_THICKFRAME | WS_CAPTION);
-+        *style &= ~(/*WS_THICKFRAME |*/ WS_CAPTION);
-       break;
-     }
-     case Widget::InitParams::TYPE_CONTROL:
 diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
-index 60c6c0e235ea62293e22c72f158450e13a11c527..6e390405ffdc9a8e1d24e0ff9de17556d81085b7 100644
+index 5906900d721c2b97a65e7a1c42af0e14eefb4d9a..4646993d25ea8a6da10a14b7882db1222958ac76 100644
 --- a/ui/views/win/hwnd_message_handler.cc
 +++ b/ui/views/win/hwnd_message_handler.cc
 @@ -1225,8 +1225,12 @@ bool HWNDMessageHandler::GetClientAreaInsets(gfx::Insets* insets) const {
