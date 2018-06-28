@@ -6,7 +6,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "contact/phonenumber_type.h"
+#include "contact/postaladdress_type.h"
 
 #include <limits>
 #include "base/memory/ptr_util.h"
@@ -14,21 +14,16 @@
 
 namespace contact {
 
-PhonenumberRow::PhonenumberRow() {}
-
-PhonenumberRow::~PhonenumberRow() {}
-
-void PhonenumberRow::Swap(PhonenumberRow* other) {
-  std::swap(phonenumber_id_, other->phonenumber_id_);
+void PostalAddressRow::Swap(PostalAddressRow* other) {
+  std::swap(postal_address_id_, other->postal_address_id_);
   std::swap(contact_id_, other->contact_id_);
+  std::swap(postal_address_, other->postal_address_);
   std::swap(type_, other->type_);
-  std::swap(phonenumber_, other->phonenumber_);
-  std::swap(is_default_, other->is_default_);
 }
 
-PhonenumberRow::PhonenumberRow(const PhonenumberRow& other) = default;
+PostalAddressRow::PostalAddressRow(const PostalAddressRow& other) = default;
 
-PhonenumberRow& PhonenumberRow::operator=(const PhonenumberRow& telephone_row) =
-    default;
+PostalAddressRow& PostalAddressRow::operator=(
+    const PostalAddressRow& postaladdress_row) = default;
 
 }  // namespace contact
