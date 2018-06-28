@@ -1,161 +1,3 @@
-diff --git a/buildtools/third_party/libc++/trunk/test/std/localization/locales/locale.convenience/conversions/conversions.string/ctor_err_string.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/localization/locales/locale.convenience/conversions/conversions.string/ctor_err_string.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..70204c2fb99aacfcc640d04934137bffaa5ef64f
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/localization/locales/locale.convenience/conversions/conversions.string/ctor_err_string.pass.cpp
-@@ -0,0 +1,74 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+// <locale>
-+
-+// wstring_convert<Codecvt, Elem, Wide_alloc, Byte_alloc>
-+
-+// wstring_convert(const byte_string& byte_err,
-+//                 const wide_string& wide_err = wide_string());
-+
-+#include <locale>
-+#include <codecvt>
-+#include <cassert>
-+
-+#include "test_macros.h"
-+
-+int main()
-+{
-+    typedef std::codecvt_utf8<wchar_t> Codecvt;
-+    typedef std::wstring_convert<Codecvt> Myconv;
-+#if TEST_STD_VER > 11
-+    static_assert(!std::is_convertible<std::string, Myconv>::value, "");
-+    static_assert( std::is_constructible<Myconv, std::string>::value, "");
-+#endif
-+#ifndef TEST_HAS_NO_EXCEPTIONS
-+    {
-+        Myconv myconv;
-+        try
-+        {
-+            myconv.to_bytes(L"\xDA83");
-+            assert(false);
-+        }
-+        catch (const std::range_error&)
-+        {
-+        }
-+        try
-+        {
-+            myconv.from_bytes('\xA5');
-+            assert(false);
-+        }
-+        catch (const std::range_error&)
-+        {
-+        }
-+    }
-+#endif
-+    {
-+        Myconv myconv("byte error");
-+        std::string bs = myconv.to_bytes(L"\xDA83");
-+        assert(bs == "byte error");
-+#ifndef TEST_HAS_NO_EXCEPTIONS
-+        try
-+        {
-+            myconv.from_bytes('\xA5');
-+            assert(false);
-+        }
-+        catch (const std::range_error&)
-+        {
-+        }
-+#endif
-+    }
-+    {
-+        Myconv myconv("byte error", L"wide error");
-+        std::string bs = myconv.to_bytes(L"\xDA83");
-+        assert(bs == "byte error");
-+        std::wstring ws = myconv.from_bytes('\xA5');
-+        assert(ws == L"wide error");
-+    }
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/localization/locales/locale.convenience/conversions/conversions.string/from_bytes.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/localization/locales/locale.convenience/conversions/conversions.string/from_bytes.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..2e627b7399285cc9a99e6cda631e289c139f02b9
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/localization/locales/locale.convenience/conversions/conversions.string/from_bytes.pass.cpp
-@@ -0,0 +1,72 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+
-+// <locale>
-+
-+// wstring_convert<Codecvt, Elem, Wide_alloc, Byte_alloc>
-+
-+// wide_string from_bytes(char byte);
-+// wide_string from_bytes(const char* ptr);
-+// wide_string from_bytes(const byte_string& str);
-+// wide_string from_bytes(const char* first, const char* last);
-+
-+#include <locale>
-+#include <codecvt>
-+#include <cassert>
-+
-+template <class CharT, size_t = sizeof(CharT)>
-+struct TestHelper;
-+template <class CharT>
-+struct TestHelper<CharT, 2> {
-+  static void test();
-+};
-+template <class CharT>
-+struct TestHelper<CharT, 4> {
-+  static void test();
-+};
-+
-+template <class CharT>
-+void TestHelper<CharT, 2>::test() {
-+  static_assert((std::is_same<CharT, wchar_t>::value), "");
-+  {
-+    std::wstring_convert<std::codecvt_utf8<CharT> > myconv;
-+    std::string bs("\xE1\x80\x85\x00");
-+    std::wstring ws = myconv.from_bytes('a');
-+    assert(ws == L"a");
-+    ws = myconv.from_bytes(bs.c_str());
-+    assert(ws == L"\x1005");
-+    ws = myconv.from_bytes(bs);
-+    assert(ws == L"\x1005");
-+    ws = myconv.from_bytes(bs.data(), bs.data() + bs.size());
-+    assert(ws == L"\x1005");
-+    ws = myconv.from_bytes("");
-+    assert(ws.size() == 0);
-+  }
-+}
-+
-+template <class CharT>
-+void TestHelper<CharT, 4>::test() {
-+  static_assert((std::is_same<CharT, wchar_t>::value), "");
-+  {
-+    std::wstring_convert<std::codecvt_utf8<CharT> > myconv;
-+    std::string bs("\xF1\x80\x80\x83");
-+    std::wstring ws = myconv.from_bytes('a');
-+    assert(ws == L"a");
-+    ws = myconv.from_bytes(bs.c_str());
-+    assert(ws == L"\x40003");
-+    ws = myconv.from_bytes(bs);
-+    assert(ws == L"\x40003");
-+    ws = myconv.from_bytes(bs.data(), bs.data() + bs.size());
-+    assert(ws == L"\x40003");
-+    ws = myconv.from_bytes("");
-+    assert(ws.size() == 0);
-+  }
-+}
-+
-+int main() { TestHelper<wchar_t>::test(); }
 diff --git a/buildtools/third_party/libc++/trunk/test/std/localization/locales/locale.convenience/conversions/conversions.string/state.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/localization/locales/locale.convenience/conversions/conversions.string/state.pass.cpp
 new file mode 100644
 index 0000000000000000000000000000000000000000..a7a816b37f9d73f5107b5b6a3e0971dfa9900078
@@ -31622,5 +31464,80 @@ index 0000000000000000000000000000000000000000..0d52179ae7e399dc50d374ace6169513
 +        typedef std::cauchy_distribution<> D;
 +        D d(.5, .5);
 +        assert(d.min() == -INFINITY);
++    }
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/numerics/rand/rand.dis/rand.dist.norm/rand.dist.norm.cauchy/param_assign.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/numerics/rand/rand.dis/rand.dist.norm/rand.dist.norm.cauchy/param_assign.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..f8e0852834d3559c01a3d38e791a1ee24e1d60ff
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/numerics/rand/rand.dis/rand.dist.norm/rand.dist.norm.cauchy/param_assign.pass.cpp
+@@ -0,0 +1,32 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// <random>
++
++// template<class RealType = double>
++// class cauchy_distribution
++// {
++//     class param_type;
++
++#include <random>
++#include <limits>
++#include <cassert>
++
++int main()
++{
++    {
++        typedef std::cauchy_distribution<> D;
++        typedef D::param_type param_type;
++        param_type p0(.75, 6);
++        param_type p;
++        p = p0;
++        assert(p.a() == .75);
++        assert(p.b() == 6);
++    }
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/numerics/rand/rand.dis/rand.dist.norm/rand.dist.norm.cauchy/param_copy.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/numerics/rand/rand.dis/rand.dist.norm/rand.dist.norm.cauchy/param_copy.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..28ef0682775780c3a1b5a900fa9aff2573039778
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/numerics/rand/rand.dis/rand.dist.norm/rand.dist.norm.cauchy/param_copy.pass.cpp
+@@ -0,0 +1,31 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// <random>
++
++// template<class RealType = double>
++// class cauchy_distribution
++// {
++//     class param_type;
++
++#include <random>
++#include <limits>
++#include <cassert>
++
++int main()
++{
++    {
++        typedef std::cauchy_distribution<> D;
++        typedef D::param_type param_type;
++        param_type p0(10, .125);
++        param_type p = p0;
++        assert(p.a() == 10);
++        assert(p.b() == .125);
 +    }
 +}

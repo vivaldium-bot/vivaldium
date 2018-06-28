@@ -1,104 +1,3 @@
-diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.lock/thread.lock.guard/mutex.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.lock/thread.lock.guard/mutex.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..97f9d07c151271ad5ae4a52e8851dd098ba774d3
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.lock/thread.lock.guard/mutex.pass.cpp
-@@ -0,0 +1,60 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+//
-+// UNSUPPORTED: libcpp-has-no-threads
-+
-+// <mutex>
-+
-+// template <class Mutex> class lock_guard;
-+
-+// explicit lock_guard(mutex_type& m);
-+
-+// template<class _Mutex> lock_guard(lock_guard<_Mutex>)
-+//     -> lock_guard<_Mutex>;  // C++17
-+
-+#include <mutex>
-+#include <thread>
-+#include <cstdlib>
-+#include <cassert>
-+
-+#include "test_macros.h"
-+
-+std::mutex m;
-+
-+typedef std::chrono::system_clock Clock;
-+typedef Clock::time_point time_point;
-+typedef Clock::duration duration;
-+typedef std::chrono::milliseconds ms;
-+typedef std::chrono::nanoseconds ns;
-+
-+void f()
-+{
-+    time_point t0 = Clock::now();
-+    time_point t1;
-+    {
-+    std::lock_guard<std::mutex> lg(m);
-+    t1 = Clock::now();
-+    }
-+    ns d = t1 - t0 - ms(250);
-+    assert(d < ms(200));  // within 200ms
-+}
-+
-+int main()
-+{
-+    m.lock();
-+    std::thread t(f);
-+    std::this_thread::sleep_for(ms(250));
-+    m.unlock();
-+    t.join();
-+
-+#ifdef __cpp_deduction_guides
-+    std::lock_guard lg(m);
-+    static_assert((std::is_same<decltype(lg), std::lock_guard<decltype(m)>>::value), "" );
-+#endif
-+}
-diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.lock/thread.lock.guard/types.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.lock/thread.lock.guard/types.pass.cpp
-new file mode 100644
-index 0000000000000000000000000000000000000000..5238ed67064f5733450755d90b5890966d28199d
---- /dev/null
-+++ b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.lock/thread.lock.guard/types.pass.cpp
-@@ -0,0 +1,29 @@
-+//===----------------------------------------------------------------------===//
-+//
-+//                     The LLVM Compiler Infrastructure
-+//
-+// This file is dual licensed under the MIT and the University of Illinois Open
-+// Source Licenses. See LICENSE.TXT for details.
-+//
-+//===----------------------------------------------------------------------===//
-+//
-+// UNSUPPORTED: libcpp-has-no-threads
-+
-+// <mutex>
-+
-+// template <class Mutex>
-+// class lock_guard
-+// {
-+// public:
-+//     typedef Mutex mutex_type;
-+//     ...
-+// };
-+
-+#include <mutex>
-+#include <type_traits>
-+
-+int main()
-+{
-+    static_assert((std::is_same<std::lock_guard<std::mutex>::mutex_type,
-+                   std::mutex>::value), "");
-+}
 diff --git a/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.lock/thread.lock.scoped/adopt_lock.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/thread/thread.mutex/thread.lock/thread.lock.scoped/adopt_lock.pass.cpp
 new file mode 100644
 index 0000000000000000000000000000000000000000..d49ba8d1139b71bc7030b56b0fb281d324bba838
@@ -36069,4 +35968,228 @@ index 0000000000000000000000000000000000000000..fc01b22c36abe822cd0876b9206118fe
 +#endif
 +    test_no_result<PMD(ND&)>();
 +    }
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.trans/meta.trans.other/result_of11.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.trans/meta.trans.other/result_of11.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..eac4e4a089fed059aa7acec8b27d36fa86627747
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.trans/meta.trans.other/result_of11.pass.cpp
+@@ -0,0 +1,156 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++//
++// UNSUPPORTED: c++98, c++03
++//
++// <functional>
++//
++// result_of<Fn(ArgTypes...)>
++
++#include <type_traits>
++#include <memory>
++#include <utility>
++#include "test_macros.h"
++
++struct wat
++{
++    wat& operator*() { return *this; }
++    void foo();
++};
++
++struct F {};
++struct FD : public F {};
++
++template <class T, class U>
++void test_result_of_imp()
++{
++    static_assert((std::is_same<typename std::result_of<T>::type, U>::value), "");
++#if TEST_STD_VER > 11
++    static_assert((std::is_same<std::result_of_t<T>, U>::value), "");
++#endif
++#if TEST_STD_VER > 14
++    static_assert(std::is_callable<T>::value, "");
++    static_assert(std::is_callable<T, U>::value, "");
++#endif
++}
++
++int main()
++{
++    {
++    typedef char F::*PMD;
++    test_result_of_imp<PMD(F                &), char                &>();
++    test_result_of_imp<PMD(F const          &), char const          &>();
++    test_result_of_imp<PMD(F volatile       &), char volatile       &>();
++    test_result_of_imp<PMD(F const volatile &), char const volatile &>();
++
++    test_result_of_imp<PMD(F                &&), char                &&>();
++    test_result_of_imp<PMD(F const          &&), char const          &&>();
++    test_result_of_imp<PMD(F volatile       &&), char volatile       &&>();
++    test_result_of_imp<PMD(F const volatile &&), char const volatile &&>();
++
++    test_result_of_imp<PMD(F                ), char &&>();
++    test_result_of_imp<PMD(F const          ), char &&>();
++    test_result_of_imp<PMD(F volatile       ), char &&>();
++    test_result_of_imp<PMD(F const volatile ), char &&>();
++
++    test_result_of_imp<PMD(FD                &), char                &>();
++    test_result_of_imp<PMD(FD const          &), char const          &>();
++    test_result_of_imp<PMD(FD volatile       &), char volatile       &>();
++    test_result_of_imp<PMD(FD const volatile &), char const volatile &>();
++
++    test_result_of_imp<PMD(FD                &&), char                &&>();
++    test_result_of_imp<PMD(FD const          &&), char const          &&>();
++    test_result_of_imp<PMD(FD volatile       &&), char volatile       &&>();
++    test_result_of_imp<PMD(FD const volatile &&), char const volatile &&>();
++
++    test_result_of_imp<PMD(FD                ), char &&>();
++    test_result_of_imp<PMD(FD const          ), char &&>();
++    test_result_of_imp<PMD(FD volatile       ), char &&>();
++    test_result_of_imp<PMD(FD const volatile ), char &&>();
++
++    test_result_of_imp<PMD(std::unique_ptr<F>),        char &>();
++    test_result_of_imp<PMD(std::unique_ptr<F const>),  const char &>();
++    test_result_of_imp<PMD(std::unique_ptr<FD>),       char &>();
++    test_result_of_imp<PMD(std::unique_ptr<FD const>), const char &>();
++
++    test_result_of_imp<PMD(std::reference_wrapper<F>),        char &>();
++    test_result_of_imp<PMD(std::reference_wrapper<F const>),  const char &>();
++    test_result_of_imp<PMD(std::reference_wrapper<FD>),       char &>();
++    test_result_of_imp<PMD(std::reference_wrapper<FD const>), const char &>();
++    }
++    {
++    test_result_of_imp<int (F::* (F       &)) ()                &, int> ();
++    test_result_of_imp<int (F::* (F       &)) () const          &, int> ();
++    test_result_of_imp<int (F::* (F       &)) () volatile       &, int> ();
++    test_result_of_imp<int (F::* (F       &)) () const volatile &, int> ();
++    test_result_of_imp<int (F::* (F const &)) () const          &, int> ();
++    test_result_of_imp<int (F::* (F const &)) () const volatile &, int> ();
++    test_result_of_imp<int (F::* (F volatile &)) () volatile       &, int> ();
++    test_result_of_imp<int (F::* (F volatile &)) () const volatile &, int> ();
++    test_result_of_imp<int (F::* (F const volatile &)) () const volatile &, int> ();
++
++    test_result_of_imp<int (F::* (F       &&)) ()                &&, int> ();
++    test_result_of_imp<int (F::* (F       &&)) () const          &&, int> ();
++    test_result_of_imp<int (F::* (F       &&)) () volatile       &&, int> ();
++    test_result_of_imp<int (F::* (F       &&)) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (F const &&)) () const          &&, int> ();
++    test_result_of_imp<int (F::* (F const &&)) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (F volatile &&)) () volatile       &&, int> ();
++    test_result_of_imp<int (F::* (F volatile &&)) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (F const volatile &&)) () const volatile &&, int> ();
++
++    test_result_of_imp<int (F::* (F       )) ()                &&, int> ();
++    test_result_of_imp<int (F::* (F       )) () const          &&, int> ();
++    test_result_of_imp<int (F::* (F       )) () volatile       &&, int> ();
++    test_result_of_imp<int (F::* (F       )) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (F const )) () const          &&, int> ();
++    test_result_of_imp<int (F::* (F const )) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (F volatile )) () volatile       &&, int> ();
++    test_result_of_imp<int (F::* (F volatile )) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (F const volatile )) () const volatile &&, int> ();
++    }
++    {
++    test_result_of_imp<int (F::* (FD       &)) ()                &, int> ();
++    test_result_of_imp<int (F::* (FD       &)) () const          &, int> ();
++    test_result_of_imp<int (F::* (FD       &)) () volatile       &, int> ();
++    test_result_of_imp<int (F::* (FD       &)) () const volatile &, int> ();
++    test_result_of_imp<int (F::* (FD const &)) () const          &, int> ();
++    test_result_of_imp<int (F::* (FD const &)) () const volatile &, int> ();
++    test_result_of_imp<int (F::* (FD volatile &)) () volatile       &, int> ();
++    test_result_of_imp<int (F::* (FD volatile &)) () const volatile &, int> ();
++    test_result_of_imp<int (F::* (FD const volatile &)) () const volatile &, int> ();
++
++    test_result_of_imp<int (F::* (FD       &&)) ()                &&, int> ();
++    test_result_of_imp<int (F::* (FD       &&)) () const          &&, int> ();
++    test_result_of_imp<int (F::* (FD       &&)) () volatile       &&, int> ();
++    test_result_of_imp<int (F::* (FD       &&)) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (FD const &&)) () const          &&, int> ();
++    test_result_of_imp<int (F::* (FD const &&)) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (FD volatile &&)) () volatile       &&, int> ();
++    test_result_of_imp<int (F::* (FD volatile &&)) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (FD const volatile &&)) () const volatile &&, int> ();
++
++    test_result_of_imp<int (F::* (FD       )) ()                &&, int> ();
++    test_result_of_imp<int (F::* (FD       )) () const          &&, int> ();
++    test_result_of_imp<int (F::* (FD       )) () volatile       &&, int> ();
++    test_result_of_imp<int (F::* (FD       )) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (FD const )) () const          &&, int> ();
++    test_result_of_imp<int (F::* (FD const )) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (FD volatile )) () volatile       &&, int> ();
++    test_result_of_imp<int (F::* (FD volatile )) () const volatile &&, int> ();
++    test_result_of_imp<int (F::* (FD const volatile )) () const volatile &&, int> ();
++    }
++    {
++    test_result_of_imp<int (F::* (std::reference_wrapper<F>))       (),       int>();
++    test_result_of_imp<int (F::* (std::reference_wrapper<const F>)) () const, int>();
++    test_result_of_imp<int (F::* (std::unique_ptr<F>       ))       (),       int>();
++    test_result_of_imp<int (F::* (std::unique_ptr<const F> ))       () const, int>();
++    }
++    test_result_of_imp<decltype(&wat::foo)(wat), void>();
++}
+diff --git a/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.trans/meta.trans.other/underlying_type.pass.cpp b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.trans/meta.trans.other/underlying_type.pass.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..b00798b72240cf1713728f3f102297ea993be328
+--- /dev/null
++++ b/buildtools/third_party/libc++/trunk/test/std/utilities/meta/meta.trans/meta.trans.other/underlying_type.pass.cpp
+@@ -0,0 +1,56 @@
++//===----------------------------------------------------------------------===//
++//
++//                     The LLVM Compiler Infrastructure
++//
++// This file is dual licensed under the MIT and the University of Illinois Open
++// Source Licenses. See LICENSE.TXT for details.
++//
++//===----------------------------------------------------------------------===//
++
++// type_traits
++
++// underlying_type
++
++#include <type_traits>
++#include <climits>
++
++#include "test_macros.h"
++
++enum E { V = INT_MIN };
++
++#if !defined(_WIN32) || defined(__MINGW32__)
++    #define TEST_UNSIGNED_UNDERLYING_TYPE 1
++#else
++    #define TEST_UNSIGNED_UNDERLYING_TYPE 0 // MSVC's ABI doesn't follow the Standard
++#endif
++
++#if TEST_UNSIGNED_UNDERLYING_TYPE
++enum F { W = UINT_MAX };
++#endif // TEST_UNSIGNED_UNDERLYING_TYPE
++
++int main()
++{
++    static_assert((std::is_same<std::underlying_type<E>::type, int>::value),
++                  "E has the wrong underlying type");
++#if TEST_UNSIGNED_UNDERLYING_TYPE
++    static_assert((std::is_same<std::underlying_type<F>::type, unsigned>::value),
++                  "F has the wrong underlying type");
++#endif // TEST_UNSIGNED_UNDERLYING_TYPE
++
++#if TEST_STD_VER > 11
++    static_assert((std::is_same<std::underlying_type_t<E>, int>::value), "");
++#if TEST_UNSIGNED_UNDERLYING_TYPE
++    static_assert((std::is_same<std::underlying_type_t<F>, unsigned>::value), "");
++#endif // TEST_UNSIGNED_UNDERLYING_TYPE
++#endif // TEST_STD_VER > 11
++
++#if TEST_STD_VER >= 11
++    enum G : char { };
++
++    static_assert((std::is_same<std::underlying_type<G>::type, char>::value),
++                  "G has the wrong underlying type");
++#if TEST_STD_VER > 11
++    static_assert((std::is_same<std::underlying_type_t<G>, char>::value), "");
++#endif // TEST_STD_VER > 11
++#endif // TEST_STD_VER >= 11
 +}
