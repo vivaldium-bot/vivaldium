@@ -1,43 +1,12 @@
-diff --git a/gpu/command_buffer/service/texture_manager.cc b/gpu/command_buffer/service/texture_manager.cc
-index 664460c09fa9ae4caf2a1082500852b8527b8ba0..d076c542baed370d390c2ed6f472ee36f3e265b6 100644
---- a/gpu/command_buffer/service/texture_manager.cc
-+++ b/gpu/command_buffer/service/texture_manager.cc
-@@ -2681,9 +2681,6 @@ void TextureManager::DoCubeMapWorkaround(
-     TextureRef* texture_ref,
-     const char* function_name,
-     const DoTexImageArguments& args) {
--  // This workaround code does not work with an unpack buffer bound.
--  ScopedResetPixelUnpackBuffer scoped_reset_pbo(state);
--
-   std::vector<GLenum> undefined_faces;
-   Texture* texture = texture_ref->texture();
-   if (texture_state->force_cube_complete ||
-@@ -2715,6 +2712,8 @@ void TextureManager::DoCubeMapWorkaround(
-   DoTexImageArguments new_args = args;
-   std::unique_ptr<char[]> zero(new char[args.pixels_size]);
-   memset(zero.get(), 0, args.pixels_size);
-+  // Need to clear PIXEL_UNPACK_BUFFER and UNPACK params for data uploading.
-+  state->PushTextureUnpackState();
-   for (GLenum face : undefined_faces) {
-     new_args.target = face;
-     new_args.pixels = zero.get();
-@@ -2722,6 +2721,7 @@ void TextureManager::DoCubeMapWorkaround(
-                function_name, texture_ref, new_args);
-     texture->MarkLevelAsInternalWorkaround(face, args.level);
-   }
-+  state->RestoreUnpackState();
- }
- 
- void TextureManager::ValidateAndDoTexImage(
 diff --git a/gpu/config/gpu_switches.cc b/gpu/config/gpu_switches.cc
-index c067d4a2b77cb7196850f9400968f2d557148d45..0ebb0777c501942e8a08bb16c94c866ce97ab6d4 100644
+index 05a0d464a5d287aa8a68efbdbf9f8ec3e8c239e5..7c77d97363ef109d1d10a5e5c21a5cf951b0017b 100644
 --- a/gpu/config/gpu_switches.cc
 +++ b/gpu/config/gpu_switches.cc
-@@ -90,4 +90,10 @@ const char kGpuVendorID[] = "gpu-vendor-id";
- // Ignores GPU blacklist.
- const char kIgnoreGpuBlacklist[] = "ignore-gpu-blacklist";
+@@ -71,4 +71,10 @@ const char kGpuBlacklistTestGroup[] = "gpu-blacklist-test-group";
+ // test_group ID.
+ const char kGpuDriverBugListTestGroup[] = "gpu-driver-bug-list-test-group";
  
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(PLATFORM_MEDIA_HWA)
 +// Attempts to turn on hardware accelerated video decoding. Relevant when
 +// platform decoders are used.
 +const char kEnablePlatformAcceleratedVideoDecoding[] =
@@ -45,14 +14,25 @@ index c067d4a2b77cb7196850f9400968f2d557148d45..0ebb0777c501942e8a08bb16c94c866c
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
  }  // namespace switches
 diff --git a/gpu/config/gpu_switches.h b/gpu/config/gpu_switches.h
-index 24f76bc6635f3365e22384231fee073044ba0054..31310caa56d014aa1b763bed4ed2bfcb7c5c192b 100644
+index bcd5440e8d039dd2ba488189846a345d3dcb1860..cec427c2f837372f0b7197e8aadf1c162d333b0b 100644
 --- a/gpu/config/gpu_switches.h
 +++ b/gpu/config/gpu_switches.h
-@@ -36,6 +36,10 @@ GPU_EXPORT extern const char kGpuTestingGLVersion[];
- GPU_EXPORT extern const char kGpuVendorID[];
- GPU_EXPORT extern const char kIgnoreGpuBlacklist[];
+@@ -7,6 +7,10 @@
+ 
+ #include "gpu/gpu_export.h"
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#include "platform_media/common/feature_toggles.h"
++#endif
++
+ namespace switches {
+ 
+ GPU_EXPORT extern const char kAMDSwitchable[];
+@@ -29,6 +33,10 @@ GPU_EXPORT extern const char kIgnoreGpuBlacklist[];
+ GPU_EXPORT extern const char kGpuBlacklistTestGroup[];
+ GPU_EXPORT extern const char kGpuDriverBugListTestGroup[];
+ 
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(PLATFORM_MEDIA_HWA)
 +GPU_EXPORT extern const char kEnablePlatformAcceleratedVideoDecoding[];
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +
@@ -60,22 +40,25 @@ index 24f76bc6635f3365e22384231fee073044ba0054..31310caa56d014aa1b763bed4ed2bfcb
  
  #endif  // GPU_CONFIG_GPU_SWITCHES_H_
 diff --git a/gpu/ipc/client/gpu_channel_host.h b/gpu/ipc/client/gpu_channel_host.h
-index 3de395f1a66a90cbe02a90c8694a550dfc935e1f..9e45415bb35d8187c59958b5f13ee5e2f79abe80 100644
+index 21b6d54e924eee64ca8bb8390a5d0f5dd80de265..1dac5536fe947242332f8e85ebd425bac0994a8f 100644
 --- a/gpu/ipc/client/gpu_channel_host.h
 +++ b/gpu/ipc/client/gpu_channel_host.h
-@@ -54,6 +54,7 @@ class GPU_EXPORT GpuChannelEstablishFactory {
-   // established, then |connection_error| is set to true (if it's not null).
-   virtual scoped_refptr<GpuChannelHost> EstablishGpuChannelSync(
-       bool* connection_error) = 0;
+@@ -48,6 +48,10 @@ class GPU_EXPORT GpuChannelEstablishFactory {
+ 
+   virtual void EstablishGpuChannel(GpuChannelEstablishedCallback callback) = 0;
+   virtual scoped_refptr<GpuChannelHost> EstablishGpuChannelSync() = 0;
++
++  // FEATURE_FORCE_ACCESS_TO_GPU
 +  virtual void SetForceAllowAccessToGpu(bool enable) = 0;
++
    virtual GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
  };
  
 diff --git a/gpu/ipc/service/gpu_channel.cc b/gpu/ipc/service/gpu_channel.cc
-index fbfcbf596221094fdcb47e40244600f0655e4d7c..77e1401b19ed177f7636f30ad4b4af799ed39736 100644
+index 2e83d3ef26ff380068a01a4bc8b6a54790aaed15..ce9c2f4b9c4a61d2b0e92d32c293b7c446363d5d 100644
 --- a/gpu/ipc/service/gpu_channel.cc
 +++ b/gpu/ipc/service/gpu_channel.cc
-@@ -382,6 +382,12 @@ void GpuChannel::SetUnhandledMessageListener(IPC::Listener* listener) {
+@@ -385,6 +385,12 @@ void GpuChannel::SetUnhandledMessageListener(IPC::Listener* listener) {
    unhandled_message_listener_ = listener;
  }
  
@@ -88,7 +71,7 @@ index fbfcbf596221094fdcb47e40244600f0655e4d7c..77e1401b19ed177f7636f30ad4b4af79
  base::WeakPtr<GpuChannel> GpuChannel::AsWeakPtr() {
    return weak_factory_.GetWeakPtr();
  }
-@@ -523,6 +529,11 @@ void GpuChannel::HandleMessageHelper(const IPC::Message& msg) {
+@@ -526,6 +532,11 @@ void GpuChannel::HandleMessageHelper(const IPC::Message& msg) {
    if (!handled && unhandled_message_listener_)
      handled = unhandled_message_listener_->OnMessageReceived(msg);
  
@@ -101,10 +84,10 @@ index fbfcbf596221094fdcb47e40244600f0655e4d7c..77e1401b19ed177f7636f30ad4b4af79
    if (!handled && msg.is_sync()) {
      IPC::Message* reply = IPC::SyncMessage::GenerateReply(&msg);
 diff --git a/gpu/ipc/service/gpu_channel.h b/gpu/ipc/service/gpu_channel.h
-index 78fb7707148062385f120764445713e7e44f2f63..a01158b4091cbe4a926e06ce5e4155c3dd6c47d1 100644
+index 31e857f9f62057bf44e0d6ac109c37d464daf1b0..b484908a4a73913e812262e981bb58f3bc936dbb 100644
 --- a/gpu/ipc/service/gpu_channel.h
 +++ b/gpu/ipc/service/gpu_channel.h
-@@ -97,6 +97,10 @@ class GPU_EXPORT GpuChannel : public IPC::Listener, public FilteredSender {
+@@ -98,6 +98,10 @@ class GPU_IPC_SERVICE_EXPORT GpuChannel : public IPC::Listener,
  
    void SetUnhandledMessageListener(IPC::Listener* listener);
  
@@ -115,7 +98,7 @@ index 78fb7707148062385f120764445713e7e44f2f63..a01158b4091cbe4a926e06ce5e4155c3
    // Get the GpuChannelManager that owns this channel.
    GpuChannelManager* gpu_channel_manager() const {
      return gpu_channel_manager_;
-@@ -217,6 +221,10 @@ class GPU_EXPORT GpuChannel : public IPC::Listener, public FilteredSender {
+@@ -218,6 +222,10 @@ class GPU_IPC_SERVICE_EXPORT GpuChannel : public IPC::Listener,
  
    IPC::Listener* unhandled_message_listener_ = nullptr;
  
@@ -127,10 +110,10 @@ index 78fb7707148062385f120764445713e7e44f2f63..a01158b4091cbe4a926e06ce5e4155c3
    IPC::MessageRouter router_;
  
 diff --git a/media/BUILD.gn b/media/BUILD.gn
-index 1260fdcbc9f0e13fbddbf7a8386f826a2ac11d8c..eb3ea6e08ff77d1864daa5d62edc85f92e07389a 100644
+index 1204e728d740d63b84dca92a843dda00286676ae..9b2cc12a7b9fba64eb1e7256023cab4e1b8c9b6b 100644
 --- a/media/BUILD.gn
 +++ b/media/BUILD.gn
-@@ -36,7 +36,7 @@ buildflag_header("media_features") {
+@@ -40,7 +40,7 @@ buildflag_header("media_features") {
  
  if (proprietary_codecs && media_use_ffmpeg) {
    assert(
@@ -140,42 +123,49 @@ index 1260fdcbc9f0e13fbddbf7a8386f826a2ac11d8c..eb3ea6e08ff77d1864daa5d62edc85f9
  }
  
 diff --git a/media/base/audio_decoder_config.cc b/media/base/audio_decoder_config.cc
-index c81697b7ce7f51497444355651defb8d0b3c7ee6..d9045b2b0fac0c20f3ce17a995b0c4ba8717d71f 100644
+index c81697b7ce7f51497444355651defb8d0b3c7ee6..8b021db8c168869efe61fdec02d79003af05c722 100644
 --- a/media/base/audio_decoder_config.cc
 +++ b/media/base/audio_decoder_config.cc
-@@ -16,6 +16,7 @@ AudioDecoderConfig::AudioDecoderConfig()
+@@ -16,6 +16,9 @@ AudioDecoderConfig::AudioDecoderConfig()
        bytes_per_channel_(0),
        channel_layout_(CHANNEL_LAYOUT_UNSUPPORTED),
        samples_per_second_(0),
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_INPUT_SAMPLES_PER_SECOND
 +      input_samples_per_second_(0),
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
        bytes_per_frame_(0),
        codec_delay_(0),
        should_discard_decoder_delay_(true) {}
-@@ -45,6 +46,7 @@ void AudioDecoderConfig::Initialize(AudioCodec codec,
+@@ -45,6 +48,9 @@ void AudioDecoderConfig::Initialize(AudioCodec codec,
    codec_ = codec;
    channel_layout_ = channel_layout;
    samples_per_second_ = samples_per_second;
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_INPUT_SAMPLES_PER_SECOND
 +  input_samples_per_second_ = 0;
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
    sample_format_ = sample_format;
    bytes_per_channel_ = SampleFormatToBytesPerChannel(sample_format);
    extra_data_ = extra_data;
-@@ -69,6 +71,8 @@ bool AudioDecoderConfig::IsValidConfig() const {
+@@ -69,6 +75,10 @@ bool AudioDecoderConfig::IsValidConfig() const {
           bytes_per_channel_ <= limits::kMaxBytesPerSample &&
           samples_per_second_ > 0 &&
           samples_per_second_ <= limits::kMaxSampleRate &&
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_INPUT_SAMPLES_PER_SECOND
 +         input_samples_per_second_ >= 0 &&
 +         input_samples_per_second_ <= limits::kMaxSampleRate &&
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
           sample_format_ != kUnknownSampleFormat &&
           seek_preroll_ >= base::TimeDelta() && codec_delay_ >= 0;
  }
 diff --git a/media/base/audio_decoder_config.h b/media/base/audio_decoder_config.h
-index a4328af4adf7f215dac825a8b0b8bf81fd11890d..5d10fb7d05de166477b87a9fb45d66ee6954700a 100644
+index a4328af4adf7f215dac825a8b0b8bf81fd11890d..26c13fc3a60e9c6f63c06403233f958aab8943df 100644
 --- a/media/base/audio_decoder_config.h
 +++ b/media/base/audio_decoder_config.h
-@@ -102,6 +102,18 @@ class MEDIA_EXPORT AudioDecoderConfig {
+@@ -102,6 +102,20 @@ class MEDIA_EXPORT AudioDecoderConfig {
      should_discard_decoder_delay_ = false;
    }
  
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_INPUT_SAMPLES_PER_SECOND
 +  // The sampling rate on decoder input.  Note that |samples_per_second| refers
 +  // to the output sampling rate.
 +  // TODO(wdzierzanowski): This should become unnecessary when DNA-35764 is
@@ -187,15 +177,18 @@ index a4328af4adf7f215dac825a8b0b8bf81fd11890d..5d10fb7d05de166477b87a9fb45d66ee
 +  void set_input_samples_per_second(int input_samples_per_second) {
 +    input_samples_per_second_ = input_samples_per_second;
 +  }
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +
   private:
    AudioCodec codec_;
    SampleFormat sample_format_;
-@@ -109,6 +121,7 @@ class MEDIA_EXPORT AudioDecoderConfig {
+@@ -109,6 +123,9 @@ class MEDIA_EXPORT AudioDecoderConfig {
    ChannelLayout channel_layout_;
    int channels_;
    int samples_per_second_;
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_INPUT_SAMPLES_PER_SECOND
 +  int input_samples_per_second_;
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
    int bytes_per_frame_;
    std::vector<uint8_t> extra_data_;
    EncryptionScheme encryption_scheme_;
@@ -354,25 +347,29 @@ index cc3f9c138cbe09e7f7ee627c3d59b32a3fab5fc8..da994d13d36434767ffbf001431a5df6
    TestFile(CONTAINER_OGG, GetTestDataFilePath("bear.ogv"));
    TestFile(CONTAINER_OGG, GetTestDataFilePath("9ch.ogg"));
 diff --git a/media/base/decoder_buffer.h b/media/base/decoder_buffer.h
-index 0341e5784f725a32fcc7d062e757f5096cf693ae..2e940f54c9e38289c7338010bfcbbeac6bcf524d 100644
+index 0341e5784f725a32fcc7d062e757f5096cf693ae..f450345410e8e11d964cb2ec6fbdfdf4d170905e 100644
 --- a/media/base/decoder_buffer.h
 +++ b/media/base/decoder_buffer.h
-@@ -22,6 +22,10 @@
+@@ -22,6 +22,14 @@
  #include "media/base/media_export.h"
  #include "media/base/timestamp_constants.h"
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
-+#include "platform_media/renderer/decoders/pass_through_decoder_texture.h"
++#include "platform_media/common/feature_toggles.h"
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
++
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(PLATFORM_MEDIA_HWA)
++#include "platform_media/renderer/decoders/pass_through_decoder_texture.h"
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(PLATFORM_MEDIA_HWA)
 +
  namespace media {
  
  // A specialized buffer for interfacing with audio / video decoders.
-@@ -148,6 +152,17 @@ class MEDIA_EXPORT DecoderBuffer
+@@ -148,6 +156,17 @@ class MEDIA_EXPORT DecoderBuffer
      return data_ == NULL;
    }
  
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(PLATFORM_MEDIA_HWA)
 +  std::unique_ptr<AutoReleasedPassThroughDecoderTexture> PassWrappedTexture() {
 +    return std::move(wrapped_texture_);
 +  }
@@ -381,24 +378,24 @@ index 0341e5784f725a32fcc7d062e757f5096cf693ae..2e940f54c9e38289c7338010bfcbbeac
 +      media::AutoReleasedPassThroughDecoderTexture> wrapped_texture) {
 +    wrapped_texture_ = std::move(wrapped_texture);
 +  }
-+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)  && defined(PLATFORM_MEDIA_HWA)
 +
    bool is_key_frame() const {
      DCHECK(!end_of_stream());
      return is_key_frame_;
-@@ -193,6 +208,10 @@ class MEDIA_EXPORT DecoderBuffer
+@@ -193,6 +212,10 @@ class MEDIA_EXPORT DecoderBuffer
    DiscardPadding discard_padding_;
    bool is_key_frame_;
  
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(PLATFORM_MEDIA_HWA)
 +  std::unique_ptr<media::AutoReleasedPassThroughDecoderTexture> wrapped_texture_;
-+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(PLATFORM_MEDIA_HWA)
 +
    // Constructor helper method for memory allocations.
    void Initialize();
  
 diff --git a/media/base/mime_util_internal.cc b/media/base/mime_util_internal.cc
-index 850b909d59bdaf808ece668d71243ac93625d064..b0398ee59b140ad75e0fb111404353486306682c 100644
+index bcab056d7d08bcdeefbe622dcb9d26ab4eed8f6b..ef49825ef8f98b31ff4eedcdb03be068bca583f3 100644
 --- a/media/base/mime_util_internal.cc
 +++ b/media/base/mime_util_internal.cc
 @@ -17,6 +17,9 @@
@@ -429,10 +426,10 @@ index 850b909d59bdaf808ece668d71243ac93625d064..b0398ee59b140ad75e0fb11140435348
  
    AddSupportedMediaFormats();
 diff --git a/media/base/mime_util_unittest.cc b/media/base/mime_util_unittest.cc
-index a358d0abc395c87862617a62d61bfc0cf196be60..ed12f64bf92818e395577fd1765d1e45473df6c7 100644
+index e541c9c91fb8e590d641ceed87b695bdb12e72f7..2b9ed98e07406af74d8b02d7790620b321fc5a88 100644
 --- a/media/base/mime_util_unittest.cc
 +++ b/media/base/mime_util_unittest.cc
-@@ -23,6 +23,14 @@
+@@ -23,6 +23,18 @@
  #include "base/android/build_info.h"
  #endif
  
@@ -444,26 +441,39 @@ index a358d0abc395c87862617a62d61bfc0cf196be60..ed12f64bf92818e395577fd1765d1e45
 +#include "base/win/windows_version.h"
 +#endif
 +
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#include "platform_media/common/feature_toggles.h"
++#endif
++
  namespace media {
  namespace internal {
  
-@@ -173,6 +181,7 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
+@@ -172,10 +184,16 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
+       "application/vnd.apple.mpegurl"));
    EXPECT_EQ(kHlsSupported, IsSupportedMediaMimeType("audio/mpegurl"));
    EXPECT_EQ(kHlsSupported, IsSupportedMediaMimeType("audio/x-mpegurl"));
- 
++
 +#if !defined(USE_SYSTEM_PROPRIETARY_CODECS)
- #if BUILDFLAG(USE_PROPRIETARY_CODECS)
    EXPECT_TRUE(IsSupportedMediaMimeType("audio/mp4"));
-   EXPECT_TRUE(IsSupportedMediaMimeType("audio/x-m4a"));
-@@ -200,6 +209,7 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
-   EXPECT_FALSE(IsSupportedMediaMimeType("audio/mpeg"));
++#endif  // !defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && !defined(PLATFORM_MEDIA_MP3)
+   EXPECT_TRUE(IsSupportedMediaMimeType("audio/mp3"));
+   EXPECT_TRUE(IsSupportedMediaMimeType("audio/x-mp3"));
+   EXPECT_TRUE(IsSupportedMediaMimeType("audio/mpeg"));
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS) && !defined(PLATFORM_MEDIA_MP3)
++#if !defined(USE_SYSTEM_PROPRIETARY_CODECS)
+   EXPECT_TRUE(IsSupportedMediaMimeType("video/mp4"));
+ 
+ #if BUILDFLAG(USE_PROPRIETARY_CODECS)
+@@ -194,6 +212,7 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
+   EXPECT_FALSE(IsSupportedMediaMimeType("video/x-m4v"));
    EXPECT_FALSE(IsSupportedMediaMimeType("audio/aac"));
  #endif  // USE_PROPRIETARY_CODECS
 +#endif  // !defined(USE_SYSTEM_PROPRIETARY_CODECS)
    EXPECT_FALSE(IsSupportedMediaMimeType("video/mp3"));
  
    EXPECT_FALSE(IsSupportedMediaMimeType("video/unknown"));
-@@ -207,6 +217,38 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
+@@ -201,6 +220,41 @@ TEST(MimeUtilTest, CommonMediaMimeType) {
    EXPECT_FALSE(IsSupportedMediaMimeType("unknown/unknown"));
  }
  
@@ -492,9 +502,12 @@ index a358d0abc395c87862617a62d61bfc0cf196be60..ed12f64bf92818e395577fd1765d1e45
 +  EXPECT_VIDEO_SUPPORT("video/mp4");
 +  EXPECT_VIDEO_SUPPORT("video/x-m4v");
 +
++#if defined(PLATFORM_MEDIA_MP3)
 +  EXPECT_AUDIO_SUPPORT("audio/mp3");
 +  EXPECT_AUDIO_SUPPORT("audio/x-mp3");
 +  EXPECT_AUDIO_SUPPORT("audio/mpeg");
++#endif  // defined(PLATFORM_MEDIA_MP3)
++
 +  EXPECT_AUDIO_SUPPORT("audio/aac");
 +}
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
@@ -517,10 +530,10 @@ index d362347e412de659d0bd62300ff502bdb7de097d..9e55e90f678730381708c346f2591e53
    // Returns the MediaResource::Type that should be used with the renderers
    // created by this factory.
 diff --git a/media/base/renderer_factory_selector_unittest.cc b/media/base/renderer_factory_selector_unittest.cc
-index 105121a93b6e957dfbac7ea1375254b5749e72ae..7748d30e225dcba26b4fabcafc7decb958a243ac 100644
+index d44d49ca5459e56a55ecb9f9f31cfbb5c27b6771..ebc889e731c411e39531349f873254835c4da1e3 100644
 --- a/media/base/renderer_factory_selector_unittest.cc
 +++ b/media/base/renderer_factory_selector_unittest.cc
-@@ -27,7 +27,8 @@ class RendererFactorySelectorTest : public testing::Test {
+@@ -26,7 +26,8 @@ class RendererFactorySelectorTest : public testing::Test {
          AudioRendererSink* audio_renderer_sink,
          VideoRendererSink* video_renderer_sink,
          const RequestOverlayInfoCB& request_overlay_info_cb,
@@ -558,11 +571,47 @@ index 47d78225c915109c4a0bb7a1c90d5b4260434cbf..ad2373fe6c9b7e394a7708256eab24ac
  }
 -
  }  // namespace media
+diff --git a/media/blink/DEPS b/media/blink/DEPS
+index 090921e2556bb9c5cfc3c29db362c83f45cecc59..35607b195a7d140473145d5623b0dd735c831365 100644
+--- a/media/blink/DEPS
++++ b/media/blink/DEPS
+@@ -13,6 +13,7 @@ include_rules = [
+   "+mojo/public/cpp/bindings",
+   "+net/base",
+   "+net/http",
++  "+services/network/public/interfaces/fetch_api.mojom.h",
+   "+services/service_manager/public/cpp",
+   "+third_party/WebKit/public/platform",
+   "+third_party/WebKit/public/web",
 diff --git a/media/blink/multibuffer_data_source.cc b/media/blink/multibuffer_data_source.cc
-index cddad150ec67e2038702735fe9e3931164283663..2d28d9cb42bb817af831a77025d6823f9c5668fc 100644
+index 45f81d88f7c2a2d61b5581292a481d7dbf882757..6ee6038069d68c88900841bd03864aaa7e119ae2 100644
 --- a/media/blink/multibuffer_data_source.cc
 +++ b/media/blink/multibuffer_data_source.cc
-@@ -566,6 +566,7 @@ void MultibufferDataSource::StartCallback() {
+@@ -278,7 +278,8 @@ bool MultibufferDataSource::HasSingleOrigin() {
+ bool MultibufferDataSource::DidPassCORSAccessCheck() const {
+   if (url_data_->cors_mode() == UrlData::CORS_UNSPECIFIED)
+     return false;
+-  // If init_cb is set, we initialization is not finished yet.
++
++  // If init_cb is set, we know initialization is not finished yet.
+   if (!init_cb_.is_null())
+     return false;
+   if (failed_)
+@@ -286,6 +287,13 @@ bool MultibufferDataSource::DidPassCORSAccessCheck() const {
+   return true;
+ }
+ 
++bool MultibufferDataSource::DidGetOpaqueResponseViaServiceWorker() const {
++  return url_data_->has_opaque_data();
++
++  // TODO(falken): Do we need to do something about |init_cb_| like
++  // in DidPassCORSAccessCheck()?
++}
++
+ void MultibufferDataSource::MediaPlaybackRateChanged(double playback_rate) {
+   DCHECK(render_task_runner_->BelongsToCurrentThread());
+ 
+@@ -567,6 +575,7 @@ void MultibufferDataSource::StartCallback() {
      {
        base::AutoLock auto_lock(lock_);
        total_bytes_ = url_data_->length();
@@ -571,19 +620,30 @@ index cddad150ec67e2038702735fe9e3931164283663..2d28d9cb42bb817af831a77025d6823f
      streaming_ =
          !assume_fully_buffered() && (total_bytes_ == kPositionNotSpecified ||
 diff --git a/media/blink/multibuffer_data_source.h b/media/blink/multibuffer_data_source.h
-index ca080d1164d3a9a4ba3fd794ddfadd04a36c0956..957a338ca6420ab3bba3b70cbffb89de9298a909 100644
+index 43695ab08ec6e7275d485fe26ac89b6dd3c6ed9d..b039129061ed3743c79b6b3ea61a60d566995a0c 100644
 --- a/media/blink/multibuffer_data_source.h
 +++ b/media/blink/multibuffer_data_source.h
-@@ -115,6 +115,8 @@ class MEDIA_BLINK_EXPORT MultibufferDataSource : public DataSource {
-   bool IsStreaming() override;
-   void SetBitrate(int bitrate) override;
+@@ -82,6 +82,10 @@ class MEDIA_BLINK_EXPORT MultibufferDataSource : public DataSource {
+   // Returns true if the media resource passed a CORS access control check.
+   bool DidPassCORSAccessCheck() const;
+ 
++  // Returns true if a service worker provided the media resource response,
++  // and the response was opaque.
++  bool DidGetOpaqueResponseViaServiceWorker() const;
++
+   // Notifies changes in playback state for controlling media buffering
+   // behavior.
+   void MediaPlaybackRateChanged(double playback_rate);
+@@ -118,6 +122,8 @@ class MEDIA_BLINK_EXPORT MultibufferDataSource : public DataSource {
+     is_client_audio_element_ = is_client_audio_element;
+   }
  
 +  const std::string& mime_type() const { return mime_type_; }
 +
   protected:
    void OnRedirect(const scoped_refptr<UrlData>& destination);
  
-@@ -189,6 +191,8 @@ class MEDIA_BLINK_EXPORT MultibufferDataSource : public DataSource {
+@@ -192,6 +198,8 @@ class MEDIA_BLINK_EXPORT MultibufferDataSource : public DataSource {
    // position and then clears it out.
    std::vector<int64_t> seek_positions_;
  
@@ -593,10 +653,36 @@ index ca080d1164d3a9a4ba3fd794ddfadd04a36c0956..957a338ca6420ab3bba3b70cbffb89de
    // i.e. range request is not supported.
    bool streaming_;
 diff --git a/media/blink/resource_multibuffer_data_provider.cc b/media/blink/resource_multibuffer_data_provider.cc
-index 8c1c591f8fc7715f156f4cd801173c8ad5b066a2..8027e8fccf670c6fda53ee5810eb6f1d7337b997 100644
+index de6d590757d079710c88e5849d63d7bdcfe1e345..a4a3f72e0f7688b26eb9c6976d5b83cac0922074 100644
 --- a/media/blink/resource_multibuffer_data_provider.cc
 +++ b/media/blink/resource_multibuffer_data_provider.cc
-@@ -265,6 +265,7 @@ void ResourceMultiBufferDataProvider::DidReceiveResponse(
+@@ -35,6 +35,25 @@ using blink::WebURLResponse;
+ 
+ namespace media {
+ 
++namespace {
++
++bool IsOpaqueData(network::mojom::FetchResponseType response_type) {
++  switch (response_type) {
++    case network::mojom::FetchResponseType::kBasic:
++    case network::mojom::FetchResponseType::kCORS:
++    case network::mojom::FetchResponseType::kDefault:
++      return false;
++    case network::mojom::FetchResponseType::kError:
++    case network::mojom::FetchResponseType::kOpaque:
++    case network::mojom::FetchResponseType::kOpaqueRedirect:
++      return true;
++  }
++  NOTREACHED();
++  return false;
++}
++
++}  // namespace
++
+ // The number of milliseconds to wait before retrying a failed load.
+ const int kLoaderFailedRetryDelayMs = 250;
+ 
+@@ -268,6 +287,7 @@ void ResourceMultiBufferDataProvider::DidReceiveResponse(
    // Expected content length can be |kPositionNotSpecified|, in that case
    // |content_length_| is not specified and this is a streaming response.
    int64_t content_length = response.ExpectedContentLength();
@@ -604,11 +690,54 @@ index 8c1c591f8fc7715f156f4cd801173c8ad5b066a2..8027e8fccf670c6fda53ee5810eb6f1d
    bool end_of_file = false;
    bool do_fail = false;
    bytes_to_discard_ = 0;
+@@ -323,6 +343,11 @@ void ResourceMultiBufferDataProvider::DidReceiveResponse(
+         url_data_->url_index()->TryInsert(destination_url_data);
+   }
+ 
++  // This is vital for security! A service worker can respond with a response
++  // from a different origin, so this response type is needed to detect that.
++  destination_url_data->set_has_opaque_data(
++      IsOpaqueData(response.ResponseTypeViaServiceWorker()));
++
+   if (destination_url_data != url_data_) {
+     // At this point, we've encountered a redirect, or found a better url data
+     // instance for the data that we're about to download.
 diff --git a/media/blink/url_index.cc b/media/blink/url_index.cc
-index b2c7f44cdcb9cc91d23fb7a85737547318f4ee25..2ddea2b03966a523b2a746bb6ee4a146e9724815 100644
+index 801735c11fa5f87af813d8b9e9868e916e230e15..46981f7e80691c49d228e9cd30d6fbec0febe284 100644
 --- a/media/blink/url_index.cc
 +++ b/media/blink/url_index.cc
-@@ -184,6 +184,11 @@ void UrlData::set_etag(const std::string& etag) {
+@@ -51,6 +51,7 @@ UrlData::UrlData(const GURL& url, CORSMode cors_mode, UrlIndex* url_index)
+       length_(kPositionNotSpecified),
+       range_supported_(false),
+       cacheable_(false),
++      has_opaque_data_(false),
+       last_used_(),
+       multibuffer_(this, url_index_->block_shift_) {}
+ 
+@@ -86,6 +87,9 @@ void UrlData::MergeFrom(const scoped_refptr<UrlData>& other) {
+       last_modified_ = other->last_modified_;
+     }
+     bytes_read_from_cache_ += other->bytes_read_from_cache_;
++    // set_has_opaque_data() will not relax from opaque to non-opaque if already
++    // opaque.
++    set_has_opaque_data(other->has_opaque_data_);
+     multibuffer()->MergeFrom(other->multibuffer());
+   }
+ }
+@@ -102,6 +106,12 @@ void UrlData::set_length(int64_t length) {
+   }
+ }
+ 
++void UrlData::set_has_opaque_data(bool has_opaque_data) {
++  if (has_opaque_data_)
++    return;
++  has_opaque_data_ = has_opaque_data;
++}
++
+ void UrlData::RedirectTo(const scoped_refptr<UrlData>& url_data) {
+   DCHECK(thread_checker_.CalledOnValidThread());
+   // Copy any cached data over to the new location.
+@@ -185,6 +195,11 @@ void UrlData::set_etag(const std::string& etag) {
    etag_ = etag;
  }
  
@@ -621,10 +750,18 @@ index b2c7f44cdcb9cc91d23fb7a85737547318f4ee25..2ddea2b03966a523b2a746bb6ee4a146
    DCHECK(thread_checker_.CalledOnValidThread());
    range_supported_ = true;
 diff --git a/media/blink/url_index.h b/media/blink/url_index.h
-index 3e71fbe309bebd5476ba897ea2c5ddc388f9528b..faf7fcbd1dac3e0a05200cd759086bba65ef919e 100644
+index 165b6187f7b4883d0ab58c37f63dbb250d6a4a59..7e7992fcec4116b9bfa150a15e9b897d3a1dd116 100644
 --- a/media/blink/url_index.h
 +++ b/media/blink/url_index.h
-@@ -64,6 +64,8 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
+@@ -19,6 +19,7 @@
+ #include "media/blink/lru.h"
+ #include "media/blink/media_blink_export.h"
+ #include "media/blink/multibuffer.h"
++#include "services/network/public/interfaces/fetch_api.mojom.h"
+ #include "url/gurl.h"
+ 
+ namespace media {
+@@ -65,6 +66,8 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
    // Cross-origin access mode
    CORSMode cors_mode() const { return cors_mode_; }
  
@@ -633,7 +770,24 @@ index 3e71fbe309bebd5476ba897ea2c5ddc388f9528b..faf7fcbd1dac3e0a05200cd759086bba
    // Are HTTP range requests supported?
    bool range_supported() const { return range_supported_; }
  
-@@ -112,6 +114,7 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
+@@ -98,6 +101,8 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
+   // Returns our url_index.
+   UrlIndex* url_index() const { return url_index_; }
+ 
++  bool has_opaque_data() const { return has_opaque_data_; }
++
+   // Notifies the url index that this is currently used.
+   // The url <-> URLData mapping will be eventually be invalidated if
+   // this is not called regularly.
+@@ -106,16 +111,18 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
+   // Call this before we add some data to the multibuffer().
+   // If the multibuffer is empty, the data origin is set from
+   // |origin| and returns true. If not, it compares |origin|
+-  // to the previous origin and returns wheather they match or not.
++  // to the previous origin and returns whether they match or not.
+   bool ValidateDataOrigin(const GURL& origin);
+ 
+   // Setters.
    void set_length(int64_t length);
    void set_cacheable(bool cacheable);
    void set_valid_until(base::Time valid_until);
@@ -641,7 +795,11 @@ index 3e71fbe309bebd5476ba897ea2c5ddc388f9528b..faf7fcbd1dac3e0a05200cd759086bba
    void set_range_supported();
    void set_last_modified(base::Time last_modified);
    void set_etag(const std::string& etag);
-@@ -179,6 +182,8 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
++  void set_has_opaque_data(bool has_opaque_data);
+ 
+   // A redirect has occured (or we've found a better UrlData for the same
+   // resource).
+@@ -180,6 +187,8 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
    // Number of bytes read from network into the cache for this resource.
    int64_t bytes_read_from_network_ = 0;
  
@@ -650,11 +808,22 @@ index 3e71fbe309bebd5476ba897ea2c5ddc388f9528b..faf7fcbd1dac3e0a05200cd759086bba
    // Does the server support ranges?
    bool range_supported_;
  
+@@ -187,6 +196,10 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
+   // will not cache this url.
+   bool cacheable_;
+ 
++  // True if a service worker intercepted a request for this resource
++  // and provided an opaque response.
++  bool has_opaque_data_;
++
+   // Last time some media time used this resource.
+   // Note that we use base::Time rather than base::TimeTicks because
+   // TimeTicks will stop advancing when a machine goes to sleep.
 diff --git a/media/blink/webmediaplayer_impl.cc b/media/blink/webmediaplayer_impl.cc
-index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b26848f7ad9a3 100644
+index 8b681abb3dcd9871e8fdd95d5bc099952e787d2f..5efd8fc9dd4b4c5020b34368b6029373648b43a0 100644
 --- a/media/blink/webmediaplayer_impl.cc
 +++ b/media/blink/webmediaplayer_impl.cc
-@@ -71,6 +71,17 @@
+@@ -74,6 +74,17 @@
  #include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
  #include "third_party/WebKit/public/web/WebView.h"
  
@@ -672,10 +841,10 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
  #if defined(OS_ANDROID)
  #include "media/base/android/media_codec_util.h"
  #endif
-@@ -150,6 +161,21 @@ constexpr base::TimeDelta kPrerollAttemptTimeout =
- // Maximum number, per-WMPI, of media logs of playback rate changes.
- constexpr int kMaxNumPlaybackRateLogs = 10;
- 
+@@ -169,6 +180,20 @@ blink::WebLocalizedString::Name GetSwitchToLocalMessage(
+   // To suppress compiler warning on Windows.
+   return blink::WebLocalizedString::kMediaRemotingStopNoText;
+ }
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +std::string GetLoadTypeName(WebMediaPlayer::LoadType load_type) {
 +  switch (load_type) {
@@ -690,11 +859,10 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
 +  return "";
 +}
 +#endif // USE_SYSTEM_PROPRIETARY_CODECS
-+
+ 
  }  // namespace
  
- class BufferedDataSourceHostImpl;
-@@ -210,6 +236,11 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
+@@ -232,6 +257,11 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
        defer_load_cb_(params->defer_load_cb()),
        adjust_allocated_memory_cb_(params->adjust_allocated_memory_cb()),
        last_reported_memory_usage_(0),
@@ -703,10 +871,10 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
 +          params->ipc_media_pipeline_host_creator()),
 +      ipc_demuxer_(NULL),
 +#endif
-       supports_save_(true),
        chunk_demuxer_(NULL),
-       tick_clock_(new base::DefaultTickClock()),
-@@ -384,6 +415,12 @@ void WebMediaPlayerImpl::Load(LoadType load_type,
+       tick_clock_(base::DefaultTickClock::GetInstance()),
+       buffered_data_source_host_(
+@@ -407,6 +437,12 @@ void WebMediaPlayerImpl::Load(LoadType load_type,
    blink::WebURL url = source.GetAsURL();
    DVLOG(1) << __func__ << "(" << load_type << ", " << GURL(url) << ", "
             << cors_mode << ")";
@@ -719,9 +887,9 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
    if (!defer_load_cb_.is_null()) {
      defer_load_cb_.Run(base::Bind(&WebMediaPlayerImpl::DoLoad, AsWeakPtr(),
                                    load_type, url, cors_mode));
-@@ -562,6 +599,11 @@ void WebMediaPlayerImpl::DoLoad(LoadType load_type,
-   SetReadyState(WebMediaPlayer::kReadyStateHaveNothing);
-   media_log_->AddEvent(media_log_->CreateLoadEvent(url.GetString().Utf8()));
+@@ -596,6 +632,11 @@ void WebMediaPlayerImpl::DoLoad(LoadType load_type,
+                                       frame_ == frame_->Top(),
+                                       frame_->Top()->GetSecurityOrigin());
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  VLOG(1) << __FUNCTION__ << ": Load type : " << GetLoadTypeName(load_type)
@@ -730,8 +898,8 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
 +
    // Media source pipelines can start immediately.
    if (load_type == kLoadTypeMediaSource) {
-     supports_save_ = false;
-@@ -733,6 +775,11 @@ void WebMediaPlayerImpl::DoSeek(base::TimeDelta time, bool time_updated) {
+     StartPipeline();
+@@ -762,6 +803,11 @@ void WebMediaPlayerImpl::DoSeek(base::TimeDelta time, bool time_updated) {
      paused_time_ = time;
    pipeline_controller_.Seek(time, time_updated);
  
@@ -743,7 +911,20 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
    // This needs to be called after Seek() so that if a resume is triggered, it
    // is to the correct time.
    UpdatePlayState();
-@@ -2034,7 +2081,18 @@ void WebMediaPlayerImpl::DataSourceInitialized(bool success) {
+@@ -1103,6 +1149,12 @@ void WebMediaPlayerImpl::Paint(blink::WebCanvas* canvas,
+       pipeline_metadata_.video_decoder_config.video_rotation(), context_3d);
+ }
+ 
++bool WebMediaPlayerImpl::DidGetOpaqueResponseFromServiceWorker() const {
++  if (data_source_)
++    return data_source_->DidGetOpaqueResponseViaServiceWorker();
++  return false;
++}
++
+ bool WebMediaPlayerImpl::HasSingleSecurityOrigin() const {
+   if (data_source_)
+     return data_source_->HasSingleOrigin();
+@@ -2103,7 +2155,18 @@ void WebMediaPlayerImpl::DataSourceInitialized(bool success) {
      data_source_->SetPreload(MultibufferDataSource::METADATA);
    }
  
@@ -763,7 +944,7 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
  }
  
  void WebMediaPlayerImpl::NotifyDownloading(bool is_downloading) {
-@@ -2152,9 +2210,21 @@ std::unique_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer() {
+@@ -2221,9 +2284,21 @@ std::unique_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer() {
    request_overlay_info_cb = BindToCurrentLoop(
        base::Bind(&WebMediaPlayerImpl::OnOverlayInfoRequested, AsWeakPtr()));
  #endif
@@ -786,7 +967,7 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
  }
  
  void WebMediaPlayerImpl::StartPipeline() {
-@@ -2186,11 +2256,57 @@ void WebMediaPlayerImpl::StartPipeline() {
+@@ -2262,11 +2337,57 @@ void WebMediaPlayerImpl::StartPipeline() {
      return;
    }
  
@@ -841,10 +1022,10 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
 +#endif  // defined(OS_MACOSX)
 +    } else {
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
- #if !defined(MEDIA_DISABLE_FFMPEG)
+ #if BUILDFLAG(ENABLE_FFMPEG)
      Demuxer::MediaTracksUpdatedCB media_tracks_updated_cb =
          BindToCurrentLoop(base::Bind(
-@@ -2203,6 +2319,10 @@ void WebMediaPlayerImpl::StartPipeline() {
+@@ -2279,6 +2400,10 @@ void WebMediaPlayerImpl::StartPipeline() {
      OnError(PipelineStatus::DEMUXER_ERROR_COULD_NOT_OPEN);
      return;
  #endif
@@ -855,7 +1036,7 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
    } else {
      DCHECK(!chunk_demuxer_);
      DCHECK(!data_source_);
-@@ -2263,6 +2383,22 @@ blink::WebAudioSourceProvider* WebMediaPlayerImpl::GetAudioSourceProvider() {
+@@ -2339,6 +2464,22 @@ blink::WebAudioSourceProvider* WebMediaPlayerImpl::GetAudioSourceProvider() {
    return audio_source_provider_.get();
  }
  
@@ -878,7 +1059,7 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
  scoped_refptr<VideoFrame> WebMediaPlayerImpl::GetCurrentFrameFromCompositor()
      const {
    DCHECK(main_task_runner_->BelongsToCurrentThread());
-@@ -2718,6 +2854,10 @@ bool WebMediaPlayerImpl::IsBackgroundOptimizationCandidate() const {
+@@ -2794,6 +2935,10 @@ bool WebMediaPlayerImpl::IsBackgroundOptimizationCandidate() const {
    if (!HasAudio() && HasVideo())
      return true;
  
@@ -889,7 +1070,7 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
    // Videos shorter than the maximum allowed keyframe distance can be optimized.
    base::TimeDelta duration = GetPipelineMediaDuration();
    base::TimeDelta max_keyframe_distance =
-@@ -2896,6 +3036,10 @@ void WebMediaPlayerImpl::RecordVideoNaturalSize(const gfx::Size& natural_size) {
+@@ -2973,6 +3118,10 @@ void WebMediaPlayerImpl::RecordVideoNaturalSize(const gfx::Size& natural_size) {
  
    int height = natural_size.height();
  
@@ -901,10 +1082,10 @@ index f66c0b96d92a0c3e57aac4ddb27ebefeb87c150d..a5b5149718862e67e6eb6a79936b2684
      UMA_HISTOGRAM_VIDEO_HEIGHT("Media.VideoHeight.Initial.SRC", height);
    else if (load_type_ == kLoadTypeMediaSource)
 diff --git a/media/blink/webmediaplayer_impl.h b/media/blink/webmediaplayer_impl.h
-index 8c6da58a26b82cdb47e139484b1ca07c49b4fc90..dfddaabda49a5fe6f7fdd2996fba05ff4a716383 100644
+index a89c9fb67308078308aa200c59e46e355c9746ae..20515b750447f428108355c35dd0a9ad9cbce75f 100644
 --- a/media/blink/webmediaplayer_impl.h
 +++ b/media/blink/webmediaplayer_impl.h
-@@ -53,6 +53,11 @@
+@@ -52,6 +52,11 @@
  #include "media/blink/webmediaplayer_cast_android.h"
  #endif
  
@@ -916,7 +1097,7 @@ index 8c6da58a26b82cdb47e139484b1ca07c49b4fc90..dfddaabda49a5fe6f7fdd2996fba05ff
  namespace blink {
  class WebLocalFrame;
  class WebMediaPlayerClient;
-@@ -78,6 +83,9 @@ namespace media {
+@@ -77,6 +82,9 @@ namespace media {
  class ChunkDemuxer;
  class ContentDecryptionModule;
  class VideoDecodeStatsReporter;
@@ -926,7 +1107,15 @@ index 8c6da58a26b82cdb47e139484b1ca07c49b4fc90..dfddaabda49a5fe6f7fdd2996fba05ff
  class MediaLog;
  class UrlIndex;
  class VideoFrameCompositor;
-@@ -364,6 +372,11 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -180,6 +188,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+   blink::WebString GetErrorMessage() const override;
+   bool DidLoadingProgress() override;
+ 
++  bool DidGetOpaqueResponseFromServiceWorker() const override;
+   bool HasSingleSecurityOrigin() const override;
+   bool DidPassCORSAccessCheck() const override;
+ 
+@@ -365,6 +374,11 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    void SetNetworkState(blink::WebMediaPlayer::NetworkState state);
    void SetReadyState(blink::WebMediaPlayer::ReadyState state);
  
@@ -938,7 +1127,7 @@ index 8c6da58a26b82cdb47e139484b1ca07c49b4fc90..dfddaabda49a5fe6f7fdd2996fba05ff
    // Returns the current video frame from |compositor_|, and asks the compositor
    // to update its frame if it is stale.
    // Can return a nullptr.
-@@ -647,6 +660,16 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -655,6 +669,16 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    WebMediaPlayerParams::AdjustAllocatedMemoryCB adjust_allocated_memory_cb_;
    int64_t last_reported_memory_usage_;
  
@@ -955,7 +1144,7 @@ index 8c6da58a26b82cdb47e139484b1ca07c49b4fc90..dfddaabda49a5fe6f7fdd2996fba05ff
    // Routes audio playback to either AudioRendererSink or WebAudio.
    scoped_refptr<WebAudioSourceProviderImpl> audio_source_provider_;
  
-@@ -692,6 +715,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
+@@ -698,6 +722,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
    // Keep track of the CDM while it is in the process of attaching to the
    // pipeline.
    scoped_refptr<ContentDecryptionModule> pending_cdm_;
@@ -964,7 +1153,7 @@ index 8c6da58a26b82cdb47e139484b1ca07c49b4fc90..dfddaabda49a5fe6f7fdd2996fba05ff
  #if defined(OS_ANDROID)  // WMPI_CAST
    WebMediaPlayerCast cast_impl_;
 diff --git a/media/blink/webmediaplayer_params.cc b/media/blink/webmediaplayer_params.cc
-index 427b3b229856a1771f69d47e8032c3fb3ba8dbe1..4e1b436224cdc31843bade3c056d50e32e283503 100644
+index ea8f342de0b5812445e6638031910dd8c67a7131..90b90698d242cb4fd85de9463bfedf233bc3ec36 100644
 --- a/media/blink/webmediaplayer_params.cc
 +++ b/media/blink/webmediaplayer_params.cc
 @@ -14,6 +14,9 @@ WebMediaPlayerParams::WebMediaPlayerParams(
@@ -977,7 +1166,7 @@ index 427b3b229856a1771f69d47e8032c3fb3ba8dbe1..4e1b436224cdc31843bade3c056d50e3
      const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
      const scoped_refptr<base::TaskRunner>& worker_task_runner,
      const scoped_refptr<base::SingleThreadTaskRunner>& compositor_task_runner,
-@@ -36,6 +39,9 @@ WebMediaPlayerParams::WebMediaPlayerParams(
+@@ -35,6 +38,9 @@ WebMediaPlayerParams::WebMediaPlayerParams(
      : defer_load_cb_(defer_load_cb),
        audio_renderer_sink_(audio_renderer_sink),
        media_log_(std::move(media_log)),
@@ -988,11 +1177,11 @@ index 427b3b229856a1771f69d47e8032c3fb3ba8dbe1..4e1b436224cdc31843bade3c056d50e3
        worker_task_runner_(worker_task_runner),
        compositor_task_runner_(compositor_task_runner),
 diff --git a/media/blink/webmediaplayer_params.h b/media/blink/webmediaplayer_params.h
-index 0231707ec4a18b599d8ed5c809632738d2e73723..553dfa55ae2fd927320b71962185eff05668555c 100644
+index 1256f638de7a5d01579a3ad83da8774a15f8f80a..84c13ca420c4f7be3307941248d7ac61ecf3ad09 100644
 --- a/media/blink/webmediaplayer_params.h
 +++ b/media/blink/webmediaplayer_params.h
 @@ -23,6 +23,10 @@
- #include "media/mojo/interfaces/video_decode_stats_recorder.mojom.h"
+ #include "media/mojo/interfaces/media_metrics_provider.mojom.h"
  #include "third_party/WebKit/public/platform/WebVideoFrameSubmitter.h"
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
@@ -1002,7 +1191,7 @@ index 0231707ec4a18b599d8ed5c809632738d2e73723..553dfa55ae2fd927320b71962185eff0
  namespace base {
  class SingleThreadTaskRunner;
  class TaskRunner;
-@@ -71,6 +75,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
+@@ -65,6 +69,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
        std::unique_ptr<MediaLog> media_log,
        const DeferLoadCB& defer_load_cb,
        const scoped_refptr<SwitchableAudioRendererSink>& audio_renderer_sink,
@@ -1012,20 +1201,19 @@ index 0231707ec4a18b599d8ed5c809632738d2e73723..553dfa55ae2fd927320b71962185eff0
        const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
        const scoped_refptr<base::TaskRunner>& worker_task_runner,
        const scoped_refptr<base::SingleThreadTaskRunner>& compositor_task_runner,
-@@ -102,6 +109,12 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
- 
-   std::unique_ptr<MediaLog> take_media_log() { return std::move(media_log_); }
- 
+@@ -98,6 +105,11 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
+   mojom::MediaMetricsProviderPtr take_metrics_provider() {
+     return std::move(metrics_provider_);
+   }
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  media::IPCMediaPipelineHost::Creator ipc_media_pipeline_host_creator() const {
 +    return ipc_media_pipeline_host_creator_;
 +  }
 +#endif
-+
+ 
    const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner() const {
      return media_task_runner_;
-   }
-@@ -176,6 +189,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
+@@ -165,6 +177,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerParams {
    DeferLoadCB defer_load_cb_;
    scoped_refptr<SwitchableAudioRendererSink> audio_renderer_sink_;
    std::unique_ptr<MediaLog> media_log_;
@@ -1067,10 +1255,10 @@ index 0000000000000000000000000000000000000000..455942aff1b0b2baab5a525eedf9b008
 +VIEW_VC: https://chromium.googlesource.com/chromium/cdm/+/
 diff --git a/media/cdm/api/content_decryption_module.h b/media/cdm/api/content_decryption_module.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f417b5b309
+index 0000000000000000000000000000000000000000..f961979dc38b050174b1f8a6283f0b2eba3e5378
 --- /dev/null
 +++ b/media/cdm/api/content_decryption_module.h
-@@ -0,0 +1,1278 @@
+@@ -0,0 +1,1638 @@
 +// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1079,6 +1267,7 @@ index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f4
 +#define CDM_CONTENT_DECRYPTION_MODULE_H_
 +
 +#include "content_decryption_module_export.h"
++#include "content_decryption_module_proxy.h"
 +
 +#if defined(_MSC_VER)
 +typedef unsigned char uint8_t;
@@ -1088,22 +1277,6 @@ index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f4
 +#else
 +#include <stdint.h>
 +#endif
-+
-+// Define CDM_CLASS_API to export class types. We have to add visibility
-+// attributes to make sure virtual tables in CDM consumer and CDM implementation
-+// are the same. Generally, it was always a good idea, as there're no guarantees
-+// about that for the internal symbols, but it has only become a practical issue
-+// after introduction of LTO devirtualization. See more details on
-+// https://crbug.com/609564#c35
-+#if defined(_WIN32)
-+#if defined(__clang__)
-+#define CDM_CLASS_API [[clang::lto_visibility_public]]
-+#else
-+#define CDM_CLASS_API
-+#endif
-+#else  // defined(_WIN32)
-+#define CDM_CLASS_API __attribute__((visibility("default")))
-+#endif  // defined(_WIN32)
 +
 +// The version number must be rolled when the exported functions are updated!
 +// If the CDM and the adapter use different versions of these functions, the
@@ -1152,6 +1325,7 @@ index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f4
 +
 +class CDM_CLASS_API Host_8;
 +class CDM_CLASS_API Host_9;
++class CDM_CLASS_API Host_10;
 +
 +enum Status {
 +  kSuccess = 0,
@@ -1476,7 +1650,11 @@ index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f4
 +enum MessageType {
 +  kLicenseRequest = 0,
 +  kLicenseRenewal = 1,
-+  kLicenseRelease = 2
++  kLicenseRelease = 2,
++  // Only supported by Host_10 and later. On Host_9 and earlier, it's undefined
++  // behavior. For example, the host can drop the message or send it using
++  // other message type.
++  kIndividualizationRequest = 3
 +};
 +
 +enum HdcpVersion {
@@ -1977,6 +2155,228 @@ index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f4
 +  virtual ~ContentDecryptionModule_9() {}
 +};
 +
++// ----- Note: This interface is still in development and not stable! -----
++//
++// ContentDecryptionModule interface that all CDMs need to implement.
++// The interface is versioned for backward compatibility.
++// Note: ContentDecryptionModule implementations must use the allocator
++// provided in CreateCdmInstance() to allocate any Buffer that needs to
++// be passed back to the caller. Implementations must call Buffer::Destroy()
++// when a Buffer is created that will never be returned to the caller.
++class CDM_CLASS_API ContentDecryptionModule_10 {
++ public:
++  static const int kVersion = 10;
++  typedef Host_10 Host;
++
++  // Initializes the CDM instance, providing information about permitted
++  // functionalities. The CDM must respond by calling Host::OnInitialized()
++  // with whether the initialization succeeded. No other calls will be made by
++  // the host before Host::OnInitialized() returns.
++  // If |allow_distinctive_identifier| is false, messages from the CDM,
++  // such as message events, must not contain a Distinctive Identifier,
++  // even in an encrypted form.
++  // If |allow_persistent_state| is false, the CDM must not attempt to
++  // persist state. Calls to CreateFileIO() will fail.
++  // If |use_hw_secure_codecs| is true, the CDM must ensure the decryption key
++  // and video buffers (compressed and uncompressed) are securely protected by
++  // hardware.
++  virtual void Initialize(bool allow_distinctive_identifier,
++                          bool allow_persistent_state,
++                          bool use_hw_secure_codecs) = 0;
++
++  // Gets the key status if the CDM has a hypothetical key with the |policy|.
++  // The CDM must respond by calling either Host::OnResolveKeyStatusPromise()
++  // with the result key status or Host::OnRejectPromise() if an unexpected
++  // error happened or this method is not supported.
++  virtual void GetStatusForPolicy(uint32_t promise_id,
++                                  const Policy& policy) = 0;
++
++  // SetServerCertificate(), CreateSessionAndGenerateRequest(), LoadSession(),
++  // UpdateSession(), CloseSession(), and RemoveSession() all accept a
++  // |promise_id|, which must be passed to the completion Host method
++  // (e.g. Host::OnResolveNewSessionPromise()).
++
++  // Provides a server certificate to be used to encrypt messages to the
++  // license server. The CDM must respond by calling either
++  // Host::OnResolvePromise() or Host::OnRejectPromise().
++  // If the CDM does not support server certificates, the promise should be
++  // rejected with kExceptionNotSupportedError. If |server_certificate_data|
++  // is empty, reject with kExceptionTypeError. Any other error should be
++  // rejected with kExceptionInvalidStateError or kExceptionQuotaExceededError.
++  // TODO(crbug.com/796417): Add support for the promise to return true or
++  // false, rather than using kExceptionNotSupportedError to mean false.
++  virtual void SetServerCertificate(uint32_t promise_id,
++                                    const uint8_t* server_certificate_data,
++                                    uint32_t server_certificate_data_size) = 0;
++
++  // Creates a session given |session_type|, |init_data_type|, and |init_data|.
++  // The CDM must respond by calling either Host::OnResolveNewSessionPromise()
++  // or Host::OnRejectPromise().
++  virtual void CreateSessionAndGenerateRequest(uint32_t promise_id,
++                                               SessionType session_type,
++                                               InitDataType init_data_type,
++                                               const uint8_t* init_data,
++                                               uint32_t init_data_size) = 0;
++
++  // Loads the session of type |session_type| specified by |session_id|.
++  // The CDM must respond by calling either Host::OnResolveNewSessionPromise()
++  // or Host::OnRejectPromise(). If the session is not found, call
++  // Host::OnResolveNewSessionPromise() with session_id = NULL.
++  virtual void LoadSession(uint32_t promise_id,
++                           SessionType session_type,
++                           const char* session_id,
++                           uint32_t session_id_size) = 0;
++
++  // Updates the session with |response|. The CDM must respond by calling
++  // either Host::OnResolvePromise() or Host::OnRejectPromise().
++  virtual void UpdateSession(uint32_t promise_id,
++                             const char* session_id,
++                             uint32_t session_id_size,
++                             const uint8_t* response,
++                             uint32_t response_size) = 0;
++
++  // Requests that the CDM close the session. The CDM must respond by calling
++  // either Host::OnResolvePromise() or Host::OnRejectPromise() when the request
++  // has been processed. This may be before the session is closed. Once the
++  // session is closed, Host::OnSessionClosed() must also be called.
++  virtual void CloseSession(uint32_t promise_id,
++                            const char* session_id,
++                            uint32_t session_id_size) = 0;
++
++  // Removes any stored session data associated with this session. Will only be
++  // called for persistent sessions. The CDM must respond by calling either
++  // Host::OnResolvePromise() or Host::OnRejectPromise() when the request has
++  // been processed.
++  virtual void RemoveSession(uint32_t promise_id,
++                             const char* session_id,
++                             uint32_t session_id_size) = 0;
++
++  // Performs scheduled operation with |context| when the timer fires.
++  virtual void TimerExpired(void* context) = 0;
++
++  // Decrypts the |encrypted_buffer|.
++  //
++  // Returns kSuccess if decryption succeeded, in which case the callee
++  // should have filled the |decrypted_buffer| and passed the ownership of
++  // |data| in |decrypted_buffer| to the caller.
++  // Returns kNoKey if the CDM did not have the necessary decryption key
++  // to decrypt.
++  // Returns kDecryptError if any other error happened.
++  // If the return value is not kSuccess, |decrypted_buffer| should be ignored
++  // by the caller.
++  virtual Status Decrypt(const InputBuffer& encrypted_buffer,
++                         DecryptedBlock* decrypted_buffer) = 0;
++
++  // Initializes the CDM audio decoder with |audio_decoder_config|. This
++  // function must be called before DecryptAndDecodeSamples() is called.
++  //
++  // Returns kSuccess if the |audio_decoder_config| is supported and the CDM
++  // audio decoder is successfully initialized.
++  // Returns kInitializationError if |audio_decoder_config| is not supported.
++  // The CDM may still be able to do Decrypt().
++  // Returns kDeferredInitialization if the CDM is not ready to initialize the
++  // decoder at this time. Must call Host::OnDeferredInitializationDone() once
++  // initialization is complete.
++  virtual Status InitializeAudioDecoder(
++      const AudioDecoderConfig& audio_decoder_config) = 0;
++
++  // Initializes the CDM video decoder with |video_decoder_config|. This
++  // function must be called before DecryptAndDecodeFrame() is called.
++  //
++  // Returns kSuccess if the |video_decoder_config| is supported and the CDM
++  // video decoder is successfully initialized.
++  // Returns kInitializationError if |video_decoder_config| is not supported.
++  // The CDM may still be able to do Decrypt().
++  // Returns kDeferredInitialization if the CDM is not ready to initialize the
++  // decoder at this time. Must call Host::OnDeferredInitializationDone() once
++  // initialization is complete.
++  virtual Status InitializeVideoDecoder(
++      const VideoDecoderConfig& video_decoder_config) = 0;
++
++  // De-initializes the CDM decoder and sets it to an uninitialized state. The
++  // caller can initialize the decoder again after this call to re-initialize
++  // it. This can be used to reconfigure the decoder if the configuration
++  // changes.
++  virtual void DeinitializeDecoder(StreamType decoder_type) = 0;
++
++  // Resets the CDM decoder to an initialized clean state. All internal buffers
++  // MUST be flushed.
++  virtual void ResetDecoder(StreamType decoder_type) = 0;
++
++  // Decrypts the |encrypted_buffer| and decodes the decrypted buffer into a
++  // |video_frame|. Upon end-of-stream, the caller should call this function
++  // repeatedly with empty |encrypted_buffer| (|data| == NULL) until only empty
++  // |video_frame| (|format| == kEmptyVideoFrame) is produced.
++  //
++  // Returns kSuccess if decryption and decoding both succeeded, in which case
++  // the callee will have filled the |video_frame| and passed the ownership of
++  // |frame_buffer| in |video_frame| to the caller.
++  // Returns kNoKey if the CDM did not have the necessary decryption key
++  // to decrypt.
++  // Returns kNeedMoreData if more data was needed by the decoder to generate
++  // a decoded frame (e.g. during initialization and end-of-stream).
++  // Returns kDecryptError if any decryption error happened.
++  // Returns kDecodeError if any decoding error happened.
++  // If the return value is not kSuccess, |video_frame| should be ignored by
++  // the caller.
++  virtual Status DecryptAndDecodeFrame(const InputBuffer& encrypted_buffer,
++                                       VideoFrame* video_frame) = 0;
++
++  // Decrypts the |encrypted_buffer| and decodes the decrypted buffer into
++  // |audio_frames|. Upon end-of-stream, the caller should call this function
++  // repeatedly with empty |encrypted_buffer| (|data| == NULL) until only empty
++  // |audio_frames| is produced.
++  //
++  // Returns kSuccess if decryption and decoding both succeeded, in which case
++  // the callee will have filled |audio_frames| and passed the ownership of
++  // |data| in |audio_frames| to the caller.
++  // Returns kNoKey if the CDM did not have the necessary decryption key
++  // to decrypt.
++  // Returns kNeedMoreData if more data was needed by the decoder to generate
++  // audio samples (e.g. during initialization and end-of-stream).
++  // Returns kDecryptError if any decryption error happened.
++  // Returns kDecodeError if any decoding error happened.
++  // If the return value is not kSuccess, |audio_frames| should be ignored by
++  // the caller.
++  virtual Status DecryptAndDecodeSamples(const InputBuffer& encrypted_buffer,
++                                         AudioFrames* audio_frames) = 0;
++
++  // Called by the host after a platform challenge was initiated via
++  // Host::SendPlatformChallenge().
++  virtual void OnPlatformChallengeResponse(
++      const PlatformChallengeResponse& response) = 0;
++
++  // Called by the host after a call to Host::QueryOutputProtectionStatus(). The
++  // |link_mask| is a bit mask of OutputLinkTypes and |output_protection_mask|
++  // is a bit mask of OutputProtectionMethods. If |result| is kQueryFailed,
++  // then |link_mask| and |output_protection_mask| are undefined and should
++  // be ignored.
++  virtual void OnQueryOutputProtectionStatus(
++      QueryResult result,
++      uint32_t link_mask,
++      uint32_t output_protection_mask) = 0;
++
++  // Called by the host after a call to Host::RequestStorageId(). If the
++  // version of the storage ID requested is available, |storage_id| and
++  // |storage_id_size| are set appropriately. |version| will be the same as
++  // what was requested, unless 0 (latest) was requested, in which case
++  // |version| will be the actual version number for the |storage_id| returned.
++  // If the requested version is not available, null/zero will be provided as
++  // |storage_id| and |storage_id_size|, respectively, and |version| should be
++  // ignored.
++  virtual void OnStorageId(uint32_t version,
++                           const uint8_t* storage_id,
++                           uint32_t storage_id_size) = 0;
++
++  // Destroys the object in the same context as it was created.
++  virtual void Destroy() = 0;
++
++ protected:
++  ContentDecryptionModule_10() {}
++  virtual ~ContentDecryptionModule_10() {}
++};
++
++// The latest stable ContentDecryptionModule interface.
 +typedef ContentDecryptionModule_9 ContentDecryptionModule;
 +
 +// Represents a buffer created by Allocator implementations.
@@ -2058,8 +2458,8 @@ index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f4
 +  // session |session_id|. |has_additional_usable_key| should be set if a
 +  // key is newly usable (e.g. new key available, previously expired key has
 +  // been renewed, etc.) and the browser should attempt to resume playback.
-+  // |key_ids| is the list of key ids for this session along with their
-+  // current status. |key_ids_count| is the number of entries in |key_ids|.
++  // |keys_info| is the list of key IDs for this session along with their
++  // current status. |keys_info_count| is the number of entries in |keys_info|.
 +  // Size parameter for |session_id| should not include null termination.
 +  virtual void OnSessionKeysChange(const char* session_id,
 +                                   uint32_t session_id_size,
@@ -2197,8 +2597,8 @@ index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f4
 +  // session |session_id|. |has_additional_usable_key| should be set if a
 +  // key is newly usable (e.g. new key available, previously expired key has
 +  // been renewed, etc.) and the browser should attempt to resume playback.
-+  // |key_ids| is the list of key ids for this session along with their
-+  // current status. |key_ids_count| is the number of entries in |key_ids|.
++  // |keys_info| is the list of key IDs for this session along with their
++  // current status. |keys_info_count| is the number of entries in |keys_info|.
 +  // Size parameter for |session_id| should not include null termination.
 +  virtual void OnSessionKeysChange(const char* session_id,
 +                                   uint32_t session_id_size,
@@ -2269,6 +2669,154 @@ index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f4
 + protected:
 +  Host_9() {}
 +  virtual ~Host_9() {}
++};
++
++class CDM_CLASS_API Host_10 {
++ public:
++  static const int kVersion = 10;
++
++  // Returns a Buffer* containing non-zero members upon success, or NULL on
++  // failure. The caller owns the Buffer* after this call. The buffer is not
++  // guaranteed to be zero initialized. The capacity of the allocated Buffer
++  // is guaranteed to be not less than |capacity|.
++  virtual Buffer* Allocate(uint32_t capacity) = 0;
++
++  // Requests the host to call ContentDecryptionModule::TimerFired() |delay_ms|
++  // from now with |context|.
++  virtual void SetTimer(int64_t delay_ms, void* context) = 0;
++
++  // Returns the current wall time.
++  virtual Time GetCurrentWallTime() = 0;
++
++  // Called by the CDM with the result after the CDM instance was initialized.
++  virtual void OnInitialized(bool success) = 0;
++
++  // Called by the CDM when a key status is available in response to
++  // GetStatusForPolicy().
++  virtual void OnResolveKeyStatusPromise(uint32_t promise_id,
++                                         KeyStatus key_status) = 0;
++
++  // Called by the CDM when a session is created or loaded and the value for the
++  // MediaKeySession's sessionId attribute is available (|session_id|).
++  // This must be called before OnSessionMessage() or
++  // OnSessionKeysChange() is called for the same session. |session_id_size|
++  // should not include null termination.
++  // When called in response to LoadSession(), the |session_id| must be the
++  // same as the |session_id| passed in LoadSession(), or NULL if the
++  // session could not be loaded.
++  virtual void OnResolveNewSessionPromise(uint32_t promise_id,
++                                          const char* session_id,
++                                          uint32_t session_id_size) = 0;
++
++  // Called by the CDM when a session is updated or released.
++  virtual void OnResolvePromise(uint32_t promise_id) = 0;
++
++  // Called by the CDM when an error occurs as a result of one of the
++  // ContentDecryptionModule calls that accept a |promise_id|.
++  // |exception| must be specified. |error_message| and |system_code|
++  // are optional. |error_message_size| should not include null termination.
++  virtual void OnRejectPromise(uint32_t promise_id,
++                               Exception exception,
++                               uint32_t system_code,
++                               const char* error_message,
++                               uint32_t error_message_size) = 0;
++
++  // Called by the CDM when it has a message for session |session_id|.
++  // Size parameters should not include null termination.
++  virtual void OnSessionMessage(const char* session_id,
++                                uint32_t session_id_size,
++                                MessageType message_type,
++                                const char* message,
++                                uint32_t message_size) = 0;
++
++  // Called by the CDM when there has been a change in keys or their status for
++  // session |session_id|. |has_additional_usable_key| should be set if a
++  // key is newly usable (e.g. new key available, previously expired key has
++  // been renewed, etc.) and the browser should attempt to resume playback.
++  // |keys_info| is the list of key IDs for this session along with their
++  // current status. |keys_info_count| is the number of entries in |keys_info|.
++  // Size parameter for |session_id| should not include null termination.
++  virtual void OnSessionKeysChange(const char* session_id,
++                                   uint32_t session_id_size,
++                                   bool has_additional_usable_key,
++                                   const KeyInformation* keys_info,
++                                   uint32_t keys_info_count) = 0;
++
++  // Called by the CDM when there has been a change in the expiration time for
++  // session |session_id|. This can happen as the result of an Update() call
++  // or some other event. If this happens as a result of a call to Update(),
++  // it must be called before resolving the Update() promise. |new_expiry_time|
++  // represents the time after which the key(s) in the session will no longer
++  // be usable for decryption. It can be 0 if no such time exists or if the
++  // license explicitly never expires. Size parameter should not include null
++  // termination.
++  virtual void OnExpirationChange(const char* session_id,
++                                  uint32_t session_id_size,
++                                  Time new_expiry_time) = 0;
++
++  // Called by the CDM when session |session_id| is closed. Size
++  // parameter should not include null termination.
++  virtual void OnSessionClosed(const char* session_id,
++                               uint32_t session_id_size) = 0;
++
++  // The following are optional methods that may not be implemented on all
++  // platforms.
++
++  // Sends a platform challenge for the given |service_id|. |challenge| is at
++  // most 256 bits of data to be signed. Once the challenge has been completed,
++  // the host will call ContentDecryptionModule::OnPlatformChallengeResponse()
++  // with the signed challenge response and platform certificate. Size
++  // parameters should not include null termination.
++  virtual void SendPlatformChallenge(const char* service_id,
++                                     uint32_t service_id_size,
++                                     const char* challenge,
++                                     uint32_t challenge_size) = 0;
++
++  // Attempts to enable output protection (e.g. HDCP) on the display link. The
++  // |desired_protection_mask| is a bit mask of OutputProtectionMethods. No
++  // status callback is issued, the CDM must call QueryOutputProtectionStatus()
++  // periodically to ensure the desired protections are applied.
++  virtual void EnableOutputProtection(uint32_t desired_protection_mask) = 0;
++
++  // Requests the current output protection status. Once the host has the status
++  // it will call ContentDecryptionModule::OnQueryOutputProtectionStatus().
++  virtual void QueryOutputProtectionStatus() = 0;
++
++  // Must be called by the CDM if it returned kDeferredInitialization during
++  // InitializeAudioDecoder() or InitializeVideoDecoder().
++  virtual void OnDeferredInitializationDone(StreamType stream_type,
++                                            Status decoder_status) = 0;
++
++  // Creates a FileIO object from the host to do file IO operation. Returns NULL
++  // if a FileIO object cannot be obtained. Once a valid FileIO object is
++  // returned, |client| must be valid until FileIO::Close() is called. The
++  // CDM can call this method multiple times to operate on different files.
++  virtual FileIO* CreateFileIO(FileIOClient* client) = 0;
++
++  // Creates a CdmProxy that proxies part of CDM functionalities to a different
++  // entity, e.g. hardware CDM modules. When not needed, the caller must call
++  // CdmProxy::Destroy() to destroy the CdmProxy in the same context as it was
++  // created. The |client| must remain valid until Destroy() is called.
++  // A CDM instance can have at most one CdmProxy throughout its lifetime, which
++  // should only be created and initialized during CDM instance initialization
++  // time, i.e. before OnInitialized() is called, to ensure proper connection of
++  // the CdmProxy and the media player (e.g. hardware decoder).
++  // Returns null if CdmProxy is not supported, or if CreateCdmProxy() is called
++  // more than once, or called after the CDM instance has been initialized.
++  virtual CdmProxy* CreateCdmProxy(CdmProxyClient* client) = 0;
++
++  // Requests a specific version of the storage ID. A storage ID is a stable,
++  // device specific ID used by the CDM to securely store persistent data. The
++  // ID will be returned by the host via ContentDecryptionModule::OnStorageId().
++  // If |version| is 0, the latest version will be returned. All |version|s
++  // that are greater than or equal to 0x80000000 are reserved for the CDM and
++  // should not be supported or returned by the host. The CDM must not expose
++  // the ID outside the client device, even in encrypted form.
++  virtual void RequestStorageId(uint32_t version) = 0;
++
++ protected:
++  Host_10() {}
++  virtual ~Host_10() {}
 +};
 +
 +// Represents a decrypted block that has not been decoded.
@@ -2351,10 +2899,10 @@ index 0000000000000000000000000000000000000000..0539135fbe0af253e336b01b721f35f4
 +#endif  // CDM_CONTENT_DECRYPTION_MODULE_H_
 diff --git a/media/cdm/api/content_decryption_module_export.h b/media/cdm/api/content_decryption_module_export.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..51d485892b14f29ba89986e6c3b8be8abf0d4ec0
+index 0000000000000000000000000000000000000000..932708deba3149ea6160849d113a06e4201c8114
 --- /dev/null
 +++ b/media/cdm/api/content_decryption_module_export.h
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,38 @@
 +// Copyright 2017 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -2374,6 +2922,22 @@ index 0000000000000000000000000000000000000000..51d485892b14f29ba89986e6c3b8be8a
 +
 +#else  // defined(_WIN32)
 +#define CDM_API __attribute__((visibility("default")))
++#endif  // defined(_WIN32)
++
++// Define CDM_CLASS_API to export class types. We have to add visibility
++// attributes to make sure virtual tables in CDM consumer and CDM implementation
++// are the same. Generally, it was always a good idea, as there're no guarantees
++// about that for the internal symbols, but it has only become a practical issue
++// after introduction of LTO devirtualization. See more details on
++// https://crbug.com/609564#c35
++#if defined(_WIN32)
++#if defined(__clang__)
++#define CDM_CLASS_API [[clang::lto_visibility_public]]
++#else
++#define CDM_CLASS_API
++#endif
++#else  // defined(_WIN32)
++#define CDM_CLASS_API __attribute__((visibility("default")))
 +#endif  // defined(_WIN32)
 +
 +#endif  // CDM_CONTENT_DECRYPTION_MODULE_EXPORT_H_
@@ -2447,6 +3011,132 @@ index 0000000000000000000000000000000000000000..5df8344e60a23988cd33d7b7c4ffabec
 +}
 +
 +#endif  // CDM_CONTENT_DECRYPTION_MODULE_EXT_H_
+diff --git a/media/cdm/api/content_decryption_module_proxy.h b/media/cdm/api/content_decryption_module_proxy.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..87bb521f67f544c2ec9f24618307fbf133a289e5
+--- /dev/null
++++ b/media/cdm/api/content_decryption_module_proxy.h
+@@ -0,0 +1,120 @@
++// Copyright 2017 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CDM_CONTENT_DECRYPTION_MODULE_PROXY_H_
++#define CDM_CONTENT_DECRYPTION_MODULE_PROXY_H_
++
++#include "content_decryption_module_export.h"
++
++#if defined(_MSC_VER)
++typedef unsigned char uint8_t;
++typedef unsigned int uint32_t;
++typedef unsigned __int64 uint64_t;
++#else
++#include <stdint.h>
++#endif
++
++namespace cdm {
++
++class CDM_CLASS_API CdmProxyClient;
++
++// A proxy class for the CDM.
++// In general, the interpretation of the CdmProxy and CdmProxyClient method
++// parameters are protocol dependent. For enum parameters, values outside the
++// enum range may not work.
++class CDM_CLASS_API CdmProxy {
++ public:
++  enum Function {
++    // For Intel Negotiate Crypto SessionKey Exchange (CSME) path to call
++    // ID3D11VideoContext::NegotiateCryptoSessionKeyExchange.
++    kIntelNegotiateCryptoSessionKeyExchange,
++    // There will be more values in the future e.g. for D3D11 RSA method.
++  };
++
++  // Initializes the proxy. The results will be returned in
++  // CdmProxyClient::OnInitialized().
++  virtual void Initialize() = 0;
++
++  // Processes and updates the state of the proxy.
++  // |output_data_size| is required by some protocol to set up the output data.
++  // The operation may fail if the |output_data_size| is wrong. The results will
++  // be returned in CdmProxyClient::OnProcessed().
++  virtual void Process(Function function,
++                       uint32_t crypto_session_id,
++                       const uint8_t* input_data,
++                       uint32_t input_data_size,
++                       uint32_t output_data_size) = 0;
++
++  // Creates a crypto session for handling media.
++  // If extra data has to be passed to further setup the media crypto session,
++  // pass the data as |input_data|. The results will be returned in
++  // CdmProxyClient::OnMediaCryptoSessionCreated().
++  virtual void CreateMediaCryptoSession(const uint8_t* input_data,
++                                        uint32_t input_data_size) = 0;
++
++  // Sets a key for the session identified by |crypto_session_id|.
++  virtual void SetKey(uint32_t crypto_session_id,
++                      const uint8_t* key_id,
++                      uint32_t key_id_size,
++                      const uint8_t* key_blob,
++                      uint32_t key_blob_size) = 0;
++
++  // Removes a key for the session identified by |crypto_session_id|.
++  virtual void RemoveKey(uint32_t crypto_session_id,
++                         const uint8_t* key_id,
++                         uint32_t key_id_size) = 0;
++
++  // Destroys the object in the same context as it was created.
++  virtual void Destroy() = 0;
++
++ protected:
++  CdmProxy() {}
++  virtual ~CdmProxy() {}
++};
++
++// Responses to CdmProxy calls. All responses will be called asynchronously.
++class CDM_CLASS_API CdmProxyClient {
++ public:
++  enum Status {
++    kOk,
++    kFail,
++  };
++
++  enum Protocol {
++    // Method using Intel CSME.
++    kIntelConvergedSecurityAndManageabilityEngine,
++    // There will be more values in the future e.g. kD3D11RsaHardware,
++    // kD3D11RsaSoftware to use the D3D11 RSA method.
++  };
++
++  // Callback for Initialize(). If the proxy created a crypto session, then the
++  // ID for the crypto session is |crypto_session_id|.
++  virtual void OnInitialized(Status status,
++                             Protocol protocol,
++                             uint32_t crypto_session_id) = 0;
++
++  // Callback for Process(). |output_data| is the output of processing.
++  virtual void OnProcessed(Status status,
++                           const uint8_t* output_data,
++                           uint32_t output_data_size) = 0;
++
++  // Callback for CreateMediaCryptoSession(). On success:
++  // - |crypto_session_id| is the ID for the created crypto session.
++  // - |output_data| is extra value, if any.
++  // Otherwise, |crypto_session_id| and |output_data| should be ignored.
++  virtual void OnMediaCryptoSessionCreated(Status status,
++                                           uint32_t crypto_session_id,
++                                           uint64_t output_data) = 0;
++
++  // Called when there is a hardware reset and all the hardware context is lost.
++  virtual void NotifyHardwareReset() = 0;
++
++ protected:
++  CdmProxyClient() {}
++  virtual ~CdmProxyClient() {}
++};
++
++}  // namespace cdm
++
++#endif  // CDM_CONTENT_DECRYPTION_MODULE_PROXY_H_
 diff --git a/media/filters/audio_file_reader.cc b/media/filters/audio_file_reader.cc
 index ae37ab7b37532c2aa222e620b6d6d1d53c11f6b2..2b4243ed2ff3c6330f89db4d3eef3d5a829f309e 100644
 --- a/media/filters/audio_file_reader.cc
@@ -2566,7 +3256,7 @@ index 3ea414621e83749433b947c6536fac9801dee131..afca90b671f3796cce4c57b372ff4538
    std::unique_ptr<InMemoryUrlProtocol> protocol_;
    std::unique_ptr<AudioFileReader> reader_;
 diff --git a/media/filters/decoder_stream.cc b/media/filters/decoder_stream.cc
-index 80b3ee50482e30109ab7493b6119f3d44e4ef641..28d1ba027c9eefcaa096e692d0e5e9479679526d 100644
+index 2921ca0e02b3d9e386c1c8e4c71d2c6e0865491f..544b8d7d22706037d32eb33e5e086a1f2d140d17 100644
 --- a/media/filters/decoder_stream.cc
 +++ b/media/filters/decoder_stream.cc
 @@ -22,6 +22,10 @@
@@ -2622,7 +3312,7 @@ index 80b3ee50482e30109ab7493b6119f3d44e4ef641..28d1ba027c9eefcaa096e692d0e5e947
      if (state_ == STATE_INITIALIZING) {
        state_ = STATE_UNINITIALIZED;
 diff --git a/media/filters/gpu_video_decoder.cc b/media/filters/gpu_video_decoder.cc
-index 53bc1bf8475f7b02585546940982ebc5de27939a..bc8a40813aa52e6c375fd9dc08c2d7ea5cd1ca53 100644
+index 02243a6d4492f885b4df87900808ac70c5d55b6b..d17603206577b285eae151011d1aa27136c9a547 100644
 --- a/media/filters/gpu_video_decoder.cc
 +++ b/media/filters/gpu_video_decoder.cc
 @@ -33,6 +33,10 @@
@@ -2669,28 +3359,30 @@ index 53bc1bf8475f7b02585546940982ebc5de27939a..bc8a40813aa52e6c375fd9dc08c2d7ea
  
  // OnOverlayInfoAvailable() might be called at any time between Initialize() and
 diff --git a/media/filters/stream_parser_factory.cc b/media/filters/stream_parser_factory.cc
-index 2effed779a624d80bdbc4e60923358e4a20d328d..2b5bc458280eae8ba793004e6d21675f42ef456f 100644
+index c95863270058732a03bad0e7bc16a3e46482bce7..b5801eddfa8bc125eca1978ffe55d7232f4b763f 100644
 --- a/media/filters/stream_parser_factory.cc
 +++ b/media/filters/stream_parser_factory.cc
-@@ -27,6 +27,9 @@
- #endif
+@@ -29,6 +29,9 @@
  
  #if BUILDFLAG(USE_PROPRIETARY_CODECS)
+ #include "media/formats/mp4/es_descriptor.h"
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +#include "platform_media/common/platform_mime_util.h"
 +#endif
  #if BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
  #include "media/formats/mp2t/mp2t_stream_parser.h"
  #endif
-@@ -382,6 +385,17 @@ static bool VerifyCodec(const CodecInfo* codec_info,
+@@ -393,6 +396,19 @@ static bool VerifyCodec(const CodecInfo* codec_info,
                          std::vector<CodecInfo::HistogramTag>* video_codecs) {
    switch (codec_info->type) {
      case CodecInfo::AUDIO:
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#if defined(PLATFORM_MEDIA_MP3)
 +      if (codec_info->tag == CodecInfo::HISTOGRAM_MP3) {
 +        if (!IsPlatformAudioDecoderAvailable(kCodecMP3))
 +          return false;
 +      }
++#endif
 +      if (codec_info->tag == CodecInfo::HISTOGRAM_MPEG2AAC ||
 +          codec_info->tag == CodecInfo::HISTOGRAM_MPEG4AAC) {
 +        if (!IsPlatformAudioDecoderAvailable(kCodecAAC))
@@ -2700,7 +3392,7 @@ index 2effed779a624d80bdbc4e60923358e4a20d328d..2b5bc458280eae8ba793004e6d21675f
        if (audio_codecs)
          audio_codecs->push_back(codec_info->tag);
        return true;
-@@ -402,6 +416,12 @@ static bool VerifyCodec(const CodecInfo* codec_info,
+@@ -413,6 +429,12 @@ static bool VerifyCodec(const CodecInfo* codec_info,
        }
  #endif
  
@@ -2713,7 +3405,7 @@ index 2effed779a624d80bdbc4e60923358e4a20d328d..2b5bc458280eae8ba793004e6d21675f
        if (video_codecs)
          video_codecs->push_back(codec_info->tag);
        return true;
-@@ -434,6 +454,7 @@ static bool CheckTypeAndCodecs(
+@@ -445,6 +467,7 @@ static bool CheckTypeAndCodecs(
      ParserFactoryFunction* factory_function,
      std::vector<CodecInfo::HistogramTag>* audio_codecs,
      std::vector<CodecInfo::HistogramTag>* video_codecs) {
@@ -2722,90 +3414,107 @@ index 2effed779a624d80bdbc4e60923358e4a20d328d..2b5bc458280eae8ba793004e6d21675f
    for (size_t i = 0; i < arraysize(kSupportedTypeInfo); ++i) {
      const SupportedTypeInfo& type_info = kSupportedTypeInfo[i];
 diff --git a/media/formats/mp4/aac.cc b/media/formats/mp4/aac.cc
-index 6590e48cd9af0fedb866bd5990edfb8ed8b70879..9f72f9cac38a65b437e7b12ab5408ee04a8a809d 100644
+index 6590e48cd9af0fedb866bd5990edfb8ed8b70879..192c96fd0e0b01655e3b642c49118fd6fb8c2f68 100644
 --- a/media/formats/mp4/aac.cc
 +++ b/media/formats/mp4/aac.cc
-@@ -150,6 +150,12 @@ bool AAC::Parse(const std::vector<uint8_t>& data, MediaLog* media_log) {
+@@ -150,6 +150,14 @@ bool AAC::Parse(const std::vector<uint8_t>& data, MediaLog* media_log) {
    return true;
  }
  
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_INPUT_SAMPLES_PER_SECOND
 +int AAC::GetSamplesPerSecond() const {
 +  if (extension_frequency_ > 0)
 +    return extension_frequency_;
 +  return frequency_;
 +}
++#endif
 +
  int AAC::GetOutputSamplesPerSecond(bool sbr_in_mimetype) const {
    if (extension_frequency_ > 0)
      return extension_frequency_;
 diff --git a/media/formats/mp4/aac.h b/media/formats/mp4/aac.h
-index b6244ab4a96277b1521095c6113d7c569bc36b0e..596cad6da78d124450c7037bcc8b1282c25b2f11 100644
+index b6244ab4a96277b1521095c6113d7c569bc36b0e..71fa5dac17f2c9dcf82205cdb253af1200e314b6 100644
 --- a/media/formats/mp4/aac.h
 +++ b/media/formats/mp4/aac.h
-@@ -36,6 +36,13 @@ class MEDIA_EXPORT AAC {
+@@ -36,6 +36,15 @@ class MEDIA_EXPORT AAC {
    // configurations.
    bool Parse(const std::vector<uint8_t>& data, MediaLog* media_log);
  
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_INPUT_SAMPLES_PER_SECOND
 +  // Gets the actual sample rate of the AAC stream.  Returns the
 +  // input_samples_per_second value that should be used in an
 +  // AudioDecoderConfig.
 +  // TODO(wdzierzanowski): This should become unnecessary when DNA-35764 is
 +  // fixed.
 +  int GetSamplesPerSecond() const;
++#endif
 +
    // Gets the output sample rate for the AAC stream.
    // |sbr_in_mimetype| should be set to true if the SBR mode is
    // signalled in the mimetype. (ie mp4a.40.5 in the codecs parameter).
 diff --git a/media/formats/mp4/box_definitions.cc b/media/formats/mp4/box_definitions.cc
-index ea6926caa5f237203152460f561757fdf099a092..9f0f7692fceb00392202ddf83e951774772e36c2 100644
+index 78c6b2d9e3b2e00c0331284510cb9e36478814ff..274d6e369275d015abeab1b2658f6fbe89724bcf 100644
 --- a/media/formats/mp4/box_definitions.cc
 +++ b/media/formats/mp4/box_definitions.cc
-@@ -893,7 +893,6 @@ FourCC ElementaryStreamDescriptor::BoxType() const {
+@@ -902,7 +902,10 @@ FourCC ElementaryStreamDescriptor::BoxType() const {
  }
  
  bool ElementaryStreamDescriptor::Parse(BoxReader* reader) {
--  std::vector<uint8_t> data;
++#if !defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_EXTRA_DATA
++  // We need this data in extra_data in platform_media
+   std::vector<uint8_t> data;
++#endif
    ESDescriptor es_desc;
  
    RCHECK(reader->ReadFullBoxHeader());
 diff --git a/media/formats/mp4/box_definitions.h b/media/formats/mp4/box_definitions.h
-index 9a0a711c03b083c4988f797aebfafe31b0d441b3..e6dd36d49ad77b922d07dc354873ea63d2843c4b 100644
+index 62ec5eb44cfc748372c6aa26b6f91d47df9e9047..e9de02c237017c2899e678ba53cb6a02efcffab9 100644
 --- a/media/formats/mp4/box_definitions.h
 +++ b/media/formats/mp4/box_definitions.h
-@@ -273,6 +273,7 @@ struct MEDIA_EXPORT ElementaryStreamDescriptor : Box {
- 
-   uint8_t object_type;
+@@ -277,6 +277,10 @@ struct MEDIA_EXPORT ElementaryStreamDescriptor : Box {
+ #if BUILDFLAG(USE_PROPRIETARY_CODECS)
    AAC aac;
+ #endif
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_EXTRA_DATA
++  // We need this data in extra_data in platform_media
 +  std::vector<uint8_t> data;
++#endif
  };
  
  struct MEDIA_EXPORT FlacSpecificBox : Box {
 diff --git a/media/formats/mp4/mp4_stream_parser.cc b/media/formats/mp4/mp4_stream_parser.cc
-index d93cebcd43c642178aff6dfc23a888efca79063c..d12528c47000d6f3de3a8e2875ebfd1053b9c83f 100644
+index cc20204453ceefcdfa1840ae2e3c99952d6ecfc7..13b26cbe106ff2b8e95055897c38d55c619d981d 100644
 --- a/media/formats/mp4/mp4_stream_parser.cc
 +++ b/media/formats/mp4/mp4_stream_parser.cc
-@@ -308,6 +308,7 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
+@@ -307,6 +307,9 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
        AudioCodec codec = kUnknownAudioCodec;
        ChannelLayout channel_layout = CHANNEL_LAYOUT_NONE;
        int sample_per_second = 0;
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_INPUT_SAMPLES_PER_SECOND
 +      int input_samples_per_second = 0;
++#endif
        std::vector<uint8_t> extra_data;
  
        if (audio_format == FOURCC_FLAC) {
-@@ -351,6 +352,8 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
+@@ -352,6 +355,11 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
            sample_per_second = aac.GetOutputSamplesPerSecond(has_sbr_);
  #if defined(OS_ANDROID)
            extra_data = aac.codec_specific_data();
 +#elif defined(USE_SYSTEM_PROPRIETARY_CODECS)
++          // FEATURE_EXTRA_DATA
 +          extra_data = entry.esds.data;
++          // FEATURE_INPUT_SAMPLES_PER_SECOND
++          input_samples_per_second = aac.GetSamplesPerSecond();
  #endif
  #if BUILDFLAG(ENABLE_AC3_EAC3_AUDIO_DEMUXING)
          } else if (audio_type == kAC3) {
-@@ -412,6 +415,7 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
+@@ -414,6 +422,9 @@ bool MP4StreamParser::ParseMoov(BoxReader* reader) {
                                       << audio_config.AsHumanReadableString();
          return false;
        }
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) // FEATURE_INPUT_SAMPLES_PER_SECOND
 +      audio_config.set_input_samples_per_second(input_samples_per_second);
++#endif
        has_audio_ = true;
        audio_track_ids_.insert(audio_track_id);
        const char* track_kind = (audio_track_ids_.size() == 1 ? "main" : "");
@@ -2822,10 +3531,10 @@ index a8653d47d7f263c57f85a1c2b8d82a5c699ebb30..b7d8d8a904f0a89067f2a14961cc0b2a
 +#include "platform_media/common/media_pipeline_messages.h"
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 diff --git a/media/mojo/clients/mojo_renderer_factory.cc b/media/mojo/clients/mojo_renderer_factory.cc
-index bd4b0972cc6af6ba3cb281868749146ce4fcb3da..e736247f6d546faa700f2e2a54c8260711672af1 100644
+index 5c5fa3aa57ea1c2a9a33f7ff4b1f4f3be707cc69..a18a2cc518e6e57f427cb53fe04a846c79ea5157 100644
 --- a/media/mojo/clients/mojo_renderer_factory.cc
 +++ b/media/mojo/clients/mojo_renderer_factory.cc
-@@ -41,7 +41,8 @@ std::unique_ptr<Renderer> MojoRendererFactory::CreateRenderer(
+@@ -42,7 +42,8 @@ std::unique_ptr<Renderer> MojoRendererFactory::CreateRenderer(
      AudioRendererSink* /* audio_renderer_sink */,
      VideoRendererSink* video_renderer_sink,
      const RequestOverlayInfoCB& /* request_overlay_info_cb */,
@@ -2836,10 +3545,10 @@ index bd4b0972cc6af6ba3cb281868749146ce4fcb3da..e736247f6d546faa700f2e2a54c82607
  
    // |get_gpu_factories_cb_| can be null in the HLS/MediaPlayerRenderer case,
 diff --git a/media/mojo/clients/mojo_renderer_factory.h b/media/mojo/clients/mojo_renderer_factory.h
-index bf06a614ec9378522a60b1d6afddb4b1eab5a4aa..5985d54d0de777b93e926fa7c2476cf3d60ccfa5 100644
+index db6b2fe98a038dfef12abe4b286fb2517c85b3e8..f034b38a01d3820c915093020b2ba8abbd4c94fd 100644
 --- a/media/mojo/clients/mojo_renderer_factory.h
 +++ b/media/mojo/clients/mojo_renderer_factory.h
-@@ -44,7 +44,8 @@ class MojoRendererFactory : public RendererFactory {
+@@ -41,7 +41,8 @@ class MojoRendererFactory : public RendererFactory {
        AudioRendererSink* audio_renderer_sink,
        VideoRendererSink* video_renderer_sink,
        const RequestOverlayInfoCB& request_overlay_info_cb,
@@ -2850,11 +3559,11 @@ index bf06a614ec9378522a60b1d6afddb4b1eab5a4aa..5985d54d0de777b93e926fa7c2476cf3
   private:
    mojom::RendererPtr GetRendererPtr();
 diff --git a/media/renderers/default_renderer_factory.cc b/media/renderers/default_renderer_factory.cc
-index 7b05a419db264f555ffb70fbf52ec7d780616d39..b4b533d196e70d9f917f1db1f08098bee3b090e1 100644
+index 5498cacea578eb19667c314b8261f5d2aea8aa2f..e48dae2ed89fc59111d3f592ed60deb47a97413b 100644
 --- a/media/renderers/default_renderer_factory.cc
 +++ b/media/renderers/default_renderer_factory.cc
-@@ -38,6 +38,20 @@
- #include "media/filters/aom_video_decoder.h"
+@@ -39,6 +39,20 @@
+ #include "media/filters/vpx_video_decoder.h"
  #endif
  
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
@@ -2874,7 +3583,7 @@ index 7b05a419db264f555ffb70fbf52ec7d780616d39..b4b533d196e70d9f917f1db1f08098be
  namespace media {
  
  DefaultRendererFactory::DefaultRendererFactory(
-@@ -52,15 +66,34 @@ DefaultRendererFactory::~DefaultRendererFactory() = default;
+@@ -53,15 +67,34 @@ DefaultRendererFactory::~DefaultRendererFactory() = default;
  
  std::vector<std::unique_ptr<AudioDecoder>>
  DefaultRendererFactory::CreateAudioDecoders(
@@ -2887,18 +3596,18 @@ index 7b05a419db264f555ffb70fbf52ec7d780616d39..b4b533d196e70d9f917f1db1f08098be
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  if (use_platform_media_pipeline) {
 +    audio_decoders.push_back(
-+        base::MakeUnique<PassThroughAudioDecoder>(media_task_runner));
++        std::make_unique<PassThroughAudioDecoder>(media_task_runner));
 +  } else {
 +#if defined(OS_MACOSX)
 +    audio_decoders.push_back(
-+        base::MakeUnique<ATAudioDecoder>(media_task_runner));
++        std::make_unique<ATAudioDecoder>(media_task_runner));
 +#elif defined(OS_WIN)
 +    audio_decoders.push_back(
-+        base::MakeUnique<WMFAudioDecoder>(media_task_runner));
++        std::make_unique<WMFAudioDecoder>(media_task_runner));
 +#endif
 +#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +
- #if !defined(MEDIA_DISABLE_FFMPEG)
+ #if BUILDFLAG(ENABLE_FFMPEG)
    audio_decoders.push_back(
        std::make_unique<FFmpegAudioDecoder>(media_task_runner, media_log_));
  #endif
@@ -2910,17 +3619,17 @@ index 7b05a419db264f555ffb70fbf52ec7d780616d39..b4b533d196e70d9f917f1db1f08098be
    // Use an external decoder only if we cannot otherwise decode in the
    // renderer.
    if (decoder_factory_)
-@@ -74,7 +107,8 @@ DefaultRendererFactory::CreateVideoDecoders(
+@@ -75,7 +108,8 @@ DefaultRendererFactory::CreateVideoDecoders(
      const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
      const RequestOverlayInfoCB& request_overlay_info_cb,
      const gfx::ColorSpace& target_color_space,
 -    GpuVideoAcceleratorFactories* gpu_factories) {
 +    GpuVideoAcceleratorFactories* gpu_factories,
 +    bool use_platform_media_pipeline) {
-   // Create our video decoders and renderer.
-   std::vector<std::unique_ptr<VideoDecoder>> video_decoders;
+   // TODO(crbug.com/789597): Move this (and CreateAudioDecoders) into a decoder
+   // factory, and just call |decoder_factory_| here.
  
-@@ -85,17 +119,43 @@ DefaultRendererFactory::CreateVideoDecoders(
+@@ -89,20 +123,48 @@ DefaultRendererFactory::CreateVideoDecoders(
      // |GetTaskRunner()|.  Since |pipeline_| will own decoders created from the
      // factories, require that their message loops are identical.
      DCHECK(gpu_factories->GetTaskRunner() == media_task_runner.get());
@@ -2929,7 +3638,7 @@ index 7b05a419db264f555ffb70fbf52ec7d780616d39..b4b533d196e70d9f917f1db1f08098be
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  if (use_platform_media_pipeline) {
 +    video_decoders.push_back(
-+        base::MakeUnique<PassThroughVideoDecoder>(media_task_runner));
++        std::make_unique<PassThroughVideoDecoder>(media_task_runner));
 +  } else {
 +#endif
  
@@ -2943,11 +3652,16 @@ index 7b05a419db264f555ffb70fbf52ec7d780616d39..b4b533d196e70d9f917f1db1f08098be
                                              &video_decoders);
      }
  
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +    if (gpu_factories) {
-     video_decoders.push_back(std::make_unique<GpuVideoDecoder>(
-         gpu_factories, request_overlay_info_cb, target_color_space,
-         media_log_));
-+    }
++#else
+     // MojoVideoDecoder replaces any VDA for this platform when it's enabled.
+     if (!base::FeatureList::IsEnabled(media::kMojoVideoDecoder)) {
++#endif
+       video_decoders.push_back(std::make_unique<GpuVideoDecoder>(
+           gpu_factories, request_overlay_info_cb, target_color_space,
+           media_log_));
+     }
 +
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
    }
@@ -2955,16 +3669,16 @@ index 7b05a419db264f555ffb70fbf52ec7d780616d39..b4b533d196e70d9f917f1db1f08098be
 +
 +#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +#if defined(OS_WIN)
-+    video_decoders.push_back(base::MakeUnique<WMFVideoDecoder>(media_task_runner));
++    video_decoders.push_back(std::make_unique<WMFVideoDecoder>(media_task_runner));
 +#elif defined(OS_MACOSX)
 +    if (!gpu_factories)
 +      pipeline_stats::ReportNoGpuProcessForDecoder();
 +#endif
 +#endif
  
- #if !defined(MEDIA_DISABLE_LIBVPX)
+ #if BUILDFLAG(ENABLE_LIBVPX)
    video_decoders.push_back(std::make_unique<OffloadingVpxVideoDecoder>());
-@@ -119,7 +179,8 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
+@@ -126,7 +188,8 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
      AudioRendererSink* audio_renderer_sink,
      VideoRendererSink* video_renderer_sink,
      const RequestOverlayInfoCB& request_overlay_info_cb,
@@ -2974,7 +3688,7 @@ index 7b05a419db264f555ffb70fbf52ec7d780616d39..b4b533d196e70d9f917f1db1f08098be
    DCHECK(audio_renderer_sink);
  
    std::unique_ptr<AudioRenderer> audio_renderer(new AudioRendererImpl(
-@@ -131,7 +192,7 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
+@@ -138,7 +201,7 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
        // RendererFactory is owned by WMPI and gets called after WMPI destructor
        // finishes.
        base::Bind(&DefaultRendererFactory::CreateAudioDecoders,
@@ -2983,7 +3697,7 @@ index 7b05a419db264f555ffb70fbf52ec7d780616d39..b4b533d196e70d9f917f1db1f08098be
        media_log_));
  
    GpuVideoAcceleratorFactories* gpu_factories = nullptr;
-@@ -148,7 +209,8 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
+@@ -155,7 +218,8 @@ std::unique_ptr<Renderer> DefaultRendererFactory::CreateRenderer(
        // finishes.
        base::Bind(&DefaultRendererFactory::CreateVideoDecoders,
                   base::Unretained(this), media_task_runner,
@@ -11887,51 +12601,59 @@ literal 0
 HcmV?d00001
 
 diff --git a/media/test/mock_media_source.cc b/media/test/mock_media_source.cc
-index d983983cff81e39a722d256ee0b42cbfcf765591..1ddf2986c3f263ed8097dd69cf2376ce1e77905c 100644
+index d983983cff81e39a722d256ee0b42cbfcf765591..92dbe43b51e822e0c98cc682ae709d1d436c09ae 100644
 --- a/media/test/mock_media_source.cc
 +++ b/media/test/mock_media_source.cc
-@@ -19,6 +19,7 @@ MockMediaSource::MockMediaSource(const std::string& filename,
+@@ -19,6 +19,9 @@ MockMediaSource::MockMediaSource(const std::string& filename,
                                   size_t initial_append_size)
      : current_position_(0),
        initial_append_size_(initial_append_size),
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +      file_path_(GetTestDataFilePath(filename)),
++#endif
        mimetype_(mimetype),
        chunk_demuxer_(new ChunkDemuxer(
            base::Bind(&MockMediaSource::DemuxerOpened, base::Unretained(this)),
 diff --git a/media/test/mock_media_source.h b/media/test/mock_media_source.h
-index 041b29e71b6c82917d3543df0d45a351b62eb4e7..d9de7317bbbed2ab83f40859785e952bf5bd7919 100644
+index 041b29e71b6c82917d3543df0d45a351b62eb4e7..9f475db1714c86dfbbbed8cdd32d919e39404b6b 100644
 --- a/media/test/mock_media_source.h
 +++ b/media/test/mock_media_source.h
-@@ -7,6 +7,7 @@
+@@ -7,6 +7,9 @@
  
  #include <limits>
  
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +#include "base/files/file_path.h"
++#endif
  #include "base/time/time.h"
  #include "media/base/demuxer.h"
  #include "media/base/pipeline_status.h"
-@@ -77,6 +78,8 @@ class MockMediaSource {
+@@ -77,6 +80,10 @@ class MockMediaSource {
      expect_append_success_ = expectation;
    }
  
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  const base::FilePath file_path() { return file_path_; }
++#endif
 +
    void InitSegmentReceived(std::unique_ptr<MediaTracks> tracks);
    MOCK_METHOD1(InitSegmentReceivedMock, void(std::unique_ptr<MediaTracks>&));
  
-@@ -87,6 +90,7 @@ class MockMediaSource {
+@@ -87,6 +94,9 @@ class MockMediaSource {
    scoped_refptr<DecoderBuffer> file_data_;
    size_t current_position_;
    size_t initial_append_size_;
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
 +  base::FilePath file_path_;
++#endif
    std::string mimetype_;
    ChunkDemuxer* chunk_demuxer_;
    std::unique_ptr<Demuxer> owned_chunk_demuxer_;
 diff --git a/media/test/pipeline_integration_test.cc b/media/test/pipeline_integration_test.cc
-index eb4ecda136511bdbe82375800ed179b6caa80741..3ae4b9c45a6439ce5d143b3c27d70915bd1469f5 100644
+index 7e85e85855c4b6d24d8f8214b25dd53b92e26b98..f2ac65e353caa1568004674483cdfbefe812935f 100644
 --- a/media/test/pipeline_integration_test.cc
 +++ b/media/test/pipeline_integration_test.cc
-@@ -85,6 +85,10 @@
+@@ -84,6 +84,10 @@
  #define MAYBE_TEXT(test) test
  #endif
  
@@ -11942,11 +12664,10 @@ index eb4ecda136511bdbe82375800ed179b6caa80741..3ae4b9c45a6439ce5d143b3c27d70915
  using ::testing::_;
  using ::testing::AnyNumber;
  using ::testing::AtLeast;
-@@ -1216,6 +1220,26 @@ TEST_P(MSEPipelineIntegrationTest, BasicPlayback_VP9_BlockGroup_WebM) {
+@@ -1207,6 +1211,25 @@ TEST_P(MSEPipelineIntegrationTest, BasicPlayback_VP9_BlockGroup_WebM) {
    Stop();
  }
  
-+
 +#if defined(USE_PROPRIETARY_CODECS)
 +TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource_MP4_AudioOnly) {
 +  MockMediaSource source("what-does-the-fox-say.mp4",
@@ -11969,23 +12690,7 @@ index eb4ecda136511bdbe82375800ed179b6caa80741..3ae4b9c45a6439ce5d143b3c27d70915
  TEST_P(MSEPipelineIntegrationTest, BasicPlayback_VP8A_WebM) {
    MockMediaSource source("bear-vp8a.webm", kVideoOnlyWebM, kAppendWholeFile);
    EXPECT_EQ(PIPELINE_OK, StartPipelineWithMediaSource(&source));
-@@ -1657,8 +1681,15 @@ TEST_P(MSEPipelineIntegrationTest, ADTS_TimestampOffset) {
-   EXPECT_EQ(0, pipeline_->GetBufferedTimeRanges().start(0).InMilliseconds());
-   EXPECT_EQ(592, pipeline_->GetBufferedTimeRanges().end(0).InMilliseconds());
- 
-+  // TODO(wdzierzanowski): Clarify decoder delay differences (DNA-44158).
-   // Verify preroll is stripped.
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(OS_MACOSX)
-+  EXPECT_HASH_EQ("-1.76,-1.35,-0.72,0.70,1.24,0.52,", GetAudioHash());
-+#elif defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(OS_WIN)
-+  EXPECT_HASH_EQ("-1.73,-1.32,-0.69,0.73,1.26,0.54,", GetAudioHash());
-+#else
-   EXPECT_HASH_EQ("-1.76,-1.35,-0.72,0.70,1.24,0.52,", GetAudioHash());
-+#endif
- }
- 
- TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_MP3) {
-@@ -1783,9 +1814,58 @@ TEST_P(MSEPipelineIntegrationTest, MP3) {
+@@ -1689,9 +1712,58 @@ TEST_P(MSEPipelineIntegrationTest, MP3) {
    EXPECT_TRUE(WaitUntilOnEnded());
  
    // Verify that codec delay was stripped.
@@ -11996,7 +12701,7 @@ index eb4ecda136511bdbe82375800ed179b6caa80741..3ae4b9c45a6439ce5d143b3c27d70915
 +#endif
  }
  
-+#if defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(PLATFORM_MEDIA_MP3)
 +// This file triggers a different sequence of "provide data", "output buffers"
 +// events in ATAudioDecoder.
 +TEST_F(PipelineIntegrationTest, MediaSource_MP3_a440) {
@@ -12039,12 +12744,26 @@ index eb4ecda136511bdbe82375800ed179b6caa80741..3ae4b9c45a6439ce5d143b3c27d70915
 +
 +  EXPECT_TRUE(WaitUntilOnEnded());
 +}
-+#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS)
++#endif  // defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(PLATFORM_MEDIA_MP3)
 +
  TEST_P(MSEPipelineIntegrationTest, MP3_TimestampOffset) {
    MockMediaSource source("sfx.mp3", kMP3, kAppendWholeFile);
    EXPECT_EQ(PIPELINE_OK, StartPipelineWithMediaSource(&source));
-@@ -1855,6 +1935,38 @@ TEST_P(MSEPipelineIntegrationTest, ConfigChange_MP4) {
+@@ -1776,8 +1848,13 @@ TEST_P(MSEPipelineIntegrationTest, ADTS_TimestampOffset) {
+   EXPECT_EQ(0, pipeline_->GetBufferedTimeRanges().start(0).InMilliseconds());
+   EXPECT_EQ(592, pipeline_->GetBufferedTimeRanges().end(0).InMilliseconds());
+ 
++  // TODO(wdzierzanowski): Clarify decoder delay differences (DNA-44158).
+   // Verify preroll is stripped.
++#if defined(USE_SYSTEM_PROPRIETARY_CODECS) && defined(OS_WIN)
++  EXPECT_HASH_EQ("-1.73,-1.32,-0.69,0.73,1.26,0.54,", GetAudioHash());
++#else
+   EXPECT_HASH_EQ("-1.76,-1.35,-0.72,0.70,1.24,0.52,", GetAudioHash());
++#endif
+ }
+ 
+ TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_ADTS) {
+@@ -1846,6 +1923,38 @@ TEST_P(MSEPipelineIntegrationTest, ConfigChange_MP4) {
    Stop();
  }
  
@@ -12084,10 +12803,10 @@ index eb4ecda136511bdbe82375800ed179b6caa80741..3ae4b9c45a6439ce5d143b3c27d70915
                   MAYBE_EME(ConfigChange_Encrypted_MP4_CENC_VideoOnly)) {
    MockMediaSource source("bear-640x360-v_frag-cenc.mp4", kMP4Video,
 diff --git a/media/test/pipeline_integration_test_base.cc b/media/test/pipeline_integration_test_base.cc
-index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422eabf1cb561 100644
+index 6afd76a2854a769e1f55501046cb69e14d760480..941ff3017450dfd688f0c98b6c6ef10ac2c6a5ad 100644
 --- a/media/test/pipeline_integration_test_base.cc
 +++ b/media/test/pipeline_integration_test_base.cc
-@@ -51,7 +51,8 @@ using ::testing::SaveArg;
+@@ -54,7 +54,8 @@ using ::testing::SaveArg;
  
  namespace media {
  
@@ -12097,7 +12816,7 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
      MediaLog* media_log,
      CreateVideoDecodersCB prepend_video_decoders_cb) {
    std::vector<std::unique_ptr<VideoDecoder>> video_decoders;
-@@ -61,6 +62,10 @@ static std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecodersForTest(
+@@ -64,6 +65,10 @@ static std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecodersForTest(
      DCHECK(!video_decoders.empty());
    }
  
@@ -12105,10 +12824,10 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
 +  AppendPlatformVideoDecoders(video_decoders, media_task_runner, media_log);
 +#endif
 +
- #if !defined(MEDIA_DISABLE_LIBVPX)
+ #if BUILDFLAG(ENABLE_LIBVPX)
    video_decoders.push_back(std::make_unique<OffloadingVpxVideoDecoder>());
- #endif  // !defined(MEDIA_DISABLE_LIBVPX)
-@@ -78,9 +83,9 @@ static std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecodersForTest(
+ #endif
+@@ -79,9 +84,9 @@ static std::vector<std::unique_ptr<VideoDecoder>> CreateVideoDecodersForTest(
    return video_decoders;
  }
  
@@ -12120,7 +12839,7 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
      CreateAudioDecodersCB prepend_audio_decoders_cb) {
    std::vector<std::unique_ptr<AudioDecoder>> audio_decoders;
  
-@@ -89,6 +94,10 @@ static std::vector<std::unique_ptr<AudioDecoder>> CreateAudioDecodersForTest(
+@@ -90,6 +95,10 @@ static std::vector<std::unique_ptr<AudioDecoder>> CreateAudioDecodersForTest(
      DCHECK(!audio_decoders.empty());
    }
  
@@ -12128,10 +12847,10 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
 +  AppendPlatformAudioDecoders(audio_decoders, media_task_runner);
 +#endif
 +
- #if !defined(MEDIA_DISABLE_FFMPEG)
+ #if BUILDFLAG(ENABLE_FFMPEG)
    audio_decoders.push_back(
        std::make_unique<FFmpegAudioDecoder>(media_task_runner, media_log));
-@@ -299,6 +308,9 @@ PipelineStatus PipelineIntegrationTestBase::StartWithFile(
+@@ -303,6 +312,9 @@ PipelineStatus PipelineIntegrationTestBase::StartWithFile(
    base::FilePath file_path(GetTestDataFilePath(filename));
    CHECK(file_data_source->Initialize(file_path)) << "Is " << file_path.value()
                                                   << " missing?";
@@ -12141,7 +12860,7 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
    return StartInternal(std::move(file_data_source), cdm_context, test_type,
                         prepend_video_decoders_cb, prepend_audio_decoders_cb);
  }
-@@ -370,6 +382,11 @@ bool PipelineIntegrationTestBase::Resume(base::TimeDelta seek_time) {
+@@ -374,6 +386,11 @@ bool PipelineIntegrationTestBase::Resume(base::TimeDelta seek_time) {
    ended_ = false;
  
    base::RunLoop run_loop;
@@ -12153,7 +12872,7 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
    EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
        .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
    pipeline_->Resume(renderer_factory_->CreateRenderer(CreateVideoDecodersCB(),
-@@ -441,6 +458,14 @@ void PipelineIntegrationTestBase::CreateDemuxer(
+@@ -445,6 +462,14 @@ void PipelineIntegrationTestBase::CreateDemuxer(
                   base::Unretained(this)),
        &media_log_));
  #endif
@@ -12168,7 +12887,7 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
  }
  
  std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
-@@ -458,7 +483,10 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
+@@ -462,7 +487,10 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
        scoped_task_environment_.GetMainThreadTaskRunner(),
        scoped_task_environment_.GetMainThreadTaskRunner().get(),
        video_sink_.get(),
@@ -12180,7 +12899,7 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
                   prepend_video_decoders_cb),
        false, nullptr, &media_log_));
  
-@@ -485,8 +513,10 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
+@@ -489,8 +517,10 @@ std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer(
        (clockless_playback_)
            ? static_cast<AudioRendererSink*>(clockless_audio_sink_.get())
            : audio_sink_.get(),
@@ -12192,7 +12911,7 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
                   prepend_audio_decoders_cb),
        &media_log_));
    if (hashing_enabled_) {
-@@ -571,6 +601,9 @@ PipelineStatus PipelineIntegrationTestBase::StartPipelineWithMediaSource(
+@@ -575,6 +605,9 @@ PipelineStatus PipelineIntegrationTestBase::StartPipelineWithMediaSource(
  PipelineStatus PipelineIntegrationTestBase::StartPipelineWithEncryptedMedia(
      MockMediaSource* source,
      FakeEncryptedMedia* encrypted_media) {
@@ -12202,7 +12921,7 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
    return StartPipelineWithMediaSource(source, kNormal, encrypted_media);
  }
  
-@@ -581,6 +614,11 @@ PipelineStatus PipelineIntegrationTestBase::StartPipelineWithMediaSource(
+@@ -585,6 +618,11 @@ PipelineStatus PipelineIntegrationTestBase::StartPipelineWithMediaSource(
    hashing_enabled_ = test_type & kHashed;
    clockless_playback_ = !(test_type & kNoClockless);
  
@@ -12215,7 +12934,7 @@ index 93438669cd6834645e1f306e5255edbdcf5b45a2..5f1031ac3461b737e5e05a69191422ea
      EXPECT_CALL(*source, InitSegmentReceivedMock(_)).Times(AtLeast(1));
  
 diff --git a/media/test/pipeline_integration_test_base.h b/media/test/pipeline_integration_test_base.h
-index 2d9e350c379b263935fd8e4b7eafaae268d05aee..a6bb1114fe0801120427e8ae3bf754842b18836c 100644
+index 57503806d91d10ebcdd436a0f56f64667e078da3..857c32f85aeb92a335e2a65567b7e09b22e105a3 100644
 --- a/media/test/pipeline_integration_test_base.h
 +++ b/media/test/pipeline_integration_test_base.h
 @@ -26,6 +26,10 @@
