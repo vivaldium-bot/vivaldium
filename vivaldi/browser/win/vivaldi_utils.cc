@@ -1,19 +1,21 @@
-// Copyright (c) 2016 Vivaldi Technologies AS. All rights reserved
+// Copyright (c) 2016-2018 Vivaldi Technologies AS. All rights reserved
 
-#include "browser/win/vivaldi_standalone.h"
+#include "browser/win/vivaldi_utils.h"
 
+#include <algorithm>
+#include <windows.h>
 #include "app/vivaldi_apptools.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/vivaldi_switches.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/installer/util/util_constants.h"
 
 namespace vivaldi {
 
-#if defined(OS_WIN)
 bool GetVivaldiStandaloneUserDataDirectory(base::FilePath* result) {
   const wchar_t kStandaloneProfileHelper[] = L"stp.viv";
 
@@ -51,6 +53,48 @@ bool GetVivaldiStandaloneUserDataDirectory(base::FilePath* result) {
 bool IsStandalone() {
   return GetVivaldiStandaloneUserDataDirectory(nullptr);
 }
-#endif
+
+namespace {
+std::wstring GenerateExitMutexName() {
+  base::FilePath exe_path;
+  PathService::Get(base::FILE_EXE, &exe_path);
+  std::wstring exe = exe_path.value();
+  std::replace(exe.begin(), exe.end(), '\\', '!');
+  std::transform(exe.begin(), exe.end(), exe.begin(), tolower);
+  exe = L"Global\\" + exe + L"-Exiting";
+
+  return exe;
+}
+}  // namespace
+
+bool IsVivaldiExiting() {
+  std::wstring exe = GenerateExitMutexName();
+  HANDLE handle = OpenEvent(SYNCHRONIZE | READ_CONTROL, FALSE, exe.c_str());
+  bool exiting = (handle != NULL);
+  if (handle != NULL) {
+    CloseHandle(handle);
+  }
+  return exiting;
+}
+
+void SetVivaldiExiting() {
+  if (!IsVivaldiExiting()) {
+    std::wstring exe = GenerateExitMutexName();
+    HANDLE handle = CreateEvent(NULL, TRUE, TRUE, exe.c_str());
+    int error = GetLastError();
+    DCHECK(handle != NULL);
+    DCHECK(error != ERROR_ALREADY_EXISTS && error != ERROR_ACCESS_DENIED);
+  }
+}
+
+void OnShutdownStarted() {
+  vivaldi::SetVivaldiExiting();
+
+  base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kTestAlreadyRunningDialog)) {
+    // Add an artificial 15s delay here for testing purposes.
+    Sleep(1000 * 15);
+  }
+}
 
 }  // namespace vivaldi
